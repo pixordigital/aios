@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>Organizations</h1><p class="text-sm text-secondary mt-1">{{ orgs|length }} org{{ 's' if orgs|length != 1 }}</p></div>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <thead><tr><th>Name</th><th>Slug</th><th>Plan</th><th>Users</th><th>Agents</th><th>Msgs/24h</th><th>Status</th><th>Created</th><th></th></tr></thead>
+        <tbody>
+            {% for o in orgs %}
+            <tr>
+                <td style="font-weight:500">{{ o.org.name }}</td>
+                <td><span class="text-sm text-tertiary">{{ o.org.slug }}</span></td>
+                <td><span class="badge" style="border-color:var(--accent-border);color:var(--accent)">{{ o.org.extra_data.get('plan', 'free') }}</span></td>
+                <td><span class="badge">{{ o.user_count }}</span></td>
+                <td><span class="badge">{{ o.agent_count }}</span></td>
+                <td><span class="badge">{{ o.usage.messages_today }}</span></td>
+                <td>
+                    {% if o.org.is_active %}
+                    <span class="badge" style="border-color:var(--green);color:var(--green)">Active</span>
+                    {% else %}
+                    <span class="badge" style="border-color:var(--amber);color:var(--amber)">Suspended</span>
+                    {% endif %}
+                </td>
+                <td><span class="text-xs text-tertiary">{{ o.org.created_at.strftime('%b %d, %Y') if o.org.created_at else '—' }}</span></td>
+                <td style="text-align:right">
+                    <a href="/dashboard/admin/orgs/{{ o.org.id }}" class="btn btn-ghost btn-sm">View</a>
+                    {% if o.org.is_active %}
+                    <a href="/dashboard/admin/orgs/{{ o.org.id }}/suspend" class="btn btn-ghost btn-sm" style="color:var(--amber)" onclick="return confirm('Suspend {{ o.org.name }}?')">Suspend</a>
+                    {% else %}
+                    <a href="/dashboard/admin/orgs/{{ o.org.id }}/unsuspend" class="btn btn-ghost btn-sm" style="color:var(--green)">Unsuspend</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

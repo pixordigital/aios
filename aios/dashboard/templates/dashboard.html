@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div>
+        <h1>Dashboard</h1>
+        <p class="text-sm text-secondary mt-1">Your agent operations at a glance</p>
+    </div>
+    <div class="flex-center gap-2">
+        <button class="btn btn-primary" onclick="document.getElementById('quick-create').showModal()">+ Quick create</button>
+    </div>
+</div>
+
+<div class="grid-4 mb-4">
+    <div class="stat-card">
+        <p class="stat-label">Agents</p>
+        <p class="stat-value">{{ stats.agents }}</p>
+        <span class="text-xs text-tertiary">{{ stats.deployed }} deployed</span>
+        <a href="/dashboard/agents" class="stat-link">Manage agents</a>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Teams</p>
+        <p class="stat-value">{{ stats.teams }}</p>
+        <a href="/dashboard/teams" class="stat-link">Manage teams</a>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Est. cost/req</p>
+        <p class="stat-value" style="font-size:1.25rem">${{ "%.2f"|format(stats.total_cost) }}</p>
+        <span class="text-xs text-tertiary">Across all agents</span>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Messages</p>
+        <p class="stat-value">{{ stats.messages }}</p>
+        <span class="text-xs text-tertiary">{{ stats.conversations }} conversations</span>
+    </div>
+</div>
+
+<!-- Quick Action Cards -->
+<div class="grid-2 mb-4">
+    <div class="card card-hover" onclick="document.getElementById('quick-agent').showModal()" style="cursor:pointer">
+        <div class="flex-center gap-3">
+            <div style="width:40px;height:40px;border-radius:var(--radius-sm);background:var(--accent-subtle);display:flex;align-items:center;justify-content:center;color:var(--accent)">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+            </div>
+            <div>
+                <h2 style="font-size:0.9375rem">Create agent</h2>
+                <p class="text-sm text-secondary" style="margin:0">Pick a type, set a name — we'll fill the rest</p>
+            </div>
+        </div>
+    </div>
+    <div class="card card-hover" onclick="document.getElementById('quick-team').showModal()" style="cursor:pointer">
+        <div class="flex-center gap-3">
+            <div style="width:40px;height:40px;border-radius:var(--radius-sm);background:var(--bg-hover);display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">
+                <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
+            </div>
+            <div>
+                <h2 style="font-size:0.9375rem">Create team</h2>
+                <p class="text-sm text-secondary" style="margin:0">Pick agents, set an orchestrator, we handle the rest</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Team Overview -->
+{% for team in teams %}
+{% set members = team.agents if team.agents else [] %}
+{% set compat = team_compatibility(members) %}
+{% set tools_all = members | map(attribute="tools") | list %}
+{% set conflicts = tool_conflicts(tools_all) %}
+{% set orch_id = team.orchestrator_agent_id %}
+{% set orch = agents | selectattr("id", "equalto", orch_id) | first %}
+{% set mgr_id = team.manager_agent_id %}
+{% set mgr = agents | selectattr("id", "equalto", mgr_id) | first %}
+
+<div class="card mb-3">
+    <div class="flex-between mb-2">
+        <div class="flex-center gap-2">
+            <h2>{{ team.name }}</h2>
+            <span class="badge" style="color:var(--text-secondary);font-size:0.625rem">{{ team.routing_strategy }}</span>
+            {% if compat.score >= 80 %}
+            <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem">{{ compat.score }}/100</span>
+            {% elif compat.score >= 50 %}
+            <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.625rem">{{ compat.score }}/100</span>
+            {% else %}
+            <span class="badge" style="border-color:var(--red);color:var(--red);font-size:0.625rem">{{ compat.score }}/100</span>
+            {% endif %}
+        </div>
+        <div class="flex-center gap-1">
+            <a href="/dashboard/teams/{{ team.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+            <a href="/dashboard/channels/new" class="btn btn-ghost btn-sm">+ Channel</a>
+        </div>
+    </div>
+
+    <div class="flex-center" style="gap:0.75rem;flex-wrap:wrap">
+        {% if orch %}
+        <div style="background:var(--accent-subtle);border:1px solid var(--accent-border);border-radius:var(--radius-sm);padding:0.375rem 0.75rem;text-align:center">
+            <div style="font-size:0.6875rem;font-weight:600;color:var(--accent)">{{ orch.name }}</div>
+            <div style="font-size:0.6rem;color:var(--text-tertiary)">orchestrator</div>
+        </div>
+        {% endif %}
+        {% if mgr %}
+        <div style="background:var(--bg-hover);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.375rem 0.75rem;text-align:center">
+            <div style="font-size:0.6875rem;font-weight:500">{{ mgr.name }}</div>
+            <div style="font-size:0.6rem;color:var(--text-tertiary)">manager</div>
+        </div>
+        {% endif %}
+        {% for a in members %}
+        {% if a.id != orch_id and a.id != mgr_id %}
+        <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.375rem 0.75rem;text-align:center;opacity:{{ '1' if a.status == 'active' else '0.5' }}">
+            <div style="font-size:0.6875rem;font-weight:500">{{ a.name }}</div>
+            <div style="font-size:0.6rem;color:var(--text-tertiary)">{{ a.agent_type }}</div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+{% endfor %}
+
+<!-- Quick Create Modal -->
+<dialog id="quick-create" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(420px,94vw);color:var(--text);box-shadow:0 24px 80px rgba(0,0,0,0.5)">
+    <div style="padding:1.25rem">
+        <h2 style="margin-bottom:1rem">Quick create</h2>
+        <div class="flex-col gap-2">
+            <div class="card card-hover" style="cursor:pointer;padding:0.875rem 1rem" onclick="closeModal('quick-create');document.getElementById('quick-agent').showModal()">
+                <div class="flex-center gap-3">
+                    <div style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--accent-subtle);display:flex;align-items:center;justify-content:center;color:var(--accent)">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                    </div>
+                    <div>
+                        <div style="font-weight:600;font-size:0.875rem">New agent</div>
+                        <div class="text-xs text-tertiary">SDR, Closer, Support, or custom</div>
+                    </div>
+                </div>
+            </div>
+            <div class="card card-hover" style="cursor:pointer;padding:0.875rem 1rem" onclick="closeModal('quick-create');document.getElementById('quick-team').showModal()">
+                <div class="flex-center gap-3">
+                    <div style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--bg-hover);display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
+                    </div>
+                    <div>
+                        <div style="font-weight:600;font-size:0.875rem">New team</div>
+                        <div class="text-xs text-tertiary">Compose agents with an orchestrator</div>
+                    </div>
+                </div>
+            </div>
+            <a href="/dashboard/channels/new" class="card card-hover" style="cursor:pointer;padding:0.875rem 1rem;text-decoration:none;color:inherit;display:flex">
+                <div class="flex-center gap-3">
+                    <div style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--bg-hover);display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    </div>
+                    <div>
+                        <div style="font-weight:600;font-size:0.875rem">Connect channel</div>
+                        <div class="text-xs text-tertiary">WhatsApp, Slack, Telegram, Discord, Email</div>
+                    </div>
+                </div>
+            </a>
+        </div>
+    </div>
+</dialog>
+
+<!-- Quick Agent Wizard -->
+<dialog id="quick-agent" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(480px,94vw);color:var(--text);box-shadow:0 24px 80px rgba(0,0,0,0.5)">
+    <form method="POST" action="/dashboard/agents/save" style="padding:1.25rem">
+        <div class="flex-between mb-3">
+            <h2>Create agent</h2>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal('quick-agent')" style="border:none">✕</button>
+        </div>
+        <div class="flex-col gap-3">
+            <div>
+                <label>Name</label>
+                <input type="text" name="name" required class="input" placeholder="e.g. Sales SDR" autofocus>
+            </div>
+            <div>
+                <label>Type</label>
+                <select name="agent_type" class="input" onchange="fillAgentPrompt(this)">
+                    <option value="sdr">📞 SDR — Sales Development</option>
+                    <option value="closer">💰 Closer — Deal Closing</option>
+                    <option value="support">🎧 Support — Customer Service</option>
+                    <option value="data_analyst">📊 Data Analyst</option>
+                    <option value="data_scientist">🔬 Data Scientist</option>
+                    <option value="orchestrator">🎯 Orchestrator — Team Coordinator</option>
+                    <option value="manager">👔 Manager — Quality & Escalations</option>
+                    <option value="custom">🤖 Custom</option>
+                </select>
+            </div>
+            <div>
+                <label>Model</label>
+                <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem">
+                    <select name="model" id="qa-model" class="input model-select">
+                        <optgroup label="OpenAI">
+                            <option value="openai/gpt-4o" selected>GPT-4o</option>
+                            <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
+                            <option value="openai/gpt-4.1-mini">GPT-4.1 Mini</option>
+                            <option value="openai/o3-mini">o3 Mini</option>
+                        </optgroup>
+                        <optgroup label="Anthropic">
+                            <option value="anthropic/claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                            <option value="anthropic/claude-5-opus-20250714">Claude Opus 5</option>
+                            <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet</option>
+                        </optgroup>
+                        <optgroup label="Google">
+                            <option value="google/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                            <option value="google/gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        </optgroup>
+                        <optgroup label="DeepSeek">
+                            <option value="deepseek/deepseek-v4-flash">DeepSeek V4 Flash</option>
+                            <option value="deepseek/deepseek-v4">DeepSeek V4</option>
+                        </optgroup>
+                        <optgroup label="xAI">
+                            <option value="x-ai/grok-4-mini">Grok 4 Mini</option>
+                            <option value="x-ai/grok-4">Grok 4</option>
+                        </optgroup>
+                    </select>
+                    <input type="number" name="temperature" step="0.1" min="0" max="2" value="0.7" class="input" placeholder="Temp">
+                    <input type="number" name="max_tokens" step="1" min="256" max="16384" value="4096" class="input" placeholder="Tokens">
+                </div>
+            </div>
+            <div>
+                <label>Tools</label>
+                <div class="flex-center gap-1" style="flex-wrap:wrap">
+                    <label class="flex-center gap-1" style="font-size:0.75rem;padding:0.25rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-xs);cursor:pointer;background:var(--bg)">
+                        <input type="checkbox" id="qa-tool-calc" value="calculator" style="accent-color:var(--accent)"> Calculator
+                    </label>
+                    <label class="flex-center gap-1" style="font-size:0.75rem;padding:0.25rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-xs);cursor:pointer;background:var(--bg)">
+                        <input type="checkbox" id="qa-tool-web" value="web_search" style="accent-color:var(--accent)"> Web Search
+                    </label>
+                    <label class="flex-center gap-1" style="font-size:0.75rem;padding:0.25rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-xs);cursor:pointer;background:var(--bg)">
+                        <input type="checkbox" id="qa-tool-email" value="send_email" style="accent-color:var(--accent)"> Email
+                    </label>
+                </div>
+                <input type="hidden" name="tools" id="qa-tools-hidden" value="">
+                <input type="hidden" name="short_term_buffer" value="50">
+                <input type="hidden" name="long_term_enabled" value="false">
+                <input type="hidden" name="episodic_enabled" value="false">
+                <input type="hidden" name="system_prompt" id="qa-system-prompt" value="">
+            </div>
+            <div class="flex-between" style="padding-top:0.5rem;border-top:1px solid var(--border)">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('quick-agent')">Cancel</button>
+                <button type="submit" class="btn btn-primary" onclick="collectAgentForm()">Create agent</button>
+            </div>
+        </div>
+    </form>
+</dialog>
+
+<script>
+    var PROMPTS = {
+        'sdr': 'You are an SDR (Sales Development Representative) AI agent. Your role is to prospect, qualify leads, and book meetings. Follow BANT framework. Be persistent but respectful.',
+        'closer': 'You are a Closer AI agent. Your role is to close deals. Review lead context, present tailored solutions, handle pricing objections, and send proposals.',
+        'support': 'You are a Customer Support AI agent. Resolve issues quickly and empathetically. Acknowledge, clarify, solve, or escalate. Never blame the customer.',
+        'data_analyst': 'You are a Data Analyst AI agent. Query databases, generate reports, and create visualizations. Explain what data means, not just what it shows.',
+        'data_scientist': 'You are a Data Scientist AI agent. Build models, run analyses, and provide data-driven recommendations. Explain methodology and state assumptions.',
+        'orchestrator': 'You are an Orchestrator AI agent. Route requests to the right team member, coordinate workflows, and synthesize responses. Delegate based on agent roles.',
+        'manager': 'You are a Manager AI agent. Oversee team performance, handle escalations, and ensure quality. Review responses, coach agents, and escalate when necessary.',
+        'custom': 'You are an AI agent. Help users with their requests using the tools available to you.',
+    };
+    function fillAgentPrompt(sel) {
+        // model defaults per type
+        var models = {
+            'orchestrator': 'openai/gpt-4o', 'manager': 'openai/gpt-4o',
+            'sdr': 'openai/gpt-4o', 'closer': 'openai/gpt-4o',
+            'support': 'openai/gpt-4o-mini', 'data_analyst': 'openai/gpt-4o',
+            'data_scientist': 'openai/gpt-4o', 'custom': 'openai/gpt-4o-mini'
+        };
+        document.getElementById('qa-model').value = models[sel.value] || 'openai/gpt-4o';
+        document.getElementById('qa-system-prompt').value = PROMPTS[sel.value] || PROMPTS['custom'];
+        // Pre-select tools based on type
+        var toolMap = {'sdr':['web_search','send_email'],'closer':['send_email'],'data_analyst':['calculator'],'data_scientist':['calculator']};
+        var tools = toolMap[sel.value] || [];
+        document.querySelectorAll('#quick-agent input[type="checkbox"]').forEach(function(cb){
+            cb.checked = tools.indexOf(cb.value) >= 0;
+        });
+    }
+    function collectAgentForm() {
+        var tools = [];
+        document.querySelectorAll('#quick-agent input[type="checkbox"]:checked').forEach(function(cb){
+            tools.push(cb.value);
+        });
+        document.getElementById('qa-tools-hidden').value = tools.join(' ');
+        if(!document.getElementById('qa-system-prompt').value) {
+            document.getElementById('qa-system-prompt').value = 'You are an AI agent. Help users with their requests.';
+        }
+    }
+    function closeModal(id) { document.getElementById(id).close(); }
+    // init first type
+    document.addEventListener('DOMContentLoaded', function(){
+        var sel = document.querySelector('#quick-agent select[name="agent_type"]');
+        if(sel) fillAgentPrompt(sel);
+    });
+</script>
+
+<!-- Quick Team Wizard -->
+<dialog id="quick-team" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(520px,94vw);color:var(--text);box-shadow:0 24px 80px rgba(0,0,0,0.5)">
+    <form method="POST" action="/dashboard/teams/save" style="padding:1.25rem">
+        <div class="flex-between mb-3">
+            <h2>Create team</h2>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal('quick-team')" style="border:none">✕</button>
+        </div>
+        <div class="flex-col gap-3">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+                <div>
+                    <label>Team name</label>
+                    <input type="text" name="name" required class="input" placeholder="e.g. Sales Squad" autofocus>
+                </div>
+                <div>
+                    <label>Strategy</label>
+                    <select name="routing_strategy" class="input">
+                        <option value="supervisor">Supervisor</option>
+                        <option value="round_robin">Round Robin</option>
+                        <option value="broadcast">Broadcast</option>
+                        <option value="semantic">Semantic</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label>Orchestrator <span class="text-xs text-tertiary">(routes work to team members)</span></label>
+                <select name="orchestrator_agent_id" required class="input">
+                    <option value="">— Select orchestrator —</option>
+                    {% for a in agents %}
+                    <option value="{{ a.id }}" {% if a.agent_type == 'orchestrator' %}selected{% endif %}>
+                        {{ a.name }} — {{ a.agent_type }} ({{ a.status }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Manager <span class="text-xs text-tertiary">(optional, oversees quality)</span></label>
+                <select name="manager_agent_id" class="input">
+                    <option value="">— No manager —</option>
+                    {% for a in agents %}
+                    <option value="{{ a.id }}">{{ a.name }} — {{ a.agent_type }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label>Members</label>
+                <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:0.25rem;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.25rem">
+                    {% for a in agents %}
+                    <label class="flex-center" style="padding:0.375rem 0.5rem;border-radius:var(--radius-xs);cursor:pointer;gap:0.5rem;font-size:0.8125rem" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
+                        <input type="checkbox" name="agent_ids" value="{{ a.id }}" style="accent-color:var(--accent)">
+                        <span style="flex:1">{{ a.name }}</span>
+                        <span class="text-xs text-tertiary capitalize">{{ a.agent_type }}</span>
+                        <span class="text-xs" style="color:{{ 'var(--green)' if a.status == 'active' else 'var(--text-tertiary)' }}">{{ a.status }}</span>
+                    </label>
+                    {% else %}
+                    <div class="text-sm text-secondary" style="padding:1rem;text-align:center">No agents yet. Create one first.</div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="flex-between" style="padding-top:0.5rem;border-top:1px solid var(--border)">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('quick-team')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create team</button>
+            </div>
+        </div>
+    </form>
+</dialog>
+{% endblock %}

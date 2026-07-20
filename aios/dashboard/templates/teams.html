@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>Teams</h1><p class="text-sm text-secondary mt-1">{{ teams|length }} team{{ 's' if teams|length != 1 }}</p></div>
+    <a href="/dashboard/teams/new" class="btn btn-primary">New team</a>
+</div>
+
+<div class="flex-col gap-3">
+    {% for t in teams %}
+    {% set members = t.agents if t.agents else [] %}
+    {% set compat = compat_scores.get(t.id, {"score": 0, "issues": []}) %}
+    {% set tools_all = members | map(attribute="tools") | list %}
+    {% set conflicts = tool_conflicts(tools_all) %}
+    {% set orch_id = t.orchestrator_agent_id %}
+    {% set orch = agents | selectattr("id", "equalto", orch_id) | first %}
+    {% set active_count = members | selectattr("status", "equalto", "active") | list | length %}
+
+    <div class="card" style="{% if compat.score < 60 %}border-color:var(--amber);{% endif %}">
+        <div class="flex-between mb-2">
+            <div class="flex-center gap-2">
+                <a href="/dashboard/teams/{{ t.id }}/edit" style="color:var(--text);text-decoration:none;font-weight:600;font-size:0.9375rem">{{ t.name }}</a>
+                <span class="badge" style="color:var(--text-secondary);font-size:0.625rem;background:var(--bg-hover)">{{ t.routing_strategy }}</span>
+                {% if compat.score >= 80 %}
+                <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem">Compatibility {{ compat.score }}%</span>
+                {% elif compat.score >= 50 %}
+                <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.625rem">Compatibility {{ compat.score }}%</span>
+                {% else %}
+                <span class="badge" style="border-color:var(--red);color:var(--red);font-size:0.625rem">Compatibility {{ compat.score }}%</span>
+                {% endif %}
+            </div>
+            <div class="flex-center gap-1">
+                <a href="/dashboard/teams/{{ t.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+                <a href="/dashboard/teams/{{ t.id }}/delete" class="btn btn-danger btn-sm">Delete</a>
+            </div>
+        </div>
+
+        <div class="flex-col gap-1">
+            {% if orch %}
+            <div class="flex-center gap-2" style="font-size:0.75rem">
+                <span style="color:var(--accent);font-weight:500">Orchestrator:</span>
+                <span>{{ orch.name }}</span>
+                <span class="text-xs text-tertiary">({{ orch.agent_type }})</span>
+            </div>
+            {% else %}
+            <div class="flex-center gap-1" style="font-size:0.75rem;color:var(--red)">
+                <span>⚠ No orchestrator assigned</span>
+                <a href="/dashboard/teams/{{ t.id }}/edit" style="color:var(--accent);text-decoration:underline">Assign</a>
+            </div>
+            {% endif %}
+            {% set mgr_id = t.manager_agent_id %}
+            {% set mgr = agents | selectattr("id", "equalto", mgr_id) | first %}
+            {% if mgr %}
+            <div class="flex-center gap-2" style="font-size:0.75rem">
+                <span style="color:var(--text-secondary);font-weight:500">Manager:</span>
+                <span>{{ mgr.name }}</span>
+                <span class="text-xs text-tertiary">({{ mgr.agent_type }})</span>
+            </div>
+            {% endif %}
+            <div class="flex-center gap-2" style="flex-wrap:wrap">
+                {% for a in members %}
+                <span class="badge" style="background:var(--bg-hover);border-color:var(--border);font-size:0.6875rem;opacity:{{ '1' if a.status == 'active' else '0.5' }}">
+                    {{ a.name }}
+                    {% if a.status != 'active' %}<span class="text-xs" style="color:var(--amber)">({{ a.status }})</span>{% endif %}
+                </span>
+                {% endfor %}
+                <span class="text-xs text-tertiary">{{ active_count }}/{{ members|length }} active</span>
+            </div>
+        </div>
+
+        {% if compat.issues or conflicts %}
+        <div class="flex-col gap-1 mt-2" style="border-top:1px solid var(--border);padding-top:0.5rem">
+            {% for issue in compat.issues %}
+            <div style="font-size:0.6875rem;color:var(--amber);background:var(--amber-subtle);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content">
+                {{ issue }}
+            </div>
+            {% endfor %}
+            {% for c in conflicts %}
+            <div style="font-size:0.6875rem;color:var(--red);background:var(--red-subtle);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content">
+                {{ c }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="empty-state">
+            <div class="empty-state-icon">
+                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
+            </div>
+            <h3>No teams</h3>
+            <p>Teams route conversations across agents with configurable strategies and orchestrator-led coordination.</p>
+            <a href="/dashboard/teams/new" class="btn btn-primary mt-2">Create team</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
