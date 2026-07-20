@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>{{ artifact.filename }}</h1>
+        <p class="text-sm text-secondary mt-1">
+            {{ artifact.content_type }} —
+            {% if artifact.size_bytes < 1024 %}
+                {{ artifact.size_bytes }} B
+            {% elif artifact.size_bytes < 1048576 %}
+                {{ (artifact.size_bytes / 1024)|round(1) }} KB
+            {% else %}
+                {{ (artifact.size_bytes / 1048576)|round(1) }} MB
+            {% endif %}
+        </p>
+    </div>
+    <a href="/dashboard/files" class="btn btn-ghost">← Back</a>
+</div>
+
+<div class="card">
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;overflow:auto;max-height:70vh;font-family:'JetBrains Mono',monospace;font-size:0.75rem;line-height:1.6;white-space:pre-wrap;word-break:break-word">{{ content }}</div>
+</div>
+{% endblock %}

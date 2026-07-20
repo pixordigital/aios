@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>{% if team %}Edit{% else %}New{% endif %} Team</h1></div>
+</div>
+
+{% if request.query_params.get('error') == 'orchestrator-required' %}
+<div style="color:var(--red);background:var(--red-subtle);border:1px solid var(--red);border-radius:var(--radius-sm);padding:0.75rem 1rem;margin-bottom:1rem;font-size:0.8125rem">
+    A team with agents needs an orchestrator. Select one or create a new agent.
+</div>
+{% endif %}
+
+<form method="POST" action="/dashboard/teams/save">
+    <input type="hidden" name="team_id" value="{{ team.id if team else '' }}">
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem">
+
+        <div class="flex-col gap-4">
+            <div class="card">
+                <h2 class="mb-3">Team</h2>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                    <div>
+                        <label>Name</label>
+                        <input type="text" name="name" value="{{ team.name if team else '' }}" required class="input" placeholder="Sales Team">
+                    </div>
+                    <div>
+                        <label>Routing strategy</label>
+                        <select name="routing_strategy" class="input">
+                            {% for s in strategies %}
+                            <option value="{{ s }}" {% if team and team.routing_strategy == s %}selected{% endif %}>{{ s | replace('_', ' ') | title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="border-color:var(--accent-border)">
+                <div class="flex-center gap-2 mb-2">
+                    <h2>Orchestrator</h2>
+                    <span class="badge" style="border-color:var(--accent);color:var(--accent);font-size:0.625rem">Required</span>
+                    <a href="/dashboard/agents/new" class="btn btn-ghost btn-sm" style="margin-left:auto">+ Create orchestrator</a>
+                </div>
+                <p class="text-sm text-secondary mb-3">Routes and coordinates all agents in the team. Choose an existing agent or create a dedicated orchestrator agent.</p>
+                <div style="display:grid;grid-template-columns:1fr auto;gap:0.5rem;align-items:end">
+                    <select name="orchestrator_agent_id" class="input" style="border-color:var(--accent-border)">
+                        <option value="">— Select orchestrator —</option>
+                        {% for a in agents %}
+                        <option value="{{ a.id }}" {% if team and team.orchestrator_agent_id == a.id %}selected{% endif %}>
+                            {{ a.name }} ({{ a.agent_type | replace('_', ' ') }}) — {{ a.status }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <a href="/dashboard/agents/new" class="btn btn-primary btn-sm" style="white-space:nowrap">New</a>
+                </div>
+            </div>
+
+            <div class="card" style="border-color:var(--border-hover)">
+                <div class="flex-center gap-2 mb-2">
+                    <h2>Manager</h2>
+                    <span class="badge" style="border-color:var(--border);color:var(--text-tertiary);font-size:0.625rem">Optional</span>
+                    <a href="/dashboard/agents/new" class="btn btn-ghost btn-sm" style="margin-left:auto">+ Create manager</a>
+                </div>
+                <p class="text-sm text-secondary mb-3">Oversees performance, escalations, and quality assurance. Reports to the orchestrator.</p>
+                <div style="display:grid;grid-template-columns:1fr auto;gap:0.5rem;align-items:end">
+                    <select name="manager_agent_id" class="input">
+                        <option value="">— No manager —</option>
+                        {% for a in agents %}
+                        <option value="{{ a.id }}" {% if team and team.manager_agent_id == a.id %}selected{% endif %}>
+                            {{ a.name }} ({{ a.agent_type | replace('_', ' ') }}) — {{ a.status }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <a href="/dashboard/agents/new" class="btn btn-ghost btn-sm">New</a>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 class="mb-3">Members</h2>
+                {% if agents %}
+                <div class="flex-col gap-1">
+                    {% for a in agents %}
+                    <label class="flex-center" style="padding:0.5rem 0.625rem;border-radius:var(--radius-sm);border:1px solid var(--border);cursor:pointer;background:var(--bg);transition:border-color 0.1s" onmouseover="this.style.borderColor='var(--border-hover)'" onmouseout="this.style.borderColor='var(--border)'">
+                        <input type="checkbox" name="agent_ids" value="{{ a.id }}" {% if team and a in team.agents %}checked{% endif %} style="accent-color:var(--accent);width:1rem;height:1rem">
+                        <div style="flex:1">
+                            <div style="font-weight:500;font-size:0.8125rem">{{ a.name }}</div>
+                            <div class="flex-center gap-2">
+                                <span class="text-xs text-tertiary capitalize">{{ a.agent_type | replace('_', ' ') }}</span>
+                                <span class="text-xs" style="color:{{ 'var(--green)' if a.status == 'active' else 'var(--text-tertiary)' }}">{{ a.status }}</span>
+                            </div>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty-state" style="padding:1.5rem">
+                    <h3 style="font-size:0.875rem">No agents</h3>
+                    <p class="text-xs">Create agents first before building a team.</p>
+                    <a href="/dashboard/agents/new" class="btn btn-primary btn-sm mt-2">Create agent</a>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="flex-between">
+                <a href="/dashboard/teams" class="btn btn-ghost">Cancel</a>
+                <button type="submit" class="btn btn-primary" style="padding:0.5rem 1.5rem">{% if team %}Save{% else %}Create team{% endif %}</button>
+            </div>
+        </div>
+
+        <div class="flex-col gap-3">
+            <div class="card">
+                <h2 class="mb-2">Team structure</h2>
+                <div class="flex-col gap-2" style="font-size:0.75rem">
+                    <div style="background:var(--accent-subtle);border:1px solid var(--accent-border);border-radius:var(--radius-xs);padding:0.5rem;text-align:center">
+                        <strong style="color:var(--accent)">Orchestrator</strong>
+                        <div class="text-xs text-tertiary">Routes & coordinates</div>
+                    </div>
+                    <div style="width:1px;height:12px;background:var(--border);margin:0 auto"></div>
+                    <div style="background:var(--bg-hover);border:1px solid var(--border);border-radius:var(--radius-xs);padding:0.5rem;text-align:center">
+                        <strong class="text-secondary">Manager</strong>
+                        <div class="text-xs text-tertiary">Oversees performance</div>
+                    </div>
+                    <div style="width:1px;height:12px;background:var(--border);margin:0 auto"></div>
+                    <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-xs);padding:0.5rem;text-align:center">
+                        <strong class="text-secondary">Agents</strong>
+                        <div class="text-xs text-tertiary">Execute tasks</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 class="mb-2">Strategy guide</h2>
+                <div class="flex-col gap-2">
+                    <div><strong style="font-size:0.75rem">Supervisor</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Orchestrator delegates tasks</p></div>
+                    <div><strong style="font-size:0.75rem">Round Robin</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Cycles through agents evenly</p></div>
+                    <div><strong style="font-size:0.75rem">Broadcast</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">All agents respond, best picked</p></div>
+                    <div><strong style="font-size:0.75rem">Semantic</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Content-based routing (needs vector DB)</p></div>
+                </div>
+            </div>
+
+            <div class="flex-col gap-2" style="margin-top:auto">
+                <a href="/dashboard/agents/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">
+                    + New orchestrator agent
+                </a>
+                <a href="/dashboard/agents/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">
+                    + New manager agent
+                </a>
+            </div>
+        </div>
+
+    </div>
+</form>
+{% endblock %}

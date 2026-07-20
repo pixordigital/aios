@@ -1,0 +1,20 @@
+# AIOS reverse proxy — replace hostname with your domain
+# If using Cloudflare proxy: use your domain, Caddy auto-gets SSL from Cloudflare origin CA
+# If no domain: https://178.105.181.38:8777 (self-signed, browser warning)
+
+178.105.181.38:443 {
+    tls internal  # self-signed — replace with your domain for real SSL
+
+    reverse_proxy localhost:8777
+
+    request_body max_size 10MB
+
+    @websocket {
+        header Upgrade websocket
+    }
+    reverse_proxy @websocket localhost:8777
+}
+
+:80 {
+    redir :443{uri}
+}

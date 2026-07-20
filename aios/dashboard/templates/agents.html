@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>Agents</h1><p class="text-sm text-secondary mt-1">{{ agents|length }} agent{{ 's' if agents|length != 1 }} · {{ agents | selectattr("status","equalto","active") | list | length }} active</p></div>
+    <div class="flex-center gap-2">
+        <button class="btn btn-primary" onclick="document.getElementById('quick-agent').showModal()">+ Quick agent</button>
+        <a href="/dashboard/agents/new" class="btn btn-ghost">Full editor</a>
+    </div>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <thead><tr><th>Name</th><th>Type</th><th>Model</th><th>Est. cost</th><th>Tools</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+        <tbody>
+            {% for a in agents %}
+            {% set cost = cost_estimate(a.llm_config.get('model', '') if a.llm_config else '', a.llm_config.get('max_tokens', 4096) if a.llm_config else 4096) %}
+            <tr>
+                <td><a href="/dashboard/agents/{{ a.id }}/edit" style="color:var(--text);text-decoration:none;font-weight:500">{{ a.name }}</a></td>
+                <td><span class="text-sm text-secondary">{{ a.agent_type }}</span></td>
+                <td><span class="text-xs font-mono" style="color:var(--text-tertiary)">{{ (a.llm_config.get('model', '?') if a.llm_config else '?').split('/')[-1][:20] }}</span></td>
+                <td><span class="text-xs font-mono text-secondary">~${{ "%.4f"|format(cost) }}</span></td>
+                <td>
+                    {% if a.tools %}
+                    <div class="flex-center gap-1" style="flex-wrap:wrap">
+                        {% for t in a.tools[:2] %}
+                        <span class="badge" style="font-size:0.6rem;padding:0.125rem 0.375rem;background:var(--bg-hover)">{{ t }}</span>
+                        {% endfor %}
+                        {% if a.tools|length > 2 %}<span class="text-xs text-tertiary">+{{ a.tools|length - 2 }}</span>{% endif %}
+                    </div>
+                    {% else %}<span class="text-xs text-tertiary">—{% endif %}
+                </td>
+                <td>
+                    {% if a.status == 'active' %}
+                    <span class="badge" style="border-color:var(--green);color:var(--green)"><span class="badge-dot" style="background:var(--green)"></span> Active</span>
+                    {% elif a.status == 'draft' %}
+                    <span class="badge" style="border-color:var(--border);color:var(--text-tertiary)"><span class="badge-dot" style="background:var(--text-tertiary)"></span> Draft</span>
+                    {% else %}
+                    <span class="badge" style="border-color:var(--amber);color:var(--amber)"><span class="badge-dot" style="background:var(--amber)"></span> {{ a.status }}</span>
+                    {% endif %}
+                </td>
+                <td style="text-align:right"><div class="flex-center" style="justify-content:flex-end;gap:0.25rem">
+                    <a href="/dashboard/agents/{{ a.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+                    <a href="/dashboard/agents/{{ a.id }}/deploy" class="btn btn-sm {% if a.status == 'active' %}btn-ghost{% else %}btn-primary{% endif %}" style="padding:0.25rem 0.5rem;font-size:0.7rem">{{ 'Deactivate' if a.status == 'active' else 'Deploy' }}</a>
+                    <a href="/dashboard/agents/{{ a.id }}/clone" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" title="Clone">Clone</a>
+                    <a href="/dashboard/agents/{{ a.id }}/delete" class="btn btn-danger btn-sm">Del</a>
+                </div></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7">
+                <div class="empty-state">
+                    <div class="empty-state-icon">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                    </div>
+                    <h3>No agents</h3>
+                    <p>Create your first agent — SDR, Closer, Support, Data Analyst, or custom.</p>
+                    <div class="flex-center gap-2 mt-2">
+                        <a href="/dashboard/agents/new" class="btn btn-primary">Create agent</a>
+                    </div>
+                </div>
+            </td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

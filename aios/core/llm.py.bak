@@ -1,0 +1,53 @@
+"""OpenRouter LLM provider. Single provider — swap when needed."""
+
+import httpx
+
+from aios.config import settings
+
+
+class LLMError(Exception):
+    pass
+
+
+class OpenRouterProvider:
+    BASE_URL = settings.openrouter_base_url
+
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or settings.openrouter_api_key
+
+    async def chat(
+        self,
+        messages: list[dict],
+        model: str = "openai/gpt-4o",
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        tools: list[dict] | None = None,
+    ) -> dict:
+        """Call OpenRouter chat completions. Returns choice message dict."""
+        body = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": min(max_tokens, 16384),  # hard cap
+        }
+        if tools:
+            body["tools"] = tools
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                f"{self.BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/pixor/aios",
+                },
+                json=body,
+            )
+            if resp.status_code == 401:
+                raise LLMError("Authentication failed")
+            if resp.status_code == 429:
+                raise LLMError("Rate limited — try again later")
+            resp.raise_for_status()
+            data = resp.json()
+            choice = data["choices"][0]["message"]
+            return choice

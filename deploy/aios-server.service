@@ -1,0 +1,24 @@
+[Unit]
+Description=AIOS - AI Agent Operating System
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/ai_projects/claude_projects/pixor_aios
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/local/bin/gunicorn aios.main:app \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --bind 0.0.0.0:8777 \
+    --workers 2 \
+    --timeout 120 \
+    --keep-alive 5 \
+    --max-requests 10000 \
+    --max-requests-jitter 1000 \
+    --access-logfile /var/log/aios/access.log \
+    --error-logfile /var/log/aios/error.log
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

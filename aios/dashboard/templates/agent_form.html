@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>{% if agent %}Edit{% else %}New{% endif %} Agent</h1></div>
+</div>
+
+<form method="POST" action="/dashboard/agents/save">
+    <input type="hidden" name="agent_id" value="{{ agent.id if agent else '' }}">
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem">
+
+        <div class="flex-col gap-4">
+            <div class="card">
+                <h2 class="mb-3">Basic info</h2>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                    <div>
+                        <label for="name">Name</label>
+                        <input id="name" type="text" name="name" value="{{ agent.name if agent else '' }}" required class="input" placeholder="My Agent">
+                    </div>
+                    <div>
+                        <label for="agent_type">Type</label>
+                        <select id="agent_type" name="agent_type" class="input" onchange="updateTypeHint(this.value)">
+                            {% for t in agent_types %}
+                            <option value="{{ t }}" {% if agent and agent.agent_type == t %}selected{% endif %}>{{ t | replace('_', ' ') | title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="flex-between mb-3">
+                    <h2>System prompt</h2>
+                    <div id="token-counter" class="badge" style="font-family:'JetBrains Mono',monospace;font-size:0.625rem">0 tok</div>
+                </div>
+                <textarea id="prompt-input" name="system_prompt" rows="12" oninput="updateTokenCount(this)" class="input input-mono" placeholder="You are an AI agent that...">{{ agent.system_prompt if agent else '' }}</textarea>
+            </div>
+
+            <div class="card">
+                <h2 class="mb-3">Model</h2>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem">
+                    <div class="model-search-wrap" style="position:relative">
+                        <label>Model</label>
+                        <input type="text" id="model-search" name="model" autocomplete="off"
+                               value="{{ agent.llm_config.get('model', 'openai/gpt-4o') if agent and agent.llm_config else 'openai/gpt-4o' }}"
+                               oninput="filterModels(this);updateCost(this.value)"
+                               onfocus="document.getElementById('model-dropdown').classList.add('open')"
+                               onblur="setTimeout(function(){document.getElementById('model-dropdown').classList.remove('open')}, 200)"
+                               class="input input-mono" placeholder="Search models…">
+                        <div id="model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;margin-top:2px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:240px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
+                            {% set models = [
+                                'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4.1', 'openai/gpt-4.1-mini', 'openai/gpt-4.1-nano',
+                                'openai/o3', 'openai/o3-mini', 'openai/o4-mini', 'openai/o4',
+                                'openai/gpt-5', 'openai/gpt-5-mini', 'openai/o5', 'openai/o5-mini',
+                                'openai/gpt-5.1-flash', 'openai/gpt-5.1-pro',
+                                'anthropic/claude-sonnet-4-20250514', 'anthropic/claude-5-opus-20250714',
+                                'anthropic/claude-4.5-sonnet', 'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-haiku',
+                                'anthropic/claude-opus-4-20250514', 'anthropic/claude-sonnet-4.6-20250715',
+                                'anthropic/claude-fable-5',
+                                'google/gemini-2.5-pro', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite',
+                                'google/gemini-3-pro-2026-05', 'google/gemini-3-flash-2026-05',
+                                'google/gemma-4-27b-it', 'google/gemma-4-9b-it',
+                                'meta-llama/llama-4-maverick', 'meta-llama/llama-4-scout',
+                                'meta-llama/llama-5-70b', 'meta-llama/llama-5-405b',
+                                'mistralai/mistral-large-3', 'mistralai/mistral-3-small', 'mistralai/codestral-2501',
+                                'deepseek/deepseek-v4', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro',
+                                'deepseek/deepseek-v5', 'deepseek/deepseek-r2',
+                                'cohere/command-x1-05-2026', 'cohere/command-a-03-2025', 'cohere/command-r7-12-2024',
+                                'x-ai/grok-4', 'x-ai/grok-4-mini', 'x-ai/grok-3',
+                                'qwen/qwen-3-235b-a22b', 'qwen/qwen-3-30b-a3b', 'qwen/qwen-max',
+                                'minimax/minimax-m4-2026', 'minimax/minimax-m3-0724',
+                                'moonshot/kimi-3', 'moonshot/kimi-k3',
+                                'perplexity/sonar-deep-research', 'perplexity/sonar-pro',
+                                'nvidia/nemotron-5-120b', 'nvidia/nemotron-4-340b',
+                                'ai21/jamba-1.6-large', 'ai21/jamba-1.6-mini',
+                                'databricks/dbrx-2', 'databricks/dbrx-instruct',
+                                'microsoft/phi-4', 'microsoft/phi-4-mini',
+                                'amazon/nova-pro-v1', 'amazon/nova-lite-v1',
+                                'upstage/solar-pro-2', 'ibm/granite-3.2-20b',
+                                'openai-direct/gpt-4o', 'openai-direct/gpt-4o-mini',
+                                'anthropic-direct/claude-sonnet-4-20250514', 'anthropic-direct/claude-3.5-haiku',
+                                'ollama/llama3', 'ollama/mistral', 'ollama/qwen2.5',
+                            ] %}
+                            {% for m in models %}
+                            <div class="model-option" data-model="{{ m }}" onclick="selectModel('{{ m }}');updateCost('{{ m }}')" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'"
+                                 style="padding:0.375rem 0.625rem;font-size:0.75rem;font-family:'JetBrains Mono',monospace;cursor:pointer;color:var(--text-secondary);border-bottom:1px solid var(--border);transition:background 0.06s">{{ m }}</div>
+                            {% endfor %}
+                        </div>
+                        <p id="model-provider" style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem"></p>
+                    </div>
+                    <div>
+                        <label>Temperature</label>
+                        <input type="number" name="temperature" step="0.1" min="0" max="2" class="input"
+                               value="{{ agent.llm_config.get('temperature', 0.7) if agent and agent.llm_config else 0.7 }}">
+                    </div>
+                    <div>
+                        <label>Max tokens</label>
+                        <input type="number" name="max_tokens" id="max-tokens" step="1" min="256" max="16384" class="input"
+                               value="{{ agent.llm_config.get('max_tokens', 4096) if agent and agent.llm_config else 4096 }}"
+                               oninput="updateCost(document.getElementById('model-search').value)">
+                    </div>
+                </div>
+                <div id="cost-estimate" class="flex-center gap-2 mt-2" style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.5rem 0.75rem;flex-wrap:wrap">
+                    <span>Estimated cost per request: <strong id="cost-value" style="color:var(--text);font-family:'JetBrains Mono',monospace">$0.0000</strong></span>
+                    <span class="text-xs text-tertiary">(input + output, 1:0.5 ratio)</span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 class="mb-3">Tools</h2>
+                <div>
+                    <label>Tool names (space or comma separated)</label>
+                    <input type="text" name="tools" id="tools-input" value="{{ agent.tools | join(', ') if agent and agent.tools else '' }}" class="input input-mono" oninput="updateToolDescriptions(this)" placeholder="calculator web_search send_email">
+                </div>
+                <div id="tool-descriptions" class="flex-col gap-1 mt-2">
+                    {% for t in (agent.tools if agent else []) %}
+                    <div style="font-size:0.6875rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content">
+                        <span style="font-family:'JetBrains Mono',monospace">{{ t }}</span>: {{ tool_descriptions.get(t, 'Custom tool') }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 class="mb-3">Memory</h2>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                    <div>
+                        <label>Short-term buffer (messages)</label>
+                        <input type="number" name="short_term_buffer" min="5" max="500" class="input"
+                               value="{{ agent.memory_config.get('short_term', {}).get('max_messages', 50) if agent and agent.memory_config else 50 }}">
+                    </div>
+                    <div class="flex-col gap-2" style="justify-content:flex-end;padding-bottom:0.25rem">
+                        <label class="flex-center" style="gap:0.5rem;font-size:0.8125rem;cursor:pointer;font-weight:400;color:var(--text)">
+                            <input type="checkbox" name="long_term_enabled" {% if agent and agent.memory_config and agent.memory_config.get('long_term', {}).get('enabled') %}checked{% endif %} style="accent-color:var(--accent);width:1rem;height:1rem">
+                            Long-term memory
+                        </label>
+                        <label class="flex-center" style="gap:0.5rem;font-size:0.8125rem;cursor:pointer;font-weight:400;color:var(--text)">
+                            <input type="checkbox" name="episodic_enabled" {% if agent and agent.memory_config and agent.memory_config.get('episodic', {}).get('enabled') %}checked{% endif %} style="accent-color:var(--accent);width:1rem;height:1rem">
+                            Episodic summarization
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar: Insights -->
+        <div class="flex-col gap-3">
+            <div class="card">
+                <h2 class="mb-2">Compatible teammates</h2>
+                {% set compat = compatible_types(agent.agent_type if agent else 'custom') %}
+                <div class="flex-col gap-1">
+                    {% for ct in compat %}
+                    <div class="flex-center gap-1" style="font-size:0.75rem;padding:0.375rem 0.5rem;background:var(--bg-hover);border-radius:var(--radius-xs)">
+                        <span style="color:var(--accent)">●</span>
+                        <span class="capitalize">{{ ct }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 class="mb-2">Quick actions</h2>
+                <div class="flex-col gap-1">
+                    <a href="/dashboard/agents/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ New agent</a>
+                    <a href="/dashboard/teams/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ New team</a>
+                    <a href="/dashboard/channels/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ New channel</a>
+                </div>
+            </div>
+
+            <div style="flex:1"></div>
+            <div class="flex-col gap-2" style="position:sticky;bottom:0">
+                <button type="submit" class="btn btn-primary w-full" style="padding:0.625rem">{% if agent %}Save changes{% else %}Create agent{% endif %}</button>
+                <a href="/dashboard/agents" class="btn btn-ghost w-full">Cancel</a>
+            </div>
+        </div>
+
+    </div>
+</form>
+
+<script>
+    var PRICING = {
+        'openai/gpt-4o': {i:2.50,o:10.00},'openai/gpt-4o-mini':{i:0.15,o:0.60},'openai/gpt-4.1':{i:2.50,o:10.00},
+        'openai/gpt-4.1-mini':{i:0.40,o:1.60},'openai/gpt-4.1-nano':{i:0.10,o:0.40},
+        'openai/o3':{i:5.00,o:20.00},'openai/o3-mini':{i:1.10,o:4.40},'openai/o4':{i:10.00,o:40.00},
+        'openai/o4-mini':{i:1.50,o:6.00},'openai/gpt-5':{i:5.00,o:20.00},'openai/gpt-5-mini':{i:0.50,o:2.00},
+        'anthropic/claude-sonnet-4-20250514':{i:3.00,o:15.00},'anthropic/claude-5-opus-20250714':{i:15.00,o:75.00},
+        'anthropic/claude-4.5-sonnet':{i:3.00,o:15.00},'anthropic/claude-3.5-sonnet':{i:3.00,o:15.00},
+        'anthropic/claude-3-haiku':{i:0.25,o:1.25},'anthropic/claude-fable-5':{i:1.50,o:7.50},
+        'google/gemini-2.5-pro':{i:1.25,o:5.00},'google/gemini-2.5-flash':{i:0.15,o:0.60},
+        'google/gemini-3-pro-2026-05':{i:2.00,o:10.00},'google/gemini-3-flash-2026-05':{i:0.30,o:1.50},
+        'deepseek/deepseek-v4':{i:0.50,o:2.00},'deepseek/deepseek-v4-flash':{i:0.15,o:0.60},
+        'deepseek/deepseek-v4-pro':{i:1.00,o:4.00},'deepseek/deepseek-v5':{i:0.75,o:3.00},
+        'x-ai/grok-4':{i:2.00,o:10.00},'x-ai/grok-4-mini':{i:0.50,o:2.00},
+    };
+    function updateCost(model){
+        var price=PRICING[model]||{i:0,o:0};
+        var tokens=parseInt(document.getElementById('max-tokens').value)||4096;
+        var cost=(price.i*tokens/1000+price.o*tokens/1000*0.5)/100;
+        document.getElementById('cost-value').textContent='$'+cost.toFixed(4);
+    }
+    function updateToolDescriptions(input){
+        var names=input.value.split(/[\s,]+/).filter(Boolean);
+        var desc=document.getElementById('tool-descriptions');
+        var known={"calculator":"Math expressions, safe eval","web_search":"Search the web","send_email":"Send email messages"};
+        desc.innerHTML=names.map(function(n){
+            var d=known[n]||'Custom tool';
+            return '<div style="font-size:0.6875rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content"><span style="font-family:JetBrains Mono,monospace">'+n+'</span>: '+d+'</div>';
+        }).join('');
+    }
+    function tokenEstimate(t){return Math.round((t.length/4)||0)}
+    function updateTokenCount(el){
+        var c=document.getElementById('token-counter');
+        var n=tokenEstimate(el.value);
+        c.textContent=n.toLocaleString()+' tok';
+        c.style.borderColor=n>32000?'var(--red)':n>16000?'var(--amber)':'var(--border)';
+        c.style.color=n>32000?'var(--red)':n>16000?'var(--amber)':'var(--text-tertiary)';
+    }
+    function selectModel(v){document.getElementById('model-search').value=v;document.getElementById('model-dropdown').classList.remove('open');updateModelProvider(v);}
+    function filterModels(i){
+        var q=i.value.toLowerCase(),dd=document.getElementById('model-dropdown');dd.classList.add('open');
+        document.querySelectorAll('.model-option').forEach(function(o){o.style.display=o.getAttribute('data-model').toLowerCase().includes(q)?'block':'none'});
+        if(!q)document.querySelectorAll('.model-option').forEach(function(o){o.style.display='block'});
+        updateModelProvider(i.value);
+    }
+    function updateModelProvider(v){
+        var el=document.getElementById('model-provider');
+        if(v.startsWith('openai')||v.startsWith('gpt-'))el.textContent='OpenAI';
+        else if(v.startsWith('anthropic')||v.startsWith('claude'))el.textContent='Anthropic';
+        else if(v.startsWith('google')||v.startsWith('gemini')||v.startsWith('gemma'))el.textContent='Google';
+        else if(v.startsWith('meta-llama')||v.startsWith('llama'))el.textContent='Meta';
+        else if(v.startsWith('mistral')||v.startsWith('codestral')||v.startsWith('mistralai'))el.textContent='Mistral';
+        else if(v.startsWith('deepseek'))el.textContent='DeepSeek';
+        else if(v.startsWith('cohere')||v.startsWith('command'))el.textContent='Cohere';
+        else if(v.startsWith('x-ai')||v.startsWith('grok'))el.textContent='xAI';
+        else if(v.startsWith('qwen'))el.textContent='Qwen';
+        else if(v.startsWith('minimax'))el.textContent='MiniMax';
+        else if(v.startsWith('moonshot')||v.startsWith('kimi'))el.textContent='Moonshot';
+        else if(v.startsWith('perplexity')||v.startsWith('sonar'))el.textContent='Perplexity';
+        else if(v.startsWith('nvidia')||v.startsWith('nemotron'))el.textContent='NVIDIA';
+        else if(v.startsWith('ai21')||v.startsWith('jamba'))el.textContent='AI21';
+        else if(v.startsWith('databricks')||v.startsWith('dbrx'))el.textContent='Databricks';
+        else if(v.startsWith('microsoft')||v.startsWith('phi'))el.textContent='Microsoft';
+        else if(v.startsWith('amazon')||v.startsWith('nova'))el.textContent='AWS';
+        else if(v.startsWith('upstage')||v.startsWith('solar'))el.textContent='Upstage';
+        else if(v.startsWith('ibm')||v.startsWith('granite'))el.textContent='IBM';
+        else if(v.startsWith('openai-direct'))el.textContent='OpenAI (direct)'; else if(v.startsWith('anthropic-direct'))el.textContent='Anthropic (direct)'; else if(v.startsWith('ollama'))el.textContent='Ollama (local)'; else el.textContent='';
+    }
+    document.addEventListener('DOMContentLoaded',function(){
+        var ta=document.getElementById('prompt-input');if(ta)updateTokenCount(ta);
+        var dd=document.getElementById('model-dropdown');
+        var obs=new MutationObserver(function(){dd.style.display=dd.classList.contains('open')?'block':'none'});
+        obs.observe(dd,{attributes:true,attributeFilter:['class']});
+        updateModelProvider(document.getElementById('model-search').value);
+        updateCost(document.getElementById('model-search').value);
+    });
+</script>
+{% endblock %}

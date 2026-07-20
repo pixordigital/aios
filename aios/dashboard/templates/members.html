@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>Members</h1><p class="text-sm text-secondary mt-1">{{ users|length }} member{{ 's' if users|length != 1 }}</p></div>
+    <button class="btn btn-primary" onclick="document.getElementById('invite-modal').showModal()">+ Invite</button>
+</div>
+
+<dialog id="invite-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.5rem;max-width:400px;width:90%">
+    <form method="POST" action="/dashboard/members/invite" style="display:flex;flex-direction:column;gap:1rem">
+        <h2 style="font-size:1rem">Invite member</h2>
+        <p class="text-sm text-secondary">They'll receive a link to join your organization.</p>
+        <div>
+            <label>Email address</label>
+            <input type="email" name="email" required class="input" placeholder="colleague@company.com">
+        </div>
+        <div>
+            <label>Role</label>
+            <select name="role" class="input">
+                <option value="member">Member</option>
+                <option value="org_admin">Admin</option>
+            </select>
+        </div>
+        <div class="flex-between" style="margin-top:0.5rem">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('invite-modal').close()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Send invite</button>
+        </div>
+    </form>
+</dialog>
+
+<div class="table-wrap">
+    <table>
+        <thead><tr><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td>
+                    <div style="font-weight:500;font-size:0.8125rem">{{ u.email }}</div>
+                </td>
+                <td>
+                    <span class="badge" style="border-color:{{ 'var(--accent-border)' if u.role == 'org_admin' else 'var(--border)' }};color:{{ 'var(--accent)' if u.role == 'org_admin' else 'var(--text-secondary)' }}">
+                        {{ u.role }}
+                    </span>
+                </td>
+                <td><span class="text-sm text-tertiary">{{ u.created_at.strftime('%b %d') if u.created_at else '—' }}</span></td>
+                <td style="text-align:right">
+                    {% if u.role != 'superadmin' and u.email != current_user_email %}
+                    <a href="/dashboard/members/{{ u.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm('Remove {{ u.email }} from org?')">Remove</a>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card mt-4">
+    <h2 class="mb-2">Pending invites</h2>
+    {% if invites %}
+    <div class="flex-col gap-2">
+        {% for inv in invites %}
+        <div class="flex-between" style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+            <div>
+                <span style="font-size:0.8125rem">{{ inv.email }}</span>
+                <span class="text-xs text-tertiary"> — {{ inv.role }}</span>
+            </div>
+            <a href="/dashboard/members/invite/{{ inv.id }}/revoke" class="btn btn-ghost btn-sm" style="color:var(--red)">Revoke</a>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding:1rem">
+        <p class="text-sm text-secondary">No pending invites</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

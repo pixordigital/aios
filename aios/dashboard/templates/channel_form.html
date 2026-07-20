@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>{% if channel %}Edit{% else %}New{% endif %} Channel</h1></div>
+</div>
+
+<form method="POST" action="/dashboard/channels/save">
+    <input type="hidden" name="channel_id" value="{{ channel.id if channel else '' }}">
+    <div class="flex-col gap-4">
+
+        <div class="card">
+            <h2 class="mb-3">Channel</h2>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                <div>
+                    <label>Label</label>
+                    <input type="text" name="label" value="{{ channel.label if channel else '' }}" required class="input" placeholder="Production WhatsApp">
+                </div>
+                <div>
+                    <label>Type</label>
+                    <select name="channel_type" class="input" onchange="showChannelCreds(this.value)">
+                        {% set types = ['web', 'whatsapp', 'slack', 'telegram', 'discord', 'email'] %}
+                        {% for t in types %}
+                        <option value="{{ t }}" {% if channel and channel.channel_type == t %}selected{% endif %}>{{ t | title }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="mb-3">Credentials</h2>
+            <div id="creds-web" class="channel-creds" style="display:none"><p class="text-sm text-secondary">Web channels need no configuration.</p></div>
+            <div id="creds-whatsapp" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div><label>Access token</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
+                <div><label>Phone number ID</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
+            </div>
+            <div id="creds-slack" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div><label>Bot token</label><input type="text" name="config_slack_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="xoxb-..."></div>
+                <div><label>Signing secret</label><input type="text" name="config_slack_secret" value="{{ channel.config.get('signing_secret', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="abc..."></div>
+            </div>
+            <div id="creds-telegram" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div><label>Bot token</label><input type="text" name="config_telegram_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123:ABC..."></div>
+            </div>
+            <div id="creds-discord" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div><label>Bot token</label><input type="text" name="config_discord_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="MTIz..."></div>
+            </div>
+            <div id="creds-email" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+                    <div><label>IMAP server</label><input type="text" name="config_email_imap" value="{{ channel.config.get('imap_server', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="imap.gmail.com"></div>
+                    <div><label>SMTP server</label><input type="text" name="config_email_smtp" value="{{ channel.config.get('smtp_server', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="smtp.gmail.com"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+                    <div><label>Email</label><input type="email" name="config_email_addr" value="{{ channel.config.get('email', '') if channel and channel.config else '' }}" class="input" placeholder="bot@example.com"></div>
+                    <div><label>Password</label><input type="password" name="config_email_pass" class="input" placeholder="App password"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2 class="mb-3">Assignment</h2>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                <div><label>Agent (optional)</label>
+                    <select name="agent_id" class="input">
+                        <option value="">— None —</option>
+                        {% for a in agents %}
+                        <option value="{{ a.id }}" {% if channel and channel.agent_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div><label>Team (optional)</label>
+                    <select name="team_id" class="input">
+                        <option value="">— None —</option>
+                        {% for t in teams %}
+                        <option value="{{ t.id }}" {% if channel and channel.team_id == t.id %}selected{% endif %}>{{ t.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-between">
+            <a href="/dashboard/channels" class="btn btn-ghost">Cancel</a>
+            <button type="submit" class="btn btn-primary" style="padding:0.5rem 1.5rem">{% if channel %}Save{% else %}Create channel{% endif %}</button>
+        </div>
+
+    </div>
+</form>
+
+<script>
+    function showChannelCreds(t){document.querySelectorAll('.channel-creds').forEach(function(e){e.style.display='none'});var el=document.getElementById('creds-'+t);if(el)el.style.display='flex';}
+    document.addEventListener('DOMContentLoaded',function(){showChannelCreds(document.querySelector('select[name="channel_type"]').value);});
+</script>
+{% endblock %}

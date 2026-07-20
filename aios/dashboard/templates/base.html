@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>AIOS — {{ title }}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;450;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0c0c0e;
+            --bg-raised: #111113;
+            --bg-elevated: #141416;
+            --bg-hover: #1a1a1d;
+            --bg-active: #1f1f23;
+            --border: #222226;
+            --border-hover: #2e2e32;
+            --border-accent: #4f46e5;
+            --text: #fafafa;
+            --text-secondary: #9d9da3;
+            --text-tertiary: #626268;
+            --accent: #6366f1;
+            --accent-subtle: rgba(99,102,241,0.08);
+            --accent-border: rgba(99,102,241,0.25);
+            --green: #22c55e;
+            --green-subtle: rgba(34,197,94,0.1);
+            --amber: #f59e0b;
+            --amber-subtle: rgba(245,158,11,0.1);
+            --red: #ef4444;
+            --red-subtle: rgba(239,68,68,0.1);
+            --radius: 10px;
+            --radius-sm: 6px;
+            --radius-xs: 4px;
+            --sidebar-w: 220px;
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html { scroll-behavior: smooth; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', -apple-system, sans-serif;
+            font-size: 14px;
+            font-weight: 400;
+            -webkit-font-smoothing: antialiased;
+            padding-bottom: 72px;
+            line-height: 1.5;
+        }
+        ::selection { background: var(--accent-subtle); color: var(--text); }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 99px; }
+
+        /* ── Sidebar ── */
+        .sidebar { display: none; position: fixed; left: 0; top: 0; bottom: 0; width: var(--sidebar-w); background: var(--bg-raised); border-right: 1px solid var(--border); flex-direction: column; z-index: 50; }
+        .sidebar-head { padding: 1.25rem 1.25rem 0.75rem; }
+        .sidebar-logo { font-size: 1.125rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+        .sidebar-logo span { color: var(--accent); }
+        .sidebar-label { font-size: 0.65rem; color: var(--text-tertiary); margin-top: 0.125rem; letter-spacing: 0.04em; text-transform: uppercase; }
+        .sidebar-nav { flex: 1; padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 1px; }
+        .sidebar-nav a {
+            display: flex; align-items: center; gap: 0.625rem;
+            padding: 0.5rem 0.625rem; border-radius: var(--radius-sm);
+            font-size: 0.8125rem; font-weight: 450; color: var(--text-secondary);
+            text-decoration: none; transition: all 0.1s; position: relative;
+        }
+        .sidebar-nav a:hover { background: var(--bg-hover); color: var(--text); }
+        .sidebar-nav a.active { background: var(--accent-subtle); color: var(--accent); }
+        .sidebar-nav a svg { width: 16px; height: 16px; flex-shrink: 0; stroke-width: 1.5; }
+        .sidebar-foot { padding: 0.75rem 1.25rem; border-top: 1px solid var(--border); font-size: 0.65rem; color: var(--text-tertiary); }
+
+        /* ── Bottom Nav (mobile) ── */
+        .bottom-nav {
+            position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+            background: var(--bg-raised); border-top: 1px solid var(--border);
+            display: flex; align-items: stretch;
+            padding: 0 env(safe-area-inset-right, 0) calc(env(safe-area-inset-bottom, 0)) env(safe-area-inset-left, 0);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        }
+        .bottom-nav a {
+            flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.125rem;
+            padding: 0.5rem 0.25rem 0.375rem;
+            text-decoration: none; color: var(--text-tertiary); font-size: 0.6rem; font-weight: 500;
+            transition: color 0.1s; letter-spacing: 0.01em;
+        }
+        .bottom-nav a svg { width: 18px; height: 18px; stroke-width: 1.5; }
+        .bottom-nav a.active { color: var(--accent); }
+        .bottom-nav .label { margin-top: 0.125rem; }
+
+        /* ── Main ── */
+        .main { padding: 1.5rem 2rem; min-height: 100vh; }
+
+        /* ── Typography ── */
+        h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
+        h1 { font-size: 1.25rem; margin: 0; }
+        h2 { font-size: 1rem; margin: 0; }
+        h3 { font-size: 0.875rem; margin: 0; }
+        .text-xs { font-size: 0.6875rem; }
+        .text-sm { font-size: 0.8125rem; }
+        .text-secondary { color: var(--text-secondary); }
+        .text-tertiary { color: var(--text-tertiary); }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .capitalize { text-transform: capitalize; }
+        .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--bg-elevated); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 1.25rem;
+            transition: border-color 0.12s;
+        }
+        .card-hover:hover { border-color: var(--border-hover); }
+
+        /* ── Stats ── */
+        .stat-card {
+            background: var(--bg-elevated); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 1rem 1.25rem;
+            transition: border-color 0.12s;
+        }
+        .stat-card:hover { border-color: var(--border-hover); }
+        .stat-value { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; margin: 0.25rem 0 0; }
+        .stat-label { font-size: 0.75rem; color: var(--text-secondary); margin: 0; }
+        .stat-link { font-size: 0.75rem; color: var(--accent); text-decoration: none; margin-top: 0.625rem; display: inline-block; }
+        .stat-link:hover { text-decoration: underline; }
+
+        /* ── Buttons ── */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+            padding: 0.5rem 0.875rem; border-radius: var(--radius-sm);
+            font-size: 0.8125rem; font-weight: 500;
+            border: 1px solid transparent; cursor: pointer;
+            transition: all 0.1s; text-decoration: none; line-height: 1;
+            min-height: 2rem; white-space: nowrap;
+        }
+        .btn:active { transform: scale(0.985); }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { background: #5558e6; }
+        .btn-ghost { background: transparent; color: var(--text-secondary); border-color: var(--border); }
+        .btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+        .btn-danger { border-color: var(--red); color: var(--red); background: transparent; }
+        .btn-danger:hover { background: var(--red-subtle); }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; min-height: 1.5rem; }
+
+        /* ── Table ── */
+        .table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        thead { background: var(--bg-raised); }
+        th { text-align: left; padding: 0.625rem 1rem; font-size: 0.6875rem; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--border); }
+        td { padding: 0.625rem 1rem; font-size: 0.8125rem; border-bottom: 1px solid var(--border); }
+        tr:last-child td { border-bottom: none; }
+        tbody tr { transition: background 0.08s; }
+        tbody tr:hover { background: var(--bg-hover); }
+
+        /* ── Badge ── */
+        .badge {
+            display: inline-flex; align-items: center; gap: 0.375rem;
+            padding: 0.1875rem 0.5rem; border-radius: 999px;
+            font-size: 0.6875rem; font-weight: 500; border: 1px solid var(--border); white-space: nowrap;
+        }
+        .badge-dot { width: 6px; height: 6px; border-radius: 99px; flex-shrink: 0; }
+
+        /* ── Inputs ── */
+        .input {
+            width: 100%; background: var(--bg); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 0.5rem 0.625rem;
+            color: var(--text); font-size: 0.8125rem; font-family: inherit;
+            outline: none; transition: border-color 0.1s;
+        }
+        .input:focus { border-color: var(--accent); }
+        .input-mono { font-family: 'JetBrains Mono', monospace; }
+        textarea.input { resize: vertical; line-height: 1.5; }
+        select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%23626268'%3E%3Cpath d='M3 5l3 3 3-3'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.625rem center; padding-right: 2rem; cursor: pointer; }
+        label { display: block; font-size: 0.75rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.375rem; }
+
+        /* ── Empty state ── */
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem 1.5rem; text-align: center; }
+        .empty-state-icon { width: 40px; height: 40px; border-radius: var(--radius); background: var(--bg-hover); display: flex; align-items: center; justify-content: center; margin-bottom: 0.75rem; color: var(--text-tertiary); }
+        .empty-state h3 { font-weight: 600; font-size: 0.9375rem; }
+        .empty-state p { color: var(--text-secondary); font-size: 0.8125rem; margin: 0.25rem 0 0; max-width: 280px; line-height: 1.4; }
+
+        /* ── Utilities ── */
+        .flex { display: flex; }
+        .flex-center { display: flex; align-items: center; gap: 0.5rem; }
+        .flex-between { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+        .flex-col { display: flex; flex-direction: column; }
+        .gap-1 { gap: 0.25rem; }
+        .gap-2 { gap: 0.5rem; }
+        .gap-3 { gap: 0.75rem; }
+        .gap-4 { gap: 1rem; }
+        .mt-1 { margin-top: 0.25rem; }
+        .mt-2 { margin-top: 0.5rem; }
+        .mt-3 { margin-top: 0.75rem; }
+        .mt-4 { margin-top: 1rem; }
+        .mb-2 { margin-bottom: 0.5rem; }
+        .mb-3 { margin-bottom: 0.75rem; }
+        .mb-4 { margin-bottom: 1rem; }
+        .w-full { width: 100%; }
+
+        .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+        .grid-2 { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
+        @media (min-width: 640px) { .grid-4 { grid-template-columns: repeat(4, 1fr); gap: 1rem; } }
+        @media (min-width: 768px) { .grid-2 { grid-template-columns: repeat(2, 1fr); gap: 1rem; } }
+        @media (min-width: 768px) {
+            .sidebar { display: flex; }
+            .bottom-nav { display: none; }
+            body { padding-bottom: 0; }
+            .main { margin-left: var(--sidebar-w); padding: 1.5rem 2rem; }
+        }
+    </style>
+</head>
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-head">
+            <div class="sidebar-logo">ai<span>os</span></div>
+            <div class="sidebar-label">Agent Operating System <span style="color:var(--text-tertiary)">v0.1</span></div>
+        </div>
+        <nav class="sidebar-nav">
+            <a href="/dashboard" class="{% if request.url.path == '/dashboard' %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                Dashboard
+            </a>
+            <a href="/dashboard/agents" class="{% if request.url.path.startswith('/dashboard/agents') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                Agents
+            </a>
+            <a href="/dashboard/teams" class="{% if request.url.path.startswith('/dashboard/teams') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
+                Teams
+            </a>
+            <a href="/dashboard/conversations" class="{% if request.url.path.startswith('/dashboard/conversations') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                Conversations
+            </a>
+            <a href="/dashboard/channels" class="{% if request.url.path.startswith('/dashboard/channels') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Channels
+            </a>
+            <a href="/dashboard/members" class="{% if request.url.path.startswith('/dashboard/members') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                Members
+            </a>
+            <a href="/dashboard/billing" class="{% if request.url.path.startswith('/dashboard/billing') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+                Billing
+            </a>
+            <a href="/dashboard/files" class="{% if request.url.path.startswith('/dashboard/files') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                Files
+            </a>
+            {% if is_superadmin %}
+            <a href="/dashboard/admin" class="{% if request.url.path.startswith('/dashboard/admin') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                Admin
+            </a>
+            {% endif %}
+        </nav>
+        <div class="sidebar-foot" style="display:flex;flex-direction:column;gap:0.25rem">
+            {% if user_email %}<div style="font-size:0.6875rem;color:var(--text-secondary)">{{ user_email }}</div>{% endif %}
+            {% if is_superadmin and orgs %}
+            <form method="GET" action="/dashboard/switch-org" style="margin:0.125rem 0" id="org-switcher">
+                <select name="org_id" class="input-sm" style="font-size:0.65rem;padding:0.2rem 0.375rem;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);outline:none;cursor:pointer" onchange="if(this.value) window.location.href='/dashboard/switch-org/'+this.value">
+                    {% if is_impersonating %}
+                    <option value="clear">← My org</option>
+                    {% endif %}
+                    {% for o in orgs %}
+                    <option value="{{ o.id }}" {% if o.id == active_org_id %}selected{% endif %}>{{ o.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% endif %}
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                {% if is_impersonating %}<span style="color:var(--amber);font-size:0.6rem">Viewing: client</span>{% endif %}
+                <span>© 2026 AIOS</span>
+                <a href="/dashboard/logout" style="color:var(--text-tertiary);text-decoration:none;font-size:0.65rem">Sign out</a>
+            </div>
+        </div>
+    </aside>
+
+    <nav class="bottom-nav">
+        <a href="/dashboard" class="{% if request.url.path == '/dashboard' %}active{% endif %}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            <span class="label">Home</span>
+        </a>
+        <a href="/dashboard/agents" class="{% if request.url.path.startswith('/dashboard/agents') %}active{% endif %}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+            <span class="label">Agents</span>
+        </a>
+        <a href="/dashboard/teams" class="{% if request.url.path.startswith('/dashboard/teams') %}active{% endif %}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
+            <span class="label">Teams</span>
+        </a>
+        <a href="/dashboard/conversations" class="{% if request.url.path.startswith('/dashboard/conversations') %}active{% endif %}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+            <span class="label">Chats</span>
+        </a>
+        <a href="/dashboard/channels" class="{% if request.url.path.startswith('/dashboard/channels') %}active{% endif %}">
+            <a href="/dashboard/members" class="{% if request.url.path.startswith("/dashboard/members") %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                Members
+            </a>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            <span class="label">Channels</span>
+        </a>
+    </nav>
+
+    <main class="main">{% block content %}{% endblock %}</main>
+
+    {% include "quick_agent_modal.html" %}
+</body>
+</html>
