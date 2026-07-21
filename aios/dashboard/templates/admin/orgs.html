@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="flex-center gap-3 mb-4" style="border-bottom:1px solid var(--border);padding-bottom:0.75rem">
+    <a href="/dashboard/admin" class="btn btn-sm {% if request.url.path == '/dashboard/admin' %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:999px">Organizations</a>
+    <a href="/dashboard/admin/fleet" class="btn btn-sm {% if request.url.path.startswith('/dashboard/admin/fleet') %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:999px">Client Fleet</a>
+</div>
 <div class="flex-between mb-4">
     <div><h1>Organizations</h1><p class="text-sm text-secondary mt-1">{{ orgs|length }} org{{ 's' if orgs|length != 1 }}</p></div>
 </div>

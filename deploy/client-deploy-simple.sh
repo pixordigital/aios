@@ -22,7 +22,7 @@ apt-get update -qq && apt-get install -y -qq python3 python3-pip git >/dev/null 
 
 # Clone & setup
 cd /opt
-git clone https://github.com/pixordigital/aios.git
+git clone https://github.com/pixordigital/aios.git /opt/aios 2>/dev/null || (cd /opt/aios && git pull)
 cd aios
 pip3 install -e . 2>/dev/null
 pip3 install gunicorn asyncpg 2>/dev/null
