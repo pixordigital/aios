@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>Client Fleet</h1><p class="text-sm text-secondary mt-1">{{ instances|length }} client instance{{ 's' if instances|length != 1 }}</p></div>
+    <button class="btn btn-primary" onclick="document.getElementById('install-modal').showModal()">+ Deploy client</button>
+    <button class="btn btn-ghost" onclick="document.getElementById('add-modal').showModal()">+ Register existing</button>
+</div>
+
+<dialog id="install-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.5rem;max-width:520px;width:90%">
+    <form style="display:flex;flex-direction:column;gap:1rem" onsubmit="return false">
+        <h2 style="font-size:1rem">Deploy to client VPS</h2>
+        <p class="text-sm text-secondary">SSH into their server and run:</p>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;font-family:'JetBrains Mono',monospace;font-size:0.75rem;line-height:1.6;word-break:break-all;position:relative">
+            <button onclick="copyCmd()" style="position:absolute;top:0.5rem;right:0.5rem;background:var(--bg-hover);border:1px solid var(--border);color:var(--text-secondary);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;font-size:0.65rem;cursor:pointer">Copy</button>
+            <code id="deploy-cmd">curl -sL https://raw.githubusercontent.com/pixordigital/aios/main/deploy/client-deploy-simple.sh \<br>  | bash -s -- "ClientName" "admin@client.com"</code>
+        </div>
+        <div style="margin-top:0.5rem">
+            <label>Client name</label>
+            <input type="text" id="client-name-input" class="input" placeholder="AcmeCorp" oninput="updateCmd()">
+        </div>
+        <div>
+            <label>Admin email</label>
+            <input type="email" id="client-email-input" class="input" placeholder="admin@client.com" oninput="updateCmd()">
+        </div>
+        <div style="margin-top:0.25rem">
+            <button type="button" class="btn btn-primary" onclick="copyDeployCmd()">Copy command</button>
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('install-modal').close()">Close</button>
+        </div>
+        <div id="copy-msg" style="font-size:0.75rem;color:var(--green);display:none">Copied! Paste into client's SSH terminal.</div>
+    </form>
+</dialog>
+
+<script>
+function updateCmd() {
+    var name = document.getElementById('client-name-input').value || 'ClientName';
+    var email = document.getElementById('client-email-input').value || 'admin@client.com';
+    document.getElementById('deploy-cmd').innerHTML = 'curl -sL https://raw.githubusercontent.com/pixordigital/aios/main/deploy/client-deploy-simple.sh \\<br>  | bash -s -- "' + name + '" "' + email + '"';
+}
+function copyCmd() { copyDeployCmd(); }
+function copyDeployCmd() {
+    var name = document.getElementById('client-name-input').value || 'ClientName';
+    var email = document.getElementById('client-email-input').value || 'admin@client.com';
+    var cmd = 'curl -sL https://raw.githubusercontent.com/pixordigital/aios/main/deploy/client-deploy-simple.sh | bash -s -- "' + name + '" "' + email + '"';
+    navigator.clipboard.writeText(cmd);
+    document.getElementById('copy-msg').style.display = 'block';
+    setTimeout(function(){ document.getElementById('copy-msg').style.display = 'none'; }, 3000);
+}
+</script>
+
+<dialog id="add-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.5rem;max-width:450px;width:90%">
+    <form method="POST" action="/dashboard/admin/fleet/add" style="display:flex;flex-direction:column;gap:1rem">
+        <h2 style="font-size:1rem">Register client instance</h2>
+        <div>
+            <label>Client name</label>
+            <input type="text" name="name" required class="input" placeholder="Acme Corp">
+        </div>
+        <div>
+            <label>Base URL</label>
+            <input type="url" name="base_url" required class="input" placeholder="http://client-ip:8777">
+        </div>
+        <div>
+            <label>API Key (JWT from their admin account)</label>
+            <input type="text" name="api_key" class="input" placeholder="eyJ...">
+        </div>
+        <div>
+            <label>Their org ID (optional)</label>
+            <input type="text" name="client_org_id" class="input" placeholder="leave blank for default">
+        </div>
+        <div class="flex-between" style="margin-top:0.5rem">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('add-modal').close()">Cancel</button>
+            <p class="text-xs text-tertiary">After deploy, register the client here with their JWT.</p>
+            <button type="submit" class="btn btn-primary">Register</button>
+        </div>
+    </form>
+</dialog>
+
+{% if instances %}
+<div class="flex-col gap-3">
+    {% for inst in instances %}
+    <div class="card">
+        <div class="flex-between">
+            <div>
+                <div style="font-weight:600;font-size:0.9375rem">{{ inst.name }}</div>
+                <div class="flex-center gap-2 mt-1">
+                    <span class="text-xs text-tertiary">{{ inst.base_url }}</span>
+                    {% if inst.is_active %}
+                    <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem">Connected</span>
+                    {% else %}
+                    <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.625rem">Offline</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex-center gap-2">
+                <a href="/dashboard/admin/fleet/{{ inst.id }}" class="btn btn-primary btn-sm">Manage</a>
+                <a href="/dashboard/admin/fleet/{{ inst.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm('Remove {{ inst.name }}?')">Remove</a>
+            </div>
+        </div>
+        {% if inst.extra_data.get('health') %}
+        <div class="flex-center gap-3 mt-2" style="font-size:0.75rem;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:0.5rem">
+            <span>Orgs: {{ inst.extra_data.health.orgs or '?' }}</span>
+            <span>Agents: {{ inst.extra_data.health.agents or '?' }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="empty-state-icon">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg>
+        </div>
+        <h3>No clients</h3>
+        <p>Register client instances to manage them from here.</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('add-modal').showModal()">Add client</button>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

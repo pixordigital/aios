@@ -199,6 +199,18 @@ class UsageRecord(Base):
     llm_calls: Mapped[int] = mapped_column(default=0)
 
 
+class RemoteInstance(Base, TimestampMixin):
+    __tablename__ = "remote_instances"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    base_url: Mapped[str] = mapped_column(String(500))
+    api_key: Mapped[str] = mapped_column(String(500), default="")
+    client_org_id: Mapped[str] = mapped_column(String(36), default="")
+    is_active: Mapped[bool] = mapped_column(default=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class Invitation(Base, TimestampMixin):
     __tablename__ = "invitations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)

@@ -760,6 +760,120 @@ async def admin_remove_user(request: Request, oid: str, uid: str):
     return RedirectResponse(f"/dashboard/admin/orgs/{oid}", status_code=303)
 
 
+# ─── Fleet management ───
+
+@router.get("/admin/fleet", response_class=HTMLResponse)
+async def admin_fleet(request: Request):
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
+    from aios.db.models import RemoteInstance
+    async with async_session() as db:
+        instances = (await db.execute(select(RemoteInstance).order_by(RemoteInstance.name))).scalars().all()
+    return await _render("admin/fleet.html", request, title="Client Fleet", instances=instances)
+
+
+@router.post("/admin/fleet/add")
+async def admin_fleet_add(
+    request: Request,
+    name: str = Form(...), base_url: str = Form(...),
+    api_key: str = Form(""), client_org_id: str = Form(""),
+):
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
+    from aios.db.models import RemoteInstance
+    async with async_session() as db:
+        inst = RemoteInstance(
+            org_id=await _org_filter(request),
+            name=name, base_url=base_url.rstrip("/"),
+            api_key=api_key, client_org_id=client_org_id,
+            extra_data={},
+        )
+        db.add(inst)
+        await db.flush()
+        # test connectivity
+        try:
+            import httpx
+            headers = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{base_url}/api/admin/health", headers=headers)
+                if resp.status_code == 200:
+                    inst.extra_data["health"] = resp.json()
+                    inst.is_active = True
+        except Exception as e:
+            inst.extra_data.setdefault("errors", []).append(str(e))
+        await db.commit()
+    return RedirectResponse("/dashboard/admin/fleet", status_code=303)
+
+
+@router.get("/admin/fleet/{fid}", response_class=HTMLResponse)
+async def admin_fleet_view(request: Request, fid: str):
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
+    from aios.db.models import RemoteInstance
+    async with async_session() as db:
+        inst = await db.get(RemoteInstance, fid)
+        if not inst:
+            return HTMLResponse("<h2>Not found</h2>", status_code=404)
+
+        # proxy to client instance for live data
+        agents = []
+        teams = []
+        conversations = []
+        health = inst.extra_data.get("health", {})
+        try:
+            import httpx
+            headers = {}
+            if inst.api_key:
+                headers["Authorization"] = f"Bearer {inst.api_key}"
+            async with httpx.AsyncClient(timeout=15) as client:
+                health_resp = await client.get(f"{inst.base_url}/api/admin/health", headers=headers)
+                if health_resp.status_code == 200:
+                    health = health_resp.json()
+                    inst.extra_data["health"] = health
+                    await db.commit()
+
+                agents_resp = await client.get(f"{inst.base_url}/api/agents", headers=headers)
+                if agents_resp.status_code == 200:
+                    agents = agents_resp.json()
+
+                teams_resp = await client.get(f"{inst.base_url}/api/teams", headers=headers)
+                if teams_resp.status_code == 200:
+                    teams = teams_resp.json()
+        except Exception as e:
+            inst.extra_data["error"] = str(e)
+
+    return await _render("admin/client_view.html", request, title=inst.name,
+                   instance=inst, agents=agents, teams=teams,
+                   conversations=conversations, health=health)
+
+
+@router.get("/admin/fleet/{fid}/open")
+async def admin_fleet_open(fid: str):
+    from aios.db.models import RemoteInstance
+    async with async_session() as db:
+        inst = await db.get(RemoteInstance, fid)
+        if not inst:
+            return HTMLResponse("<h2>Not found</h2>", status_code=404)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(inst.base_url)
+
+
+@router.get("/admin/fleet/{fid}/remove")
+async def admin_fleet_remove(fid: str):
+    from aios.db.models import RemoteInstance
+    async with async_session() as db:
+        inst = await db.get(RemoteInstance, fid)
+        if inst:
+            await db.delete(inst)
+            await db.commit()
+    return RedirectResponse("/dashboard/admin/fleet", status_code=303)
+
+
 # ─── Billing page ───
 
 @router.get("/billing", response_class=HTMLResponse)
