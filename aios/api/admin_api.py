@@ -3,13 +3,12 @@
 import hmac
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body
 from sqlalchemy import func, select
 
 from aios.config import settings
 from aios.db.backend import db_session
-from aios.db.models import Agent, Organization, User
-from aios.api.deps import get_current_user
+from aios.db.models import Agent, Organization
 
 logger = logging.getLogger(__name__)
 
@@ -52,3 +51,18 @@ async def remote_health():
         "agents": agent_count,
         "healthy": True,
     }
+
+
+@router.get("/dlq")
+async def get_dlq(limit: int = 50):
+    """Get dead letter queue entries (failed webhook messages)."""
+    from aios.core.retry import get_dlq
+    return {"entries": get_dlq(limit), "count": len(get_dlq())}
+
+
+@router.post("/dlq/clear")
+async def clear_dlq():
+    """Clear dead letter queue."""
+    from aios.core.retry import clear_dlq
+    clear_dlq()
+    return {"status": "ok"}

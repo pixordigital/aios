@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIOS — AI Agent Operating System</title>
+    <meta name="description" content="Deploy AI agents that work across WhatsApp, email, Slack, and web. Multi-tenant, governed, and production-ready.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a' },
+                        dark: { 800: '#1e293b', 900: '#0f172a', 950: '#020617' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #1e293b 100%); }
+        .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        .glow { box-shadow: 0 0 40px rgba(59,130,246,0.3); }
+        @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        .float { animation: float 3s ease-in-out infinite; }
+    </style>
+</head>
+<body class="bg-dark-950 text-white">
+    <!-- Nav -->
+    <nav class="fixed w-full z-50 glass">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center font-bold text-sm">A</div>
+                <span class="text-xl font-bold">AIOS</span>
+            </div>
+            <div class="hidden md:flex items-center gap-8 text-sm text-gray-300">
+                <a href="#features" class="hover:text-white transition">Features</a>
+                <a href="#channels" class="hover:text-white transition">Channels</a>
+                <a href="#pricing" class="hover:text-white transition">Pricing</a>
+                <a href="#docs" class="hover:text-white transition">Docs</a>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/dashboard/login" class="text-sm text-gray-300 hover:text-white transition">Log in</a>
+                <a href="/dashboard/register" class="bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">Get started</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="gradient-bg min-h-screen flex items-center pt-20">
+        <div class="max-w-7xl mx-auto px-6 py-20 text-center">
+            <div class="inline-block glass px-4 py-2 rounded-full text-sm text-primary-300 mb-8 float">
+                🚀 Open source • Multi-tenant • Production-ready
+            </div>
+            <h1 class="text-5xl md:text-7xl font-bold mb-6 leading-tight">
+                AI agents that<br>
+                <span class="text-primary-400">actually work</span>
+            </h1>
+            <p class="text-xl text-gray-400 max-w-2xl mx-auto mb-10">
+                Deploy AI agents across WhatsApp, email, Slack, and web. Governed by intent, compounding over time. Not a chatbot — an operating system.
+            </p>
+            <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                <a href="/dashboard/register" class="bg-primary-600 hover:bg-primary-700 text-white font-semibold px-8 py-4 rounded-xl text-lg transition glow">
+                    Start free →
+                </a>
+                <a href="#docs" class="glass hover:bg-white/10 text-white font-semibold px-8 py-4 rounded-xl text-lg transition">
+                    Read docs
+                </a>
+            </div>
+            <p class="text-sm text-gray-500 mt-6">No credit card required • Free tier included</p>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-24 bg-dark-900">
+        <div class="max-w-7xl mx-auto px-6">
+            <h2 class="text-4xl font-bold text-center mb-4">Everything you need</h2>
+            <p class="text-gray-400 text-center mb-16 max-w-2xl mx-auto">
+                Built for teams who want AI agents that integrate with their existing workflows, not replace them.
+            </p>
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
+                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">🧠</div>
+                    <h3 class="text-xl font-semibold mb-3">Multi-Model</h3>
+                    <p class="text-gray-400">GPT-4o, Claude, Gemini, Llama — pick the right model for each agent. Switch anytime.</p>
+                </div>
+                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
+                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">🔒</div>
+                    <h3 class="text-xl font-semibold mb-3">Governed</h3>
+                    <p class="text-gray-400">Autonomy levels, tool allow/deny lists, per-agent budgets. Enterprise-grade control.</p>
+                </div>
+                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
+                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">👥</div>
+                    <h3 class="text-xl font-semibold mb-3">Multi-Tenant</h3>
+                    <p class="text-gray-400">Each client gets their own isolated workspace. Agents, conversations, billing — all separated.</p>
+                </div>
+                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
+                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">⚡</div>
+                    <h3 class="text-xl font-semibold mb-3">Real-Time</h3>
+                    <p class="text-gray-400">Streaming responses, live conversation updates, instant channel delivery.</p>
+                </div>
+                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
+                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">📊</div>
+                    <h3 class="text-xl font-semibold mb-3">Observable</h3>
+                    <p class="text-gray-400">Sentry errors, structured JSON logs, usage tracking, cost estimation per agent.</p>
+                </div>
+                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
+                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">💳</div>
+                    <h3 class="text-xl font-semibold mb-3">Billing Built-In</h3>
+                    <p class="text-gray-400">Stripe integration, usage-based plans, customer portal. Monetize from day one.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Channels -->
+    <section id="channels" class="py-24 bg-dark-950">
+        <div class="max-w-7xl mx-auto px-6 text-center">
+            <h2 class="text-4xl font-bold mb-4">One agent, every channel</h2>
+            <p class="text-gray-400 mb-12 max-w-xl mx-auto">
+                Deploy the same agent across WhatsApp, email, Slack, Telegram, Discord, and web chat.
+            </p>
+            <div class="flex flex-wrap justify-center gap-6">
+                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
+                    <span class="text-2xl">💬</span>
+                    <span class="font-medium">WhatsApp</span>
+                </div>
+                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
+                    <span class="text-2xl">📧</span>
+                    <span class="font-medium">Email</span>
+                </div>
+                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
+                    <span class="text-2xl">💼</span>
+                    <span class="font-medium">Slack</span>
+                </div>
+                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
+                    <span class="text-2xl">✈️</span>
+                    <span class="font-medium">Telegram</span>
+                </div>
+                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
+                    <span class="text-2xl">🎮</span>
+                    <span class="font-medium">Discord</span>
+                </div>
+                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
+                    <span class="text-2xl">🌐</span>
+                    <span class="font-medium">Web Chat</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing" class="py-24 bg-dark-900">
+        <div class="max-w-7xl mx-auto px-6">
+            <h2 class="text-4xl font-bold text-center mb-4">Simple pricing</h2>
+            <p class="text-gray-400 text-center mb-16 max-w-xl mx-auto">
+                Start free, scale as you grow. No hidden fees.
+            </p>
+            <div class="grid md:grid-cols-4 gap-6 max-w-5xl mx-auto">
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">Free</h3>
+                    <div class="text-3xl font-bold mb-4">$0<span class="text-sm text-gray-400">/mo</span></div>
+                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
+                        <li>2 agents</li>
+                        <li>100 messages/day</li>
+                        <li>Web channel only</li>
+                        <li>Community support</li>
+                    </ul>
+                    <a href="/dashboard/register" class="block text-center glass hover:bg-white/10 py-2 rounded-lg text-sm transition">Get started</a>
+                </div>
+                <div class="glass rounded-2xl p-6 border border-primary-500/50 glow">
+                    <div class="text-xs text-primary-400 font-medium mb-2">MOST POPULAR</div>
+                    <h3 class="text-lg font-semibold mb-2">Starter</h3>
+                    <div class="text-3xl font-bold mb-4">$49<span class="text-sm text-gray-400">/mo</span></div>
+                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
+                        <li>10 agents</li>
+                        <li>500 messages/day</li>
+                        <li>WhatsApp + Web</li>
+                        <li>Email support</li>
+                    </ul>
+                    <a href="/dashboard/register" class="block text-center bg-primary-600 hover:bg-primary-700 py-2 rounded-lg text-sm font-medium transition">Start free trial</a>
+                </div>
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">Pro</h3>
+                    <div class="text-3xl font-bold mb-4">$199<span class="text-sm text-gray-400">/mo</span></div>
+                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
+                        <li>50 agents</li>
+                        <li>5,000 messages/day</li>
+                        <li>All channels</li>
+                        <li>Priority support</li>
+                    </ul>
+                    <a href="/dashboard/register" class="block text-center glass hover:bg-white/10 py-2 rounded-lg text-sm transition">Start free trial</a>
+                </div>
+                <div class="glass rounded-2xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">Enterprise</h3>
+                    <div class="text-3xl font-bold mb-4">Custom</div>
+                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
+                        <li>500+ agents</li>
+                        <li>Custom limits</li>
+                        <li>SSO / SAML</li>
+                        <li>Dedicated support</li>
+                    </ul>
+                    <a href="mailto:sales@aios.dev" class="block text-center glass hover:bg-white/10 py-2 rounded-lg text-sm transition">Contact sales</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="py-24 gradient-bg">
+        <div class="max-w-4xl mx-auto px-6 text-center">
+            <h2 class="text-4xl font-bold mb-6">Ready to deploy AI agents?</h2>
+            <p class="text-xl text-gray-300 mb-10">
+                Join teams using AIOS to automate customer support, sales outreach, and internal workflows.
+            </p>
+            <a href="/dashboard/register" class="bg-white text-dark-900 font-semibold px-8 py-4 rounded-xl text-lg hover:bg-gray-100 transition inline-block">
+                Get started for free →
+            </a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 bg-dark-950 border-t border-white/10">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="grid md:grid-cols-4 gap-8 mb-8">
+                <div>
+                    <div class="flex items-center gap-2 mb-4">
+                        <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center font-bold text-sm">A</div>
+                        <span class="text-lg font-bold">AIOS</span>
+                    </div>
+                    <p class="text-sm text-gray-400">AI Agent Operating System. Open source, multi-tenant, production-ready.</p>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-3">Product</h4>
+                    <ul class="text-sm text-gray-400 space-y-2">
+                        <li><a href="#features" class="hover:text-white transition">Features</a></li>
+                        <li><a href="#pricing" class="hover:text-white transition">Pricing</a></li>
+                        <li><a href="/docs" class="hover:text-white transition">API Docs</a></li>
+                        <li><a href="https://github.com/your-org/aios" class="hover:text-white transition">GitHub</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-3">Legal</h4>
+                    <ul class="text-sm text-gray-400 space-y-2">
+                        <li><a href="/legal/terms" class="hover:text-white transition">Terms of Service</a></li>
+                        <li><a href="/legal/privacy" class="hover:text-white transition">Privacy Policy</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold mb-3">Support</h4>
+                    <ul class="text-sm text-gray-400 space-y-2">
+                        <li><a href="mailto:support@aios.dev" class="hover:text-white transition">support@aios.dev</a></li>
+                        <li><a href="https://github.com/your-org/aios/issues" class="hover:text-white transition">Report a bug</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-white/10 pt-8 text-center text-sm text-gray-500">
+                © 2026 AIOS. All rights reserved.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

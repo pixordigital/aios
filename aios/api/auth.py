@@ -7,12 +7,11 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
-from aios.api.ratelimit import limiter
 from aios.config import settings
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
@@ -57,6 +56,18 @@ def _create_email_token(user_id: str, purpose: str, expire_minutes: int = 60) ->
         {"sub": user_id, "purpose": purpose, "exp": expire, "iat": datetime.now(timezone.utc)},
         settings.jwt_secret, algorithm=settings.jwt_algorithm,
     )
+
+
+def _render_email_template(template_name: str, **kwargs) -> str:
+    """Load and render an HTML email template."""
+    from pathlib import Path
+    template_path = Path(__file__).parent.parent / "templates" / "emails" / f"{template_name}.html"
+    if not template_path.exists():
+        return ""
+    html = template_path.read_text()
+    for key, value in kwargs.items():
+        html = html.replace("{{" + key + "}}", str(value))
+    return html
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -226,8 +237,8 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
     # send verification email
     vt = _create_email_token(user.id, "email_verify", expire_minutes=1440)
     verify_url = f"{settings.app_url}/api/auth/verify-email?token={vt}"
-    await _send_email(user.email, "Verify your email — AIOS",
-                       f"Welcome! Verify your email: {verify_url}\n\nLink expires in 24h.")
+    html_body = _render_email_template("verification", name=body.org_name, verify_url=verify_url, app_url=settings.app_url)
+    await _send_email(user.email, "Verify your email — AIOS", html_body or f"Welcome! Verify your email: {verify_url}\n\nLink expires in 24h.")
 
     token = _create_access_token(user.id, org.id)
     refresh = _create_refresh_token(user.id)
@@ -305,12 +316,8 @@ async def forgot_password(email: str = Query(...), db: DatabaseBackend = Depends
 
     token = _create_email_token(user.id, "password_reset", expire_minutes=60)
     reset_url = f"{settings.app_url}/auth/reset-password?token={token}"
-    body = f"""Reset your password:
-
-{reset_url}
-
-This link expires in 1 hour. If you didn't request this, ignore this email."""
-    await _send_email(user.email, "Password Reset — AIOS", body)
+    html_body = _render_email_template("reset_password", name=user.email.split("@")[0], reset_url=reset_url, app_url=settings.app_url)
+    await _send_email(user.email, "Password Reset — AIOS", html_body or f"Reset your password: {reset_url}\n\nLink expires in 1 hour.")
     return {"message": "If the email exists, a reset link has been sent"}
 
 
@@ -464,7 +471,6 @@ async def github_callback(code: str, state: str, db: DatabaseBackend = Depends(g
     if not provider_user_id or not email:
         raise HTTPException(400, "Failed to get user info from GitHub")
 
-    from aios.db.models import OAuthAccount
 
     return await _oauth_login_or_register(db, "github", provider_user_id, email.lower().strip(), data.get("login", email))
 
