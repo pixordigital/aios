@@ -1,18 +1,19 @@
-"""Evolution API webhook — inbound WhatsApp messages from Evolution API."""
+"""Evolution API webhook — inbound WhatsApp messages from Evolution API.
+
+Event-driven: webhook → dispatch → ARQ worker → agent → reply.
+"""
 
 import hashlib
 import hmac
+import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 
-from aios.channels.base import OutboundMessage
-from aios.channels.manager import manager as channel_mgr
-from aios.core.limits import check_org_limits, track_usage
 from aios.db.backend import db_session
-from aios.db.models import Agent, ChannelConnection, Conversation, Message, Team
+from aios.db.models import ChannelConnection
+from aios.config import settings
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,10 @@ async def verify_evolution_webhook(instance: str):
 
 @router.post("/webhook/{instance}")
 async def evolution_webhook(instance: str, request: Request):
-    """Receive incoming WhatsApp messages from Evolution API."""
+    """Receive incoming WhatsApp message from Evolution API → dispatch to worker."""
     body = await request.json()
-    logger.debug("Evolution webhook: %s event=%s", instance, body.get("event", "?"))
 
-    # verify webhook signature if configured
+    # verify signature if configured
     sig = request.headers.get("x-evolution-signature", "")
     if sig:
         instance_key = _get_evolution_api_key(instance)
@@ -39,138 +39,60 @@ async def evolution_webhook(instance: str, request: Request):
             logger.warning("Evolution webhook signature mismatch for instance %s", instance)
             return {"status": "ignored"}
 
-    try:
-        event = body.get("event", "")
-        data = body.get("data", {})
+    # only handle new messages
+    event = body.get("event", "")
+    if event not in ("messages.upsert", "messages.update"):
+        return {"status": "ok"}
 
-        # Only handle new messages
-        if event not in ("messages.upsert", "messages.update"):
-            return {"status": "ok"}
+    data = body.get("data", {})
+    key = data.get("key", {})
 
-        # Extract message details
-        key = data.get("key", {})
-        msg_text = ""
-        msg_from = ""
+    # skip outgoing messages
+    if key.get("fromMe"):
+        return {"status": "ok"}
 
-        # Evolution API payload structure
-        remote_jid = key.get("remoteJid", "")
-        if remote_jid:
-            # Remove @s.whatsapp.net suffix
-            msg_from = remote_jid.split("@")[0]
+    # extract message
+    remote_jid = key.get("remoteJid", "")
+    msg_from = remote_jid.split("@")[0] if remote_jid else ""
 
-        message_data = data.get("message", {})
-        if "conversation" in message_data:
-            msg_text = message_data["conversation"]
-        elif "extendedTextMessage" in message_data:
-            msg_text = message_data["extendedTextMessage"].get("text", "")
+    message_data = data.get("message", {})
+    msg_text = ""
+    if "conversation" in message_data:
+        msg_text = message_data["conversation"]
+    elif "extendedTextMessage" in message_data:
+        msg_text = message_data["extendedTextMessage"].get("text", "")
 
-        if not msg_text or not msg_from:
-            return {"status": "ok"}
+    if not msg_text or not msg_from:
+        return {"status": "ok"}
 
-        # Don't process outgoing messages (from our own instance)
-        if data.get("key", {}).get("fromMe"):
-            return {"status": "ok"}
-
-        async with db_session() as db:
-            # Find matching Evolution API channel by instance name
-            result = await db.execute(
-                select(ChannelConnection).where(
-                    ChannelConnection.channel_type == "evolution",
-                    ChannelConnection.is_active == True,
-                )
+    # find channel connection
+    async with db_session() as db:
+        result = await db.execute(
+            select(ChannelConnection).where(
+                ChannelConnection.channel_type == "evolution",
+                ChannelConnection.is_active == True,
             )
-            conn = None
-            for ch in result.scalars():
-                if ch.config.get("instance") == instance:
-                    conn = ch
-                    break
+        )
+        conn = None
+        for ch in result.scalars():
+            if ch.config.get("instance") == instance:
+                conn = ch
+                break
 
-            if not conn:
-                logger.warning("No active Evolution channel for instance %s", instance)
-                return {"status": "ok"}
+        if not conn:
+            logger.warning("No active Evolution channel for instance %s", instance)
+            return {"status": "ok"}
 
-            # resolve agent or team
-            agent_or_team = None
-            if conn.agent_id:
-                agent_or_team = await db.get(Agent, conn.agent_id)
-            elif conn.team_id:
-                agent_or_team = await db.get(
-                    Team, conn.team_id, options=[selectinload(Team.agents)]
-                )
-
-            # find or create conversation
-            ext_id = f"evo_{msg_from}"
-            conv = (await db.execute(
-                select(Conversation).where(
-                    Conversation.channel == "evolution",
-                    Conversation.external_id == ext_id,
-                )
-            )).scalars().first()
-
-            if not conv:
-                conv = Conversation(
-                    org_id=conn.org_id,
-                    channel="evolution",
-                    external_id=ext_id,
-                    channel_connection_id=conn.id,
-                    agent_id=conn.agent_id,
-                    team_id=conn.team_id,
-                    extra_data={"from_number": msg_from, "instance": instance},
-                )
-                db.add(conv)
-                await db.commit()
-                await db.refresh(conv)
-
-            # save inbound message
-            db.add(Message(
-                conversation_id=conv.id,
-                role="user",
-                content=msg_text,
-                extra_data={"from_number": msg_from, "instance": instance},
-            ))
-            await db.commit()
-
-            # check org limits
-            allowed, reason = await check_org_limits(conn.org_id, db)
-            if not allowed:
-                logger.warning("Evolution limit hit for org %s: %s", conn.org_id, reason)
-                return {"status": "ok"}
-
-            # route to agent
-            reply_text = None
-            if agent_or_team:
-                try:
-                    if hasattr(agent_or_team, "agents"):  # Team
-                        from aios.core.orchestrator import TeamOrchestrator
-                        orch = TeamOrchestrator(agent_or_team, list(agent_or_team.agents))
-                        reply_text = await orch.handle_message(conv.id, msg_text)
-                    else:  # Agent
-                        from aios.core.agent import AgentRuntime
-                        runtime = AgentRuntime(agent_or_team)
-                        reply_text = await runtime.run(conv.id, msg_text)
-
-                    if reply_text:
-                        db.add(Message(
-                            conversation_id=conv.id,
-                            role="assistant",
-                            content=reply_text,
-                            agent_id=getattr(agent_or_team, "id", None),
-                        ))
-                        await db.commit()
-
-                        # send reply via Evolution API
-                        ch = channel_mgr.build(conn, agent_or_team, db)
-                        await ch.send(OutboundMessage(
-                            conversation_id=conv.id,
-                            text=reply_text,
-                            channel_connection_id=conn.id,
-                            extra_data={"from_number": msg_from},
-                        ))
-                except Exception:
-                    logger.exception("Evolution routing failed for %s", msg_from)
-
-    except Exception:
-        logger.exception("Evolution webhook processing failed")
+    # dispatch to ARQ worker
+    from aios.core.dispatch import dispatch_inbound
+    await dispatch_inbound(
+        channel_type="evolution",
+        channel_connection_id=conn.id,
+        conversation_id="",
+        text=msg_text,
+        user_id=msg_from,
+        extra_data={"from_number": msg_from, "instance": instance},
+    )
 
     return {"status": "ok"}
 
@@ -206,7 +128,6 @@ def _get_evolution_api_key(instance_name: str) -> str:
 
 def _verify_evolution_sig(signature: str, body: dict, api_key: str) -> bool:
     """Verify Evolution webhook HMAC-SHA256 signature."""
-    import json
     raw = json.dumps(body, separators=(",", ":"), sort_keys=True)
     expected = hmac.new(api_key.encode(), raw.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature, expected)
