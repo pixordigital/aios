@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy import select
+import json
 
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
@@ -146,3 +147,115 @@ async def stop_agent(
     await db.commit()
     await db.refresh(agent)
     return agent
+
+
+# ─── Agent Export / Import / Fleet Push ───
+
+
+@router.get("/{agent_id}/export")
+async def export_agent(
+    agent_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Export agent config as JSON — portable across AIOS instances."""
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+    return {
+        "name": agent.name,
+        "agent_type": agent.agent_type,
+        "system_prompt": agent.system_prompt,
+        "llm_config": agent.llm_config,
+        "tools": agent.tools,
+        "memory_config": agent.memory_config,
+        "governance_config": agent.governance_config,
+    }
+
+
+@router.post("/import")
+async def import_agent(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Import agent config from exported JSON. Creates new agent on this instance."""
+    required = ["name", "llm_config"]
+    for field in required:
+        if field not in body:
+            raise HTTPException(422, f"Missing required field: {field}")
+
+    agent = Agent(
+        org_id=org_id,
+        name=body["name"],
+        agent_type=body.get("agent_type", "custom"),
+        system_prompt=body.get("system_prompt", ""),
+        llm_config=body["llm_config"],
+        tools=body.get("tools", []),
+        memory_config=body.get("memory_config", {}),
+        governance_config=body.get("governance_config", {}),
+    )
+    db.add(agent)
+    await db.commit()
+    await db.refresh(agent)
+
+    await log_audit(db, org_id, "agent.import", "agent", user_id=user.id, resource_id=agent.id, details={"name": agent.name})
+    return agent
+
+
+@router.post("/{agent_id}/push")
+async def push_agent_to_fleet(
+    agent_id: str,
+    target_instance_ids: list[str] = Body(...),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Push agent config to remote fleet instances."""
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+
+    from aios.db.models import RemoteInstance
+    results = []
+
+    for instance_id in target_instance_ids:
+        inst = await db.get(RemoteInstance, instance_id)
+        if not inst or not inst.is_active:
+            results.append({"instance_id": instance_id, "status": "skipped", "reason": "not found or inactive"})
+            continue
+
+        try:
+            import httpx
+            headers = {"Content-Type": "application/json"}
+            if inst.api_key:
+                headers["Authorization"] = f"Bearer {inst.api_key}"
+
+            export_data = {
+                "name": agent.name,
+                "agent_type": agent.agent_type,
+                "system_prompt": agent.system_prompt,
+                "llm_config": agent.llm_config,
+                "tools": agent.tools,
+                "memory_config": agent.memory_config,
+                "governance_config": agent.governance_config,
+            }
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{inst.base_url}/api/agents/import",
+                    headers=headers,
+                    json=export_data,
+                )
+                if resp.status_code == 200:
+                    results.append({"instance_id": instance_id, "status": "ok"})
+                    await log_audit(db, org_id, "agent.push", "agent", user_id=user.id,
+                                   resource_id=agent_id, details={"instance": inst.name, "status": "ok"})
+                else:
+                    results.append({"instance_id": instance_id, "status": "error", "code": resp.status_code})
+        except Exception as e:
+            results.append({"instance_id": instance_id, "status": "error", "error": str(e)})
+            logger.exception("Failed to push agent to instance %s", instance_id)
+
+    return {"results": results}

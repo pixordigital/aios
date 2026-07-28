@@ -81,3 +81,39 @@ async def reset_agent_health(agent_id: str):
     from aios.core.agent_health import health_tracker
     health_tracker.reset(agent_id)
     return {"status": "ok", "agent_id": agent_id}
+
+
+@router.post("/fleet/refresh")
+async def fleet_health_refresh():
+    """Refresh health status of all remote fleet instances."""
+    from aios.db.models import RemoteInstance
+    import httpx
+
+    results = []
+    async with db_session() as db:
+        instances = (await db.execute(
+            select(RemoteInstance).where(RemoteInstance.is_active == True)
+        )).scalars().all()
+
+        for inst in instances:
+            try:
+                headers = {}
+                if inst.api_key:
+                    headers["Authorization"] = f"Bearer {inst.api_key}"
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(f"{inst.base_url}/api/admin/health", headers=headers)
+                    if resp.status_code == 200:
+                        inst.extra_data["health"] = resp.json()
+                        inst.extra_data["last_check"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+                        inst.is_active = True
+                        results.append({"instance_id": inst.id, "name": inst.name, "status": "healthy"})
+                    else:
+                        inst.is_active = False
+                        results.append({"instance_id": inst.id, "name": inst.name, "status": "unreachable"})
+            except Exception as e:
+                inst.is_active = False
+                results.append({"instance_id": inst.id, "name": inst.name, "status": "error", "error": str(e)})
+
+        await db.commit()
+
+    return {"instances": results}
