@@ -98,13 +98,30 @@ async def process_inbound(
             logger.warning("process_inbound: no agent/team for channel %s", channel_connection_id)
             return
 
-        # run agent
+        # run agent with retry + team failover
         reply_text = None
         try:
             if hasattr(agent_or_team, "agents"):  # Team
                 from aios.core.orchestrator import TeamOrchestrator
-                orch = TeamOrchestrator(agent_or_team, list(agent_or_team.agents))
+                from aios.core.agent_health import health_tracker
+                agents = list(agent_or_team.agents)
+                # filter to available agents
+                available = [a for a in agents if health_tracker.is_available(a.id)]
+                if not available:
+                    logger.warning("process_inbound: all agents in team %s are stopped", agent_or_team.id)
+                    return
+                orch = TeamOrchestrator(agent_or_team, available)
                 reply_text = await orch.handle_message(conv.id, text)
+                # if team failed, try each agent individually
+                if not reply_text and len(available) > 1:
+                    for agent in available:
+                        try:
+                            runtime = AgentRuntime(agent)
+                            reply_text = await runtime.run(conv.id, text)
+                            if reply_text:
+                                break
+                        except Exception:
+                            logger.exception("Team failover: agent %s failed", agent.id)
             else:  # Agent
                 from aios.core.agent import AgentRuntime
                 runtime = AgentRuntime(agent_or_team)

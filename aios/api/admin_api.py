@@ -66,3 +66,18 @@ async def clear_dlq():
     from aios.core.retry import clear_dlq
     clear_dlq()
     return {"status": "ok"}
+
+
+@router.get("/health/agents")
+async def agent_health_status():
+    """Get health status of all agents."""
+    from aios.core.agent_health import health_tracker
+    return health_tracker.all_status()
+
+
+@router.post("/health/agents/{agent_id}/reset")
+async def reset_agent_health(agent_id: str):
+    """Reset agent health status to healthy."""
+    from aios.core.agent_health import health_tracker
+    health_tracker.reset(agent_id)
+    return {"status": "ok", "agent_id": agent_id}
