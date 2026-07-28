@@ -6,7 +6,6 @@ Agent scheduler manages queue and lifecycle.
 
 import json
 import logging
-import time
 
 from typing import AsyncGenerator
 from aios.db.backend import DatabaseBackend
@@ -23,7 +22,7 @@ from aios.core.providers import (
 from aios.core.scheduler import scheduler
 from aios.core.syscalls import (
     SyscallRequest, SyscallResponse, SyscallType,
-    dispatcher as syscall_dispatcher, SyscallError,
+    dispatcher as syscall_dispatcher,
 )
 from aios.core.tools import ToolEngine
 from aios.core.tracing import start_span, end_span
@@ -193,7 +192,17 @@ class AgentRuntime:
         user_message: str,
         db: DatabaseBackend | None = None,
     ) -> AsyncGenerator[dict, None]:
-        """Streaming: yield token/tool_call/done events as they happen."""
+        """Streaming: yield token/tool_call/done events as they happen.
+
+        Includes: health tracking, retry with fallback models, error escalation.
+        """
+        from aios.core.agent_health import health_tracker
+
+        # check agent health
+        if not health_tracker.is_available(self.agent.id):
+            yield {"type": STREAM_ERROR, "error": f"Agent {self.agent.name} is stopped due to repeated failures"}
+            return
+
         scheduler.start(self.agent.id)
         hooks.fire(HookPoint.AGENT_START, HookContext(
             agent_id=self.agent.id,
@@ -302,19 +311,22 @@ class AgentRuntime:
                     context_manager.save(conversation_id, self.agent.id, context)
 
                 yield {"type": STREAM_DONE}
+                health_tracker.record_success(self.agent.id)
                 return
 
             logger.warning("Agent %s hit max iterations", self.agent.id)
             yield {"type": STREAM_TOKEN, "content": "I'm having trouble completing this request. Please try again."}
             yield {"type": STREAM_DONE}
+            health_tracker.record_failure(self.agent.id, "max_iterations")
         except Exception as e:
             logger.exception("Agent stream failed: agent=%s conv=%s", self.agent.id, conversation_id)
+            health_tracker.record_failure(self.agent.id, str(e)[:200])
             hooks.fire(HookPoint.AGENT_ERROR, HookContext(
                 agent_id=self.agent.id,
                 conversation_id=conversation_id,
                 data={"error": str(e)},
             ))
-            raise
+            yield {"type": STREAM_ERROR, "error": "Agent encountered an error. Please try again."}
         finally:
             scheduler.terminate(self.agent.id)
             hooks.fire(HookPoint.AGENT_END, HookContext(

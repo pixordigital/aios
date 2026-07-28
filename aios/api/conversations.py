@@ -8,7 +8,6 @@ from sqlalchemy import select
 from aios.core.agent import AgentRuntime
 from aios.core.limits import check_org_limits, track_usage
 from aios.core.orchestrator import TeamOrchestrator
-from aios.core.providers import STREAM_TOKEN, STREAM_DONE, STREAM_ERROR, STREAM_TOOL_CALL
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, Conversation, Message, Team
 from aios.schemas import ConversationCreate, ConversationOut, MessageOut, MessageSend, SendMessageResponse
@@ -133,25 +132,48 @@ async def send_message(
         await db.refresh(reply_msg)
         return SendMessageResponse(user_message=msg, reply=reply_msg)
 
-    # route to agent or team if assigned
+    # route to agent or team if assigned, with retry + failover
     reply_msg: Message | None = None
     try:
+        from aios.core.agent_health import health_tracker
         if conv.team_id:
             team = await db.get(Team, conv.team_id)
             if team and team.agents:
-                orchestrator = TeamOrchestrator(team, list(team.agents))
-                reply = await orchestrator.handle_message(conversation_id, body.content, db)
-                if reply:
-                    reply_msg = Message(
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content=reply,
-                        org_id=org_id,
-                    )
-                    db.add(reply_msg)
-                    await db.commit()
-                    await db.refresh(reply_msg)
-                    await track_usage(org_id, db, messages=1, tokens=len(reply))
+                available = [a for a in team.agents if health_tracker.is_available(a.id)]
+                if available:
+                    orchestrator = TeamOrchestrator(team, available)
+                    reply = await orchestrator.handle_message(conversation_id, body.content, db)
+                    if reply:
+                        reply_msg = Message(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=reply,
+                            org_id=org_id,
+                        )
+                        db.add(reply_msg)
+                        await db.commit()
+                        await db.refresh(reply_msg)
+                        await track_usage(org_id, db, messages=1, tokens=len(reply))
+                    elif len(available) > 1:
+                        # team failed, try each agent individually
+                        for agent in available:
+                            try:
+                                runtime = AgentRuntime(agent)
+                                reply = await runtime.run(conversation_id, body.content, db)
+                                if reply:
+                                    reply_msg = Message(
+                                        conversation_id=conversation_id,
+                                        role="assistant",
+                                        content=reply,
+                                        org_id=org_id,
+                                    )
+                                    db.add(reply_msg)
+                                    await db.commit()
+                                    await db.refresh(reply_msg)
+                                    await track_usage(org_id, db, messages=1, tokens=len(reply))
+                                    break
+                            except Exception:
+                                logger.exception("Failover: agent %s failed", agent.id)
         elif conv.agent_id:
             agent_model = await db.get(Agent, conv.agent_id)
             if agent_model:
