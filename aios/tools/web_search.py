@@ -40,7 +40,7 @@ class WebSearchTool(BaseTool):
             logger.warning("duckduckgo_search not installed, falling back to placeholder")
             return {"results": [{"title": "Search unavailable", "snippet": "Install duckduckgo_search package", "url": ""}]}
         except Exception as e:
-            logger.error("Web search failed: %s", e)
+            logger.exception("Web search failed for query: %s", query)
             return {"results": [{"title": "Search error", "snippet": str(e), "url": ""}]}
 
 

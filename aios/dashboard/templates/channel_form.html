@@ -18,7 +18,7 @@
                 <div>
                     <label>Type</label>
                     <select name="channel_type" class="input" onchange="showChannelCreds(this.value)">
-                        {% set types = ['web', 'whatsapp', 'slack', 'telegram', 'discord', 'email'] %}
+                        {% set types = ['web', 'whatsapp', 'evolution', 'slack', 'telegram', 'discord', 'email'] %}
                         {% for t in types %}
                         <option value="{{ t }}" {% if channel and channel.channel_type == t %}selected{% endif %}>{{ t | title }}</option>
                         {% endfor %}
@@ -54,6 +54,11 @@
                     <div><label>Password</label><input type="password" name="config_email_pass" class="input" placeholder="App password"></div>
                 </div>
             </div>
+            <div id="creds-evolution" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div><label>Server URL</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://localhost:8080"></div>
+                <div><label>API Key</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
+                <div><label>Instance name</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="my-whatsapp-instance"></div>
+            </div>
         </div>
 
         <div class="card">
@@ -79,9 +84,47 @@
         </div>
 
         <div class="flex-between">
-            <a href="/dashboard/channels" class="btn btn-ghost">Cancel</a>
+            <div class="flex-center gap-2">
+                <a href="/dashboard/channels" class="btn btn-ghost">Cancel</a>
+                <button type="button" class="btn btn-ghost" id="test-btn" onclick="testConnection()" style="color:var(--accent);border-color:var(--accent-border)">🔄 Test connection</button>
+            </div>
             <button type="submit" class="btn btn-primary" style="padding:0.5rem 1.5rem">{% if channel %}Save{% else %}Create channel{% endif %}</button>
         </div>
+        <div id="test-result" style="display:none;margin-top:0.5rem;padding:0.5rem 0.75rem;border-radius:var(--radius-sm);font-size:0.8125rem"></div>
+
+<script>
+async function testConnection() {
+    var btn = document.getElementById('test-btn');
+    var result = document.getElementById('test-result');
+    btn.disabled = true; btn.textContent = '⏳ Testing...'; result.style.display = 'none';
+
+    var channelType = document.querySelector('select[name="channel_type"]')?.value || 'web';
+    var config = {};
+    document.querySelectorAll('[name^="config_"]').forEach(function(el) {
+        var key = el.name.replace('config_', '');
+        if (el.value) config[key] = el.value;
+    });
+
+    try {
+        var resp = await fetch('/api/channels/test', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({channel_type: channelType, config: config})
+        });
+        var data = await resp.json();
+        result.style.display = 'block';
+        result.style.background = data.ok ? 'var(--green-subtle)' : 'var(--red-subtle)';
+        result.style.color = data.ok ? 'var(--green)' : 'var(--red)';
+        result.style.border = '1px solid ' + (data.ok ? 'var(--green)' : 'var(--red)');
+        result.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || (data.ok ? 'Connected' : 'Failed'));
+    } catch(e) {
+        result.style.display = 'block';
+        result.style.background = 'var(--red-subtle)';
+        result.style.color = 'var(--red)';
+        result.textContent = '❌ Error: ' + e.message;
+    }
+    btn.disabled = false; btn.textContent = '🔄 Test connection';
+}
+</script>
 
     </div>
 </form>

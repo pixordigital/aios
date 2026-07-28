@@ -1,8 +1,13 @@
-"""AIOS Dashboard — Jinja2 server-rendered UI."""
+"""AIOS Dashboard — Jinja2 server-rendered UI.
+
+Auth: All /dashboard/* paths (except login/register/logout) are protected
+by middleware in main.py. If adding static files, mount them under
+/dashboard/static/ and add the path to AUTH_EXEMPT in main.py.
+Currently all CSS/JS is inline or CDN-loaded — no local static files.
+"""
 
 import json
-import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Request, Response
@@ -10,13 +15,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from aios.db.engine import async_session
+from aios.db.backend import db_session
 from aios.db.models import Agent, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
 from aios.templates import apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token, get_dashboard_user
-from aios.api.auth import _hash_password, _validate_password
+from aios.api.auth import _validate_password
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -40,8 +44,12 @@ MODEL_PRICING = {
 }
 
 TOOL_DESCRIPTIONS = {
-    "calculator": "Math expressions, safe eval", "web_search": "Search the web",
+    "calculator": "Math expressions, safe eval",
+    "web_search": "Search the web",
     "send_email": "Send email messages",
+    "read_file": "Read uploaded files by artifact ID",
+    "current_datetime": "Get current UTC / timezone-aware datetime",
+    "http_get": "Fetch HTTPS URLs",
 }
 
 
@@ -127,7 +135,7 @@ async def _render(name: str, request: Request, **kw) -> str:
     active_org_id = None
     is_sa = getattr(state, "is_superadmin", False) if state else False
     if is_sa:
-        async with async_session() as db:
+        async with db_session() as db:
             orgs = (await db.execute(select(Organization).order_by(Organization.name))).scalars().all()
     active_org_id = getattr(state, "org_id", None) if state else None
     return t.render({
@@ -148,11 +156,11 @@ async def login_page(request: Request, error: str = ""):
     return await _render("login.html", request, title="Login", error=error)
 
 
-@router.post("/login")
+@router.post("/login", response_class=HTMLResponse)
 async def login_action(request: Request, email: str = Form(...), password: str = Form(...)):
     from aios.api.auth import _verify_password
     from sqlalchemy import select
-    async with async_session() as db:
+    async with db_session() as db:
         result = await db.execute(select(User).where(User.email == email.lower().strip()))
         user = result.scalar_one_or_none()
         if not user or not _verify_password(password, user.hashed_password):
@@ -163,7 +171,7 @@ async def login_action(request: Request, email: str = Form(...), password: str =
         is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
         resp.set_cookie(
             key=COOKIE_NAME, value=token,
-            max_age=86400 * 7, httponly=True, secure=is_https, samesite="lax",
+            max_age=86400 * 7, httponly=True, secure=is_https, samesite="strict",
             path="/",
         )
         return resp
@@ -174,7 +182,7 @@ async def register_page(request: Request, error: str = ""):
     return await _render("register.html", request, title="Register", error=error)
 
 
-@router.post("/register")
+@router.post("/register", response_class=HTMLResponse)
 async def register_action(
     request: Request,
     name: str = Form(...), email: str = Form(...),
@@ -186,7 +194,7 @@ async def register_action(
         return await register_page(request, error=str(e.detail) if hasattr(e, "detail") else str(e))
 
     from aios.api.auth import _hash_password
-    async with async_session() as db:
+    async with db_session() as db:
         from sqlalchemy import select
         existing = await db.execute(select(User).where(User.email == email.lower().strip()))
         if existing.scalar_one_or_none():
@@ -211,7 +219,7 @@ async def register_action(
         is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
         resp.set_cookie(
             key=COOKIE_NAME, value=token,
-            max_age=86400 * 7, httponly=True, secure=is_https, samesite="lax",
+            max_age=86400 * 7, httponly=True, secure=is_https, samesite="strict",
             path="/",
         )
         return resp
@@ -236,7 +244,7 @@ async def _resolve_org_id(request: Request) -> str:
 
 
 async def _default_org_id() -> str:
-    async with async_session() as db:
+    async with db_session() as db:
         org = (await db.execute(select(Organization).where(Organization.slug == "default"))).scalar_one_or_none()
         return org.id if org else "none"
 
@@ -253,7 +261,7 @@ async def _org_filter(request: Request) -> str:
 @router.get("/", response_class=HTMLResponse)
 async def dashboard_home(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         ac = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
         tc = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
         cc = (await db.execute(select(func.count(Conversation.id)).where(Conversation.org_id == org_id))).scalar() or 0
@@ -278,7 +286,7 @@ ROUTING_STRATEGIES = ["supervisor", "round_robin", "broadcast", "semantic"]
 @router.get("/agents", response_class=HTMLResponse)
 async def agent_list(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.created_at.desc()))).scalars().all()
         teams_map = {}
         result = await db.execute(
@@ -293,7 +301,7 @@ async def agent_list(request: Request):
 @router.get("/agents/new", response_class=HTMLResponse)
 async def agent_new_form(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
     return await _render("agent_form.html", request, title="New Agent",
                    agent=None, agent_types=AGENT_TYPES, agents=agents)
@@ -302,7 +310,7 @@ async def agent_new_form(request: Request):
 @router.get("/agents/{aid}/edit", response_class=HTMLResponse)
 async def agent_edit_form(request: Request, aid: str):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         agent = await db.get(Agent, aid)
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         if not agent:
@@ -313,7 +321,7 @@ async def agent_edit_form(request: Request, aid: str):
 
 @router.get("/agents/{aid}/clone")
 async def agent_clone(aid: str):
-    async with async_session() as db:
+    async with db_session() as db:
         src = await db.get(Agent, aid)
         if not src:
             return RedirectResponse("/dashboard/agents", status_code=303)
@@ -344,7 +352,7 @@ async def agent_save(
     long_term_enabled: bool = Form(False),
     episodic_enabled: bool = Form(False),
 ):
-    async with async_session() as db:
+    async with db_session() as db:
         tools_list = [t.strip() for t in tools.replace(",", " ").split() if t.strip()]
         llm_config = {"model": model, "temperature": temperature, "max_tokens": max_tokens}
         memory_config = {
@@ -376,7 +384,7 @@ async def agent_save(
 
 @router.get("/agents/{aid}/deploy")
 async def agent_deploy(aid: str):
-    async with async_session() as db:
+    async with db_session() as db:
         agent = await db.get(Agent, aid)
         if agent:
             agent.status = "active" if agent.status != "active" else "draft"
@@ -386,7 +394,7 @@ async def agent_deploy(aid: str):
 
 @router.get("/agents/{aid}/delete")
 async def agent_delete(aid: str):
-    async with async_session() as db:
+    async with db_session() as db:
         agent = await db.get(Agent, aid)
         if agent:
             await db.delete(agent)
@@ -399,7 +407,7 @@ async def agent_delete(aid: str):
 @router.get("/teams", response_class=HTMLResponse)
 async def team_list(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         teams = (await db.execute(
             select(Team).options(selectinload(Team.agents)).where(Team.org_id == org_id).order_by(Team.created_at.desc())
         )).scalars().all()
@@ -411,7 +419,7 @@ async def team_list(request: Request):
 @router.get("/teams/new", response_class=HTMLResponse)
 async def team_new_form(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
     return await _render("team_form.html", request, title="New Team",
                    team=None, agents=agents, strategies=ROUTING_STRATEGIES)
@@ -420,7 +428,7 @@ async def team_new_form(request: Request):
 @router.get("/teams/{tid}/edit", response_class=HTMLResponse)
 async def team_edit_form(request: Request, tid: str):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         team = await db.get(
             Team, tid,
             options=(selectinload(Team.agents),)
@@ -434,7 +442,7 @@ async def team_edit_form(request: Request, tid: str):
 
 @router.get("/teams/{tid}/recommend-orchestrator")
 async def recommend_orchestrator(tid: str):
-    async with async_session() as db:
+    async with db_session() as db:
         team = await db.get(Team, tid)
         if team and team.agents:
             rec = _orchestrator_recommendation(team.agents)
@@ -457,7 +465,7 @@ async def team_save(
     manager_agent_id: str = Form(""),
     agent_ids: list[str] = Form(default=[]),
 ):
-    async with async_session() as db:
+    async with db_session() as db:
         # validate: if agents exist, orchestrator is required
         agent_count = (await db.execute(select(func.count(Agent.id)))).scalar() or 0
         if agent_count > 0 and not orchestrator_agent_id:
@@ -495,7 +503,7 @@ async def team_save(
 
 @router.get("/teams/{tid}/delete")
 async def team_delete(tid: str):
-    async with async_session() as db:
+    async with db_session() as db:
         team = await db.get(Team, tid)
         if team:
             await db.delete(team); await db.commit()
@@ -507,15 +515,50 @@ async def team_delete(tid: str):
 @router.get("/conversations", response_class=HTMLResponse)
 async def conversation_list(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
-        convs = (await db.execute(select(Conversation).where(Conversation.org_id == org_id).order_by(Conversation.created_at.desc()))).scalars().all()
+    async with db_session() as db:
+        convs = (await db.execute(
+            select(Conversation).where(Conversation.org_id == org_id).order_by(Conversation.created_at.desc())
+        )).scalars().all()
+        # eagerly count messages per conversation
+        msg_counts = {}
+        for conv in convs:
+            cnt = (await db.execute(
+                select(func.count(Message.id)).where(Message.conversation_id == conv.id)
+            )).scalar() or 0
+            conv._msg_count = cnt
     return await _render("conversations.html", request, title="Conversations", conversations=convs)
+
+
+@router.get("/conversations/{conv_id}/delete")
+async def conversation_delete(conv_id: str):
+    async with db_session() as db:
+        conv = await db.get(Conversation, conv_id)
+        if conv:
+            # delete associated messages first
+            await db.execute(Message.__table__.delete().where(Message.conversation_id == conv.id))
+            await db.delete(conv)
+            await db.commit()
+    return RedirectResponse("/dashboard/conversations", status_code=303)
+
+
+@router.get("/conversations/{conv_id}", response_class=HTMLResponse)
+async def conversation_detail(request: Request, conv_id: str):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        conv = await db.get(Conversation, conv_id)
+        if not conv or conv.org_id != org_id:
+            return HTMLResponse("<h2>Not found</h2><a href='/dashboard/conversations'>Back</a>", status_code=404)
+        msgs = (await db.execute(
+            select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.asc())
+        )).scalars().all()
+    return await _render("conversation_detail.html", request, title="Conversation",
+                   conv=conv, messages=msgs)
 
 
 @router.get("/channels", response_class=HTMLResponse)
 async def channel_list(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         channels = (await db.execute(select(ChannelConnection).where(ChannelConnection.org_id == org_id).order_by(ChannelConnection.created_at.desc()))).scalars().all()
     return await _render("channels.html", request, title="Channels", channels=channels)
 
@@ -523,7 +566,7 @@ async def channel_list(request: Request):
 @router.get("/channels/new", response_class=HTMLResponse)
 async def channel_new_form(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         teams = (await db.execute(select(Team).where(Team.org_id == org_id).order_by(Team.name))).scalars().all()
     return await _render("channel_form.html", request, title="New Channel", channel=None, agents=agents, teams=teams)
@@ -532,7 +575,7 @@ async def channel_new_form(request: Request):
 @router.get("/channels/{cid}/edit", response_class=HTMLResponse)
 async def channel_edit_form(request: Request, cid: str):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         channel = await db.get(ChannelConnection, cid)
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         teams = (await db.execute(select(Team).where(Team.org_id == org_id).order_by(Team.name))).scalars().all()
@@ -543,6 +586,7 @@ async def channel_edit_form(request: Request, cid: str):
 
 CHANNEL_CONFIG_FIELDS = {
     "whatsapp": ["config_whatsapp_token", "config_whatsapp_phone"],
+    "evolution": ["config_evo_server", "config_evo_key", "config_evo_instance"],
     "slack": ["config_slack_token", "config_slack_secret"],
     "telegram": ["config_telegram_token"],
     "discord": ["config_discord_token"],
@@ -556,6 +600,7 @@ async def channel_save(
     channel_id: str = Form(""), label: str = Form(...), channel_type: str = Form(...),
     agent_id: str = Form(""), team_id: str = Form(""),
     config_whatsapp_token: str = Form(""), config_whatsapp_phone: str = Form(""),
+    config_evo_server: str = Form(""), config_evo_key: str = Form(""), config_evo_instance: str = Form(""),
     config_slack_token: str = Form(""), config_slack_secret: str = Form(""),
     config_telegram_token: str = Form(""), config_discord_token: str = Form(""),
     config_email_imap: str = Form(""), config_email_smtp: str = Form(""),
@@ -570,10 +615,12 @@ async def channel_save(
         config = {"bot_token": config_telegram_token}
     elif channel_type == "discord":
         config = {"bot_token": config_discord_token}
+    elif channel_type == "evolution":
+        config = {"server_url": config_evo_server, "api_key": config_evo_key, "instance": config_evo_instance}
     elif channel_type == "email":
         config = {"imap_server": config_email_imap, "smtp_server": config_email_smtp, "email": config_email_addr, "password": config_email_pass}
 
-    async with async_session() as db:
+    async with db_session() as db:
         if channel_id:
             ch = await db.get(ChannelConnection, channel_id)
             if ch:
@@ -592,10 +639,20 @@ async def channel_save(
 
 @router.get("/channels/{cid}/toggle")
 async def channel_toggle(cid: str):
-    async with async_session() as db:
+    async with db_session() as db:
         ch = await db.get(ChannelConnection, cid)
         if ch:
             ch.is_active = not ch.is_active; await db.commit()
+    return RedirectResponse("/dashboard/channels", status_code=303)
+
+
+@router.get("/channels/{cid}/delete")
+async def channel_delete(cid: str):
+    async with db_session() as db:
+        ch = await db.get(ChannelConnection, cid)
+        if ch:
+            await db.delete(ch)
+            await db.commit()
     return RedirectResponse("/dashboard/channels", status_code=303)
 
 
@@ -604,7 +661,7 @@ async def channel_toggle(cid: str):
 @router.get("/members", response_class=HTMLResponse)
 async def member_list(request: Request):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         users = (await db.execute(select(User).where(User.org_id == org_id).order_by(User.created_at))).scalars().all()
         invites = (await db.execute(
             select(Invitation).where(Invitation.org_id == org_id, Invitation.accepted == False).order_by(Invitation.created_at.desc())
@@ -616,13 +673,13 @@ async def member_list(request: Request):
 @router.post("/members/invite")
 async def member_invite(request: Request, email: str = Form(...), role: str = Form("member")):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         existing = (await db.execute(select(User).where(User.email == email, User.org_id == org_id))).scalar_one_or_none()
         if existing:
             return RedirectResponse("/dashboard/members?error=already-member", status_code=303)
         inv = Invitation(
             org_id=org_id, email=email.lower().strip(), role=role,
-            expires_at=datetime.utcnow() + timedelta(days=7),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
         )
         db.add(inv)
         await db.commit()
@@ -631,7 +688,7 @@ async def member_invite(request: Request, email: str = Form(...), role: str = Fo
 
 @router.get("/members/invite/{inv_id}/revoke")
 async def member_invite_revoke(inv_id: str):
-    async with async_session() as db:
+    async with db_session() as db:
         inv = await db.get(Invitation, inv_id)
         if inv:
             await db.delete(inv)
@@ -642,7 +699,7 @@ async def member_invite_revoke(inv_id: str):
 @router.get("/members/{uid}/remove")
 async def member_remove(request: Request, uid: str):
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         user = await db.get(User, uid)
         if user and user.org_id == org_id and user.role != "superadmin":
             await db.delete(user)
@@ -653,7 +710,7 @@ async def member_remove(request: Request, uid: str):
 @router.get("/invite/accept")
 async def accept_invite(request: Request, token: str = ""):
     """Accept invite link from email."""
-    async with async_session() as db:
+    async with db_session() as db:
         inv = (await db.execute(
             select(Invitation).where(Invitation.token == token, Invitation.accepted == False)
         )).scalar_one_or_none()
@@ -692,7 +749,7 @@ async def admin_dashboard(request: Request):
     denied = await _require_superadmin(request)
     if denied and isinstance(denied, HTMLResponse):
         return denied
-    async with async_session() as db:
+    async with db_session() as db:
         org_rows = (await db.execute(select(Organization).order_by(Organization.created_at.desc()))).scalars().all()
         from aios.core.limits import get_usage_summary
         orgs_data = []
@@ -710,7 +767,7 @@ async def admin_org_detail(request: Request, oid: str):
     denied = await _require_superadmin(request)
     if denied and isinstance(denied, HTMLResponse):
         return denied
-    async with async_session() as db:
+    async with db_session() as db:
         org = await db.get(Organization, oid)
         if not org:
             return HTMLResponse("<h2>Not found</h2>", status_code=404)
@@ -726,7 +783,7 @@ async def admin_org_suspend(request: Request, oid: str):
     denied = await _require_superadmin(request)
     if denied and isinstance(denied, HTMLResponse):
         return denied
-    async with async_session() as db:
+    async with db_session() as db:
         org = await db.get(Organization, oid)
         if org:
             org.is_active = False
@@ -739,7 +796,7 @@ async def admin_org_unsuspend(request: Request, oid: str):
     denied = await _require_superadmin(request)
     if denied and isinstance(denied, HTMLResponse):
         return denied
-    async with async_session() as db:
+    async with db_session() as db:
         org = await db.get(Organization, oid)
         if org:
             org.is_active = True
@@ -752,7 +809,7 @@ async def admin_remove_user(request: Request, oid: str, uid: str):
     denied = await _require_superadmin(request)
     if denied and isinstance(denied, HTMLResponse):
         return denied
-    async with async_session() as db:
+    async with db_session() as db:
         user = await db.get(User, uid)
         if user and user.org_id == oid and user.role != "superadmin":
             await db.delete(user)
@@ -768,7 +825,7 @@ async def admin_fleet(request: Request):
     if denied and isinstance(denied, HTMLResponse):
         return denied
     from aios.db.models import RemoteInstance
-    async with async_session() as db:
+    async with db_session() as db:
         instances = (await db.execute(select(RemoteInstance).order_by(RemoteInstance.name))).scalars().all()
     return await _render("admin/fleet.html", request, title="Client Fleet", instances=instances)
 
@@ -783,7 +840,7 @@ async def admin_fleet_add(
     if denied and isinstance(denied, HTMLResponse):
         return denied
     from aios.db.models import RemoteInstance
-    async with async_session() as db:
+    async with db_session() as db:
         inst = RemoteInstance(
             org_id=await _org_filter(request),
             name=name, base_url=base_url.rstrip("/"),
@@ -804,6 +861,7 @@ async def admin_fleet_add(
                     inst.extra_data["health"] = resp.json()
                     inst.is_active = True
         except Exception as e:
+            logger.exception("Fleet health check failed")
             inst.extra_data.setdefault("errors", []).append(str(e))
         await db.commit()
     return RedirectResponse("/dashboard/admin/fleet", status_code=303)
@@ -815,7 +873,7 @@ async def admin_fleet_view(request: Request, fid: str):
     if denied and isinstance(denied, HTMLResponse):
         return denied
     from aios.db.models import RemoteInstance
-    async with async_session() as db:
+    async with db_session() as db:
         inst = await db.get(RemoteInstance, fid)
         if not inst:
             return HTMLResponse("<h2>Not found</h2>", status_code=404)
@@ -845,6 +903,7 @@ async def admin_fleet_view(request: Request, fid: str):
                 if teams_resp.status_code == 200:
                     teams = teams_resp.json()
         except Exception as e:
+            logger.exception("Fleet proxy request failed")
             inst.extra_data["error"] = str(e)
 
     return await _render("admin/client_view.html", request, title=inst.name,
@@ -855,7 +914,7 @@ async def admin_fleet_view(request: Request, fid: str):
 @router.get("/admin/fleet/{fid}/open")
 async def admin_fleet_open(fid: str):
     from aios.db.models import RemoteInstance
-    async with async_session() as db:
+    async with db_session() as db:
         inst = await db.get(RemoteInstance, fid)
         if not inst:
             return HTMLResponse("<h2>Not found</h2>", status_code=404)
@@ -866,7 +925,7 @@ async def admin_fleet_open(fid: str):
 @router.get("/admin/fleet/{fid}/remove")
 async def admin_fleet_remove(fid: str):
     from aios.db.models import RemoteInstance
-    async with async_session() as db:
+    async with db_session() as db:
         inst = await db.get(RemoteInstance, fid)
         if inst:
             await db.delete(inst)
@@ -880,7 +939,7 @@ async def admin_fleet_remove(fid: str):
 async def billing_page(request: Request):
     from aios.config import PLANS
     org_id = await _org_filter(request)
-    async with async_session() as db:
+    async with db_session() as db:
         org = await db.get(Organization, org_id)
         agent_count = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
         team_count = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
@@ -888,7 +947,7 @@ async def billing_page(request: Request):
     plan_limits = PLANS.get(current_plan, PLANS["free"])
 
     from aios.core.limits import get_usage_summary
-    async with async_session() as db:
+    async with db_session() as db:
         usage = await get_usage_summary(org_id, db)
     daily_msgs = usage["messages_today"]
 
@@ -907,13 +966,60 @@ async def billing_page(request: Request):
                    subscription_id=org.extra_data.get("stripe_subscription_id") if org else None)
 
 
+# ─── Agent Sandbox (chat playground) ───
+
+@router.get("/sandbox", response_class=HTMLResponse)
+async def sandbox_page(request: Request):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        agents = (await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active").order_by(Agent.name))).scalars().all()
+    return await _render("sandbox.html", request, title="Agent Sandbox", agents=agents)
+
+
+@router.post("/sandbox/chat")
+async def sandbox_chat(
+    request: Request,
+    agent_id: str = Form(...),
+    message: str = Form(...),
+    conversation_id: str = Form(""),
+):
+    """Streaming proxy: agent_id + message → SSE stream of tokens."""
+    from aios.core.agent import AgentRuntime
+
+    async def sse_stream():
+        org_id = await _org_filter(request)
+        async with db_session() as db:
+            agent = await db.get(Agent, agent_id)
+            if not agent:
+                yield "data: " + json.dumps({"error": "Agent not found"}) + "\n\n"
+                return
+
+            import uuid
+            cid = conversation_id or f"sandbox_{uuid.uuid4().hex[:12]}"
+            runtime = AgentRuntime(agent, async_session)
+            yield "data: " + json.dumps({"conversation_id": cid}) + "\n\n"
+
+            async for event in runtime.run_stream(cid, message, db):
+                if event["type"] == "token":
+                    yield "data: " + json.dumps({"type": "token", "content": event["content"]}) + "\n\n"
+                elif event["type"] == "error":
+                    yield "data: " + json.dumps({"type": "error", "error": event.get("error", "")}) + "\n\n"
+                elif event["type"] == "tool_call":
+                    yield "data: " + json.dumps({"type": "tool_call", "tool_calls": event["tool_calls"]}) + "\n\n"
+                elif event["type"] == "done":
+                    yield "data: " + json.dumps({"type": "done"}) + "\n\n"
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(sse_stream(), media_type="text/event-stream")
+
+
 # ─── Files page ───
 
 @router.get("/files", response_class=HTMLResponse)
 async def files_list(request: Request):
     org_id = await _org_filter(request)
     from aios.core.storage import list_artifacts
-    async with async_session() as db:
+    async with db_session() as db:
         artifacts = await list_artifacts(db, org_id)
     return await _render("files.html", request, title="Files", artifacts=artifacts)
 
@@ -922,22 +1028,25 @@ async def files_list(request: Request):
 async def files_upload(request: Request):
     org_id = await _org_filter(request)
     from aios.core.storage import save_artifact
+    from aios.core.file_validation import validate_file
     form = await request.form()
     file_field = form.get("file")
     if not file_field:
         return RedirectResponse("/dashboard/files", status_code=303)
 
-    import tempfile, os
-    # file_field is a starlette UploadFile
     content = await file_field.read()
     description = form.get("description", "")
 
-    async with async_session() as db:
+    valid, content_type = validate_file(file_field.filename or "file", bytes(content))
+    if not valid:
+        return HTMLResponse(f"<h2>Invalid file</h2><p>{content_type}</p><a href='/dashboard/files'>Back</a>", status_code=400)
+
+    async with db_session() as db:
         await save_artifact(
             db=db, org_id=org_id,
             filename=file_field.filename or "file",
             content=bytes(content),
-            content_type=file_field.content_type or "application/octet-stream",
+            content_type=content_type,
             description=description,
         )
     return RedirectResponse("/dashboard/files", status_code=303)
@@ -948,7 +1057,7 @@ async def files_view(request: Request, art_id: str):
     org_id = await _org_filter(request)
     from aios.core.storage import read_artifact_text, get_artifact_content
     from aios.db.models import Artifact
-    async with async_session() as db:
+    async with db_session() as db:
         art = await db.get(Artifact, art_id)
         if not art or art.org_id != org_id:
             return HTMLResponse("<h2>Not found</h2>", status_code=404)
@@ -967,7 +1076,7 @@ async def switch_org(request: Request, org_id: str):
     resp = RedirectResponse("/dashboard", status_code=303)
     resp.set_cookie(
         key="aios_impersonate_org", value=org_id,
-        max_age=86400 * 7, httponly=True, samesite="lax",
+        max_age=86400 * 7, httponly=True, samesite="strict",
         secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
         path="/",
     )

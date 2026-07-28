@@ -1,7 +1,9 @@
 """Tool execution engine. Allow-list based — no arbitrary imports."""
 
+import asyncio
 import importlib
 import json
+import time
 from typing import Any
 
 from aios.tools.registry import TOOL_REGISTRY
@@ -11,7 +13,19 @@ _ALLOWED_MODULES = {
     "aios.tools.calculator",
     "aios.tools.web_search",
     "aios.tools.send_email",
+    "aios.tools.read_file",
+    "aios.tools.current_datetime",
+    "aios.tools.http_get",
 }
+
+# Safety limits
+_TOOL_TIMEOUT = 30.0  # seconds per tool call
+_TOOL_MAX_RETRIES = 2
+_TOOL_MAX_OUTPUT = 100_000  # chars
+_TOOL_MAX_INPUT_ARGS = 50_000  # chars
+_TOOL_CALL_TRACKING = {}  # tool_name -> count for audit
+
+# ponytail: in-memory tool audit. DB-backed when observability scales.
 
 
 class ToolExecutionError(Exception):
@@ -32,23 +46,65 @@ class ToolEngine:
         if not tool:
             raise ToolExecutionError(f"Unknown tool: {name}")
 
+        # double-check tool is in registry allow-list
+        entry = TOOL_REGISTRY.get(name)
+        if not entry:
+            raise ToolExecutionError(f"Tool '{name}' not in registry")
+        mod_path = entry["code_reference"]
+        module_name = mod_path.rsplit(".", 1)[0]
+        if module_name not in _ALLOWED_MODULES:
+            raise ToolExecutionError(f"Tool '{name}' module not allowed")
+
+        # input size limit
+        if len(args_json) > _TOOL_MAX_INPUT_ARGS:
+            raise ToolExecutionError(f"Tool args too large ({len(args_json)} chars, max {_TOOL_MAX_INPUT_ARGS})")
+
         try:
             args = json.loads(args_json)
         except json.JSONDecodeError:
             raise ToolExecutionError(f"Invalid JSON args")
 
-        try:
-            result = await tool.run(**args)
-            return json.dumps(result) if isinstance(result, dict) else str(result)
-        except Exception as e:
-            raise ToolExecutionError(f"Tool '{name}' failed: {e}")
+        # audit tracking
+        _TOOL_CALL_TRACKING[name] = _TOOL_CALL_TRACKING.get(name, 0) + 1
+
+        # retry loop with timeout
+        last_err = None
+        for attempt in range(_TOOL_MAX_RETRIES + 1):
+            try:
+                result = await asyncio.wait_for(
+                    tool.run(**args),
+                    timeout=_TOOL_TIMEOUT,
+                )
+                output = json.dumps(result) if isinstance(result, dict) else str(result)
+                # output size limit
+                if len(output) > _TOOL_MAX_OUTPUT:
+                    output = output[:_TOOL_MAX_OUTPUT] + "\n... [truncated]"
+                return output
+            except asyncio.TimeoutError:
+                last_err = f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s"
+                if attempt < _TOOL_MAX_RETRIES:
+                    await asyncio.sleep(0.5)
+                else:
+                    raise ToolExecutionError(last_err)
+            except Exception as e:
+                logger.exception("Tool %s attempt %d failed", name, attempt + 1)
+                last_err = str(e)
+                if attempt < _TOOL_MAX_RETRIES:
+                    await asyncio.sleep(0.5)
+                else:
+                    raise ToolExecutionError(f"Tool '{name}' failed: {last_err}")
+
+        raise ToolExecutionError(f"Tool '{name}' failed: {last_err}")
+
+    @staticmethod
+    def audit_summary() -> dict:
+        return dict(_TOOL_CALL_TRACKING)
 
     def _load(self, name: str) -> Any:
         entry = TOOL_REGISTRY.get(name)
         if not entry:
             raise ValueError(f"Tool '{name}' not registered")
         mod_path = entry["code_reference"]
-        # Security: only allow known built-in modules
         module_name = mod_path.rsplit(".", 1)[0]
         if module_name not in _ALLOWED_MODULES:
             raise ValueError(f"Tool module '{module_name}' not in allow-list")

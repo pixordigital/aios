@@ -47,7 +47,7 @@ class EmailChannel(Channel):
             logger.info("Email sent to %s", to)
             return message.conversation_id
         except Exception as e:
-            logger.error("Email send failed: %s", e)
+            logger.exception("Email send failed to %s", to)
             return None
 
     async def start(self) -> None:
@@ -60,6 +60,22 @@ class EmailChannel(Channel):
         if self._poll_task:
             self._poll_task.cancel()
             self._poll_task = None
+
+    async def test(self) -> dict:
+        import imaplib
+        imap_server = self._config.get("imap_server", "")
+        email_addr = self._config.get("email", "")
+        password = self._config.get("password", "")
+        if not imap_server or not email_addr:
+            return {"ok": False, "message": "Missing IMAP server or email"}
+        try:
+            mail = imaplib.IMAP4_SSL(imap_server, timeout=10)
+            mail.login(email_addr, password)
+            mail.logout()
+            return {"ok": True, "message": f"IMAP login successful ({email_addr})"}
+        except Exception as e:
+            logger.exception("Email test failed")
+            return {"ok": False, "message": str(e)}
 
     async def _poll_loop(self):
         """Poll IMAP inbox every 30s for new messages."""

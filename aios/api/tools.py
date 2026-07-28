@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from aios.db.engine import get_db
+from aios.core.tools import ToolEngine
+from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Tool
 from aios.schemas import BaseModel
 from .deps import get_org_id
@@ -32,7 +32,7 @@ class ToolCreate(BaseModel):
 @router.post("", response_model=ToolOut)
 async def create_tool(
     body: ToolCreate,
-    db: AsyncSession = Depends(get_db),
+    db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
     tool = Tool(
@@ -51,21 +51,31 @@ async def create_tool(
 
 @router.get("", response_model=list[ToolOut])
 async def list_tools(
-    db: AsyncSession = Depends(get_db),
+    db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
 ):
     result = await db.execute(
         select(Tool)
         .where(Tool.org_id == org_id)
         .order_by(Tool.name)
+        .limit(limit)
+        .offset(offset)
     )
     return result.scalars().all()
+
+
+@router.get("/audit/calls")
+async def tool_audit_calls():
+    """Get tool call audit counters (in-memory, since app start)."""
+    return ToolEngine.audit_summary()
 
 
 @router.get("/{tool_id}", response_model=ToolOut)
 async def get_tool(
     tool_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
     tool = await db.get(Tool, tool_id)

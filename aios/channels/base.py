@@ -35,3 +35,7 @@ class Channel(ABC):
     @abstractmethod
     async def stop(self) -> None:
         ...
+
+    async def test(self) -> dict:
+        """Test connection. Returns {"ok": True/False, "message": "..."}."""
+        return {"ok": False, "message": f"No test implemented for {self.channel_type}"}

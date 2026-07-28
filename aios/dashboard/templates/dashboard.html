@@ -10,6 +10,21 @@
     </div>
 </div>
 
+{% if stats.agents == 0 %}
+<div class="card mb-4" style="border-left:4px solid var(--accent)">
+    <h2 style="font-size:1.125rem;margin-bottom:0.5rem">👋 Welcome to AIOS</h2>
+    <p class="text-sm" style="margin-bottom:1rem">Get started in 3 steps:</p>
+    <ol style="padding-left:1.25rem;margin:0;font-size:0.875rem;color:var(--text-secondary)">
+        <li style="margin-bottom:0.5rem"><strong>Create an agent</strong> — pick a type (SDR, support, closer, etc.) and give it a name</li>
+        <li style="margin-bottom:0.5rem"><strong>Add a channel</strong> — connect WhatsApp, email, Slack, or use the web chat</li>
+        <li><strong>Deploy</strong> — activate your agent and start sending messages</li>
+    </ol>
+    <div style="margin-top:1rem">
+        <a href="/dashboard/agents/new" class="btn btn-primary" style="font-size:0.8125rem">Create your first agent →</a>
+    </div>
+</div>
+{% endif %}
+
 <div class="grid-4 mb-4">
     <div class="stat-card">
         <p class="stat-label">Agents</p>

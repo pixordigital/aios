@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from aios.channels.base import InboundMessage, OutboundMessage
 from aios.channels.manager import manager as channel_mgr
 from aios.core.limits import check_org_limits, track_usage
-from aios.db.engine import async_session
+from aios.db.backend import db_session
 from aios.db.models import Agent, ChannelConnection, Conversation, Message, Team
 from aios.config import settings
 from sqlalchemy import select
@@ -38,6 +38,17 @@ async def inbound_webhook(request: Request):
     body = await request.json()
     logger.debug("WhatsApp webhook: %s", body)
 
+    # verify WhatsApp signature if app secret is configured
+    sig = request.headers.get("x-hub-signature-256", "")
+    if sig and settings.whatsapp_app_secret:
+        raw_body = await request.body()
+        expected = "sha256=" + hmac.new(
+            settings.whatsapp_app_secret.encode(), raw_body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            logger.warning("WhatsApp webhook signature mismatch")
+            return {"status": "ignored"}
+
     try:
         entry = (body.get("entry") or [{}])[0]
         change = (entry.get("changes") or [{}])[0]
@@ -57,7 +68,7 @@ async def inbound_webhook(request: Request):
 
         # find matching active WhatsApp channel by phone number ID
         phone_id = (value.get("metadata") or {}).get("phone_number_id", "")
-        async with async_session() as db:
+        async with db_session() as db:
             result = await db.execute(
                 select(ChannelConnection).where(
                     ChannelConnection.channel_type == "whatsapp",
