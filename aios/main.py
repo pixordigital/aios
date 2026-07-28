@@ -9,7 +9,6 @@ setup_logging()
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from aios.api.router import api_router
@@ -18,13 +17,14 @@ from aios.core.storage import ensure_storage
 from aios.core.syscalls import dispatcher as syscall_dispatcher
 from aios.core.scheduler import scheduler
 from aios.core.context_manager import context_manager
-from aios.core.hooks import hooks, HookPoint
 from aios.db.backend import init_backends, registry
 from aios.db.engine import init_db
 
 logger = logging.getLogger(__name__)
 
+import threading
 REQUEST_COUNT = 0
+_request_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -59,6 +59,11 @@ async def lifespan(app: FastAPI):
     # Register syscall handlers
     await _register_syscall_handlers()
     logger.info("Syscall handlers registered")
+
+    # Start event bus (processes inbound messages from channels)
+    from aios.core.event_bus import event_bus
+    await event_bus.start()
+    logger.info("Event bus started")
 
     # Log scheduler stats periodically
     async def _log_scheduler():
@@ -158,6 +163,10 @@ async def lifespan(app: FastAPI):
         await close_pool()
     except Exception:
         pass
+
+    # Stop event bus
+    from aios.core.event_bus import event_bus
+    await event_bus.stop()
 
     logger.info("Shutting down AIOS...")
 
@@ -272,9 +281,11 @@ async def limit_body_size(request: Request, call_next):
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
     global REQUEST_COUNT
-    REQUEST_COUNT += 1
+    with _request_lock:
+        REQUEST_COUNT += 1
+        req_id = REQUEST_COUNT
     response = await call_next(request)
-    response.headers["X-Request-ID"] = str(REQUEST_COUNT)
+    response.headers["X-Request-ID"] = str(req_id)
     return response
 
 
@@ -336,7 +347,6 @@ async def _register_syscall_handlers():
     """Register handlers for each syscall type."""
     from aios.core.syscalls import SyscallType
     from aios.core.providers import get_provider
-    from aios.core.memory import MemoryManager
     from aios.core.storage import save_artifact, get_artifact_content, list_artifacts
     from aios.db.backend import db_session
 

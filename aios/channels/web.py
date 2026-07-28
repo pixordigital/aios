@@ -1,9 +1,15 @@
 """WebSocket channel — real-time web chat via FastAPI WebSocket.
 
-SECURITY: bare except blocks and origin validation addressed.
+Supports both inbound (receive) and outbound (send) messages.
+Event-driven: incoming messages dispatch to ARQ worker.
 """
 
+import json
+import logging
+
 from aios.channels.base import Channel, OutboundMessage
+
+logger = logging.getLogger(__name__)
 
 
 class WebChannel(Channel):
@@ -23,8 +29,7 @@ class WebChannel(Channel):
     async def send(self, message: OutboundMessage) -> str | None:
         ws = self._connections.get(message.conversation_id)
         if ws:
-            import json
-            await ws.send_json({"text": message.text})
+            await ws.send_json({"type": "message", "text": message.text})
         return None
 
     async def start(self) -> None:
@@ -35,8 +40,21 @@ class WebChannel(Channel):
             try:
                 await ws.close()
             except (RuntimeError, ConnectionError):
-                pass  # already closed or never opened
+                pass
         self._connections.clear()
+
+    @classmethod
+    async def handle_incoming(cls, ws, conversation_id: str, text: str, channel_connection_id: str):
+        """Receive incoming WebSocket message → dispatch to ARQ worker."""
+        from aios.core.dispatch import dispatch_inbound
+        await dispatch_inbound(
+            channel_type="web",
+            channel_connection_id=channel_connection_id,
+            conversation_id=conversation_id,
+            text=text,
+            user_id="web_user",
+            extra_data={"source": "websocket"},
+        )
 
 
 # global connections dict
