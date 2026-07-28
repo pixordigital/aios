@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 class RegisterRequest(BaseModel):
     email: str = Field(min_length=5, max_length=255)
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=6, max_length=128)
     org_name: str = Field(default="Default", min_length=1, max_length=100)
 
 
@@ -20,6 +20,7 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str = ""
     token_type: str = "bearer"
     user_id: str
     org_id: str
@@ -34,6 +35,8 @@ class UserOut(BaseModel):
     org_id: str
     created_at: datetime | None = None
 
+    model_config = {"from_attributes": True}
+
 
 # --- Organization ---
 
@@ -43,6 +46,8 @@ class OrganizationOut(BaseModel):
     slug: str
     extra_data: dict
     created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
 
 
 # --- Agent ---
@@ -57,6 +62,15 @@ _AGENT_MEMORY_DEFAULT = {
 }
 
 
+_GOVERNANCE_DEFAULT = {
+    "autonomy": "draft",  # autonomous | draft | ask
+    "max_tokens_per_run": 500_000,
+    "allowed_tools": "__all__",  # "__all__" or list of tool names
+    "denied_tools": [],
+    "max_iterations": 10,
+}
+
+
 class AgentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     agent_type: str = Field(default="custom", max_length=50)
@@ -64,6 +78,7 @@ class AgentCreate(BaseModel):
     llm_config: dict = Field(default_factory=lambda: dict(_AGENT_LLM_CONFIG_DEFAULT))
     tools: list[str] = Field(default_factory=list, max_length=50)
     memory_config: dict = Field(default_factory=lambda: dict(_AGENT_MEMORY_DEFAULT))
+    governance_config: dict = Field(default_factory=lambda: dict(_GOVERNANCE_DEFAULT))
 
 
 class AgentUpdate(BaseModel):
@@ -72,6 +87,7 @@ class AgentUpdate(BaseModel):
     llm_config: dict | None = None
     tools: list[str] | None = Field(default=None, max_length=50)
     memory_config: dict | None = None
+    governance_config: dict | None = None
     status: str | None = Field(default=None, max_length=20)
 
 
@@ -83,10 +99,13 @@ class AgentOut(BaseModel):
     llm_config: dict
     tools: list
     memory_config: dict
+    governance_config: dict
     status: str
     org_id: str
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
 
 
 # --- Team ---
@@ -103,7 +122,10 @@ class TeamOut(BaseModel):
     routing_strategy: str
     extra_data: dict
     org_id: str
+    agents: list = []
     created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class TeamAssignRequest(BaseModel):
@@ -128,6 +150,8 @@ class ConversationOut(BaseModel):
     extra_data: dict
     created_at: datetime | None = None
 
+    model_config = {"from_attributes": True}
+
 
 class MessageOut(BaseModel):
     id: str
@@ -138,6 +162,8 @@ class MessageOut(BaseModel):
     tool_calls: dict | None = None
     tool_results: dict | None = None
     created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class MessageSend(BaseModel):
@@ -159,6 +185,14 @@ class ChannelCreate(BaseModel):
     team_id: str | None = None
 
 
+class ChannelUpdate(BaseModel):
+    label: str | None = None
+    config: dict | None = None
+    is_active: bool | None = None
+    agent_id: str | None = None
+    team_id: str | None = None
+
+
 class ChannelOut(BaseModel):
     id: str
     channel_type: str
@@ -167,3 +201,5 @@ class ChannelOut(BaseModel):
     agent_id: str | None = None
     team_id: str | None = None
     created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}

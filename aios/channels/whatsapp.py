@@ -43,3 +43,22 @@ class WhatsAppChannel(Channel):
 
     async def stop(self) -> None:
         pass
+
+    async def test(self) -> dict:
+        import httpx
+        token = self._config.get("access_token", "")
+        phone_id = self._config.get("phone_id", "")
+        if not token or not phone_id:
+            return {"ok": False, "message": "Missing access_token or phone_id"}
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"https://graph.facebook.com/v18.0/{phone_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code == 200:
+                    return {"ok": True, "message": f"WhatsApp API connected — {resp.json().get('display_phone_numbers', [{}])[0].get('verified_name', 'ok')}"}
+                return {"ok": False, "message": f"API error: {resp.status_code}"}
+        except Exception as e:
+            logger.exception("WhatsApp API test failed")
+            return {"ok": False, "message": str(e)}

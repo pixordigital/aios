@@ -10,7 +10,6 @@ class BaseTool(ABC):
     name: str = ""
     description: str = ""
     input_model: type[BaseModel] | None = None
-    output_model: type[BaseModel] | None = None
 
     @abstractmethod
     async def run(self, **kwargs) -> Any:

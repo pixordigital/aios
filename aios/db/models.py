@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Column, ForeignKey, Integer, String, Table, Text
 from sqlalchemy import JSON
@@ -13,13 +13,13 @@ def _uuid():
 
 
 def _now():
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # --- Mixins ---
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(default=_now)
+    created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
 
@@ -50,9 +50,10 @@ class User(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
-    api_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    api_key_hash: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"))
     role: Mapped[str] = mapped_column(String(50), default="admin")
+    email_verified: Mapped[bool] = mapped_column(default=False)
 
     organization = relationship("Organization", back_populates="users")
 
@@ -72,6 +73,7 @@ class Agent(Base, TimestampMixin, OrgScopedMixin):
         "long_term": {"enabled": True, "top_k": 5},
         "episodic": {"enabled": True, "summarize_after": 10},
     })
+    governance_config: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(20), default="draft")
 
     organization = relationship("Organization", back_populates="agents")
@@ -83,6 +85,7 @@ class AgentInstance(Base, TimestampMixin):
     __tablename__ = "agent_instances"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"))
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     status: Mapped[str] = mapped_column(String(20), default="idle")
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
@@ -124,7 +127,7 @@ class Conversation(Base, TimestampMixin, OrgScopedMixin):
     team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
     channel: Mapped[str] = mapped_column(String(50), default="web")
-    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at")
@@ -134,6 +137,7 @@ class Message(Base, TimestampMixin):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text, default="")
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
@@ -211,6 +215,18 @@ class RemoteInstance(Base, TimestampMixin):
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class AuditLog(Base, TimestampMixin):
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), index=True)
+    resource_type: Mapped[str] = mapped_column(String(50))
+    resource_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+
 class Invitation(Base, TimestampMixin):
     __tablename__ = "invitations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
@@ -225,8 +241,18 @@ class Memory(Base, TimestampMixin):
     __tablename__ = "memories"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     type: Mapped[str] = mapped_column(String(50))
     content: Mapped[str] = mapped_column(Text, default="")
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     agent = relationship("Agent", back_populates="memories")
+
+
+class OAuthAccount(Base, TimestampMixin):
+    __tablename__ = "oauth_accounts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(50), index=True)  # "google" | "github"
+    provider_user_id: Mapped[str] = mapped_column(String(255), index=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)

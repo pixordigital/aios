@@ -41,7 +41,7 @@ class SendEmailTool(BaseTool):
             )
             return {"sent": True, "to": to, "subject": subject}
         except Exception as e:
-            logger.error("Email send failed: %s", e)
+            logger.exception("Email send failed to %s", to)
             return {"sent": False, "to": to, "subject": subject, "error": str(e)}
 
 
