@@ -9,7 +9,7 @@ setup_logging()
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from aios.api.router import api_router
 from aios.config import settings
@@ -313,6 +313,40 @@ async def request_logging(request: Request, call_next):
     if not path.startswith("/health") and not path.endswith((".css", ".js", ".ico")):
         logger.info("%s %s %d %dms", request.method, path, response.status_code, duration_ms)
     return response
+
+
+# ─── Landing page + legal pages ───
+
+from pathlib import Path
+
+_WEBSITE_DIR = Path(__file__).parent.parent / "website"
+
+
+@app.get("/", response_class=HTMLResponse)
+async def landing_page():
+    """Serve landing page."""
+    index = _WEBSITE_DIR / "index.html"
+    if index.exists():
+        return HTMLResponse(content=index.read_text())
+    return HTMLResponse(content="<h1>AIOS</h1><p><a href='/dashboard'>Dashboard</a></p>", status_code=200)
+
+
+@app.get("/legal/terms", response_class=HTMLResponse)
+async def terms_of_service():
+    """Serve Terms of Service."""
+    terms = _WEBSITE_DIR / "terms.html"
+    if terms.exists():
+        return HTMLResponse(content=terms.read_text())
+    return HTMLResponse(content="<h1>Terms of Service</h1><p>Coming soon.</p>", status_code=200)
+
+
+@app.get("/legal/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    """Serve Privacy Policy."""
+    privacy = _WEBSITE_DIR / "privacy.html"
+    if privacy.exists():
+        return HTMLResponse(content=privacy.read_text())
+    return HTMLResponse(content="<h1>Privacy Policy</h1><p>Coming soon.</p>", status_code=200)
 
 
 # ─── Scheduler status endpoint ───

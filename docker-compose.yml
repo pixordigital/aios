@@ -46,6 +46,7 @@ services:
     networks:
       - default
       - supabase
+      - convex
     volumes:
       - ./data:/data
     depends_on:
@@ -67,6 +68,7 @@ services:
     networks:
       - default
       - supabase
+      - convex
     volumes:
       - ./data:/data
     depends_on:
@@ -92,3 +94,6 @@ networks:
   supabase:
     external: true
     name: x7cec17of43bremk02s521wj
+  convex:
+    external: true
+    name: dnegt58yjh5x380z724ahoba
