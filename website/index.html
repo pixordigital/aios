@@ -5,260 +5,509 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIOS — AI Agent Operating System</title>
     <meta name="description" content="Deploy AI agents that work across WhatsApp, email, Slack, and web. Multi-tenant, governed, and production-ready.">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a' },
-                        dark: { 800: '#1e293b', 900: '#0f172a', 950: '#020617' }
-                    }
-                }
-            }
-        }
-    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
-        .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #1e293b 100%); }
-        .glass { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
-        .glow { box-shadow: 0 0 40px rgba(59,130,246,0.3); }
-        @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-        .float { animation: float 3s ease-in-out infinite; }
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --surface-2: #161616;
+            --border: #1f1f1f;
+            --border-hover: #2a2a2a;
+            --cyan: #00e5a0;
+            --cyan-dim: #00e5a020;
+            --purple: #a78bfa;
+            --amber: #fbbf24;
+            --text: #e5e5e5;
+            --text-dim: #737373;
+            --text-muted: #525252;
+            --red: #ef4444;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* ── Nav ── */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            background: rgba(10,10,10,0.85); backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+        }
+        nav .inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+        .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); }
+        .logo-mark { width: 28px; height: 28px; background: var(--cyan); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+        .logo-mark span { color: var(--bg); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; }
+        .logo-text { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+        nav .links { display: flex; gap: 32px; }
+        nav .links a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
+        nav .links a:hover { color: var(--text); }
+        nav .cta-group { display: flex; align-items: center; gap: 16px; }
+        nav .cta-group a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
+        nav .cta-group a:hover { color: var(--text); }
+        .btn-primary { background: var(--cyan); color: var(--bg); font-weight: 600; font-size: 14px; padding: 8px 20px; border-radius: 8px; text-decoration: none; transition: all 0.15s; border: none; cursor: pointer; }
+        .btn-primary:hover { box-shadow: 0 0 20px rgba(0,229,160,0.3); }
+        .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); font-weight: 500; font-size: 14px; padding: 8px 20px; border-radius: 8px; text-decoration: none; transition: all 0.15s; cursor: pointer; }
+        .btn-ghost:hover { border-color: var(--border-hover); background: var(--surface); }
+
+        /* ── Hero ── */
+        .hero { min-height: 100vh; display: flex; align-items: center; padding: 80px 24px 60px; position: relative; overflow: hidden; }
+        .hero::before { content: ''; position: absolute; top: -200px; right: -200px; width: 600px; height: 600px; background: radial-gradient(circle, rgba(0,229,160,0.08) 0%, transparent 70%); pointer-events: none; }
+        .hero::after { content: ''; position: absolute; bottom: -100px; left: -100px; width: 400px; height: 400px; background: radial-gradient(circle, rgba(167,139,250,0.06) 0%, transparent 70%); pointer-events: none; }
+        .hero-inner { max-width: 1200px; margin: 0 auto; width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
+        .hero-text { position: relative; z-index: 1; }
+        .hero-badge { display: inline-flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 100px; padding: 6px 16px; font-size: 13px; color: var(--text-dim); margin-bottom: 24px; }
+        .hero-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .hero h1 { font-size: clamp(36px, 5vw, 64px); font-weight: 700; line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 20px; }
+        .hero h1 .accent { color: var(--cyan); }
+        .hero p { font-size: 18px; color: var(--text-dim); max-width: 480px; margin-bottom: 32px; line-height: 1.7; }
+        .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+        .hero-note { font-size: 13px; color: var(--text-muted); margin-top: 16px; }
+
+        /* ── Terminal ── */
+        .terminal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; position: relative; z-index: 1; }
+        .terminal-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+        .terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .terminal-dot.r { background: var(--red); }
+        .terminal-dot.y { background: var(--amber); }
+        .terminal-dot.g { background: var(--cyan); }
+        .terminal-title { color: var(--text-muted); font-size: 12px; margin-left: 8px; }
+        .terminal-body { padding: 16px; }
+        .terminal-line { display: flex; gap: 8px; margin-bottom: 4px; }
+        .terminal-prompt { color: var(--cyan); white-space: nowrap; }
+        .terminal-cmd { color: var(--text); }
+        .terminal-output { color: var(--text-dim); margin-left: 20px; }
+        .terminal-success { color: var(--cyan); }
+        .terminal-warn { color: var(--amber); }
+        .terminal-cursor { display: inline-block; width: 8px; height: 16px; background: var(--cyan); animation: blink 1s step-end infinite; vertical-align: text-bottom; margin-left: 2px; }
+        @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+        /* ── Status bar ── */
+        .status-bar { display: flex; gap: 24px; margin-top: 32px; flex-wrap: wrap; }
+        .status-item { display: flex; align-items: center; gap: 8px; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-dot.green { background: var(--cyan); box-shadow: 0 0 8px rgba(0,229,160,0.5); }
+        .status-dot.amber { background: var(--amber); }
+        .status-dot.red { background: var(--red); }
+        .status-label { font-size: 13px; color: var(--text-dim); }
+        .status-value { font-size: 13px; color: var(--text); font-weight: 500; }
+
+        /* ── Sections ── */
+        section { padding: 96px 24px; }
+        section .inner { max-width: 1200px; margin: 0 auto; }
+        .section-label { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; }
+        .section-title { font-size: clamp(28px, 3.5vw, 44px); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 16px; line-height: 1.15; }
+        .section-desc { font-size: 17px; color: var(--text-dim); max-width: 560px; line-height: 1.7; margin-bottom: 48px; }
+
+        /* ── Feature grid ── */
+        .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .feature-card { background: var(--surface); padding: 32px; transition: background 0.15s; }
+        .feature-card:hover { background: var(--surface-2); }
+        .feature-icon { font-size: 20px; margin-bottom: 16px; }
+        .feature-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+        .feature-desc { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
+
+        /* ── Channels ── */
+        .channel-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+        .channel-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; text-align: center; transition: all 0.15s; }
+        .channel-card:hover { border-color: var(--cyan); transform: translateY(-2px); }
+        .channel-icon { font-size: 24px; margin-bottom: 8px; }
+        .channel-name { font-size: 13px; font-weight: 500; }
+
+        /* ── Pricing ── */
+        .pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+        .pricing-card { background: var(--surface); padding: 32px; display: flex; flex-direction: column; }
+        .pricing-card.featured { background: var(--surface-2); position: relative; }
+        .pricing-card.featured::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--cyan); }
+        .pricing-tier { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+        .pricing-name { font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+        .pricing-price { font-size: 32px; font-weight: 700; margin-bottom: 24px; }
+        .pricing-price span { font-size: 14px; font-weight: 400; color: var(--text-dim); }
+        .pricing-features { list-style: none; flex: 1; margin-bottom: 24px; }
+        .pricing-features li { font-size: 14px; color: var(--text-dim); padding: 6px 0; border-bottom: 1px solid var(--border); }
+        .pricing-features li:last-child { border-bottom: none; }
+
+        /* ── CTA ── */
+        .cta-section { text-align: center; position: relative; overflow: hidden; }
+        .cta-section::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(0,229,160,0.06) 0%, transparent 60%); pointer-events: none; }
+        .cta-section .inner { position: relative; z-index: 1; }
+
+        /* ── Footer ── */
+        footer { border-top: 1px solid var(--border); padding: 48px 24px; }
+        footer .inner { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 48px; }
+        footer .brand p { font-size: 14px; color: var(--text-dim); margin-top: 12px; max-width: 280px; }
+        footer h4 { font-size: 13px; font-weight: 600; margin-bottom: 16px; color: var(--text); }
+        footer ul { list-style: none; }
+        footer ul li { margin-bottom: 8px; }
+        footer ul a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
+        footer ul a:hover { color: var(--text); }
+        footer .bottom { max-width: 1200px; margin: 32px auto 0; padding-top: 24px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-muted); display: flex; justify-content: space-between; }
+
+        /* ── Responsive ── */
+        @media (max-width: 900px) {
+            .hero-inner { grid-template-columns: 1fr; }
+            .terminal { display: none; }
+            .feature-grid { grid-template-columns: 1fr; }
+            .channel-grid { grid-template-columns: repeat(3, 1fr); }
+            .pricing-grid { grid-template-columns: 1fr; }
+            footer .inner { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 600px) {
+            nav .links { display: none; }
+            .channel-grid { grid-template-columns: repeat(2, 1fr); }
+            .hero h1 { font-size: 32px; }
+            footer .inner { grid-template-columns: 1fr; }
+        }
+
+        /* ── Animations ── */
+        .fade-in { opacity: 0; transform: translateY(20px); transition: opacity 0.6s ease, transform 0.6s ease; }
+        .fade-in.visible { opacity: 1; transform: translateY(0); }
     </style>
 </head>
-<body class="bg-dark-950 text-white">
-    <!-- Nav -->
-    <nav class="fixed w-full z-50 glass">
-        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-                <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center font-bold text-sm">A</div>
-                <span class="text-xl font-bold">AIOS</span>
-            </div>
-            <div class="hidden md:flex items-center gap-8 text-sm text-gray-300">
-                <a href="#features" class="hover:text-white transition">Features</a>
-                <a href="#channels" class="hover:text-white transition">Channels</a>
-                <a href="#pricing" class="hover:text-white transition">Pricing</a>
-                <a href="#docs" class="hover:text-white transition">Docs</a>
-            </div>
-            <div class="flex items-center gap-3">
-                <a href="/dashboard/login" class="text-sm text-gray-300 hover:text-white transition">Log in</a>
-                <a href="/dashboard/register" class="bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">Get started</a>
-            </div>
-        </div>
-    </nav>
+<body>
 
-    <!-- Hero -->
-    <section class="gradient-bg min-h-screen flex items-center pt-20">
-        <div class="max-w-7xl mx-auto px-6 py-20 text-center">
-            <div class="inline-block glass px-4 py-2 rounded-full text-sm text-primary-300 mb-8 float">
-                🚀 Open source • Multi-tenant • Production-ready
-            </div>
-            <h1 class="text-5xl md:text-7xl font-bold mb-6 leading-tight">
-                AI agents that<br>
-                <span class="text-primary-400">actually work</span>
-            </h1>
-            <p class="text-xl text-gray-400 max-w-2xl mx-auto mb-10">
-                Deploy AI agents across WhatsApp, email, Slack, and web. Governed by intent, compounding over time. Not a chatbot — an operating system.
-            </p>
-            <div class="flex flex-col sm:flex-row gap-4 justify-center">
-                <a href="/dashboard/register" class="bg-primary-600 hover:bg-primary-700 text-white font-semibold px-8 py-4 rounded-xl text-lg transition glow">
-                    Start free →
-                </a>
-                <a href="#docs" class="glass hover:bg-white/10 text-white font-semibold px-8 py-4 rounded-xl text-lg transition">
-                    Read docs
-                </a>
-            </div>
-            <p class="text-sm text-gray-500 mt-6">No credit card required • Free tier included</p>
+<!-- Nav -->
+<nav>
+    <div class="inner">
+        <a href="/" class="logo">
+            <div class="logo-mark"><span>A</span></div>
+            <span class="logo-text">AIOS</span>
+        </a>
+        <div class="links">
+            <a href="#features">Features</a>
+            <a href="#channels">Channels</a>
+            <a href="#pricing">Pricing</a>
+            <a href="/docs">Docs</a>
         </div>
-    </section>
+        <div class="cta-group">
+            <a href="/dashboard/login">Log in</a>
+            <a href="/dashboard/register" class="btn-primary">Get started</a>
+        </div>
+    </div>
+</nav>
 
-    <!-- Features -->
-    <section id="features" class="py-24 bg-dark-900">
-        <div class="max-w-7xl mx-auto px-6">
-            <h2 class="text-4xl font-bold text-center mb-4">Everything you need</h2>
-            <p class="text-gray-400 text-center mb-16 max-w-2xl mx-auto">
-                Built for teams who want AI agents that integrate with their existing workflows, not replace them.
-            </p>
-            <div class="grid md:grid-cols-3 gap-8">
-                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
-                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">🧠</div>
-                    <h3 class="text-xl font-semibold mb-3">Multi-Model</h3>
-                    <p class="text-gray-400">GPT-4o, Claude, Gemini, Llama — pick the right model for each agent. Switch anytime.</p>
+<!-- Hero -->
+<section class="hero">
+    <div class="hero-inner">
+        <div class="hero-text">
+            <div class="hero-badge">
+                <span class="dot"></span>
+                <span class="mono">v0.1.0 — now generally available</span>
+            </div>
+            <h1>AI agents that<br><span class="accent">run like systems</span></h1>
+            <p>Deploy governed AI agents across WhatsApp, email, Slack, and web. Multi-tenant. Observable. Built for teams that sell AI to clients.</p>
+            <div class="hero-actions">
+                <a href="/dashboard/register" class="btn-primary">Start free →</a>
+                <a href="#features" class="btn-ghost">See how it works</a>
+            </div>
+            <p class="hero-note">No credit card · Free tier · Deploy in 5 minutes</p>
+
+            <div class="status-bar">
+                <div class="status-item">
+                    <span class="status-dot green"></span>
+                    <span class="status-label">Agents online</span>
+                    <span class="status-value" id="agents-online">3</span>
                 </div>
-                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
-                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">🔒</div>
-                    <h3 class="text-xl font-semibold mb-3">Governed</h3>
-                    <p class="text-gray-400">Autonomy levels, tool allow/deny lists, per-agent budgets. Enterprise-grade control.</p>
+                <div class="status-item">
+                    <span class="status-dot green"></span>
+                    <span class="status-label">Messages today</span>
+                    <span class="status-value" id="messages-today">1,247</span>
                 </div>
-                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
-                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">👥</div>
-                    <h3 class="text-xl font-semibold mb-3">Multi-Tenant</h3>
-                    <p class="text-gray-400">Each client gets their own isolated workspace. Agents, conversations, billing — all separated.</p>
-                </div>
-                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
-                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">⚡</div>
-                    <h3 class="text-xl font-semibold mb-3">Real-Time</h3>
-                    <p class="text-gray-400">Streaming responses, live conversation updates, instant channel delivery.</p>
-                </div>
-                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
-                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">📊</div>
-                    <h3 class="text-xl font-semibold mb-3">Observable</h3>
-                    <p class="text-gray-400">Sentry errors, structured JSON logs, usage tracking, cost estimation per agent.</p>
-                </div>
-                <div class="glass rounded-2xl p-8 hover:bg-white/5 transition">
-                    <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center mb-4 text-2xl">💳</div>
-                    <h3 class="text-xl font-semibold mb-3">Billing Built-In</h3>
-                    <p class="text-gray-400">Stripe integration, usage-based plans, customer portal. Monetize from day one.</p>
+                <div class="status-item">
+                    <span class="status-dot green"></span>
+                    <span class="status-label">Uptime</span>
+                    <span class="status-value">99.9%</span>
                 </div>
             </div>
         </div>
-    </section>
 
-    <!-- Channels -->
-    <section id="channels" class="py-24 bg-dark-950">
-        <div class="max-w-7xl mx-auto px-6 text-center">
-            <h2 class="text-4xl font-bold mb-4">One agent, every channel</h2>
-            <p class="text-gray-400 mb-12 max-w-xl mx-auto">
-                Deploy the same agent across WhatsApp, email, Slack, Telegram, Discord, and web chat.
-            </p>
-            <div class="flex flex-wrap justify-center gap-6">
-                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
-                    <span class="text-2xl">💬</span>
-                    <span class="font-medium">WhatsApp</span>
-                </div>
-                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
-                    <span class="text-2xl">📧</span>
-                    <span class="font-medium">Email</span>
-                </div>
-                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
-                    <span class="text-2xl">💼</span>
-                    <span class="font-medium">Slack</span>
-                </div>
-                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
-                    <span class="text-2xl">✈️</span>
-                    <span class="font-medium">Telegram</span>
-                </div>
-                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
-                    <span class="text-2xl">🎮</span>
-                    <span class="font-medium">Discord</span>
-                </div>
-                <div class="glass rounded-xl px-6 py-4 flex items-center gap-3">
-                    <span class="text-2xl">🌐</span>
-                    <span class="font-medium">Web Chat</span>
+        <div class="terminal" id="terminal">
+            <div class="terminal-bar">
+                <span class="terminal-dot r"></span>
+                <span class="terminal-dot y"></span>
+                <span class="terminal-dot g"></span>
+                <span class="terminal-title">aios — agent deployment</span>
+            </div>
+            <div class="terminal-body" id="terminal-body">
+                <div class="terminal-line">
+                    <span class="terminal-prompt">$</span>
+                    <span class="terminal-cmd" id="t1"></span>
                 </div>
             </div>
         </div>
-    </section>
+    </div>
+</section>
 
-    <!-- Pricing -->
-    <section id="pricing" class="py-24 bg-dark-900">
-        <div class="max-w-7xl mx-auto px-6">
-            <h2 class="text-4xl font-bold text-center mb-4">Simple pricing</h2>
-            <p class="text-gray-400 text-center mb-16 max-w-xl mx-auto">
-                Start free, scale as you grow. No hidden fees.
-            </p>
-            <div class="grid md:grid-cols-4 gap-6 max-w-5xl mx-auto">
-                <div class="glass rounded-2xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">Free</h3>
-                    <div class="text-3xl font-bold mb-4">$0<span class="text-sm text-gray-400">/mo</span></div>
-                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
-                        <li>2 agents</li>
-                        <li>100 messages/day</li>
-                        <li>Web channel only</li>
-                        <li>Community support</li>
-                    </ul>
-                    <a href="/dashboard/register" class="block text-center glass hover:bg-white/10 py-2 rounded-lg text-sm transition">Get started</a>
-                </div>
-                <div class="glass rounded-2xl p-6 border border-primary-500/50 glow">
-                    <div class="text-xs text-primary-400 font-medium mb-2">MOST POPULAR</div>
-                    <h3 class="text-lg font-semibold mb-2">Starter</h3>
-                    <div class="text-3xl font-bold mb-4">$49<span class="text-sm text-gray-400">/mo</span></div>
-                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
-                        <li>10 agents</li>
-                        <li>500 messages/day</li>
-                        <li>WhatsApp + Web</li>
-                        <li>Email support</li>
-                    </ul>
-                    <a href="/dashboard/register" class="block text-center bg-primary-600 hover:bg-primary-700 py-2 rounded-lg text-sm font-medium transition">Start free trial</a>
-                </div>
-                <div class="glass rounded-2xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">Pro</h3>
-                    <div class="text-3xl font-bold mb-4">$199<span class="text-sm text-gray-400">/mo</span></div>
-                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
-                        <li>50 agents</li>
-                        <li>5,000 messages/day</li>
-                        <li>All channels</li>
-                        <li>Priority support</li>
-                    </ul>
-                    <a href="/dashboard/register" class="block text-center glass hover:bg-white/10 py-2 rounded-lg text-sm transition">Start free trial</a>
-                </div>
-                <div class="glass rounded-2xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">Enterprise</h3>
-                    <div class="text-3xl font-bold mb-4">Custom</div>
-                    <ul class="text-sm text-gray-400 space-y-2 mb-6">
-                        <li>500+ agents</li>
-                        <li>Custom limits</li>
-                        <li>SSO / SAML</li>
-                        <li>Dedicated support</li>
-                    </ul>
-                    <a href="mailto:sales@aios.dev" class="block text-center glass hover:bg-white/10 py-2 rounded-lg text-sm transition">Contact sales</a>
-                </div>
+<!-- Features -->
+<section id="features">
+    <div class="inner">
+        <div class="section-label">01 / Capabilities</div>
+        <h2 class="section-title">Built for production,<br>not prototypes</h2>
+        <p class="section-desc">Every feature exists because someone needed it in production. No decoration.</p>
+
+        <div class="feature-grid">
+            <div class="feature-card fade-in">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">Multi-Model</div>
+                <div class="feature-desc">GPT-4o, Claude, Gemini, Llama. Pick the right model for each agent. Switch without redeploying.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-title">Governed</div>
+                <div class="feature-desc">Autonomy levels, tool allow/deny lists, per-agent budgets. Enterprise-grade control without enterprise complexity.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">👥</div>
+                <div class="feature-title">Multi-Tenant</div>
+                <div class="feature-desc">Each client gets an isolated workspace. Agents, conversations, billing — all separated. Deploy to their infrastructure.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">📡</div>
+                <div class="feature-title">Event-Driven</div>
+                <div class="feature-desc">Webhook → dispatch → worker → agent → reply. Async processing with retry and dead letter queue.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">📊</div>
+                <div class="feature-title">Observable</div>
+                <div class="feature-desc">Real-time telemetry: response times, error rates, token usage, cost per agent. Know before your clients do.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">💳</div>
+                <div class="feature-title">Billing Built-In</div>
+                <div class="feature-desc">Stripe integration, usage-based plans, customer portal. Monetize from day one.</div>
             </div>
         </div>
-    </section>
+    </div>
+</section>
 
-    <!-- CTA -->
-    <section class="py-24 gradient-bg">
-        <div class="max-w-4xl mx-auto px-6 text-center">
-            <h2 class="text-4xl font-bold mb-6">Ready to deploy AI agents?</h2>
-            <p class="text-xl text-gray-300 mb-10">
-                Join teams using AIOS to automate customer support, sales outreach, and internal workflows.
-            </p>
-            <a href="/dashboard/register" class="bg-white text-dark-900 font-semibold px-8 py-4 rounded-xl text-lg hover:bg-gray-100 transition inline-block">
-                Get started for free →
+<!-- Channels -->
+<section id="channels" style="background: var(--surface);">
+    <div class="inner" style="text-align: center;">
+        <div class="section-label">02 / Channels</div>
+        <h2 class="section-title" style="margin-left: auto; margin-right: auto;">One agent,<br>every surface</h2>
+        <p class="section-desc" style="margin-left: auto; margin-right: auto; text-align: center;">
+            Deploy the same agent everywhere your clients already are.
+        </p>
+        <div class="channel-grid">
+            <div class="channel-card">
+                <div class="channel-icon">💬</div>
+                <div class="channel-name">WhatsApp</div>
+            </div>
+            <div class="channel-card">
+                <div class="channel-icon">📧</div>
+                <div class="channel-name">Email</div>
+            </div>
+            <div class="channel-card">
+                <div class="channel-icon">💼</div>
+                <div class="channel-name">Slack</div>
+            </div>
+            <div class="channel-card">
+                <div class="channel-icon">✈️</div>
+                <div class="channel-name">Telegram</div>
+            </div>
+            <div class="channel-card">
+                <div class="channel-icon">🎮</div>
+                <div class="channel-name">Discord</div>
+            </div>
+            <div class="channel-card">
+                <div class="channel-icon">🌐</div>
+                <div class="channel-name">Web Chat</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Pricing -->
+<section id="pricing">
+    <div class="inner">
+        <div class="section-label">03 / Pricing</div>
+        <h2 class="section-title">Start free.<br>Scale when ready.</h2>
+        <p class="section-desc">No hidden fees. Upgrade or cancel anytime.</p>
+
+        <div class="pricing-grid">
+            <div class="pricing-card">
+                <div class="pricing-tier">Tier 01</div>
+                <div class="pricing-name">Free</div>
+                <div class="pricing-price">$0<span>/mo</span></div>
+                <ul class="pricing-features">
+                    <li>2 agents</li>
+                    <li>100 messages/day</li>
+                    <li>Web channel only</li>
+                    <li>Community support</li>
+                </ul>
+                <a href="/dashboard/register" class="btn-ghost" style="text-align: center;">Get started</a>
+            </div>
+            <div class="pricing-card featured">
+                <div class="pricing-tier">Tier 02</div>
+                <div class="pricing-name">Starter</div>
+                <div class="pricing-price">$49<span>/mo</span></div>
+                <ul class="pricing-features">
+                    <li>10 agents</li>
+                    <li>500 messages/day</li>
+                    <li>WhatsApp + Web</li>
+                    <li>Email support</li>
+                </ul>
+                <a href="/dashboard/register" class="btn-primary" style="text-align: center; display: block;">Start free trial</a>
+            </div>
+            <div class="pricing-card">
+                <div class="pricing-tier">Tier 03</div>
+                <div class="pricing-name">Pro</div>
+                <div class="pricing-price">$199<span>/mo</span></div>
+                <ul class="pricing-features">
+                    <li>50 agents</li>
+                    <li>5,000 messages/day</li>
+                    <li>All channels</li>
+                    <li>Priority support</li>
+                </ul>
+                <a href="/dashboard/register" class="btn-ghost" style="text-align: center;">Start free trial</a>
+            </div>
+            <div class="pricing-card">
+                <div class="pricing-tier">Tier 04</div>
+                <div class="pricing-name">Enterprise</div>
+                <div class="pricing-price">Custom</div>
+                <ul class="pricing-features">
+                    <li>500+ agents</li>
+                    <li>Custom limits</li>
+                    <li>SSO / SAML</li>
+                    <li>Dedicated support</li>
+                </ul>
+                <a href="mailto:sales@aios.dev" class="btn-ghost" style="text-align: center;">Contact sales</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+    <div class="inner">
+        <div class="section-label">04 / Get Started</div>
+        <h2 class="section-title" style="margin-left: auto; margin-right: auto; text-align: center;">Ready to deploy?</h2>
+        <p class="section-desc" style="margin-left: auto; margin-right: auto; text-align: center;">
+            Join teams using AIOS to automate support, sales, and workflows for their clients.
+        </p>
+        <div style="text-align: center;">
+            <a href="/dashboard/register" class="btn-primary" style="font-size: 16px; padding: 12px 32px;">Get started for free →</a>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <div class="inner">
+        <div class="brand">
+            <a href="/" class="logo">
+                <div class="logo-mark"><span>A</span></div>
+                <span class="logo-text">AIOS</span>
             </a>
+            <p>AI Agent Operating System. Open source, multi-tenant, production-ready.</p>
         </div>
-    </section>
+        <div>
+            <h4>Product</h4>
+            <ul>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#pricing">Pricing</a></li>
+                <li><a href="/docs">API Docs</a></li>
+                <li><a href="https://github.com/your-org/aios">GitHub</a></li>
+            </ul>
+        </div>
+        <div>
+            <h4>Legal</h4>
+            <ul>
+                <li><a href="/legal/terms">Terms of Service</a></li>
+                <li><a href="/legal/privacy">Privacy Policy</a></li>
+            </ul>
+        </div>
+        <div>
+            <h4>Support</h4>
+            <ul>
+                <li><a href="mailto:support@aios.dev">support@aios.dev</a></li>
+                <li><a href="https://github.com/your-org/aios/issues">Report a bug</a></li>
+            </ul>
+        </div>
+    </div>
+    <div class="bottom">
+        <span>© 2026 AIOS. All rights reserved.</span>
+        <span class="mono" style="font-size: 12px;">v0.1.0</span>
+    </div>
+</footer>
 
-    <!-- Footer -->
-    <footer class="py-12 bg-dark-950 border-t border-white/10">
-        <div class="max-w-7xl mx-auto px-6">
-            <div class="grid md:grid-cols-4 gap-8 mb-8">
-                <div>
-                    <div class="flex items-center gap-2 mb-4">
-                        <div class="w-8 h-8 bg-primary-500 rounded-lg flex items-center justify-center font-bold text-sm">A</div>
-                        <span class="text-lg font-bold">AIOS</span>
-                    </div>
-                    <p class="text-sm text-gray-400">AI Agent Operating System. Open source, multi-tenant, production-ready.</p>
-                </div>
-                <div>
-                    <h4 class="font-semibold mb-3">Product</h4>
-                    <ul class="text-sm text-gray-400 space-y-2">
-                        <li><a href="#features" class="hover:text-white transition">Features</a></li>
-                        <li><a href="#pricing" class="hover:text-white transition">Pricing</a></li>
-                        <li><a href="/docs" class="hover:text-white transition">API Docs</a></li>
-                        <li><a href="https://github.com/your-org/aios" class="hover:text-white transition">GitHub</a></li>
-                    </ul>
-                </div>
-                <div>
-                    <h4 class="font-semibold mb-3">Legal</h4>
-                    <ul class="text-sm text-gray-400 space-y-2">
-                        <li><a href="/legal/terms" class="hover:text-white transition">Terms of Service</a></li>
-                        <li><a href="/legal/privacy" class="hover:text-white transition">Privacy Policy</a></li>
-                    </ul>
-                </div>
-                <div>
-                    <h4 class="font-semibold mb-3">Support</h4>
-                    <ul class="text-sm text-gray-400 space-y-2">
-                        <li><a href="mailto:support@aios.dev" class="hover:text-white transition">support@aios.dev</a></li>
-                        <li><a href="https://github.com/your-org/aios/issues" class="hover:text-white transition">Report a bug</a></li>
-                    </ul>
-                </div>
-            </div>
-            <div class="border-t border-white/10 pt-8 text-center text-sm text-gray-500">
-                © 2026 AIOS. All rights reserved.
-            </div>
-        </div>
-    </footer>
+<script>
+// ── Terminal typing animation ──
+const terminalLines = [
+    { type: 'cmd', text: 'aios agent create --name "Support Bot" --model gpt-4o', delay: 0 },
+    { type: 'output', text: 'Creating agent...', delay: 800 },
+    { type: 'success', text: '✓ Agent "Support Bot" created (id: ag_7x9k2m)', delay: 1200 },
+    { type: 'cmd', text: 'aios channel connect --type whatsapp --agent ag_7x9k2m', delay: 2000 },
+    { type: 'output', text: 'Connecting WhatsApp channel...', delay: 2800 },
+    { type: 'success', text: '✓ Channel connected. Listening on +1 (555) 123-4567', delay: 3200 },
+    { type: 'cmd', text: 'aios deploy ag_7x9k2m --env production', delay: 4000 },
+    { type: 'output', text: 'Deploying to production...', delay: 4800 },
+    { type: 'success', text: '✓ Deployed. Agent is live and handling messages.', delay: 5200 },
+    { type: 'cmd', text: 'aios status', delay: 6000 },
+    { type: 'success', text: '  Agents: 3 active  |  Messages: 1,247 today  |  Uptime: 99.9%', delay: 6500 },
+];
+
+function typeTerminal() {
+    const body = document.getElementById('terminal-body');
+    let currentLine = 0;
+
+    function addLine() {
+        if (currentLine >= terminalLines.length) return;
+        const line = terminalLines[currentLine];
+        const div = document.createElement('div');
+        div.className = 'terminal-line';
+
+        if (line.type === 'cmd') {
+            div.innerHTML = '<span class="terminal-prompt">$</span><span class="terminal-cmd" id="typing"></span>';
+            body.appendChild(div);
+            typeText(line.text, () => {
+                currentLine++;
+                setTimeout(addLine, line.delay - (terminalLines[currentLine-1]?.delay || 0));
+            });
+        } else {
+            const cls = line.type === 'success' ? 'terminal-success' : line.type === 'warn' ? 'terminal-warn' : 'terminal-output';
+            div.innerHTML = '<span class="terminal-prompt" style="visibility:hidden">$</span><span class="' + cls + '">' + line.text + '</span>';
+            body.appendChild(div);
+            body.scrollTop = body.scrollHeight;
+            currentLine++;
+            setTimeout(addLine, currentLine < terminalLines.length ? terminalLines[currentLine].delay - line.delay : 0);
+        }
+    }
+
+    function typeText(text, callback) {
+        const el = document.getElementById('typing');
+        let i = 0;
+        const interval = setInterval(() => {
+            el.textContent = text.slice(0, i + 1);
+            i++;
+            if (i >= text.length) {
+                clearInterval(interval);
+                el.removeAttribute('id');
+                callback();
+            }
+        }, 25);
+    }
+
+    setTimeout(addLine, 1000);
+}
+
+// ── Scroll animations ──
+const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+// ── Start terminal ──
+typeTerminal();
+</script>
+
 </body>
 </html>
