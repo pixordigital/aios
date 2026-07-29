@@ -99,12 +99,15 @@ async def lifespan(app: FastAPI):
 
         # seed default org for dashboard (bypasses auth)
         from sqlalchemy import select
-        org = (await sess.execute(select(Organization).where(Organization.slug == "default"))).scalar_one_or_none()
-        if org is None:
-            org = Organization(name="Default", slug="default")
-            sess.add(org)
-            await sess.commit()
-            logger.info("Seeded default organization: %s", org.id)
+        try:
+            org = (await sess.execute(select(Organization).where(Organization.slug == "default"))).scalar_one_or_none()
+            if org is None:
+                org = Organization(name="Default", slug="default")
+                sess.add(org)
+                await sess.commit()
+                logger.info("Seeded default organization: %s", org.id)
+        except Exception:
+            logger.debug("Default org already exists (concurrent seed)")
 
         await sess.commit()
     logger.info("Cleared stale AgentInstance statuses")
