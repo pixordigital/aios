@@ -249,6 +249,20 @@ class Memory(Base, TimestampMixin):
     agent = relationship("Agent", back_populates="memories")
 
 
+class AgentMetric(Base):
+    """Per-agent performance metrics — aggregated hourly."""
+    __tablename__ = "agent_metrics"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    hour: Mapped[str] = mapped_column(String(13), index=True)  # YYYY-MM-DD-HH
+    messages: Mapped[int] = mapped_column(default=0)
+    tokens: Mapped[int] = mapped_column(default=0)
+    errors: Mapped[int] = mapped_column(default=0)
+    avg_response_ms: Mapped[int] = mapped_column(default=0)
+    tool_calls: Mapped[int] = mapped_column(default=0)
+
+
 class OAuthAccount(Base, TimestampMixin):
     __tablename__ = "oauth_accounts"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)

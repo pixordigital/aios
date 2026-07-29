@@ -194,9 +194,16 @@ class AgentRuntime:
     ) -> AsyncGenerator[dict, None]:
         """Streaming: yield token/tool_call/done events as they happen.
 
-        Includes: health tracking, retry with fallback models, error escalation.
+        Includes: health tracking, retry with fallback models, error escalation, telemetry.
         """
         from aios.core.agent_health import health_tracker
+        from aios.core.telemetry import telemetry
+        import time
+
+        start_time = time.time()
+        total_tokens = 0
+        total_tool_calls = 0
+        had_error = False
 
         # check agent health
         if not health_tracker.is_available(self.agent.id):
@@ -244,6 +251,7 @@ class AgentRuntime:
                         yield event
                     elif event["type"] == STREAM_TOOL_CALL:
                         response_tool_calls = event["tool_calls"]
+                        total_tool_calls += len(response_tool_calls or [])
                     elif event["type"] == STREAM_ERROR:
                         yield event
                         return
@@ -312,15 +320,22 @@ class AgentRuntime:
 
                 yield {"type": STREAM_DONE}
                 health_tracker.record_success(self.agent.id)
+                response_ms = int((time.time() - start_time) * 1000)
+                telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, tokens=total_tokens, tool_calls=total_tool_calls)
                 return
 
             logger.warning("Agent %s hit max iterations", self.agent.id)
             yield {"type": STREAM_TOKEN, "content": "I'm having trouble completing this request. Please try again."}
             yield {"type": STREAM_DONE}
             health_tracker.record_failure(self.agent.id, "max_iterations")
+            response_ms = int((time.time() - start_time) * 1000)
+            telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, error=True)
         except Exception as e:
             logger.exception("Agent stream failed: agent=%s conv=%s", self.agent.id, conversation_id)
             health_tracker.record_failure(self.agent.id, str(e)[:200])
+            had_error = True
+            response_ms = int((time.time() - start_time) * 1000)
+            telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, error=True)
             hooks.fire(HookPoint.AGENT_ERROR, HookContext(
                 agent_id=self.agent.id,
                 conversation_id=conversation_id,

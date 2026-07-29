@@ -277,6 +277,14 @@ async def dashboard_home(request: Request):
                    teams=teams, agents=agents)
 
 
+# ─── Analytics Dashboard ───
+
+@router.get("/analytics", response_class=HTMLResponse)
+async def analytics_page(request: Request):
+    """Analytics & Telemetry dashboard."""
+    return await _render("analytics.html", request, title="Analytics")
+
+
 # ─── Agent CRUD ───
 
 AGENT_TYPES = ["custom", "orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist"]
