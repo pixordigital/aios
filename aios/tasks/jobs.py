@@ -151,14 +151,8 @@ async def process_inbound(
             logger.exception("process_inbound: agent failed for conversation %s", conv.id)
 
 
-async def example_job(ctx, *args, **kwargs):
-    logger.info("Example job ran with ctx=%s", ctx)
-    return "ok"
-
-
 # ARQ worker function registry
 FUNCTIONS = [
     process_inbound,
     deliver_message,
-    example_job,
 ]

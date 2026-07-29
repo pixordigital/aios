@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     s3_endpoint: str = ""  # for Supabase Storage, R2, MinIO
     db_backend: str = "sqlalchemy"  # "sqlalchemy" | "convex"
     db_replica_backend: str = ""  # failover backend type, empty = no failover
-    db_auto_failover: bool = True
     convex_url: str = ""
     convex_admin_key: str = ""
     openrouter_api_key: str = ""
