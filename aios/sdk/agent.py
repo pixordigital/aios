@@ -1,6 +1,5 @@
 """Agent handle — deploy, message, manage."""
 
-from typing import Any
 
 
 class AgentHandle:

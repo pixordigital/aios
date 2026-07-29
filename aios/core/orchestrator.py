@@ -7,9 +7,9 @@ from typing import AsyncGenerator
 
 from aios.core.agent import AgentRuntime
 from aios.core.providers import (
-    get_provider, STREAM_TOKEN, STREAM_DONE, STREAM_ERROR, LLMError,
+    get_provider, STREAM_TOKEN, STREAM_DONE,
 )
-from sqlalchemy import select, update
+from sqlalchemy import update
 
 from aios.core.scheduler import scheduler
 from aios.db.backend import DatabaseBackend

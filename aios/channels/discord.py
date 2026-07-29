@@ -19,7 +19,6 @@ class DiscordChannel(Channel):
         channel_id = message.extra_data.get("channel_id") if message.extra_data else None
         if not channel_id:
             return None
-        import discord
         channel = self._bot.get_channel(int(channel_id))
         if channel:
             msg = await channel.send(message.text)

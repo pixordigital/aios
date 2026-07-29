@@ -20,7 +20,7 @@ from sqlalchemy import select
 from aios.db.backend import DatabaseBackend
 
 from aios.config import settings
-from aios.db.models import Message, Memory
+from aios.db.models import Message
 
 logger = logging.getLogger(__name__)
 

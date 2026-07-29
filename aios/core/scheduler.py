@@ -10,9 +10,8 @@ when agents span processes.
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 from aios.core.hooks import HookContext, HookPoint, hooks
 

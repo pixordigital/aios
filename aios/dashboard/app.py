@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Request, Response
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, select
@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 from aios.db.backend import db_session
 from aios.db.models import Agent, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
 from aios.templates import apply_template
-from aios.api.deps import COOKIE_NAME, create_jwt_token, get_dashboard_user
+from aios.api.deps import COOKIE_NAME, create_jwt_token
 from aios.api.auth import _validate_password
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -1055,7 +1055,7 @@ async def files_upload(request: Request):
 @router.get("/files/{art_id}/view")
 async def files_view(request: Request, art_id: str):
     org_id = await _org_filter(request)
-    from aios.core.storage import read_artifact_text, get_artifact_content
+    from aios.core.storage import read_artifact_text
     from aios.db.models import Artifact
     async with db_session() as db:
         art = await db.get(Artifact, art_id)

@@ -9,10 +9,9 @@ Separate from memory. Responsibilities:
 ponytail: in-memory LRU cache. External cache (Redis) when multi-process.
 """
 
-import json
 import logging
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from aios.core.hooks import HookContext, HookPoint, hooks
 from aios.core.tokenizer import count_tokens

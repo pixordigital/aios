@@ -4,7 +4,7 @@ import email
 import logging
 from email.mime.text import MIMEText
 
-from aios.channels.base import Channel, InboundMessage, OutboundMessage
+from aios.channels.base import Channel, OutboundMessage
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,7 @@ class EmailChannel(Channel):
         seen_uids: set[str] = set()
         while self._running:
             try:
-                from aiosmtplib import SMTP
                 import imaplib
-                import time
 
                 mail = imaplib.IMAP4_SSL(imap_server)
                 mail.login(email_addr, password)

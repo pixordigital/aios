@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from aios.api.ratelimit import limiter
 
 from aios.core.file_validation import validate_file
-from aios.core.storage import ensure_storage, list_artifacts, read_artifact_text, save_artifact
+from aios.core.storage import list_artifacts, read_artifact_text, save_artifact
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Artifact
 from .deps import get_current_user, get_org_id
