@@ -98,6 +98,13 @@ PLANS = {
         "max_tokens_per_month": 500_000_000,
         "channels": "__all__",
     },
+    "unlimited": {
+        "max_agents": 999999,
+        "max_teams": 999999,
+        "max_messages_per_day": 999999,
+        "max_tokens_per_month": 999999999,
+        "channels": "__all__",
+    },
 }
 
 DEFAULT_PLAN = "free"

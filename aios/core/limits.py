@@ -30,6 +30,10 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     if not org.is_active:
         return False, "Organization is suspended"
 
+    # unlimited orgs bypass all limits
+    if org.extra_data.get("unlimited"):
+        return True, ""
+
     plan_name = _get_plan(org)
     limits = PLANS.get(plan_name, PLANS[DEFAULT_PLAN])
 
