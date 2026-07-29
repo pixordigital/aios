@@ -30,6 +30,14 @@ def _get_org_key(request) -> str:
     return get_remote_address(request)
 
 
-# ponytail: in-memory storage. Redis-backed for multi-worker deployments.
 _rpm = 10000 if settings.debug else settings.rate_limit_per_minute
-limiter = Limiter(key_func=_get_org_key, default_limits=[f"{_rpm}/minute"])
+
+# Redis-backed when available, in-memory fallback
+_storage_uri = None
+if settings.redis_url:
+    _storage_uri = settings.redis_url
+
+if _storage_uri:
+    limiter = Limiter(key_func=_get_org_key, default_limits=[f"{_rpm}/minute"], storage_uri=_storage_uri)
+else:
+    limiter = Limiter(key_func=_get_org_key, default_limits=[f"{_rpm}/minute"])

@@ -88,6 +88,9 @@ async def create_checkout(body: CheckoutRequest, db: DatabaseBackend = Depends(g
         return {"error": str(e)}
 
 
+_processed_events: set[str] = set()  # ponytail: in-memory idempotency. Redis-backed at scale.
+
+
 @router.post("/stripe-webhook")
 async def stripe_webhook(request: Request):
     """Handle Stripe events (subscription created/updated/canceled)."""
@@ -103,6 +106,16 @@ async def stripe_webhook(request: Request):
     except Exception as e:
         logger.exception("Stripe webhook signature invalid")
         raise HTTPException(400, "Invalid signature")
+
+    # idempotency — skip already-processed events
+    event_id = event.get("id", "")
+    if event_id in _processed_events:
+        logger.info("Stripe webhook %s already processed, skipping", event_id)
+        return {"status": "already_processed"}
+    _processed_events.add(event_id)
+    # prevent unbounded growth
+    if len(_processed_events) > 10000:
+        _processed_events.clear()
 
     event_type = event.type
     data = event.data.object
