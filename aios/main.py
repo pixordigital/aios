@@ -301,6 +301,20 @@ async def trace_middleware(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    """Log every request with method, path, status, duration."""
+    import time
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = round((time.time() - start) * 1000, 1)
+    # skip health checks and static assets to reduce noise
+    path = request.url.path
+    if not path.startswith("/health") and not path.endswith((".css", ".js", ".ico")):
+        logger.info("%s %s %d %dms", request.method, path, response.status_code, duration_ms)
+    return response
+
+
 # ─── Scheduler status endpoint ───
 
 
