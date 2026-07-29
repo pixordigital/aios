@@ -3,16 +3,55 @@
 Starts an ARQ worker that picks up queued jobs from Redis.
 Registered jobs in aios.tasks.jobs.FUNCTIONS.
 Reads Redis URL from settings.redis_url or REDIS_URL env.
+
+Usage:
+    python -m aios.tasks.worker
+    aios-worker
 """
 
 import os
-from arq import Worker
+from arq import cron
+from arq.connections import RedisSettings
 from aios.config import settings
 from .jobs import FUNCTIONS
 
 
+def _parse_redis(redis_url: str) -> RedisSettings:
+    """Parse redis:// URL into RedisSettings."""
+    from urllib.parse import urlparse
+    parsed = urlparse(redis_url)
+    return RedisSettings(
+        host=parsed.hostname or "localhost",
+        port=parsed.port or 6379,
+        database=int(parsed.path.lstrip("/") or "0"),
+        password=parsed.password or None,
+    )
+
+
+class WorkerSettings:
+    """ARQ worker configuration — used by `arq aios.tasks.worker.WorkerSettings`."""
+    functions = [f"{f.__module__}.{f.__name__}" for f in FUNCTIONS]
+    redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379"))
+    max_jobs = 10
+    job_timeout = 300
+    poll_delay = 0.5
+    health_check_interval = 3600
+    log_results = True
+
+
+# ponytail: async def run() kept for backward compat with aios-worker script
 async def run():
-    """Entry point for ``aios-worker`` script."""
-    redis_url = settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
-    worker = Worker(FUNCTIONS, redis_settings={"address": redis_url})
+    """Entry point for ``aios-worker`` script — blocks on event loop."""
+    from arq.worker import Worker
+    worker = Worker(functions=FUNCTIONS, redis_settings=WorkerSettings.redis_settings)
     await worker.run()
+
+
+def main():
+    """CLI entry point — uses arq's built-in worker loop."""
+    from arq.cli import run_worker
+    run_worker(WorkerSettings)
+
+
+if __name__ == "__main__":
+    main()

@@ -41,6 +41,9 @@ services:
     environment:
       AIOS_REDIS_URL: redis://redis:6379
       AIOS_DATABASE_URL: postgresql+asyncpg://aios:aios@postgres:5432/aios
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - ./data:/data
     depends_on:
@@ -57,6 +60,9 @@ services:
     environment:
       AIOS_REDIS_URL: redis://redis:6379
       AIOS_DATABASE_URL: postgresql+asyncpg://aios:aios@postgres:5432/aios
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       - ./data:/data
     depends_on:
