@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Agent, Team, team_agents
+from aios.db.models import Agent, Team
 from aios.schemas import TeamAssignRequest, TeamCreate, TeamOut
 from .deps import get_current_user, get_org_id
 

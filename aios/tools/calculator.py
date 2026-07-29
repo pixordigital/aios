@@ -2,7 +2,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-import hashlib
 import re
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY

@@ -1,6 +1,5 @@
 """Conversation handle — message, stream, history."""
 
-from typing import Any
 
 
 class ConversationHandle:

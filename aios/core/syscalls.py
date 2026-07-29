@@ -8,7 +8,6 @@ ponytail: in-process dispatch. Remote syscalls (RPC/gRPC) when
 agents run in separate processes.
 """
 
-import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum

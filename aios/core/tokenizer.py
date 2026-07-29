@@ -4,7 +4,6 @@ Tries tiktoken first, falls back to char/4 estimate.
 """
 
 import logging
-import re
 
 logger = logging.getLogger(__name__)
 

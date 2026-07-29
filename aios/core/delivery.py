@@ -7,10 +7,9 @@ Failed messages after max retries land in a DB DLQ table.
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
 
 from aios.db.backend import db_session
-from aios.db.models import ChannelConnection, Conversation
+from aios.db.models import ChannelConnection
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +77,6 @@ async def deliver_message(
             # re-enqueue with backoff via ARQ
             from aios.tasks.queue import get_redis_pool
             pool = await get_redis_pool()
-            import asyncio
             delay = _BASE_DELAY_S * (2 ** (attempt - 1))
             await pool.enqueue_job(
                 "aios.core.delivery.deliver_message",
