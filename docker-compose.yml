@@ -40,10 +40,12 @@ services:
     env_file: .env
     environment:
       AIOS_REDIS_URL: redis://redis:6379
-      AIOS_DATABASE_URL: postgresql+asyncpg://aios:aios@postgres:5432/aios
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    networks:
+      - default
+      - supabase
     volumes:
       - ./data:/data
     depends_on:
@@ -59,10 +61,12 @@ services:
     env_file: .env
     environment:
       AIOS_REDIS_URL: redis://redis:6379
-      AIOS_DATABASE_URL: postgresql+asyncpg://aios:aios@postgres:5432/aios
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    networks:
+      - default
+      - supabase
     volumes:
       - ./data:/data
     depends_on:
@@ -75,3 +79,10 @@ services:
 volumes:
   redis-data:
   postgres-data:
+
+networks:
+  default:
+    name: pixor_aios_default
+  supabase:
+    external: true
+    name: x7cec17of43bremk02s521wj
