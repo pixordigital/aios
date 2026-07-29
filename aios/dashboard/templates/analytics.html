@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div>
+        <h1>Analytics & Telemetry</h1>
+        <p class="text-sm text-secondary mt-1">Agent performance, usage metrics, and health status</p>
+    </div>
+    <button class="btn btn-primary" onclick="refreshData()">↻ Refresh</button>
+</div>
+
+<!-- Summary Cards -->
+<div class="grid-4 mb-4" id="summary-cards">
+    <div class="stat-card">
+        <p class="stat-label">Total Messages</p>
+        <p class="stat-value" id="total-messages">-</p>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Total Tokens</p>
+        <p class="stat-value" id="total-tokens">-</p>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Avg Response Time</p>
+        <p class="stat-value" id="avg-response">-</p>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Error Rate</p>
+        <p class="stat-value" id="error-rate">-</p>
+    </div>
+</div>
+
+<!-- Agent Performance Table -->
+<div class="card mb-4">
+    <h2 class="text-lg font-semibold mb-3">Agent Performance</h2>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-700">
+                    <th class="text-left py-2 px-3">Agent</th>
+                    <th class="text-right py-2 px-3">Messages</th>
+                    <th class="text-right py-2 px-3">Tokens</th>
+                    <th class="text-right py-2 px-3">Avg Response</th>
+                    <th class="text-right py-2 px-3">Errors</th>
+                    <th class="text-right py-2 px-3">Error Rate</th>
+                    <th class="text-right py-2 px-3">Tool Calls</th>
+                    <th class="text-center py-2 px-3">Health</th>
+                </tr>
+            </thead>
+            <tbody id="agent-table">
+                <tr><td colspan="8" class="text-center py-4 text-gray-500">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Usage Over Time -->
+<div class="card mb-4">
+    <h2 class="text-lg font-semibold mb-3">Usage Over Time (24h)</h2>
+    <div id="usage-chart" style="height:200px;display:flex;align-items:end;gap:2px;">
+        <p class="text-gray-500">Loading chart...</p>
+    </div>
+</div>
+
+<!-- Health Status -->
+<div class="card mb-4">
+    <h2 class="text-lg font-semibold mb-3">Agent Health</h2>
+    <div id="health-status" class="grid gap-3">
+        <p class="text-gray-500">Loading...</p>
+    </div>
+</div>
+
+<!-- Raw Metrics -->
+<details class="card">
+    <summary class="cursor-pointer text-sm font-medium">Raw Metrics</summary>
+    <pre id="raw-metrics" class="mt-2 text-xs overflow-auto max-h-64 bg-gray-900 p-3 rounded"></pre>
+</details>
+
+<script>
+async function refreshData() {
+    try {
+        // Fetch summary
+        const summaryRes = await fetch('/api/analytics/telemetry/summary');
+        const summary = await summaryRes.json();
+        document.getElementById('total-messages').textContent = summary.total_messages.toLocaleString();
+        document.getElementById('total-tokens').textContent = summary.total_tokens.toLocaleString();
+        document.getElementById('avg-response').textContent = summary.avg_response_ms + 'ms';
+        document.getElementById('error-rate').textContent = summary.error_rate_pct + '%';
+
+        // Fetch agent metrics
+        const agentsRes = await fetch('/api/analytics/telemetry/agents');
+        const agentsData = await agentsRes.json();
+        const tbody = document.getElementById('agent-table');
+        if (agentsData.agents.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">No agent data yet. Deploy and run an agent to see metrics.</td></tr>';
+        } else {
+            tbody.innerHTML = agentsData.agents.map(a => `
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="py-2 px-3 font-medium">${a.name || a.agent_id.slice(0,8)}</td>
+                    <td class="text-right py-2 px-3">${a.messages}</td>
+                    <td class="text-right py-2 px-3">${a.tokens.toLocaleString()}</td>
+                    <td class="text-right py-2 px-3">${a.avg_response_ms}ms</td>
+                    <td class="text-right py-2 px-3 ${a.errors > 0 ? 'text-red-400' : ''}">${a.errors}</td>
+                    <td class="text-right py-2 px-3 ${a.error_rate_pct > 5 ? 'text-red-400' : 'text-green-400'}">${a.error_rate_pct}%</td>
+                    <td class="text-right py-2 px-3">${a.tool_calls}</td>
+                    <td class="text-center py-2 px-3">
+                        <span class="inline-block w-2 h-2 rounded-full ${a.health?.status === 'healthy' ? 'bg-green-400' : a.health?.status === 'degraded' ? 'bg-yellow-400' : 'bg-red-400'}"></span>
+                        ${a.health?.status || 'unknown'}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Fetch health
+        const healthRes = await fetch('/api/analytics/telemetry/health');
+        const healthData = await healthRes.json();
+        const healthDiv = document.getElementById('health-status');
+        if (healthData.agents.length === 0) {
+            healthDiv.innerHTML = '<p class="text-gray-500">No health data yet.</p>';
+        } else {
+            healthDiv.innerHTML = healthData.agents.map(h => `
+                <div class="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
+                    <div class="flex items-center gap-2">
+                        <span class="inline-block w-3 h-3 rounded-full ${h.status === 'healthy' ? 'bg-green-400' : h.status === 'degraded' ? 'bg-yellow-400' : 'bg-red-400'}"></span>
+                        <span class="font-medium">${h.agent_id.slice(0,8)}</span>
+                    </div>
+                    <div class="text-sm text-gray-400">
+                        ${h.failures} failures / ${h.successes} successes
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Fetch raw metrics
+        const metricsRes = await fetch('/api/analytics/metrics');
+        const metrics = await metricsRes.json();
+        document.getElementById('raw-metrics').textContent = JSON.stringify(metrics, null, 2);
+
+    } catch (e) {
+        console.error('Failed to load analytics:', e);
+    }
+}
+
+// Auto-refresh on load
+refreshData();
+// Refresh every 30 seconds
+setInterval(refreshData, 30000);
+</script>
+{% endblock %}

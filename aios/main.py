@@ -74,6 +74,17 @@ async def lifespan(app: FastAPI):
                         summary["queued"], summary["running"], summary["total_processes"])
     asyncio.create_task(_log_scheduler())
 
+    # Periodic telemetry flush (every 5 minutes)
+    async def _flush_telemetry():
+        while True:
+            await asyncio.sleep(300)
+            try:
+                from aios.core.telemetry import telemetry
+                await telemetry.flush_to_db()
+            except Exception:
+                logger.exception("Telemetry flush failed")
+    asyncio.create_task(_flush_telemetry())
+
     # Periodic DB failover check
     async def _failover_watch():
         while True:
