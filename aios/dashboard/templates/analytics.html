@@ -30,23 +30,23 @@
 
 <!-- Agent Performance Table -->
 <div class="card mb-4">
-    <h2 class="text-lg font-semibold mb-3">Agent Performance</h2>
-    <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Agent Performance</h2>
+    <div class="table-wrap">
+        <table>
             <thead>
-                <tr class="border-b border-gray-700">
-                    <th class="text-left py-2 px-3">Agent</th>
-                    <th class="text-right py-2 px-3">Messages</th>
-                    <th class="text-right py-2 px-3">Tokens</th>
-                    <th class="text-right py-2 px-3">Avg Response</th>
-                    <th class="text-right py-2 px-3">Errors</th>
-                    <th class="text-right py-2 px-3">Error Rate</th>
-                    <th class="text-right py-2 px-3">Tool Calls</th>
-                    <th class="text-center py-2 px-3">Health</th>
+                <tr>
+                    <th>Agent</th>
+                    <th style="text-align:right">Messages</th>
+                    <th style="text-align:right">Tokens</th>
+                    <th style="text-align:right">Avg Response</th>
+                    <th style="text-align:right">Errors</th>
+                    <th style="text-align:right">Error Rate</th>
+                    <th style="text-align:right">Tool Calls</th>
+                    <th style="text-align:center">Health</th>
                 </tr>
             </thead>
             <tbody id="agent-table">
-                <tr><td colspan="8" class="text-center py-4 text-gray-500">Loading...</td></tr>
+                <tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--text-tertiary)">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -54,24 +54,24 @@
 
 <!-- Usage Over Time -->
 <div class="card mb-4">
-    <h2 class="text-lg font-semibold mb-3">Usage Over Time (24h)</h2>
+    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Usage Over Time (24h)</h2>
     <div id="usage-chart" style="height:200px;display:flex;align-items:end;gap:2px;">
-        <p class="text-gray-500">Loading chart...</p>
+        <p style="color:var(--text-tertiary)">Loading chart...</p>
     </div>
 </div>
 
 <!-- Health Status -->
 <div class="card mb-4">
-    <h2 class="text-lg font-semibold mb-3">Agent Health</h2>
-    <div id="health-status" class="grid gap-3">
-        <p class="text-gray-500">Loading...</p>
+    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Agent Health</h2>
+    <div id="health-status" class="flex-col gap-3">
+        <p style="color:var(--text-tertiary)">Loading...</p>
     </div>
 </div>
 
 <!-- Raw Metrics -->
 <details class="card">
-    <summary class="cursor-pointer text-sm font-medium">Raw Metrics</summary>
-    <pre id="raw-metrics" class="mt-2 text-xs overflow-auto max-h-64 bg-gray-900 p-3 rounded"></pre>
+    <summary style="cursor:pointer;font-size:0.8125rem;font-weight:500">Raw Metrics</summary>
+    <pre id="raw-metrics" class="mt-2 font-mono" style="margin-top:0.5rem;font-size:0.6875rem;overflow:auto;max-height:16rem;background:var(--bg-hover);padding:0.75rem;border-radius:var(--radius-sm)"></pre>
 </details>
 
 <script>
@@ -90,19 +90,19 @@ async function refreshData() {
         const agentsData = await agentsRes.json();
         const tbody = document.getElementById('agent-table');
         if (agentsData.agents.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">No agent data yet. Deploy and run an agent to see metrics.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--text-tertiary)">No agent data yet. Deploy and run an agent to see metrics.</td></tr>';
         } else {
             tbody.innerHTML = agentsData.agents.map(a => `
-                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
-                    <td class="py-2 px-3 font-medium">${a.name || a.agent_id.slice(0,8)}</td>
-                    <td class="text-right py-2 px-3">${a.messages}</td>
-                    <td class="text-right py-2 px-3">${a.tokens.toLocaleString()}</td>
-                    <td class="text-right py-2 px-3">${a.avg_response_ms}ms</td>
-                    <td class="text-right py-2 px-3 ${a.errors > 0 ? 'text-red-400' : ''}">${a.errors}</td>
-                    <td class="text-right py-2 px-3 ${a.error_rate_pct > 5 ? 'text-red-400' : 'text-green-400'}">${a.error_rate_pct}%</td>
-                    <td class="text-right py-2 px-3">${a.tool_calls}</td>
-                    <td class="text-center py-2 px-3">
-                        <span class="inline-block w-2 h-2 rounded-full ${a.health?.status === 'healthy' ? 'bg-green-400' : a.health?.status === 'degraded' ? 'bg-yellow-400' : 'bg-red-400'}"></span>
+                <tr style="border-bottom:1px solid var(--border)">
+                    <td style="padding:0.625rem 1rem;font-weight:500">${a.name || a.agent_id.slice(0,8)}</td>
+                    <td style="text-align:right;padding:0.625rem 1rem">${a.messages}</td>
+                    <td style="text-align:right;padding:0.625rem 1rem">${a.tokens.toLocaleString()}</td>
+                    <td style="text-align:right;padding:0.625rem 1rem">${a.avg_response_ms}ms</td>
+                    <td style="text-align:right;padding:0.625rem 1rem;${a.errors > 0 ? 'color:var(--red)' : ''}">${a.errors}</td>
+                    <td style="text-align:right;padding:0.625rem 1rem;${a.error_rate_pct > 5 ? 'color:var(--red)' : 'color:var(--green)'}">${a.error_rate_pct}%</td>
+                    <td style="text-align:right;padding:0.625rem 1rem">${a.tool_calls}</td>
+                    <td style="text-align:center;padding:0.625rem 1rem">
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:99px;${a.health?.status === 'healthy' ? 'background:var(--green)' : a.health?.status === 'degraded' ? 'background:var(--amber)' : 'background:var(--red)'}"></span>
                         ${a.health?.status || 'unknown'}
                     </td>
                 </tr>
@@ -114,15 +114,15 @@ async function refreshData() {
         const healthData = await healthRes.json();
         const healthDiv = document.getElementById('health-status');
         if (healthData.agents.length === 0) {
-            healthDiv.innerHTML = '<p class="text-gray-500">No health data yet.</p>';
+            healthDiv.innerHTML = '<p style="color:var(--text-tertiary)">No health data yet.</p>';
         } else {
             healthDiv.innerHTML = healthData.agents.map(h => `
-                <div class="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
-                    <div class="flex items-center gap-2">
-                        <span class="inline-block w-3 h-3 rounded-full ${h.status === 'healthy' ? 'bg-green-400' : h.status === 'degraded' ? 'bg-yellow-400' : 'bg-red-400'}"></span>
-                        <span class="font-medium">${h.agent_id.slice(0,8)}</span>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem;background:var(--bg-hover);border-radius:var(--radius-sm)">
+                    <div style="display:flex;align-items:center;gap:0.5rem">
+                        <span style="display:inline-block;width:12px;height:12px;border-radius:99px;${h.status === 'healthy' ? 'background:var(--green)' : h.status === 'degraded' ? 'background:var(--amber)' : 'background:var(--red)'}"></span>
+                        <span style="font-weight:500">${h.agent_id.slice(0,8)}</span>
                     </div>
-                    <div class="text-sm text-gray-400">
+                    <div style="font-size:0.8125rem;color:var(--text-secondary)">
                         ${h.failures} failures / ${h.successes} successes
                     </div>
                 </div>

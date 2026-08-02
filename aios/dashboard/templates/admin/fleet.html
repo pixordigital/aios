@@ -92,7 +92,7 @@ function copyDeployCmd() {
             </div>
             <div class="flex-center gap-2">
                 <a href="/dashboard/admin/fleet/{{ inst.id }}" class="btn btn-primary btn-sm">Manage</a>
-                <a href="/dashboard/admin/fleet/{{ inst.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm('Remove {{ inst.name }}?')">Remove</a>
+                <a href="/dashboard/admin/fleet/{{ inst.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm({{ ('Remove ' ~ inst.name ~ '?')|tojson|forceescape }})">Remove</a>
             </div>
         </div>
         {% if inst.extra_data.get('health') %}

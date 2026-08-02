@@ -31,7 +31,7 @@
                 <td style="text-align:right">
                     <a href="/dashboard/admin/orgs/{{ o.org.id }}" class="btn btn-ghost btn-sm">View</a>
                     {% if o.org.is_active %}
-                    <a href="/dashboard/admin/orgs/{{ o.org.id }}/suspend" class="btn btn-ghost btn-sm" style="color:var(--amber)" onclick="return confirm('Suspend {{ o.org.name }}?')">Suspend</a>
+                    <a href="/dashboard/admin/orgs/{{ o.org.id }}/suspend" class="btn btn-ghost btn-sm" style="color:var(--amber)" onclick="return confirm({{ ('Suspend ' ~ o.org.name ~ '?')|tojson|forceescape }})">Suspend</a>
                     {% else %}
                     <a href="/dashboard/admin/orgs/{{ o.org.id }}/unsuspend" class="btn btn-ghost btn-sm" style="color:var(--green)">Unsuspend</a>
                     {% endif %}

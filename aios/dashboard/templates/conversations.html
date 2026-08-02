@@ -7,11 +7,11 @@
 {% if conversations %}
 <div class="flex-col gap-2">
     {% for c in conversations %}
-    <a href="/dashboard/conversations/{{ c.id }}" class="card card-hover" style="display:flex;align-items:center;gap:1rem;text-decoration:none;color:var(--text)">
+    <div class="card card-hover" style="display:flex;align-items:center;gap:1rem;cursor:pointer" onclick="window.location='/dashboard/conversations/{{ c.id }}'" role="button" tabindex="0">
         <div style="width:36px;height:36px;border-radius:var(--radius-sm);background:var(--bg-hover);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-tertiary)">
             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
         </div>
-        <div style="flex:1;min-width:0">
+        <a href="/dashboard/conversations/{{ c.id }}" style="flex:1;min-width:0;text-decoration:none;color:var(--text)">
             <div class="flex-center gap-2" style="flex-wrap:wrap">
                 <span class="text-sm" style="text-transform:capitalize;font-weight:500">{{ c.channel }}</span>
                 {% if c.agent_id or c.team_id %}
@@ -22,14 +22,15 @@
                 <span class="text-xs font-mono" style="color:var(--text-tertiary)">{{ c.id[:16] }}…</span>
                 <span class="text-xs" style="color:var(--text-secondary)">{{ c.created_at.strftime('%b %d') if c.created_at else '' }}</span>
             </div>
-        </div>
-        <div style="text-align:right;flex-shrink:0">
+        </a>
+        <div style="text-align:right;flex-shrink:0" onclick="event.stopPropagation()">
             <div class="badge">{{ c._msg_count }}</div>
             <div style="font-size:0.6rem;color:var(--text-tertiary);margin-top:0.25rem">msgs</div>
             <div style="margin-top:0.375rem">
                 <a href="/dashboard/conversations/{{ c.id }}/delete" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red-subtle);font-size:0.65rem" onclick="return confirm('Delete this conversation and all its messages?')">Delete</a>
             </div>
         </div>
+    </div>
     {% endfor %}
 </div>
 {% else %}
