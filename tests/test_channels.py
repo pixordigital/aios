@@ -114,3 +114,23 @@ class TestChannels:
         assert response.status_code == 200
         data = response.json()
         assert "ok" in data
+
+    async def test_test_channel_requires_auth(self, async_client: AsyncClient):
+        """Unauthenticated channel test must be rejected."""
+        response = await async_client.post(
+            "/api/channels/test",
+            json={"channel_type": "web", "config": {}},
+        )
+        assert response.status_code == 401
+
+    async def test_test_channel_blocks_private_url(self, auth_client: AsyncClient):
+        """Channel test with internal URL must be blocked (SSRF guard)."""
+        response = await auth_client.post(
+            "/api/channels/test",
+            json={
+                "channel_type": "evolution",
+                "config": {"server_url": "http://169.254.169.254", "api_key": "x"},
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["ok"] is False

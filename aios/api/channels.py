@@ -1,5 +1,9 @@
+import logging
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 from aios.channels.manager import manager as channel_mgr
 from aios.core.audit import log_audit
@@ -125,10 +129,25 @@ async def start_channel(
 
 
 @router.post("/test")
-async def test_channel(body: dict = Body(...)):
+async def test_channel(body: dict = Body(...), user=Depends(get_current_user)):
     """Test connection without saving channel. Body: {channel_type, config}"""
     channel_type = body.get("channel_type", "")
     config = body.get("config", {})
+
+    # SSRF guard: reject private/internal URLs in channel config
+    from urllib.parse import urlparse
+    from aios.tools.http_get import _is_private
+    for key in ("server_url", "imap_server", "smtp_server"):
+        url = config.get(key, "")
+        if not url:
+            continue
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url  # normalize for hostname extraction
+        host = urlparse(url).hostname
+        if not host or _is_private(host):
+            logger.warning("Channel test blocked: private URL for %s (%s)", key, host)
+            return {"ok": False, "message": f"{key} must be a public URL"}
+
     from aios.db.models import ChannelConnection as DummyConn
     dummy = DummyConn(channel_type=channel_type, config=config, org_id="test", label="test")
     try:

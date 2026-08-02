@@ -11,8 +11,8 @@ _MAGIC_SIGNATURES = [
     (b"GIF87a", 0, "image/gif", False),
     (b"GIF89a", 0, "image/gif", False),
     (b"RIFF", 0, "image/webp", False, lambda d: d[8:12] == b"WEBP"),
-    (b"<?xml ", 0, "image/svg+xml", False),
-    (b"<svg", 0, "image/svg+xml", False),
+    (b"<?xml ", 0, None, True),  # SVG blocked — XSS vector, no sanitizer yet
+    (b"<svg", 0, None, True),
     (b"%PDF", 0, "application/pdf", False),
     (b"PK\x03\x04", 0, None, True),
     (b"MZ", 0, None, True),

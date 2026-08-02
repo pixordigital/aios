@@ -3,7 +3,7 @@
 import hmac
 import logging
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, Depends, Header, HTTPException, Body
 from sqlalchemy import func, select
 
 from aios.config import settings
@@ -13,6 +13,17 @@ from aios.db.models import Agent, Organization
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+async def require_admin_key(authorization: str = Header(None)):
+    """Require admin master key as Bearer token (used by fleet master server)."""
+    expected = settings.admin_master_key
+    if not expected:
+        raise HTTPException(403, "Admin master key not configured on server")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(403, "Missing admin key")
+    if not hmac.compare_digest(authorization[7:], expected):
+        raise HTTPException(403, "Invalid admin key")
 
 
 @router.post("/register-remote")
@@ -40,7 +51,7 @@ async def register_remote_admin(
 
 
 @router.get("/health")
-async def remote_health():
+async def remote_health(_: None = Depends(require_admin_key)):
     """Health check for master monitoring."""
     async with db_session() as db:
         org_count = (await db.execute(select(func.count(Organization.id)))).scalar() or 0
@@ -54,14 +65,14 @@ async def remote_health():
 
 
 @router.get("/dlq")
-async def get_dlq(limit: int = 50):
+async def get_dlq(limit: int = 50, _: None = Depends(require_admin_key)):
     """Get dead letter queue entries (failed webhook messages)."""
     from aios.core.retry import get_dlq
     return {"entries": get_dlq(limit), "count": len(get_dlq())}
 
 
 @router.post("/dlq/clear")
-async def clear_dlq():
+async def clear_dlq(_: None = Depends(require_admin_key)):
     """Clear dead letter queue."""
     from aios.core.retry import clear_dlq
     clear_dlq()
@@ -69,14 +80,14 @@ async def clear_dlq():
 
 
 @router.get("/health/agents")
-async def agent_health_status():
+async def agent_health_status(_: None = Depends(require_admin_key)):
     """Get health status of all agents."""
     from aios.core.agent_health import health_tracker
     return health_tracker.all_status()
 
 
 @router.post("/health/agents/{agent_id}/reset")
-async def reset_agent_health(agent_id: str):
+async def reset_agent_health(agent_id: str, _: None = Depends(require_admin_key)):
     """Reset agent health status to healthy."""
     from aios.core.agent_health import health_tracker
     health_tracker.reset(agent_id)
@@ -84,8 +95,11 @@ async def reset_agent_health(agent_id: str):
 
 
 @router.post("/fleet/refresh")
-async def fleet_health_refresh():
+async def fleet_health_refresh(key: str = Body(...)):
     """Refresh health status of all remote fleet instances."""
+    expected = settings.admin_master_key
+    if not expected or not hmac.compare_digest(key, expected):
+        raise HTTPException(403, "Invalid master key")
     from aios.db.models import RemoteInstance
     import httpx
 

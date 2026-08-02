@@ -52,3 +52,19 @@ class TestBilling:
         assert "messages_today" in data
         assert "llm_calls_today" in data
         assert "tokens_today" in data
+
+    async def test_create_checkout_requires_auth(self, async_client: AsyncClient):
+        """Unauthenticated checkout creation must be rejected."""
+        response = await async_client.post(
+            "/api/billing/create-checkout",
+            json={"org_id": "test-org-id", "price_id": "price_test"},
+        )
+        assert response.status_code == 401
+
+    async def test_create_portal_requires_auth(self, async_client: AsyncClient):
+        """Unauthenticated portal creation must be rejected."""
+        response = await async_client.post(
+            "/api/billing/create-portal",
+            json={"org_id": "test-org-id"},
+        )
+        assert response.status_code == 401

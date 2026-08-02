@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import func, select
@@ -158,8 +158,13 @@ async def login_page(request: Request, error: str = ""):
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_action(request: Request, email: str = Form(...), password: str = Form(...)):
-    from aios.api.auth import _verify_password
+    from aios.api.auth import _verify_password, _rate_limit
     from sqlalchemy import select
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        await _rate_limit(f"{email.lower().strip()}:{client_ip}")
+    except HTTPException:
+        return await login_page(request, error="Too many login attempts. Try again later.")
     async with db_session() as db:
         result = await db.execute(select(User).where(User.email == email.lower().strip()))
         user = result.scalar_one_or_none()
@@ -200,12 +205,14 @@ async def register_action(
         if existing.scalar_one_or_none():
             return await register_page(request, error="Email already registered")
 
+        # first-ever user gets superadmin — count BEFORE creating the org so two
+        # concurrent registrations can't both read 0 and both become superadmin
+        user_count = (await db.execute(select(func.count(User.id)))).scalar() or 0
+        role = "superadmin" if user_count == 0 else "org_admin"
+
         org = Organization(name=org_name, slug=org_name.lower().replace(" ", "-"))
         db.add(org); await db.flush()
 
-        # first-ever user gets superadmin
-        user_count = (await db.execute(select(func.count(User.id)))).scalar() or 0
-        role = "superadmin" if user_count == 0 else "org_admin"
         user = User(
             email=email.lower().strip(),
             hashed_password=_hash_password(password),
@@ -328,10 +335,11 @@ async def agent_edit_form(request: Request, aid: str):
 
 
 @router.get("/agents/{aid}/clone")
-async def agent_clone(aid: str):
+async def agent_clone(request: Request, aid: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         src = await db.get(Agent, aid)
-        if not src:
+        if not src or src.org_id != org_id:
             return RedirectResponse("/dashboard/agents", status_code=303)
         agent = Agent(
             org_id=src.org_id, name=f"{src.name} (copy)",
@@ -370,7 +378,7 @@ async def agent_save(
         }
         if agent_id:
             agent = await db.get(Agent, agent_id)
-            if agent:
+            if agent and agent.org_id == await _resolve_org_id(request):
                 agent.name = name; agent.agent_type = agent_type
                 agent.system_prompt = system_prompt; agent.llm_config = llm_config
                 agent.tools = tools_list; agent.memory_config = memory_config
@@ -391,20 +399,22 @@ async def agent_save(
 
 
 @router.get("/agents/{aid}/deploy")
-async def agent_deploy(aid: str):
+async def agent_deploy(request: Request, aid: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         agent = await db.get(Agent, aid)
-        if agent:
+        if agent and agent.org_id == org_id:
             agent.status = "active" if agent.status != "active" else "draft"
             await db.commit()
     return RedirectResponse("/dashboard/agents", status_code=303)
 
 
 @router.get("/agents/{aid}/delete")
-async def agent_delete(aid: str):
+async def agent_delete(request: Request, aid: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         agent = await db.get(Agent, aid)
-        if agent:
+        if agent and agent.org_id == org_id:
             await db.delete(agent)
             await db.commit()
     return RedirectResponse("/dashboard/agents", status_code=303)
@@ -487,7 +497,7 @@ async def team_save(
 
         if team_id:
             team = await db.get(Team, team_id)
-            if team:
+            if team and team.org_id == await _resolve_org_id(request):
                 team.name = name; team.routing_strategy = routing_strategy
                 team.orchestrator_agent_id = orchestrator_agent_id or None
                 team.manager_agent_id = manager_agent_id or None
@@ -510,10 +520,11 @@ async def team_save(
 
 
 @router.get("/teams/{tid}/delete")
-async def team_delete(tid: str):
+async def team_delete(request: Request, tid: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         team = await db.get(Team, tid)
-        if team:
+        if team and team.org_id == org_id:
             await db.delete(team); await db.commit()
     return RedirectResponse("/dashboard/teams", status_code=303)
 
@@ -538,10 +549,11 @@ async def conversation_list(request: Request):
 
 
 @router.get("/conversations/{conv_id}/delete")
-async def conversation_delete(conv_id: str):
+async def conversation_delete(request: Request, conv_id: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         conv = await db.get(Conversation, conv_id)
-        if conv:
+        if conv and conv.org_id == org_id:
             # delete associated messages first
             await db.execute(Message.__table__.delete().where(Message.conversation_id == conv.id))
             await db.delete(conv)
@@ -631,7 +643,7 @@ async def channel_save(
     async with db_session() as db:
         if channel_id:
             ch = await db.get(ChannelConnection, channel_id)
-            if ch:
+            if ch and ch.org_id == await _resolve_org_id(request):
                 ch.label = label; ch.channel_type = channel_type; ch.config = config
                 ch.agent_id = agent_id or None; ch.team_id = team_id or None
         else:
@@ -646,19 +658,21 @@ async def channel_save(
 
 
 @router.get("/channels/{cid}/toggle")
-async def channel_toggle(cid: str):
+async def channel_toggle(request: Request, cid: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         ch = await db.get(ChannelConnection, cid)
-        if ch:
+        if ch and ch.org_id == org_id:
             ch.is_active = not ch.is_active; await db.commit()
     return RedirectResponse("/dashboard/channels", status_code=303)
 
 
 @router.get("/channels/{cid}/delete")
-async def channel_delete(cid: str):
+async def channel_delete(request: Request, cid: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         ch = await db.get(ChannelConnection, cid)
-        if ch:
+        if ch and ch.org_id == org_id:
             await db.delete(ch)
             await db.commit()
     return RedirectResponse("/dashboard/channels", status_code=303)
@@ -695,10 +709,11 @@ async def member_invite(request: Request, email: str = Form(...), role: str = Fo
 
 
 @router.get("/members/invite/{inv_id}/revoke")
-async def member_invite_revoke(inv_id: str):
+async def member_invite_revoke(request: Request, inv_id: str):
+    org_id = await _org_filter(request)
     async with db_session() as db:
         inv = await db.get(Invitation, inv_id)
-        if inv:
+        if inv and inv.org_id == org_id:
             await db.delete(inv)
             await db.commit()
     return RedirectResponse("/dashboard/members", status_code=303)
@@ -726,10 +741,15 @@ async def accept_invite(request: Request, token: str = ""):
             return HTMLResponse("<h2>Invalid or expired invite</h2><p>This invite link is no longer valid.</p>")
 
         if getattr(request.state, "user_email", None):
-            # logged in — add to org
+            # logged in — add to org, but only for the invite's own email and
+            # never promote to superadmin (prevents account takeover via link).
             from aios.api.deps import get_dashboard_user
             user = await get_dashboard_user(request)
             if user:
+                if user.email.lower() != inv.email.lower():
+                    return HTMLResponse("<h2>This invite is for a different email</h2><p>Log out and accept it with the invited address.</p>")
+                if inv.role == "superadmin":
+                    return HTMLResponse("<h2>Invalid invite</h2><p>Invites cannot grant superadmin.</p>")
                 user.org_id = inv.org_id
                 user.role = inv.role
                 inv.accepted = True
@@ -998,7 +1018,7 @@ async def sandbox_chat(
         org_id = await _org_filter(request)
         async with db_session() as db:
             agent = await db.get(Agent, agent_id)
-            if not agent:
+            if not agent or agent.org_id != org_id:
                 yield "data: " + json.dumps({"error": "Agent not found"}) + "\n\n"
                 return
 

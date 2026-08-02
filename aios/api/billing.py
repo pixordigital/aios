@@ -12,7 +12,7 @@ from aios.config import PLANS, STRIPE_PRICE_MAP, settings
 from aios.core.limits import get_usage_summary
 from aios.db.backend import db_session, get_db_backend, DatabaseBackend
 from aios.db.models import Organization
-from .deps import get_org_id
+from .deps import get_current_user, get_org_id
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +61,19 @@ async def usage_summary(
 
 
 @router.post("/create-checkout")
-async def create_checkout(body: CheckoutRequest, db: DatabaseBackend = Depends(get_db_backend)):
+async def create_checkout(
+    body: CheckoutRequest,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
     """Create Stripe Checkout Session for org upgrade."""
     if not settings.stripe_secret_key:
         raise HTTPException(400, "Stripe not configured")
+
+    # only allow checkout for your own org
+    if body.org_id != org_id:
+        raise HTTPException(403, "Cannot create checkout for another org")
 
     # verify org exists
     org = await db.get(Organization, body.org_id)
@@ -179,10 +188,16 @@ async def stripe_webhook(request: Request):
 
 
 @router.post("/create-portal")
-async def create_portal(body: PortalRequest):
+async def create_portal(
+    body: PortalRequest,
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
     """Create Stripe Customer Portal session."""
     if not settings.stripe_secret_key:
         raise HTTPException(400, "Stripe not configured")
+    if body.org_id != org_id:
+        raise HTTPException(403, "Cannot create portal for another org")
 
     async with db_session() as db:
         org = await db.get(Organization, body.org_id)
