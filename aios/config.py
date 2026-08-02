@@ -23,13 +23,16 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
     redis_url: str = ""  # e.g. redis://:password@host:6379/0
+    redis_password: str = ""  # used when redis_url lacks embedded creds
     app_data_dir: str = "./data"
-    jwt_secret: str = ""  # must be set in production via env
+
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60  # reduced from 1440 for security
     jwt_refresh_expire_days: int = 30
     log_format: str = "json"  # "text" | "json"
-    https_only: bool = False
+    https_only: bool = True
+
     cors_origins: str = ""  # comma-separated, defaults to app_url in non-debug
     rate_limit_per_minute: int = 60
     password_bcrypt_rounds: int = 12
@@ -41,6 +44,7 @@ class Settings(BaseSettings):
     app_url: str = "http://localhost:8777"
     admin_master_key: str = ""  # set in production — used for fleet management auth
     whatsapp_app_secret: str = ""  # Meta app secret for webhook signature verification
+    whatsapp_verify_token: str = ""  # Meta webhook subscribe verification token
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

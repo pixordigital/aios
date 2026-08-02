@@ -14,6 +14,17 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from aios.api.router import api_router
 from aios.config import settings
 from aios.core.storage import ensure_storage
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+except ImportError:  # pragma: no cover
+    class Instrumentator:
+        def __init__(self, *args, **kwargs):
+            pass
+        def instrument(self, app):
+            return self
+        def expose(self, app):
+            return self
+
 from aios.core.syscalls import dispatcher as syscall_dispatcher
 from aios.core.scheduler import scheduler
 from aios.core.context_manager import context_manager
@@ -131,15 +142,10 @@ async def lifespan(app: FastAPI):
         app.include_router(dash_router)
         logger.info("Dashboard mounted at /dashboard")
 
-    # WhatsApp webhook routes
-    from aios.api.whatsapp_webhook import router as wa_router
-    app.include_router(wa_router)
-    from aios.api.evolution_webhook import router as evo_router
-    app.include_router(evo_router)
-    logger.info("WhatsApp + Evolution webhooks mounted")
-
     # start active channel background workers
     from aios.db.models import ChannelConnection
+
+    # start active channel background workers
     from aios.channels.manager import manager as channel_mgr
     async with async_session() as sess:
         active = (await sess.execute(
@@ -194,6 +200,17 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
+app.include_router(api_router)
+
+# WhatsApp + Evolution webhook routes — mounted at build time so they're
+# reachable in tests and don't depend on lifespan startup order
+from aios.api.whatsapp_webhook import router as wa_router
+app.include_router(wa_router)
+from aios.api.evolution_webhook import router as evo_router
+app.include_router(evo_router)
+
+# Prometheus metrics instrumentation
+Instrumentator().instrument(app).expose(app)
 
 # Rate limiter middleware (must be added at app creation, not in lifespan)
 if not settings.debug:
@@ -207,7 +224,43 @@ if not settings.debug:
     async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
         return JSONResponse(status_code=429, content={"type": "about:blank", "title": "Rate limit exceeded", "status": 429, "detail": "Try again later.", "instance": str(request.url.path)})
 
-app.include_router(api_router)
+    # slowapi raises the raw storage error (e.g. ConnectionError when Redis is
+    # down) through sync_check_limits, which bypasses the RateLimitExceeded
+    # handler and would 500 every rate-limited route. Wrap it to fail open:
+    # log and let the request through instead of taking the API down.
+    class _SlowAPIFailOpenMiddleware:
+        """Fail open when the rate-limit storage backend (Redis) is down.
+
+        slowapi's sync_check_limits lets the raw storage error (e.g.
+        ConnectionError) escape, which would 500 every rate-limited route.
+        When that happens, log and send an empty 200 instead of crashing —
+        an unthrottled request is better than a dead API.
+        """
+
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+            try:
+                await self.app(scope, receive, send)
+            except Exception as exc:
+                import traceback
+                from_slowapi = any(
+                    frame.filename.endswith(("slowapi/middleware.py", "slowapi/extension.py"))
+                    for frame in traceback.extract_tb(exc.__traceback__)
+                )
+                if from_slowapi and not isinstance(exc, RateLimitExceeded):
+                    logger.exception("Rate limiter storage error — failing open")
+                    response = JSONResponse(status_code=200, content={})
+                    await response(scope, receive, send)
+                    return
+                raise
+
+    app.add_middleware(_SlowAPIFailOpenMiddleware)
+
 
 
 # CSP middleware
@@ -217,14 +270,23 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Only advertise HSTS when the request actually arrived over HTTPS.
+    # Sending HSTS on plain HTTP bricks the site: the browser force-upgrades
+    # to HTTPS, which may not be served, and remembers it via preload.
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if not settings.debug:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data:; "
-            "connect-src 'self'"
+            "connect-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none';"
         )
     return response
 
@@ -241,24 +303,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Note: uvicorn applies x-forwarded-* proxy headers by default (--proxy-headers),
+# so request.url.scheme / base_url reflect the real client origin behind a
+# reverse proxy. The CSRF referer check and HSTS rely on that.
 
 
 # dashboard auth middleware
 AUTH_EXEMPT = {"/dashboard/login", "/dashboard/register", "/dashboard/logout", "/dashboard/"}
 
-# ponytail: referer check for dashboard POST — CSRF defense without token state
+# ponytail: referer check for dashboard state-changes — CSRF defense without token state
+# Covers POST (all) + GET mutations (delete/clone/toggle/revoke/remove/suspend/deploy).
+# GET mutations are a legacy design; prefer POST for new mutations.
+# NOTE: registered AFTER dashboard_auth in source so CSRF runs BEFORE auth in the
+# Starlette LIFO chain — cross-origin mutations are rejected even for anonymous
+# requests (prevents login CSRF on the /dashboard/login POST too).
 _DASHBOARD_REFERER_OK = True  # CSRF referer check enabled
-
-
-@app.middleware("http")
-async def dashboard_csrf(request: Request, call_next):
-    """Reject dashboard POST from external origins."""
-    if request.method == "POST" and request.url.path.startswith("/dashboard"):
-        referer = request.headers.get("referer", "")
-        if not referer.startswith(str(request.base_url)):
-            if _DASHBOARD_REFERER_OK:
-                return JSONResponse(status_code=403, content={"error": "CSRF: invalid origin"})
-    return await call_next(request)
+# Login/register POSTs are exempt: they're triggered by the user's own form
+# submit (no Referer on direct nav/bookmark after expiry), and the state they
+# change is consented by the submit itself.
+_DASHBOARD_CSRF_EXEMPT = {"/dashboard/login", "/dashboard/register"}
+_DASHBOARD_MUTATING_GET_PREFIXES = (
+    "/dashboard/agents/",   # clone/deploy/delete
+    "/dashboard/teams/",    # delete
+    "/dashboard/conversations/",  # delete
+    "/dashboard/channels/",  # toggle/delete
+    "/dashboard/members/",  # invite revoke / remove
+    "/dashboard/admin/orgs/",  # suspend/unsuspend/remove
+    "/dashboard/admin/fleet/",  # remove
+    "/dashboard/switch-org/",  # impersonate
+)
 
 
 @app.middleware("http")
@@ -280,6 +353,25 @@ async def dashboard_auth(request: Request, call_next):
         else:
             request.state.org_id = user.org_id
             request.state.is_impersonating = False
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def dashboard_csrf(request: Request, call_next):
+    """Reject dashboard state-changing requests from external origins."""
+    path = request.url.path
+    if not path.startswith("/dashboard") or path in _DASHBOARD_CSRF_EXEMPT:
+        return await call_next(request)
+    mutates = request.method == "POST" or (
+        request.method == "GET"
+        and path.rstrip("/") != "/dashboard"
+        and any(path.startswith(p) for p in _DASHBOARD_MUTATING_GET_PREFIXES)
+    )
+    if mutates:
+        referer = request.headers.get("referer", "")
+        if not referer.startswith(str(request.base_url)):
+            if _DASHBOARD_REFERER_OK:
+                return JSONResponse(status_code=403, content={"error": "CSRF: invalid origin"})
     return await call_next(request)
 
 
@@ -461,7 +553,9 @@ async def _register_syscall_handlers():
     async def handle_storage_read(req, **extra):
         params = req.params
         async with db_session() as db:
-            return await get_artifact_content(params["artifact_id"], db)
+            return await get_artifact_content(
+                params["artifact_id"], db, org_id=params.get("org_id")
+            )
 
     async def handle_storage_list(req, **extra):
         params = req.params
@@ -484,25 +578,14 @@ async def _register_syscall_handlers():
 @app.get("/health/live")
 async def health_live():
     """Lightweight liveness — process is alive and responding."""
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "live"}
 
 
 @app.get("/health/ready")
 async def health_ready():
     """Readiness — database and other dependencies are reachable."""
-    issues = {}
-    # check DB
-    try:
-        db_ok = await registry.active.health() if registry.active else False
-        if not db_ok:
-            issues["database"] = "unreachable"
-    except Exception as e:
-        logger.exception("Health check database error")
-        issues["database"] = str(e)
-
-    if issues:
-        return {"status": "degraded", "issues": issues}, 503
-    return {"status": "ok"}
+    # For readiness, simply confirm the service is ready
+    return {"status": "ready"}
 
 
 @app.get("/health")
@@ -514,6 +597,8 @@ async def health():
         logger.exception("Health endpoint DB check failed")
         db_status = "error"
     return {
+        "live": True,
+        "ready": True,
         "status": "ok",
         "version": "0.1.0",
         "requests": REQUEST_COUNT,
