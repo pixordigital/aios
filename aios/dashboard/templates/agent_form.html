@@ -102,57 +102,6 @@
                         </div>
                         <p id="model-provider" style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem"></p>
                     </div>
-
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem">
-                    <div class="model-search-wrap" style="position:relative">
-                        <label>Model</label>
-                        <input type="text" id="model-search" name="model" autocomplete="off"
-                               value="{{ agent.llm_config.get('model', 'openai/gpt-4o') if agent and agent.llm_config else 'openai/gpt-4o' }}"
-                               oninput="filterModels(this);updateCost(this.value)"
-                               onfocus="document.getElementById('model-dropdown').classList.add('open')"
-                               onblur="setTimeout(function(){document.getElementById('model-dropdown').classList.remove('open')}, 200)"
-                               class="input input-mono" placeholder="Search models…">
-                        <div id="model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;margin-top:2px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:240px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
-                            {% set models = [
-                                'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4.1', 'openai/gpt-4.1-mini', 'openai/gpt-4.1-nano',
-                                'openai/o3', 'openai/o3-mini', 'openai/o4-mini', 'openai/o4',
-                                'openai/gpt-5', 'openai/gpt-5-mini', 'openai/o5', 'openai/o5-mini',
-                                'openai/gpt-5.1-flash', 'openai/gpt-5.1-pro',
-                                'anthropic/claude-sonnet-4-20250514', 'anthropic/claude-5-opus-20250714',
-                                'anthropic/claude-4.5-sonnet', 'anthropic/claude-3.5-sonnet', 'anthropic/claude-3-haiku',
-                                'anthropic/claude-opus-4-20250514', 'anthropic/claude-sonnet-4.6-20250715',
-                                'anthropic/claude-fable-5',
-                                'google/gemini-2.5-pro', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite',
-                                'google/gemini-3-pro-2026-05', 'google/gemini-3-flash-2026-05',
-                                'google/gemma-4-27b-it', 'google/gemma-4-9b-it',
-                                'meta-llama/llama-4-maverick', 'meta-llama/llama-4-scout',
-                                'meta-llama/llama-5-70b', 'meta-llama/llama-5-405b',
-                                'mistralai/mistral-large-3', 'mistralai/mistral-3-small', 'mistralai/codestral-2501',
-                                'deepseek/deepseek-v4', 'deepseek/deepseek-v4-flash', 'deepseek/deepseek-v4-pro',
-                                'deepseek/deepseek-v5', 'deepseek/deepseek-r2',
-                                'cohere/command-x1-05-2026', 'cohere/command-a-03-2025', 'cohere/command-r7-12-2024',
-                                'x-ai/grok-4', 'x-ai/grok-4-mini', 'x-ai/grok-3',
-                                'qwen/qwen-3-235b-a22b', 'qwen/qwen-3-30b-a3b', 'qwen/qwen-max',
-                                'minimax/minimax-m4-2026', 'minimax/minimax-m3-0724',
-                                'moonshot/kimi-3', 'moonshot/kimi-k3',
-                                'perplexity/sonar-deep-research', 'perplexity/sonar-pro',
-                                'nvidia/nemotron-5-120b', 'nvidia/nemotron-4-340b',
-                                'ai21/jamba-1.6-large', 'ai21/jamba-1.6-mini',
-                                'databricks/dbrx-2', 'databricks/dbrx-instruct',
-                                'microsoft/phi-4', 'microsoft/phi-4-mini',
-                                'amazon/nova-pro-v1', 'amazon/nova-lite-v1',
-                                'upstage/solar-pro-2', 'ibm/granite-3.2-20b',
-                                'openai-direct/gpt-4o', 'openai-direct/gpt-4o-mini',
-                                'anthropic-direct/claude-sonnet-4-20250514', 'anthropic-direct/claude-3.5-haiku',
-                                'ollama/llama3', 'ollama/mistral', 'ollama/qwen2.5',
-                            ] %}
-                            {% for m in models %}
-                            <div class="model-option" data-model="{{ m }}" onclick="selectModel('{{ m }}');updateCost('{{ m }}')" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'"
-                                 style="padding:0.375rem 0.625rem;font-size:0.75rem;font-family:'JetBrains Mono',monospace;cursor:pointer;color:var(--text-secondary);border-bottom:1px solid var(--border);transition:background 0.06s">{{ m }}</div>
-                            {% endfor %}
-                        </div>
-                        <p id="model-provider" style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem"></p>
-                    </div>
                     <div>
                         <label>Temperature</label>
                         <input type="number" name="temperature" step="0.1" min="0" max="2" class="input"
