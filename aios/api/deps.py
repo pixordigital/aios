@@ -17,6 +17,7 @@ def _constant_time_compare(a: str, b: str) -> bool:
 
 
 async def get_current_user(
+    request: FastAPIRequest = None,
     db: DatabaseBackend = Depends(get_db_backend),
     authorization: str = Header(None),
     x_api_key: str = Header(None),
@@ -44,6 +45,13 @@ async def get_current_user(
         for user in result.scalars():
             if user.api_key_hash and _constant_time_compare(user.api_key_hash, x_api_key):
                 return user
+
+    # Fall back to dashboard cookie so the browser's fetch() calls to /api/*
+    # work without embedding the JWT in client-side JS.
+    if request is not None:
+        user = await get_dashboard_user(request)
+        if user:
+            return user
 
     raise HTTPException(401, "Not authenticated")
 
@@ -82,5 +90,8 @@ async def get_dashboard_user(request: FastAPIRequest) -> User | None:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError:
         return None
-    async with async_session() as db:
+    # Route through FastAPI DI so tests' dependency_overrides apply
+    resolver = request.app.dependency_overrides.get(get_db_backend, get_db_backend)
+    async for db in resolver():
         return await db.get(User, payload["sub"])
+    return None

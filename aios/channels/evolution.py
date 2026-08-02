@@ -27,6 +27,14 @@ class EvolutionChannel(Channel):
             logger.warning("Evolution API not configured: instance=%s", instance)
             return None
 
+        # SSRF guard: never send to private/internal hosts
+        from urllib.parse import urlparse
+        from aios.tools.http_get import _is_private
+        host = urlparse(base_url).hostname
+        if not host or _is_private(host):
+            logger.warning("Evolution API send blocked: private server_url (%s)", host)
+            return None
+
         # Get recipient number from message extra_data
         to = message.extra_data.get("from_number") if message.extra_data else ""
         if not to:
@@ -72,6 +80,11 @@ class EvolutionChannel(Channel):
         instance = self._config.get("instance", "")
         if not base_url or not api_key:
             return {"ok": False, "message": "Missing server_url or api_key"}
+        from urllib.parse import urlparse
+        from aios.tools.http_get import _is_private
+        host = urlparse(base_url).hostname
+        if not host or _is_private(host):
+            return {"ok": False, "message": "server_url must be a public URL"}
         try:
             import httpx
             async with httpx.AsyncClient(timeout=10) as client:

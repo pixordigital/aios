@@ -22,15 +22,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 
-WHATSAPP_VERIFY_TOKEN = "aios_verify_2024"
-
-
 @router.get("/webhook")
 async def verify_webhook(request: Request):
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-    if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN and challenge:
+    if mode == "subscribe" and token == settings.whatsapp_verify_token and challenge:
         return int(challenge)
     raise HTTPException(403, "Verification failed")
 
@@ -40,16 +37,21 @@ async def inbound_webhook(request: Request):
     """Receive WhatsApp message → dispatch to ARQ worker for async processing."""
     body = await request.json()
 
-    # verify signature
+    # verify signature — fail closed: reject missing signature or unconfigured secret
     sig = request.headers.get("x-hub-signature-256", "")
-    if sig and settings.whatsapp_app_secret:
-        raw_body = await request.body()
-        expected = "sha256=" + hmac.new(
-            settings.whatsapp_app_secret.encode(), raw_body, hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(sig, expected):
-            logger.warning("WhatsApp webhook signature mismatch")
-            return {"status": "ignored"}
+    if not settings.whatsapp_app_secret:
+        logger.error("WhatsApp webhook received but AIOS_WHATSAPP_APP_SECRET not configured — rejecting")
+        return {"status": "ignored"}
+    if not sig:
+        logger.warning("WhatsApp webhook missing signature")
+        return {"status": "ignored"}
+    raw_body = await request.body()
+    expected = "sha256=" + hmac.new(
+        settings.whatsapp_app_secret.encode(), raw_body, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        logger.warning("WhatsApp webhook signature mismatch")
+        return {"status": "ignored"}
 
     # extract message
     entry = (body.get("entry") or [{}])[0]

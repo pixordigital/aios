@@ -31,13 +31,18 @@ async def evolution_webhook(instance: str, request: Request):
     """Receive incoming WhatsApp message from Evolution API → dispatch to worker."""
     body = await request.json()
 
-    # verify signature if configured
+    # verify signature — fail closed: reject missing signature or unknown instance key
     sig = request.headers.get("x-evolution-signature", "")
-    if sig:
-        instance_key = _get_evolution_api_key(instance)
-        if instance_key and not _verify_evolution_sig(sig, body, instance_key):
-            logger.warning("Evolution webhook signature mismatch for instance %s", instance)
-            return {"status": "ignored"}
+    if not sig:
+        logger.warning("Evolution webhook missing signature for instance %s", instance)
+        return {"status": "ignored"}
+    instance_key = await _get_evolution_api_key(instance)
+    if not instance_key:
+        logger.warning("Evolution webhook: no API key for instance %s — rejecting", instance)
+        return {"status": "ignored"}
+    if not _verify_evolution_sig(sig, body, instance_key):
+        logger.warning("Evolution webhook signature mismatch for instance %s", instance)
+        return {"status": "ignored"}
 
     # only handle new messages
     event = body.get("event", "")
@@ -97,30 +102,22 @@ async def evolution_webhook(instance: str, request: Request):
     return {"status": "ok"}
 
 
-def _get_evolution_api_key(instance_name: str) -> str:
+async def _get_evolution_api_key(instance_name: str) -> str:
     """Look up API key for Evolution instance from channel configs."""
     from aios.db.engine import async_session
     from sqlalchemy import select as sql_select
-    import asyncio
     try:
-        loop = asyncio.new_event_loop()
-        conn = loop.run_until_complete(async_session())
-        try:
-            result = loop.run_until_complete(
-                conn.execute(
-                    sql_select(ChannelConnection.config).where(
-                        ChannelConnection.channel_type == "evolution",
-                        ChannelConnection.is_active == True,
-                    )
+        async with async_session() as conn:
+            result = await conn.execute(
+                sql_select(ChannelConnection.config).where(
+                    ChannelConnection.channel_type == "evolution",
+                    ChannelConnection.is_active == True,
                 )
             )
             for row in result.scalars():
                 if row.get("instance") == instance_name:
                     return row.get("api_key", "")
             return ""
-        finally:
-            loop.run_until_complete(conn.close())
-            loop.close()
     except Exception:
         logger.debug("Could not fetch Evolution API key for signature check")
         return ""

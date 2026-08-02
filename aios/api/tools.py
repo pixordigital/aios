@@ -5,7 +5,7 @@ from aios.core.tools import ToolEngine
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Tool
 from aios.schemas import BaseModel
-from .deps import get_org_id
+from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
@@ -67,7 +67,7 @@ async def list_tools(
 
 
 @router.get("/audit/calls")
-async def tool_audit_calls():
+async def tool_audit_calls(user=Depends(get_current_user)):
     """Get tool call audit counters (in-memory, since app start)."""
     return ToolEngine.audit_summary()
 

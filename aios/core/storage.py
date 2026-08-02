@@ -183,12 +183,20 @@ async def save_artifact(
     }
 
 
-async def get_artifact_content(artifact_id: str, db: DatabaseBackend) -> bytes | None:
-    """Read artifact file content from backend."""
+async def get_artifact_content(
+    artifact_id: str, db: DatabaseBackend, org_id: str | None = None
+) -> bytes | None:
+    """Read artifact file content from backend.
+
+    org_id enforced when provided — callers at a trust boundary (syscalls,
+    tools) must pass it to prevent cross-org artifact reads.
+    """
     from aios.db.models import Artifact
 
     art = await db.get(Artifact, artifact_id)
     if not art:
+        return None
+    if org_id is not None and art.org_id != org_id:
         return None
     return await backend().read(art.storage_path)
 

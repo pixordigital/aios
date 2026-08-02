@@ -7,7 +7,7 @@ from aios.schemas import BaseModel
 from aios.core.cache import cache
 from aios.core.tracing import get_trace, METRICS
 from aios.core.agent_health import health_tracker
-from .deps import get_org_id
+from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -47,13 +47,13 @@ async def overview(
 
 
 @router.get("/trace/{trace_id}")
-async def get_trace_api(trace_id: str):
+async def get_trace_api(trace_id: str, user=Depends(get_current_user)):
     """Return all spans for a given trace ID."""
     return {"trace_id": trace_id, "spans": get_trace(trace_id)}
 
 
 @router.get("/metrics")
-async def get_metrics():
+async def get_metrics(user=Depends(get_current_user)):
     """Return in-memory metrics counters."""
     from aios.core.tools import ToolEngine
     return {
@@ -136,7 +136,7 @@ async def telemetry_health(
 
 
 @router.post("/telemetry/flush")
-async def telemetry_flush():
+async def telemetry_flush(user=Depends(get_current_user)):
     """Manually flush telemetry metrics to DB."""
     from aios.core.telemetry import telemetry
     await telemetry.flush_to_db()
