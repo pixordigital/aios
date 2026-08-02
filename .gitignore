@@ -10,6 +10,11 @@ venv/
 
 # Data
 data/
+tests/test.db
+
+# Scratch / local tooling
+tmp/
+.claude/
 
 # IDE
 .vscode/

@@ -9,34 +9,50 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from aios.config import settings
-from aios.db.engine import Base, get_db
+
+
+# Shared file-backed SQLite for tests. Set BEFORE importing engine/main: those
+# modules build their engine/limiter from settings at import time, and .env points
+# at docker-network services (supabase-db, redis) unreachable in CI/sandbox.
+# File (not :memory:) so the global engine used by dashboard db_session() paths
+# and the per-test session see the same data.
+TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test.db")
+TEST_DATABASE_URL = f"sqlite+aiosqlite:///{TEST_DB_PATH}"
+settings.jwt_secret = "test-secret"
+settings.debug = True
+settings.database_url = TEST_DATABASE_URL
+settings.redis_url = ""
+settings.storage_backend = "local"
+
+from aios.db.engine import Base, async_session, get_db, engine
 from aios.db.models import Organization, User
 from aios.main import app
 
 
-# Use in-memory SQLite for tests
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-settings.jwt_secret = "test-secret"
-settings.debug = True
+@pytest_asyncio.fixture(loop_scope="function", autouse=True)
+async def _fresh_db():
+    """Reset the shared test DB before each test."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest_asyncio.fixture(loop_scope="function")
 async def test_engine():
-    """Create test database engine."""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Global engine — same DB as dashboard db_session() paths."""
     yield engine
-    await engine.dispose()
+    # no dispose: module-level engine owned by app
 
 
 @pytest_asyncio.fixture(loop_scope="function")
 async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create test database session."""
-    async_session = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    """Create test database session on the shared engine."""
     async with async_session() as session:
         yield session
 
@@ -58,6 +74,7 @@ async def test_db_session(test_session: AsyncSession) -> AsyncGenerator[AsyncSes
 
     app.dependency_overrides[get_db] = _get_db
     app.dependency_overrides[get_db_backend] = _get_db_backend
+    # Auth overrides removed; using real authentication flow
     yield test_session
     app.dependency_overrides.clear()
 

@@ -13,13 +13,18 @@ def _is_sqlite() -> bool:
     return "sqlite" in settings.database_url
 
 
+# postgres gets a real pool; sqlite doesn't accept pool_size/max_overflow kwargs,
+# so only pass them for postgres.
+_pool_kwargs = (
+    {"pool_size": settings.db_pool_size, "max_overflow": settings.db_max_overflow}
+    if _is_postgres()
+    else {}
+)
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     pool_pre_ping=True,
-    pool_size=settings.db_pool_size if _is_postgres() else None,
-    max_overflow=settings.db_max_overflow if _is_postgres() else None,
-    connect_args={} if not _is_postgres() else {},
+    **_pool_kwargs,
 )
 
 
