@@ -195,8 +195,8 @@ app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="AIOS — plataforma de orquestração de agentes de IA multi-tenant com cobrança, canais e observabilidade.",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
@@ -432,6 +432,15 @@ async def landing_page():
     if index.exists():
         return HTMLResponse(content=index.read_text())
     return HTMLResponse(content="<h1>AIOS</h1><p><a href='/dashboard'>Dashboard</a></p>", status_code=200)
+
+
+@app.get("/docs", response_class=HTMLResponse)
+async def docs_page():
+    """Serve custom PT-BR documentation page."""
+    index = _WEBSITE_DIR / "docs.html"
+    if index.exists():
+        return HTMLResponse(content=index.read_text())
+    return HTMLResponse(content="<h1>Documentação</h1><p><a href='/api/docs'>Swagger UI</a></p>", status_code=200)
 
 
 @app.get("/legal/terms", response_class=HTMLResponse)
