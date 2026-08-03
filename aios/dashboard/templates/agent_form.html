@@ -20,7 +20,7 @@
                         <label for="agent_type">Tipo</label>
                         <select id="agent_type" name="agent_type" class="input" onchange="updateTypeHint(this.value)">
                             {% for t in agent_types %}
-                            <option value="{{ t }}" {% if agent and agent.agent_type == t %}selected{% endif %}>{{ t | replace('_', ' ') | title }}</option>
+                            <option value="{{ t }}" {% if agent and agent.agent_type == t %}selected{% endif %}>{{ agent_type_label(t) }}</option>
                             {% endfor %}
                         </select>
                     </div>

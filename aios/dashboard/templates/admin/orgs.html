@@ -16,7 +16,7 @@
             <tr>
                 <td style="font-weight:500">{{ o.org.name }}</td>
                 <td><span class="text-sm text-tertiary">{{ o.org.slug }}</span></td>
-                <td><span class="badge" style="border-color:var(--accent-border);color:var(--accent)">{{ o.org.extra_data.get('plan', 'free') }}</span></td>
+                <td><span class="badge" style="border-color:var(--accent-border);color:var(--accent)">{{ plan_label(o.org.extra_data.get('plan', 'free')) }}</span></td>
                 <td><span class="badge">{{ o.user_count }}</span></td>
                 <td><span class="badge">{{ o.agent_count }}</span></td>
                 <td><span class="badge">{{ o.usage.messages_today }}</span></td>

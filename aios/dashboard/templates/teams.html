@@ -19,7 +19,7 @@
         <div class="flex-between mb-2">
             <div class="flex-center gap-2">
                 <a href="/dashboard/teams/{{ t.id }}/edit" style="color:var(--text);text-decoration:none;font-weight:600;font-size:0.9375rem">{{ t.name }}</a>
-                <span class="badge" style="color:var(--text-secondary);font-size:0.625rem;background:var(--bg-hover)">{{ t.routing_strategy }}</span>
+                <span class="badge" style="color:var(--text-secondary);font-size:0.625rem;background:var(--bg-hover)">{{ strategy_label(t.routing_strategy) }}</span>
                 {% if compat.score >= 80 %}
                 <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem">Compatibilidade {{ compat.score }}%</span>
                 {% elif compat.score >= 50 %}
@@ -39,7 +39,7 @@
             <div class="flex-center gap-2" style="font-size:0.75rem">
                 <span style="color:var(--accent);font-weight:500">Orquestrador:</span>
                 <span>{{ orch.name }}</span>
-                <span class="text-xs text-tertiary">({{ orch.agent_type }})</span>
+                <span class="text-xs text-tertiary">({{ agent_type_label(orch.agent_type) }})</span>
             </div>
             {% else %}
             <div class="flex-center gap-1" style="font-size:0.75rem;color:var(--red)">
@@ -53,14 +53,14 @@
             <div class="flex-center gap-2" style="font-size:0.75rem">
                 <span style="color:var(--text-secondary);font-weight:500">Gerente:</span>
                 <span>{{ mgr.name }}</span>
-                <span class="text-xs text-tertiary">({{ mgr.agent_type }})</span>
+                <span class="text-xs text-tertiary">({{ agent_type_label(mgr.agent_type) }})</span>
             </div>
             {% endif %}
             <div class="flex-center gap-2" style="flex-wrap:wrap">
                 {% for a in members %}
                 <span class="badge" style="background:var(--bg-hover);border-color:var(--border);font-size:0.6875rem;opacity:{{ '1' if a.status == 'active' else '0.5' }}">
                     {{ a.name }}
-                    {% if a.status != 'active' %}<span class="text-xs" style="color:var(--amber)">({{ a.status }})</span>{% endif %}
+                    {% if a.status != 'active' %}<span class="text-xs" style="color:var(--amber)">({{ status_label(a.status) }})</span>{% endif %}
                 </span>
                 {% endfor %}
                 <span class="text-xs text-tertiary">{{ active_count }}/{{ members|length }} ativos</span>

@@ -26,7 +26,7 @@
                         <label>Estratégia de roteamento</label>
                         <select name="routing_strategy" class="input">
                             {% for s in strategies %}
-                            <option value="{{ s }}" {% if team and team.routing_strategy == s %}selected{% endif %}>{{ s | replace('_', ' ') | title }}</option>
+                            <option value="{{ s }}" {% if team and team.routing_strategy == s %}selected{% endif %}>{{ strategy_label(s) }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -45,11 +45,11 @@
                         <option value="">— Selecione o orquestrador —</option>
                         {% for a in agents %}
                         <option value="{{ a.id }}" {% if team and team.orchestrator_agent_id == a.id %}selected{% endif %}>
-                            {{ a.name }} ({{ a.agent_type | replace('_', ' ') }}) — {{ a.status }}
+                            {{ a.name }} ({{ agent_type_label(a.agent_type) }}) — {{ status_label(a.status) }}
                         </option>
                         {% endfor %}
                     </select>
-                    <a href="/dashboard/agents/new" class="btn btn-primary btn-sm" style="white-space:nowrap">New</a>
+                    <a href="/dashboard/agents/new" class="btn btn-primary btn-sm" style="white-space:nowrap">Novo</a>
                 </div>
             </div>
 
@@ -65,11 +65,11 @@
                         <option value="">— Sem gerente —</option>
                         {% for a in agents %}
                         <option value="{{ a.id }}" {% if team and team.manager_agent_id == a.id %}selected{% endif %}>
-                            {{ a.name }} ({{ a.agent_type | replace('_', ' ') }}) — {{ a.status }}
+                            {{ a.name }} ({{ agent_type_label(a.agent_type) }}) — {{ status_label(a.status) }}
                         </option>
                         {% endfor %}
                     </select>
-                    <a href="/dashboard/agents/new" class="btn btn-ghost btn-sm">New</a>
+                    <a href="/dashboard/agents/new" class="btn btn-ghost btn-sm">Novo</a>
                 </div>
             </div>
 
@@ -83,8 +83,8 @@
                         <div style="flex:1">
                             <div style="font-weight:500;font-size:0.8125rem">{{ a.name }}</div>
                             <div class="flex-center gap-2">
-                                <span class="text-xs text-tertiary capitalize">{{ a.agent_type | replace('_', ' ') }}</span>
-                                <span class="text-xs" style="color:{{ 'var(--green)' if a.status == 'active' else 'var(--text-tertiary)' }}">{{ a.status }}</span>
+                                <span class="text-xs text-tertiary capitalize">{{ agent_type_label(a.agent_type) }}</span>
+                                <span class="text-xs" style="color:{{ 'var(--green)' if a.status == 'active' else 'var(--text-tertiary)' }}">{{ status_label(a.status) }}</span>
                             </div>
                         </div>
                     </label>
@@ -129,10 +129,10 @@
             <div class="card">
                 <h2 class="mb-2">Guia de estratégias</h2>
                 <div class="flex-col gap-2">
-                    <div><strong style="font-size:0.75rem">Supervisor</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">O orquestrador delega tarefas</p></div>
-                    <div><strong style="font-size:0.75rem">Round Robin</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Alterna entre os agentes igualmente</p></div>
-                    <div><strong style="font-size:0.75rem">Broadcast</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Todos respondem, o melhor é escolhido</p></div>
-                    <div><strong style="font-size:0.75rem">Semântica</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Roteamento por conteúdo (precisa de banco vetorial)</p></div>
+                    <div><strong style="font-size:0.75rem">{{ strategy_label('supervisor') }}</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">O orquestrador delega tarefas</p></div>
+                    <div><strong style="font-size:0.75rem">{{ strategy_label('round_robin') }}</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Alterna entre os agentes igualmente</p></div>
+                    <div><strong style="font-size:0.75rem">{{ strategy_label('broadcast') }}</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Todos respondem, o melhor é escolhido</p></div>
+                    <div><strong style="font-size:0.75rem">{{ strategy_label('semantic') }}</strong><p class="text-xs text-tertiary" style="margin:0.125rem 0 0">Roteamento por conteúdo (precisa de banco vetorial)</p></div>
                 </div>
             </div>
 
