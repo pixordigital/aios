@@ -194,7 +194,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
-    description="AIOS — multi-tenant AI agent orchestration platform with billing, channels, and observability.",
+    description="AIOS — plataforma de orquestração de agentes de IA multi-tenant com cobrança, canais e observabilidade.",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
