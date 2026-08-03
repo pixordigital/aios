@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentação — AIOS</title>
+    <meta name="description" content="Documentação da API do AIOS: como criar agentes, conectar canais e implantar seu sistema de agentes de IA.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --surface: #111111;
+            --surface-2: #161616;
+            --border: #1f1f1f;
+            --border-hover: #2a2a2a;
+            --cyan: #00e5a0;
+            --purple: #a78bfa;
+            --amber: #fbbf24;
+            --text: #e5e5e5;
+            --text-dim: #737373;
+            --text-muted: #525252;
+            --red: #ef4444;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* Nav */
+        nav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            background: rgba(10,10,10,0.85); backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+        }
+        nav .inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+        .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); }
+        .logo-mark { width: 28px; height: 28px; background: var(--cyan); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+        .logo-mark span { color: var(--bg); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; }
+        .logo-text { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
+        nav .links { display: flex; gap: 32px; }
+        nav .links a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
+        nav .links a:hover { color: var(--text); }
+        .btn-primary { background: var(--cyan); color: var(--bg); font-weight: 600; font-size: 14px; padding: 8px 20px; border-radius: 8px; text-decoration: none; transition: all 0.15s; border: none; cursor: pointer; }
+        .btn-primary:hover { box-shadow: 0 0 20px rgba(0,229,160,0.3); }
+
+        /* Layout */
+        .wrap { max-width: 1000px; margin: 0 auto; padding: 96px 24px 64px; }
+        .hero { margin-bottom: 48px; }
+        .hero h1 { font-size: clamp(32px, 4vw, 48px); font-weight: 700; letter-spacing: -0.02em; margin-bottom: 12px; }
+        .hero h1 .accent { color: var(--cyan); }
+        .hero p { font-size: 16px; color: var(--text-dim); max-width: 560px; }
+
+        .section { margin-bottom: 48px; }
+        .section-label { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px; }
+        .section h2 { font-size: 22px; font-weight: 700; margin-bottom: 16px; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 16px; }
+        .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+        .card p { font-size: 14px; color: var(--text-dim); }
+        .card p:not(:last-child) { margin-bottom: 8px; }
+        code {
+            font-family: 'JetBrains Mono', monospace; font-size: 13px;
+            background: var(--surface-2); border: 1px solid var(--border);
+            padding: 2px 6px; border-radius: 4px; color: var(--cyan);
+        }
+        pre {
+            font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7;
+            background: var(--surface-2); border: 1px solid var(--border);
+            border-radius: 8px; padding: 16px; overflow-x: auto; margin: 12px 0;
+        }
+        pre code { background: none; border: none; padding: 0; color: var(--text); }
+        .method { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+        .method.get { background: rgba(0,229,160,0.15); color: var(--cyan); }
+        .method.post { background: rgba(167,139,250,0.15); color: var(--purple); }
+        .method.put { background: rgba(251,191,36,0.15); color: var(--amber); }
+        .endpoint { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); }
+        .tag { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); margin: 0 4px 4px 0; }
+        a { color: var(--cyan); }
+        ul { list-style: none; }
+        .card ul li { font-size: 14px; color: var(--text-dim); padding: 4px 0; }
+        .card ul li::before { content: '› '; color: var(--cyan); }
+
+        /* Footer */
+        footer { border-top: 1px solid var(--border); padding: 32px 24px; }
+        footer .inner { max-width: 1000px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--text-muted); }
+        footer a { color: var(--text-dim); text-decoration: none; }
+        footer a:hover { color: var(--text); }
+
+        @media (max-width: 600px) {
+            nav .links { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="inner">
+        <a href="/" class="logo">
+            <div class="logo-mark"><span>A</span></div>
+            <span class="logo-text">AIOS</span>
+        </a>
+        <div class="links">
+            <a href="/#features">Recursos</a>
+            <a href="/#pricing">Planos</a>
+            <a href="/docs">Documentação</a>
+        </div>
+        <a href="/dashboard/login" class="btn-primary">Entrar</a>
+    </div>
+</nav>
+
+<main class="wrap">
+    <div class="hero">
+        <div class="section-label">Documentação da API</div>
+        <h1>Referência da API<br><span class="accent">do AIOS</span></h1>
+        <p>Implante, gerencie e governe agentes de IA via API REST. Abaixo, os endpoints principais. Para uma referência interativa completa, acesse o <a href="/api/docs">Swagger UI</a>.</p>
+    </div>
+
+    <div class="section">
+        <div class="section-label">01 / Autenticação</div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/auth/register</span></h3>
+            <p>Cria uma nova conta de usuário. Retorna um token de acesso.</p>
+            <pre><code>{ "email": "voce@exemplo.com", "password": "senha-forte" }</code></pre>
+        </div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/auth/login</span></h3>
+            <p>Autentica com e-mail e senha. Retorna um token para usar nas requisições autenticadas.</p>
+        </div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/api/auth/me</span></h3>
+            <p>Retorna o usuário e a organização autenticados.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">02 / Agentes</div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/api/agents</span></h3>
+            <p>Lista todos os agentes da sua organização.</p>
+        </div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/agents</span></h3>
+            <p>Cria um novo agente. Tipos disponíveis: <span class="tag">sdr</span><span class="tag">closer</span><span class="tag">support</span><span class="tag">orchestrator</span><span class="tag">custom</span></p>
+            <pre><code>{ "name": "Bot de Suporte", "agent_type": "support", "model": "gpt-4o", "system_prompt": "Você ajuda clientes..." }</code></pre>
+        </div>
+        <div class="card">
+            <h3><span class="method put">PUT</span><span class="endpoint">/api/agents/{id}</span></h3>
+            <p>Atualiza um agente existente. Você pode trocar o modelo, o prompt ou as ferramentas sem reimplantar.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">03 / Canais</div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/api/channels</span></h3>
+            <p>Lista os canais conectados da organização.</p>
+        </div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/channels</span></h3>
+            <p>Conecta um novo canal. Tipos: <span class="tag">web</span><span class="tag">whatsapp</span><span class="tag">evolution</span><span class="tag">slack</span><span class="tag">telegram</span><span class="tag">discord</span><span class="tag">email</span></p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">04 / Conversas</div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/api/conversations</span></h3>
+            <p>Lista as conversas com histórico, mensagens e agente responsável.</p>
+        </div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/conversations/{id}/send</span></h3>
+            <p>Envia uma mensagem em nome do agente dentro de uma conversa.</p>
+            <pre><code>{ "message": "Olá! Como posso ajudar?" }</code></pre>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">05 / Equipes</div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/teams</span></h3>
+            <p>Cria uma equipe com estratégia de roteamento: <span class="tag">supervisor</span><span class="tag">round_robin</span><span class="tag">broadcast</span><span class="tag">semantic</span></p>
+            <pre><code>{ "name": "Equipe de Vendas", "routing_strategy": "round_robin", "orchestrator_agent_id": "...", "agent_ids": ["...", "..."] }</code></pre>
+        </div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/api/teams</span></h3>
+            <p>Lista as equipes da organização com compatibilidade e conflitos de ferramentas.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">06 / Cobrança</div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/api/billing</span></h3>
+            <p>Retorna o plano atual, o uso do período e o histórico de cobranças.</p>
+        </div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/billing/checkout</span></h3>
+            <p>Cria uma sessão de checkout do Stripe para fazer upgrade do plano.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">07 / Primeiros passos</div>
+        <div class="card">
+            <h3>1. Crie um agente</h3>
+            <p>Escolha um tipo (SDR, suporte, closer, etc.) e defina o modelo e o prompt do sistema.</p>
+        </div>
+        <div class="card">
+            <h3>2. Conecte um canal</h3>
+            <p>Ligue WhatsApp, e-mail, Slack ou o chat web ao agente para começar a receber mensagens.</p>
+        </div>
+        <div class="card">
+            <h3>3. Implante</h3>
+            <p>Ative o agente e acompanhe a telemetria em tempo real: mensagens, custo por requisição e taxa de erro.</p>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <div class="inner">
+        <span>© 2026 AIOS. Todos os direitos reservados.</span>
+        <span class="mono" style="font-size: 12px;"><a href="/api/docs">Swagger UI →</a></span>
+    </div>
+</footer>
+
+</body>
+</html>
