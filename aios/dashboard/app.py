@@ -120,12 +120,68 @@ def _tool_conflicts(tools_list: list[list[str]]) -> list[str]:
     return list(set(conflicts))
 
 
+def _strategy_label(value: str) -> str:
+    """Human-readable label for a routing strategy DB value."""
+    LABELS = {
+        "supervisor": "Supervisor",
+        "round_robin": "Rodízio",
+        "broadcast": "Broadcast",
+        "semantic": "Semântica",
+    }
+    return LABELS.get(value, value)
+
+
+def _plan_label(value: str) -> str:
+    """Human-readable label for a plan key."""
+    from aios.config import PLANS
+    return PLANS.get(value, {}).get("name", value)
+
+
+def _agent_type_label(value: str) -> str:
+    """Human-readable label for an agent type DB value."""
+    LABELS = {
+        "custom": "Personalizado",
+        "orchestrator": "Orquestrador",
+        "manager": "Gerente",
+        "sdr": "SDR",
+        "closer": "Closer",
+        "support": "Suporte",
+        "data_analyst": "Analista de Dados",
+        "data_scientist": "Cientista de Dados",
+    }
+    return LABELS.get(value, value)
+
+
+def _channel_type_label(value: str) -> str:
+    """Human-readable label for a channel type DB value."""
+    LABELS = {
+        "web": "Web Chat",
+        "whatsapp": "WhatsApp",
+        "evolution": "Evolution",
+        "slack": "Slack",
+        "telegram": "Telegram",
+        "discord": "Discord",
+        "email": "E-mail",
+    }
+    return LABELS.get(value, value)
+
+
+def _status_label(value: str) -> str:
+    """Human-readable label for an agent status DB value."""
+    return "Ativo" if value == "active" else ("Rascunho" if value == "draft" else value)
+
+
 _env.globals["cost_estimate"] = _cost_estimate
 _env.globals["compatible_types"] = _compatible_agent_types
 _env.globals["orchestrator_recommendation"] = _orchestrator_recommendation
 _env.globals["team_compatibility"] = _team_compatibility
 _env.globals["tool_conflicts"] = _tool_conflicts
 _env.globals["tool_descriptions"] = TOOL_DESCRIPTIONS
+_env.globals["strategy_label"] = _strategy_label
+_env.globals["plan_label"] = _plan_label
+_env.globals["agent_type_label"] = _agent_type_label
+_env.globals["channel_type_label"] = _channel_type_label
+_env.globals["status_label"] = _status_label
 
 
 async def _render(name: str, request: Request, **kw) -> str:

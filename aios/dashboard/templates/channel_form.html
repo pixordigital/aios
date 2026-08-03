@@ -20,7 +20,7 @@
                     <select name="channel_type" class="input" onchange="showChannelCreds(this.value)">
                         {% set types = ['web', 'whatsapp', 'evolution', 'slack', 'telegram', 'discord', 'email'] %}
                         {% for t in types %}
-                        <option value="{{ t }}" {% if channel and channel.channel_type == t %}selected{% endif %}>{{ t | title }}</option>
+                        <option value="{{ t }}" {% if channel and channel.channel_type == t %}selected{% endif %}>{{ channel_type_label(t) }}</option>
                         {% endfor %}
                     </select>
                 </div>

@@ -90,7 +90,7 @@
     <div class="flex-between mb-2">
         <div class="flex-center gap-2">
             <h2>{{ team.name }}</h2>
-            <span class="badge" style="color:var(--text-secondary);font-size:0.625rem">{{ team.routing_strategy }}</span>
+            <span class="badge" style="color:var(--text-secondary);font-size:0.625rem">{{ strategy_label(team.routing_strategy) }}</span>
             {% if compat.score >= 80 %}
             <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem">{{ compat.score }}/100</span>
             {% elif compat.score >= 50 %}
@@ -122,7 +122,7 @@
         {% if a.id != orch_id and a.id != mgr_id %}
         <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.375rem 0.75rem;text-align:center;opacity:{{ '1' if a.status == 'active' else '0.5' }}">
             <div style="font-size:0.6875rem;font-weight:500">{{ a.name }}</div>
-            <div style="font-size:0.6rem;color:var(--text-tertiary)">{{ a.agent_type }}</div>
+            <div style="font-size:0.6rem;color:var(--text-tertiary)">{{ agent_type_label(a.agent_type) }}</div>
         </div>
         {% endif %}
         {% endfor %}
@@ -189,10 +189,10 @@
                 <div>
                     <label>Estratégia</label>
                     <select name="routing_strategy" class="input">
-                        <option value="supervisor">Supervisor</option>
-                        <option value="round_robin">Round Robin</option>
-                        <option value="broadcast">Broadcast</option>
-                        <option value="semantic">Semântica</option>
+                        <option value="supervisor">{{ strategy_label('supervisor') }}</option>
+                        <option value="round_robin">{{ strategy_label('round_robin') }}</option>
+                        <option value="broadcast">{{ strategy_label('broadcast') }}</option>
+                        <option value="semantic">{{ strategy_label('semantic') }}</option>
                     </select>
                 </div>
             </div>
@@ -202,7 +202,7 @@
                     <option value="">— Selecione o orquestrador —</option>
                     {% for a in agents %}
                     <option value="{{ a.id }}" {% if a.agent_type == 'orchestrator' %}selected{% endif %}>
-                        {{ a.name }} — {{ a.agent_type }} ({{ a.status }})
+                        {{ a.name }} — {{ agent_type_label(a.agent_type) }} ({{ status_label(a.status) }})
                     </option>
                     {% endfor %}
                 </select>
@@ -212,7 +212,7 @@
                 <select name="manager_agent_id" class="input">
                     <option value="">— Sem gerente —</option>
                     {% for a in agents %}
-                    <option value="{{ a.id }}">{{ a.name }} — {{ a.agent_type }}</option>
+                    <option value="{{ a.id }}">{{ a.name }} — {{ agent_type_label(a.agent_type) }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -223,8 +223,8 @@
                     <label class="flex-center" style="padding:0.375rem 0.5rem;border-radius:var(--radius-xs);cursor:pointer;gap:0.5rem;font-size:0.8125rem" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
                         <input type="checkbox" name="agent_ids" value="{{ a.id }}" style="accent-color:var(--accent)">
                         <span style="flex:1">{{ a.name }}</span>
-                        <span class="text-xs text-tertiary capitalize">{{ a.agent_type }}</span>
-                        <span class="text-xs" style="color:{{ 'var(--green)' if a.status == 'active' else 'var(--text-tertiary)' }}">{{ a.status }}</span>
+                        <span class="text-xs text-tertiary capitalize">{{ agent_type_label(a.agent_type) }}</span>
+                        <span class="text-xs" style="color:{{ 'var(--green)' if a.status == 'active' else 'var(--text-tertiary)' }}">{{ status_label(a.status) }}</span>
                     </label>
                     {% else %}
                     <div class="text-sm text-secondary" style="padding:1rem;text-align:center">Ainda não há agentes. Crie um primeiro.</div>

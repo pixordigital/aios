@@ -16,7 +16,7 @@
             {% set cost = cost_estimate(a.llm_config.get('model', '') if a.llm_config else '', a.llm_config.get('max_tokens', 4096) if a.llm_config else 4096) %}
             <tr>
                 <td><a href="/dashboard/agents/{{ a.id }}/edit" style="color:var(--text);text-decoration:none;font-weight:500">{{ a.name }}</a></td>
-                <td><span class="text-sm text-secondary">{{ a.agent_type }}</span></td>
+                <td><span class="text-sm text-secondary">{{ agent_type_label(a.agent_type) }}</span></td>
                 <td><span class="text-xs font-mono" style="color:var(--text-tertiary)">{{ (a.llm_config.get('model', '?') if a.llm_config else '?').split('/')[-1][:20] }}</span></td>
                 <td><span class="text-xs font-mono text-secondary">~${{ "%.4f"|format(cost) }}</span></td>
                 <td>
@@ -35,7 +35,7 @@
                     {% elif a.status == 'draft' %}
                     <span class="badge" style="border-color:var(--border);color:var(--text-tertiary)"><span class="badge-dot" style="background:var(--text-tertiary)"></span> Rascunho</span>
                     {% else %}
-                    <span class="badge" style="border-color:var(--amber);color:var(--amber)"><span class="badge-dot" style="background:var(--amber)"></span> {{ a.status }}</span>
+                    <span class="badge" style="border-color:var(--amber);color:var(--amber)"><span class="badge-dot" style="background:var(--amber)"></span> {{ status_label(a.status) }}</span>
                     {% endif %}
                 </td>
                 <td style="text-align:right"><div class="flex-center" style="justify-content:flex-end;gap:0.25rem">

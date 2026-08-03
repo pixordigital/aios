@@ -36,9 +36,9 @@
         <div class="flex-between" style="padding:0.375rem 0;border-bottom:1px solid var(--border)">
             <div class="flex-center gap-2">
                 <span style="font-size:0.8125rem">{{ a.name }}</span>
-                <span class="text-xs text-tertiary">{{ a.agent_type }}</span>
+                <span class="text-xs text-tertiary">{{ agent_type_label(a.agent_type) }}</span>
             </div>
-            <span class="badge" style="font-size:0.625rem;border-color:{{ 'var(--green)' if a.status == 'active' else 'var(--border)' }}">{{ a.status }}</span>
+            <span class="badge" style="font-size:0.625rem;border-color:{{ 'var(--green)' if a.status == 'active' else 'var(--border)' }}">{{ status_label(a.status) }}</span>
         </div>
         {% endfor %}
     </div>
@@ -52,7 +52,7 @@
         {% for t in teams %}
         <div class="flex-between" style="padding:0.375rem 0;border-bottom:1px solid var(--border)">
             <span style="font-size:0.8125rem">{{ t.name }}</span>
-            <span class="text-xs text-tertiary">{{ t.routing_strategy }}</span>
+            <span class="text-xs text-tertiary">{{ strategy_label(t.routing_strategy) }}</span>
         </div>
         {% endfor %}
     </div>
