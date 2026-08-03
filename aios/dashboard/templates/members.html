@@ -1,35 +1,35 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>Members</h1><p class="text-sm text-secondary mt-1">{{ users|length }} member{{ 's' if users|length != 1 }}</p></div>
-    <button class="btn btn-primary" onclick="document.getElementById('invite-modal').showModal()">+ Invite</button>
+    <div><h1>Membros</h1><p class="text-sm text-secondary mt-1">{{ users|length }} membro{{ 's' if users|length != 1 }}</p></div>
+    <button class="btn btn-primary" onclick="document.getElementById('invite-modal').showModal()">+ Convidar</button>
 </div>
 
 <dialog id="invite-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.5rem;max-width:400px;width:90%">
     <form method="POST" action="/dashboard/members/invite" style="display:flex;flex-direction:column;gap:1rem">
-        <h2 style="font-size:1rem">Invite member</h2>
-        <p class="text-sm text-secondary">They'll receive a link to join your organization.</p>
+        <h2 style="font-size:1rem">Convidar membro</h2>
+        <p class="text-sm text-secondary">Eles receberão um link para entrar na sua organização.</p>
         <div>
-            <label>Email address</label>
-            <input type="email" name="email" required class="input" placeholder="colleague@company.com">
+            <label>Endereço de e-mail</label>
+            <input type="email" name="email" required class="input" placeholder="colega@empresa.com">
         </div>
         <div>
-            <label>Role</label>
+            <label>Função</label>
             <select name="role" class="input">
-                <option value="member">Member</option>
-                <option value="org_admin">Admin</option>
+                <option value="member">Membro</option>
+                <option value="org_admin">Administrador</option>
             </select>
         </div>
         <div class="flex-between" style="margin-top:0.5rem">
-            <button type="button" class="btn btn-ghost" onclick="document.getElementById('invite-modal').close()">Cancel</button>
-            <button type="submit" class="btn btn-primary">Send invite</button>
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('invite-modal').close()">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Enviar convite</button>
         </div>
     </form>
 </dialog>
 
 <div class="table-wrap">
     <table>
-        <thead><tr><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+        <thead><tr><th>E-mail</th><th>Função</th><th>Ingressou</th><th></th></tr></thead>
         <tbody>
             {% for u in users %}
             <tr>
@@ -44,7 +44,7 @@
                 <td><span class="text-sm text-tertiary">{{ u.created_at.strftime('%b %d') if u.created_at else '—' }}</span></td>
                 <td style="text-align:right">
                     {% if u.role != 'superadmin' and u.email != current_user_email %}
-                    <a href="/dashboard/members/{{ u.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm({{ ('Remove ' ~ u.email ~ ' from org?')|tojson|forceescape }})">Remove</a>
+                    <a href="/dashboard/members/{{ u.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm({{ ('Remover ' ~ u.email ~ ' da organização?')|tojson|forceescape }})">Remover</a>
                     {% endif %}
                 </td>
             </tr>
@@ -54,7 +54,7 @@
 </div>
 
 <div class="card mt-4">
-    <h2 class="mb-2">Pending invites</h2>
+    <h2 class="mb-2">Convites pendentes</h2>
     {% if invites %}
     <div class="flex-col gap-2">
         {% for inv in invites %}
@@ -63,13 +63,13 @@
                 <span style="font-size:0.8125rem">{{ inv.email }}</span>
                 <span class="text-xs text-tertiary"> — {{ inv.role }}</span>
             </div>
-            <a href="/dashboard/members/invite/{{ inv.id }}/revoke" class="btn btn-ghost btn-sm" style="color:var(--red)">Revoke</a>
+            <a href="/dashboard/members/invite/{{ inv.id }}/revoke" class="btn btn-ghost btn-sm" style="color:var(--red)">Revogar</a>
         </div>
         {% endfor %}
     </div>
     {% else %}
     <div class="empty-state" style="padding:1rem">
-        <p class="text-sm text-secondary">No pending invites</p>
+        <p class="text-sm text-secondary">Sem convites pendentes</p>
     </div>
     {% endif %}
 </div>

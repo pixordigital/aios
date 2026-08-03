@@ -2,10 +2,10 @@
 {% block content %}
 <div class="flex-between mb-4">
     <div>
-        <h1>{{ conv.channel | capitalize }} conversation</h1>
-        <p class="text-sm text-secondary mt-1">{{ conv.id[:20] }}… · {{ messages|length }} message{{ 's' if messages|length != 1 }}</p>
+        <h1>{{ conv.channel | capitalize }} — conversa</h1>
+        <p class="text-sm text-secondary mt-1">{{ conv.id[:20] }}… · {{ messages|length }} mensagem{{ 's' if messages|length != 1 }}</p>
     </div>
-    <a href="/dashboard/conversations" class="btn btn-ghost">← Back</a>
+    <a href="/dashboard/conversations" class="btn btn-ghost">← Voltar</a>
 </div>
 
 <div class="card" style="padding:0;overflow:hidden">
@@ -26,7 +26,7 @@
             </div>
         </div>
         {% else %}
-        <div class="text-sm text-secondary" style="text-align:center;padding:2rem">No messages in this conversation.</div>
+        <div class="text-sm text-secondary" style="text-align:center;padding:2rem">Nenhuma mensagem nesta conversa.</div>
         {% endfor %}
     </div>
 </div>

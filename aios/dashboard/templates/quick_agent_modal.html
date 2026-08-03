@@ -2,34 +2,34 @@
 <dialog id="quick-agent" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(480px,94vw);color:var(--text);box-shadow:0 24px 80px rgba(0,0,0,0.5)">
     <form method="POST" action="/dashboard/agents/save" style="padding:1.25rem">
         <div class="flex-between mb-3">
-            <h2>Create agent</h2>
+            <h2>Criar agente</h2>
             <div class="flex-center gap-2">
-                <a href="/dashboard/agents/new" class="btn btn-ghost btn-sm" style="font-size:0.7rem">Full editor →</a>
+                <a href="/dashboard/agents/new" class="btn btn-ghost btn-sm" style="font-size:0.7rem">Editor completo →</a>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('quick-agent').close()" style="border:none">✕</button>
             </div>
         </div>
         <div class="flex-col gap-3">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
                 <div>
-                    <label>Name</label>
-                    <input type="text" name="name" required class="input" placeholder="e.g. Sales SDR" autofocus>
+                    <label>Nome</label>
+                    <input type="text" name="name" required class="input" placeholder="ex.: SDR de Vendas" autofocus>
                 </div>
                 <div>
-                    <label>Type</label>
+                    <label>Tipo</label>
                     <select name="agent_type" class="input" onchange="fillAgentPrompt(this)">
-                        <option value="sdr">SDR — Sales Development</option>
-                        <option value="closer">Closer — Deal Closing</option>
-                        <option value="support">Support — Customer Service</option>
-                        <option value="data_analyst">Data Analyst</option>
-                        <option value="data_scientist">Data Scientist</option>
-                        <option value="orchestrator">Orchestrator — Team Coordinator</option>
-                        <option value="manager">Manager — Quality & Escalations</option>
-                        <option value="custom">Custom</option>
+                        <option value="sdr">SDR — Desenvolvimento de Vendas</option>
+                        <option value="closer">Closer — Fechamento de Negócios</option>
+                        <option value="support">Suporte — Atendimento ao Cliente</option>
+                        <option value="data_analyst">Analista de Dados</option>
+                        <option value="data_scientist">Cientista de Dados</option>
+                        <option value="orchestrator">Orquestrador — Coordenador de Equipe</option>
+                        <option value="manager">Gerente — Qualidade e Escalonamentos</option>
+                        <option value="custom">Personalizado</option>
                     </select>
                 </div>
             </div>
             <div>
-                <label>Model</label>
+                <label>Modelo</label>
                 <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem">
                     <select name="model" id="qa-model" class="input model-select">
                         <optgroup label="OpenAI">
@@ -56,16 +56,16 @@
                 </div>
             </div>
             <div>
-                <label>Tools</label>
+                <label>Ferramentas</label>
                 <div class="flex-center gap-1" style="flex-wrap:wrap">
                     <label class="flex-center gap-1" style="font-size:0.75rem;padding:0.25rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-xs);cursor:pointer;background:var(--bg)">
-                        <input type="checkbox" class="qa-tool-cb" value="calculator" style="accent-color:var(--accent)"> Calculator
+                        <input type="checkbox" class="qa-tool-cb" value="calculator" style="accent-color:var(--accent)"> Calculadora
                     </label>
                     <label class="flex-center gap-1" style="font-size:0.75rem;padding:0.25rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-xs);cursor:pointer;background:var(--bg)">
-                        <input type="checkbox" class="qa-tool-cb" value="web_search" style="accent-color:var(--accent)"> Web Search
+                        <input type="checkbox" class="qa-tool-cb" value="web_search" style="accent-color:var(--accent)"> Busca na Web
                     </label>
                     <label class="flex-center gap-1" style="font-size:0.75rem;padding:0.25rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius-xs);cursor:pointer;background:var(--bg)">
-                        <input type="checkbox" class="qa-tool-cb" value="send_email" style="accent-color:var(--accent)"> Email
+                        <input type="checkbox" class="qa-tool-cb" value="send_email" style="accent-color:var(--accent)"> E-mail
                     </label>
                 </div>
                 <input type="hidden" name="tools" id="qa-tools-hidden" value="">
@@ -75,8 +75,8 @@
                 <input type="hidden" name="system_prompt" id="qa-system-prompt" value="">
             </div>
             <div class="flex-between" style="padding-top:0.5rem;border-top:1px solid var(--border)">
-                <button type="button" class="btn btn-ghost" onclick="document.getElementById('quick-agent').close()">Cancel</button>
-                <button type="submit" class="btn btn-primary" onclick="collectAgentTools()">Create agent</button>
+                <button type="button" class="btn btn-ghost" onclick="document.getElementById('quick-agent').close()">Cancelar</button>
+                <button type="submit" class="btn btn-primary" onclick="collectAgentTools()">Criar agente</button>
             </div>
         </div>
     </form>
@@ -84,14 +84,14 @@
 
 <script>
     var PROMPTS = {
-        'sdr': 'You are an SDR (Sales Development Representative) AI agent. Prospect, qualify leads using BANT, and book meetings. Be persistent but respectful.',
-        'closer': 'You are a Closer AI agent. Close deals by reviewing lead context, presenting tailored solutions, handling objections, and sending proposals.',
-        'support': 'You are a Customer Support AI agent. Resolve issues quickly and empathetically. Acknowledge, clarify, solve, or escalate. Never blame the customer.',
-        'data_analyst': 'You are a Data Analyst AI agent. Query databases, generate reports, and create visualizations. Explain what data means, not just what it shows.',
-        'data_scientist': 'You are a Data Scientist AI agent. Build models, run analyses, and provide data-driven recommendations. Explain methodology.',
-        'orchestrator': 'You are an Orchestrator AI agent. Route requests to the right team member, coordinate multi-agent workflows, and synthesize responses.',
-        'manager': 'You are a Manager AI agent. Oversee team performance, handle escalations, and ensure quality. Review responses and coach agents.',
-        'custom': 'You are an AI agent. Help users with their requests using the tools available to you.',
+        'sdr': 'Você é um agente de IA SDR (Representante de Desenvolvimento de Vendas). Prospecte, qualifique leads usando BANT e agende reuniões. Seja persistente, mas respeitoso.',
+        'closer': 'Você é um agente de IA Closer. Feche negócios revisando o contexto do lead, apresentando soluções personalizadas, lidando com objeções e enviando propostas.',
+        'support': 'Você é um agente de IA de Suporte ao Cliente. Resolva problemas rapidamente e com empatia. Reconheça, esclareça, resolva ou escalone. Nunca culpe o cliente.',
+        'data_analyst': 'Você é um agente de IA Analista de Dados. Consulte bancos de dados, gere relatórios e crie visualizações. Explique o que os dados significam, não apenas o que mostram.',
+        'data_scientist': 'Você é um agente de IA Cientista de Dados. Construa modelos, execute análises e forneça recomendações baseadas em dados. Explique a metodologia.',
+        'orchestrator': 'Você é um agente de IA Orquestrador. Encaminhe solicitações ao membro certo da equipe, coordene fluxos de trabalho multiagente e sintetize respostas.',
+        'manager': 'Você é um agente de IA Gerente. Supervisione o desempenho da equipe, lide com escalonamentos e garanta a qualidade. Revise respostas e oriente agentes.',
+        'custom': 'Você é um agente de IA. Ajude os usuários com seus pedidos usando as ferramentas disponíveis.',
     };
     function fillAgentPrompt(sel) {
         var models = {'orchestrator':'openai/gpt-4o','manager':'openai/gpt-4o','sdr':'openai/gpt-4o','closer':'openai/gpt-4o','support':'openai/gpt-4o-mini','data_analyst':'openai/gpt-4o','data_scientist':'openai/gpt-4o','custom':'openai/gpt-4o-mini'};
@@ -106,7 +106,7 @@
         document.querySelectorAll('.qa-tool-cb:checked').forEach(function(cb){ tools.push(cb.value); });
         document.getElementById('qa-tools-hidden').value = tools.join(' ');
         if(!document.getElementById('qa-system-prompt').value) {
-            document.getElementById('qa-system-prompt').value = 'You are an AI agent. Help users with their requests.';
+            document.getElementById('qa-system-prompt').value = 'Você é um agente de IA. Ajude os usuários com seus pedidos.';
         }
     }
     document.addEventListener('DOMContentLoaded', function(){

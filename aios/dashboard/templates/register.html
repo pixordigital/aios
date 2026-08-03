@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIOS — Register</title>
+    <title>AIOS — Registrar</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -51,7 +51,7 @@
 <body>
     <div class="card">
         <div class="logo">ai<span>os</span></div>
-        <div class="subtitle">Create your account</div>
+        <div class="subtitle">Crie sua conta</div>
 
         {% if error %}
         <div class="error">{{ error }}</div>
@@ -60,26 +60,26 @@
         <form method="POST" action="/dashboard/register">
             <div class="grid-2">
                 <div>
-                    <label>Your name</label>
-                    <input type="text" name="name" required placeholder="John">
+                    <label>Seu nome</label>
+                    <input type="text" name="name" required placeholder="João">
                 </div>
                 <div>
-                    <label>Password</label>
-                    <input type="password" name="password" required minlength="8" placeholder="min 8 chars">
+                    <label>Senha</label>
+                    <input type="password" name="password" required minlength="8" placeholder="mín. 8 caracteres">
                 </div>
             </div>
 
-            <label>Email</label>
-            <input type="email" name="email" required autocomplete="email" placeholder="you@company.com">
+            <label>E-mail</label>
+            <input type="email" name="email" required autocomplete="email" placeholder="voce@empresa.com">
 
-            <label>Organization name</label>
-            <input type="text" name="org_name" required placeholder="My Company">
+            <label>Nome da organização</label>
+            <input type="text" name="org_name" required placeholder="Minha Empresa">
 
-            <button type="submit" class="btn">Create account</button>
+            <button type="submit" class="btn">Criar conta</button>
         </form>
 
         <div class="footer">
-            Already have an account? <a href="/dashboard/login">Sign in</a>
+            Já tem uma conta? <a href="/dashboard/login">Entrar</a>
         </div>
     </div>
 </body>

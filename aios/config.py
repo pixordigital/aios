@@ -74,6 +74,7 @@ if settings.stripe_price_pro:
 
 PLANS = {
     "free": {
+        "name": "Gratuito",
         "max_agents": 2,
         "max_teams": 1,
         "max_messages_per_day": 100,
@@ -81,6 +82,7 @@ PLANS = {
         "channels": ["web"],
     },
     "starter": {
+        "name": "Starter",
         "max_agents": 10,
         "max_teams": 3,
         "max_messages_per_day": 500,
@@ -88,6 +90,7 @@ PLANS = {
         "channels": ["web", "whatsapp"],
     },
     "pro": {
+        "name": "Pro",
         "max_agents": 50,
         "max_teams": 10,
         "max_messages_per_day": 5000,
@@ -95,6 +98,7 @@ PLANS = {
         "channels": ["web", "whatsapp", "email", "slack", "telegram", "discord"],
     },
     "enterprise": {
+        "name": "Enterprise",
         "max_agents": 500,
         "max_teams": 100,
         "max_messages_per_day": 50000,
@@ -102,6 +106,7 @@ PLANS = {
         "channels": "__all__",
     },
     "unlimited": {
+        "name": "Ilimitado",
         "max_agents": 999999,
         "max_teams": 999999,
         "max_messages_per_day": 999999,

@@ -73,12 +73,12 @@ async def create_checkout(
 
     # only allow checkout for your own org
     if body.org_id != org_id:
-        raise HTTPException(403, "Cannot create checkout for another org")
+        raise HTTPException(403, "Não é possível criar o checkout para outra organização")
 
     # verify org exists
     org = await db.get(Organization, body.org_id)
     if not org:
-        raise HTTPException(400, "Organization not found")
+        raise HTTPException(400, "Organização não encontrada")
 
     sig = _org_hmac(body.org_id)
     stripe = _stripe()
@@ -114,7 +114,7 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(payload, sig, settings.stripe_webhook_secret)
     except Exception as e:
         logger.exception("Stripe webhook signature invalid")
-        raise HTTPException(400, "Invalid signature")
+        raise HTTPException(400, "Assinatura inválida")
 
     # idempotency — skip already-processed events
     event_id = event.get("id", "")
@@ -197,7 +197,7 @@ async def create_portal(
     if not settings.stripe_secret_key:
         raise HTTPException(400, "Stripe not configured")
     if body.org_id != org_id:
-        raise HTTPException(403, "Cannot create portal for another org")
+        raise HTTPException(403, "Não é possível criar o portal para outra organização")
 
     async with db_session() as db:
         org = await db.get(Organization, body.org_id)
@@ -205,7 +205,7 @@ async def create_portal(
         sub_id = org.extra_data.get("stripe_subscription_id") if org else None
 
     if not stripe_customer_id and not sub_id:
-        raise HTTPException(400, "No active subscription")
+        raise HTTPException(400, "Sem assinatura ativa")
 
     stripe = _stripe()
     try:

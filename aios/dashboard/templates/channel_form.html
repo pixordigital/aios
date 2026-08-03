@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>{% if channel %}Edit{% else %}New{% endif %} Channel</h1></div>
+    <div><h1>{% if channel %}Editar{% else %}Novo{% endif %} Canal</h1></div>
 </div>
 
 <form method="POST" action="/dashboard/channels/save">
@@ -9,14 +9,14 @@
     <div class="flex-col gap-4">
 
         <div class="card">
-            <h2 class="mb-3">Channel</h2>
+            <h2 class="mb-3">Canal</h2>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                 <div>
-                    <label>Label</label>
-                    <input type="text" name="label" value="{{ channel.label if channel else '' }}" required class="input" placeholder="Production WhatsApp">
+                    <label>Rótulo</label>
+                    <input type="text" name="label" value="{{ channel.label if channel else '' }}" required class="input" placeholder="WhatsApp de Produção">
                 </div>
                 <div>
-                    <label>Type</label>
+                    <label>Tipo</label>
                     <select name="channel_type" class="input" onchange="showChannelCreds(this.value)">
                         {% set types = ['web', 'whatsapp', 'evolution', 'slack', 'telegram', 'discord', 'email'] %}
                         {% for t in types %}
@@ -28,53 +28,53 @@
         </div>
 
         <div class="card">
-            <h2 class="mb-3">Credentials</h2>
-            <div id="creds-web" class="channel-creds" style="display:none"><p class="text-sm text-secondary">Web channels need no configuration.</p></div>
+            <h2 class="mb-3">Credenciais</h2>
+            <div id="creds-web" class="channel-creds" style="display:none"><p class="text-sm text-secondary">Os canais web não precisam de configuração.</p></div>
             <div id="creds-whatsapp" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Access token</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
-                <div><label>Phone number ID</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
+                <div><label>Token de acesso</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
+                <div><label>ID do número de telefone</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
             </div>
             <div id="creds-slack" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Bot token</label><input type="text" name="config_slack_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="xoxb-..."></div>
-                <div><label>Signing secret</label><input type="text" name="config_slack_secret" value="{{ channel.config.get('signing_secret', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="abc..."></div>
+                <div><label>Token do bot</label><input type="text" name="config_slack_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="xoxb-..."></div>
+                <div><label>Segredo de assinatura</label><input type="text" name="config_slack_secret" value="{{ channel.config.get('signing_secret', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="abc..."></div>
             </div>
             <div id="creds-telegram" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Bot token</label><input type="text" name="config_telegram_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123:ABC..."></div>
+                <div><label>Token do bot</label><input type="text" name="config_telegram_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123:ABC..."></div>
             </div>
             <div id="creds-discord" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Bot token</label><input type="text" name="config_discord_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="MTIz..."></div>
+                <div><label>Token do bot</label><input type="text" name="config_discord_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="MTIz..."></div>
             </div>
             <div id="creds-email" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
-                    <div><label>IMAP server</label><input type="text" name="config_email_imap" value="{{ channel.config.get('imap_server', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="imap.gmail.com"></div>
-                    <div><label>SMTP server</label><input type="text" name="config_email_smtp" value="{{ channel.config.get('smtp_server', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="smtp.gmail.com"></div>
+                    <div><label>Servidor IMAP</label><input type="text" name="config_email_imap" value="{{ channel.config.get('imap_server', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="imap.gmail.com"></div>
+                    <div><label>Servidor SMTP</label><input type="text" name="config_email_smtp" value="{{ channel.config.get('smtp_server', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="smtp.gmail.com"></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
-                    <div><label>Email</label><input type="email" name="config_email_addr" value="{{ channel.config.get('email', '') if channel and channel.config else '' }}" class="input" placeholder="bot@example.com"></div>
-                    <div><label>Password</label><input type="password" name="config_email_pass" class="input" placeholder="App password"></div>
+                    <div><label>E-mail</label><input type="email" name="config_email_addr" value="{{ channel.config.get('email', '') if channel and channel.config else '' }}" class="input" placeholder="bot@example.com"></div>
+                    <div><label>Senha</label><input type="password" name="config_email_pass" class="input" placeholder="Senha de aplicativo"></div>
                 </div>
             </div>
             <div id="creds-evolution" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Server URL</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://localhost:8080"></div>
-                <div><label>API Key</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
-                <div><label>Instance name</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="my-whatsapp-instance"></div>
+                <div><label>URL do servidor</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://localhost:8080"></div>
+                <div><label>Chave da API</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
+                <div><label>Nome da instância</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="my-whatsapp-instance"></div>
             </div>
         </div>
 
         <div class="card">
-            <h2 class="mb-3">Assignment</h2>
+            <h2 class="mb-3">Atribuição</h2>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
-                <div><label>Agent (optional)</label>
+                <div><label>Agente (opcional)</label>
                     <select name="agent_id" class="input">
-                        <option value="">— None —</option>
+                        <option value="">— Nenhum —</option>
                         {% for a in agents %}
                         <option value="{{ a.id }}" {% if channel and channel.agent_id == a.id %}selected{% endif %}>{{ a.name }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div><label>Team (optional)</label>
+                <div><label>Equipe (opcional)</label>
                     <select name="team_id" class="input">
-                        <option value="">— None —</option>
+                        <option value="">— Nenhum —</option>
                         {% for t in teams %}
                         <option value="{{ t.id }}" {% if channel and channel.team_id == t.id %}selected{% endif %}>{{ t.name }}</option>
                         {% endfor %}
@@ -85,10 +85,10 @@
 
         <div class="flex-between">
             <div class="flex-center gap-2">
-                <a href="/dashboard/channels" class="btn btn-ghost">Cancel</a>
-                <button type="button" class="btn btn-ghost" id="test-btn" onclick="testConnection()" style="color:var(--accent);border-color:var(--accent-border)">🔄 Test connection</button>
+                <a href="/dashboard/channels" class="btn btn-ghost">Cancelar</a>
+                <button type="button" class="btn btn-ghost" id="test-btn" onclick="testConnection()" style="color:var(--accent);border-color:var(--accent-border)">🔄 Testar conexão</button>
             </div>
-            <button type="submit" class="btn btn-primary" style="padding:0.5rem 1.5rem">{% if channel %}Save{% else %}Create channel{% endif %}</button>
+            <button type="submit" class="btn btn-primary" style="padding:0.5rem 1.5rem">{% if channel %}Salvar{% else %}Criar canal{% endif %}</button>
         </div>
         <div id="test-result" style="display:none;margin-top:0.5rem;padding:0.5rem 0.75rem;border-radius:var(--radius-sm);font-size:0.8125rem"></div>
 
@@ -96,7 +96,7 @@
 async function testConnection() {
     var btn = document.getElementById('test-btn');
     var result = document.getElementById('test-result');
-    btn.disabled = true; btn.textContent = '⏳ Testing...'; result.style.display = 'none';
+    btn.disabled = true; btn.textContent = '⏳ Testando...'; result.style.display = 'none';
 
     var channelType = document.querySelector('select[name="channel_type"]')?.value || 'web';
     var config = {};
@@ -115,14 +115,14 @@ async function testConnection() {
         result.style.background = data.ok ? 'var(--green-subtle)' : 'var(--red-subtle)';
         result.style.color = data.ok ? 'var(--green)' : 'var(--red)';
         result.style.border = '1px solid ' + (data.ok ? 'var(--green)' : 'var(--red)');
-        result.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || (data.ok ? 'Connected' : 'Failed'));
+        result.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || (data.ok ? 'Conectado' : 'Falhou'));
     } catch(e) {
         result.style.display = 'block';
         result.style.background = 'var(--red-subtle)';
         result.style.color = 'var(--red)';
-        result.textContent = '❌ Error: ' + e.message;
+        result.textContent = '❌ Erro: ' + e.message;
     }
-    btn.disabled = false; btn.textContent = '🔄 Test connection';
+    btn.disabled = false; btn.textContent = '🔄 Testar conexão';
 }
 </script>
 

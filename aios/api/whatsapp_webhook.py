@@ -29,7 +29,7 @@ async def verify_webhook(request: Request):
     challenge = request.query_params.get("hub.challenge")
     if mode == "subscribe" and token == settings.whatsapp_verify_token and challenge:
         return int(challenge)
-    raise HTTPException(403, "Verification failed")
+    raise HTTPException(403, "Falha na verificação")
 
 
 @router.post("/webhook")
