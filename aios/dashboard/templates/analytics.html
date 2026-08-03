@@ -2,51 +2,51 @@
 {% block content %}
 <div class="flex-between mb-4">
     <div>
-        <h1>Analytics & Telemetry</h1>
-        <p class="text-sm text-secondary mt-1">Agent performance, usage metrics, and health status</p>
+        <h1>Análises e Telemetria</h1>
+        <p class="text-sm text-secondary mt-1">Desempenho dos agentes, métricas de uso e status de saúde</p>
     </div>
-    <button class="btn btn-primary" onclick="refreshData()">↻ Refresh</button>
+    <button class="btn btn-primary" onclick="refreshData()">↻ Atualizar</button>
 </div>
 
 <!-- Summary Cards -->
 <div class="grid-4 mb-4" id="summary-cards">
     <div class="stat-card">
-        <p class="stat-label">Total Messages</p>
+        <p class="stat-label">Total de Mensagens</p>
         <p class="stat-value" id="total-messages">-</p>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Total Tokens</p>
+        <p class="stat-label">Total de Tokens</p>
         <p class="stat-value" id="total-tokens">-</p>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Avg Response Time</p>
+        <p class="stat-label">Tempo Médio de Resposta</p>
         <p class="stat-value" id="avg-response">-</p>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Error Rate</p>
+        <p class="stat-label">Taxa de Erros</p>
         <p class="stat-value" id="error-rate">-</p>
     </div>
 </div>
 
 <!-- Agent Performance Table -->
 <div class="card mb-4">
-    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Agent Performance</h2>
+    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Desempenho dos Agentes</h2>
     <div class="table-wrap">
         <table>
             <thead>
                 <tr>
-                    <th>Agent</th>
-                    <th style="text-align:right">Messages</th>
+                    <th>Agente</th>
+                    <th style="text-align:right">Mensagens</th>
                     <th style="text-align:right">Tokens</th>
-                    <th style="text-align:right">Avg Response</th>
-                    <th style="text-align:right">Errors</th>
-                    <th style="text-align:right">Error Rate</th>
-                    <th style="text-align:right">Tool Calls</th>
-                    <th style="text-align:center">Health</th>
+                    <th style="text-align:right">Resposta Média</th>
+                    <th style="text-align:right">Erros</th>
+                    <th style="text-align:right">Taxa de Erros</th>
+                    <th style="text-align:right">Chamadas de Ferramenta</th>
+                    <th style="text-align:center">Saúde</th>
                 </tr>
             </thead>
             <tbody id="agent-table">
-                <tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--text-tertiary)">Loading...</td></tr>
+                <tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--text-tertiary)">Carregando...</td></tr>
             </tbody>
         </table>
     </div>
@@ -54,23 +54,23 @@
 
 <!-- Usage Over Time -->
 <div class="card mb-4">
-    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Usage Over Time (24h)</h2>
+    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Uso ao Longo do Tempo (24h)</h2>
     <div id="usage-chart" style="height:200px;display:flex;align-items:end;gap:2px;">
-        <p style="color:var(--text-tertiary)">Loading chart...</p>
+        <p style="color:var(--text-tertiary)">Carregando gráfico...</p>
     </div>
 </div>
 
 <!-- Health Status -->
 <div class="card mb-4">
-    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Agent Health</h2>
+    <h2 class="mb-3" style="font-size:1rem;font-weight:600">Saúde dos Agentes</h2>
     <div id="health-status" class="flex-col gap-3">
-        <p style="color:var(--text-tertiary)">Loading...</p>
+        <p style="color:var(--text-tertiary)">Carregando...</p>
     </div>
 </div>
 
 <!-- Raw Metrics -->
 <details class="card">
-    <summary style="cursor:pointer;font-size:0.8125rem;font-weight:500">Raw Metrics</summary>
+    <summary style="cursor:pointer;font-size:0.8125rem;font-weight:500">Métricas Brutas</summary>
     <pre id="raw-metrics" class="mt-2 font-mono" style="margin-top:0.5rem;font-size:0.6875rem;overflow:auto;max-height:16rem;background:var(--bg-hover);padding:0.75rem;border-radius:var(--radius-sm)"></pre>
 </details>
 
@@ -90,7 +90,7 @@ async function refreshData() {
         const agentsData = await agentsRes.json();
         const tbody = document.getElementById('agent-table');
         if (agentsData.agents.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--text-tertiary)">No agent data yet. Deploy and run an agent to see metrics.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--text-tertiary)">Ainda sem dados de agentes. Implante e execute um agente para ver as métricas.</td></tr>';
         } else {
             tbody.innerHTML = agentsData.agents.map(a => `
                 <tr style="border-bottom:1px solid var(--border)">
@@ -103,7 +103,7 @@ async function refreshData() {
                     <td style="text-align:right;padding:0.625rem 1rem">${a.tool_calls}</td>
                     <td style="text-align:center;padding:0.625rem 1rem">
                         <span style="display:inline-block;width:8px;height:8px;border-radius:99px;${a.health?.status === 'healthy' ? 'background:var(--green)' : a.health?.status === 'degraded' ? 'background:var(--amber)' : 'background:var(--red)'}"></span>
-                        ${a.health?.status || 'unknown'}
+                        ${a.health?.status || 'desconhecido'}
                     </td>
                 </tr>
             `).join('');
@@ -114,7 +114,7 @@ async function refreshData() {
         const healthData = await healthRes.json();
         const healthDiv = document.getElementById('health-status');
         if (healthData.agents.length === 0) {
-            healthDiv.innerHTML = '<p style="color:var(--text-tertiary)">No health data yet.</p>';
+            healthDiv.innerHTML = '<p style="color:var(--text-tertiary)">Ainda sem dados de saúde.</p>';
         } else {
             healthDiv.innerHTML = healthData.agents.map(h => `
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem;background:var(--bg-hover);border-radius:var(--radius-sm)">
@@ -123,7 +123,7 @@ async function refreshData() {
                         <span style="font-weight:500">${h.agent_id.slice(0,8)}</span>
                     </div>
                     <div style="font-size:0.8125rem;color:var(--text-secondary)">
-                        ${h.failures} failures / ${h.successes} successes
+                        ${h.failures} falhas / ${h.successes} sucessos
                     </div>
                 </div>
             `).join('');
@@ -135,7 +135,7 @@ async function refreshData() {
         document.getElementById('raw-metrics').textContent = JSON.stringify(metrics, null, 2);
 
     } catch (e) {
-        console.error('Failed to load analytics:', e);
+        console.error('Falha ao carregar análises:', e);
     }
 }
 

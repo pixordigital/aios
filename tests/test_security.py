@@ -148,7 +148,7 @@ class TestInviteEmailMatch:
         req.state.user_email = test_user.email
         resp = await accept_invite(req, token="tok123")
         body = resp.body.decode()
-        assert "different email" in body or "Invalid" in body
+        assert "outro e-mail" in body or "inválido" in body.lower()
 
 
 class TestTemplateXSS:

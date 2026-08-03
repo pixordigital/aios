@@ -27,15 +27,15 @@ async def get_current_user(
         try:
             payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
         except jwt.PyJWTError:
-            raise HTTPException(401, "Invalid token")
+            raise HTTPException(401, "Token inválido")
 
         # enforce token is an access token, not a refresh token
         if payload.get("type") != "access":
-            raise HTTPException(401, "Invalid token type")
+            raise HTTPException(401, "Tipo de token inválido")
 
         user = await db.get(User, payload["sub"])
         if not user:
-            raise HTTPException(401, "Invalid token")
+            raise HTTPException(401, "Token inválido")
         return user
 
     if x_api_key:

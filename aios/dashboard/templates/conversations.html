@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>Conversations</h1><p class="text-sm text-secondary mt-1">{{ conversations|length }} conversation{{ 's' if conversations|length != 1 }}</p></div>
+    <div><h1>Conversas</h1><p class="text-sm text-secondary mt-1">{{ conversations|length }} conversa{{ 's' if conversations|length != 1 }}</p></div>
 </div>
 
 {% if conversations %}
@@ -15,7 +15,7 @@
             <div class="flex-center gap-2" style="flex-wrap:wrap">
                 <span class="text-sm" style="text-transform:capitalize;font-weight:500">{{ c.channel }}</span>
                 {% if c.agent_id or c.team_id %}
-                <span class="badge" style="font-size:0.6rem;border-color:var(--accent-border);color:var(--accent)">Assigned</span>
+                <span class="badge" style="font-size:0.6rem;border-color:var(--accent-border);color:var(--accent)">Atribuída</span>
                 {% endif %}
             </div>
             <div class="flex-center gap-2 mt-1">
@@ -25,9 +25,9 @@
         </a>
         <div style="text-align:right;flex-shrink:0" onclick="event.stopPropagation()">
             <div class="badge">{{ c._msg_count }}</div>
-            <div style="font-size:0.6rem;color:var(--text-tertiary);margin-top:0.25rem">msgs</div>
+            <div style="font-size:0.6rem;color:var(--text-tertiary);margin-top:0.25rem">mensagens</div>
             <div style="margin-top:0.375rem">
-                <a href="/dashboard/conversations/{{ c.id }}/delete" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red-subtle);font-size:0.65rem" onclick="return confirm('Delete this conversation and all its messages?')">Delete</a>
+                <a href="/dashboard/conversations/{{ c.id }}/delete" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red-subtle);font-size:0.65rem" onclick="return confirm('Excluir esta conversa e todas as suas mensagens?')">Excluir</a>
             </div>
         </div>
     </div>
@@ -39,9 +39,9 @@
         <div class="empty-state-icon">
             <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
         </div>
-        <h3>No conversations</h3>
-        <p>Messages appear when agents receive input through connected channels.</p>
-        <a href="/dashboard/channels" class="btn btn-ghost mt-2">View channels</a>
+        <h3>Sem conversas</h3>
+        <p>As mensagens aparecem quando os agentes recebem entrada pelos canais conectados.</p>
+        <a href="/dashboard/channels" class="btn btn-ghost mt-2">Ver canais</a>
     </div>
 </div>
 {% endif %}

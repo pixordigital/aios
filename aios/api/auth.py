@@ -113,7 +113,7 @@ async def _rate_limit(key: str):
             results = await pipe.execute()
             count = results[2]
             if count >= _MAX_LOGIN_ATTEMPTS:
-                raise HTTPException(429, "Too many login attempts. Try again later.")
+                raise HTTPException(429, "Muitas tentativas de login. Tente novamente mais tarde.")
             return
     except HTTPException:
         raise
@@ -123,7 +123,7 @@ async def _rate_limit(key: str):
     attempts = _login_attempts.get(key, [])
     attempts = [t for t in attempts if (now - t).total_seconds() < _LOGIN_WINDOW_SEC]
     if len(attempts) >= _MAX_LOGIN_ATTEMPTS:
-        raise HTTPException(429, "Too many login attempts. Try again later.")
+        raise HTTPException(429, "Muitas tentativas de login. Tente novamente mais tarde.")
     attempts.append(now)
     _login_attempts[key] = attempts
 
@@ -178,14 +178,14 @@ _PASSWORD_RE = re.compile(r"^[\x20-\x7E]+$")  # printable ASCII
 
 def _validate_password(password: str):
     if len(password) < _PASSWORD_MIN:
-        raise HTTPException(422, f"Password must be at least {_PASSWORD_MIN} characters")
+        raise HTTPException(422, f"A senha deve ter pelo menos {_PASSWORD_MIN} caracteres")
     if len(password) > _PASSWORD_MAX:
-        raise HTTPException(422, f"Password must be at most {_PASSWORD_MAX} characters")
+        raise HTTPException(422, f"A senha deve ter no máximo {_PASSWORD_MAX} caracteres")
     if not _PASSWORD_RE.match(password):
-        raise HTTPException(422, "Password contains invalid characters")
+        raise HTTPException(422, "A senha contém caracteres inválidos")
     # check for common patterns
     if password.lower() in ("password", "12345678", "qwerty123", "letmein"):
-        raise HTTPException(422, "Password is too common")
+        raise HTTPException(422, "Senha muito comum")
 
 
 # ─── JWT helpers ───
@@ -216,7 +216,7 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
 
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
-        raise HTTPException(409, "Email already registered")
+        raise HTTPException(409, "E-mail já registrado")
 
     org = Organization(name=body.org_name, slug=body.org_name.lower().replace(" ", "-"))
     db.add(org)
@@ -238,7 +238,7 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
     vt = _create_email_token(user.id, "email_verify", expire_minutes=1440)
     verify_url = f"{settings.app_url}/api/auth/verify-email?token={vt}"
     html_body = _render_email_template("verification", name=body.org_name, verify_url=verify_url, app_url=settings.app_url)
-    await _send_email(user.email, "Verify your email — AIOS", html_body or f"Welcome! Verify your email: {verify_url}\n\nLink expires in 24h.")
+    await _send_email(user.email, "Verifique seu e-mail — AIOS", html_body or f"Bem-vindo! Verifique seu e-mail: {verify_url}\n\nO link expira em 24h.")
 
     token = _create_access_token(user.id, org.id)
     refresh = _create_refresh_token(user.id)
@@ -252,7 +252,7 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
     result = await db.execute(select(User).where(User.email == body.email.lower().strip()))
     user = result.scalar_one_or_none()
     if not user or not _verify_password(body.password, user.hashed_password):
-        raise HTTPException(401, "Invalid email or password")
+        raise HTTPException(401, "E-mail ou senha inválidos")
 
     token = _create_access_token(user.id, user.org_id)
     refresh = _create_refresh_token(user.id)
@@ -264,20 +264,20 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
     """Exchange a refresh token for a new access token + new refresh token."""
     raw = body.get("refresh_token", "")
     if not raw:
-        raise HTTPException(422, "refresh_token is required")
+        raise HTTPException(422, "refresh_token é obrigatório")
 
     try:
         payload = jwt.decode(raw, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError:
-        raise HTTPException(401, "Invalid or expired refresh token")
+        raise HTTPException(401, "Token de atualização inválido ou expirado")
 
     if payload.get("type") != "refresh":
-        raise HTTPException(401, "Invalid token type")
+        raise HTTPException(401, "Tipo de token inválido")
 
     user_id = payload["sub"]
     user = await db.get(User, user_id)
     if not user:
-        raise HTTPException(401, "User not found")
+        raise HTTPException(401, "Usuário não encontrado")
 
     token = _create_access_token(user.id, user.org_id)
     refresh = _create_refresh_token(user.id)
@@ -290,19 +290,19 @@ async def verify_email(token: str = Query(...), db: DatabaseBackend = Depends(ge
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError:
-        raise HTTPException(400, "Invalid or expired verification token")
+        raise HTTPException(400, "Token de verificação inválido ou expirado")
     if payload.get("purpose") != "email_verify":
-        raise HTTPException(400, "Invalid token purpose")
+        raise HTTPException(400, "Finalidade do token inválida")
 
     user = await db.get(User, payload["sub"])
     if not user:
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Usuário não encontrado")
     if user.email_verified:
-        return {"message": "Email already verified"}
+        return {"message": "E-mail já verificado"}
 
     user.email_verified = True
     await db.commit()
-    return {"message": "Email verified successfully"}
+    return {"message": "E-mail verificado com sucesso"}
 
 
 @router.post("/forgot-password")
@@ -312,13 +312,13 @@ async def forgot_password(email: str = Query(...), db: DatabaseBackend = Depends
     user = result.scalar_one_or_none()
     if not user:
         # Don't reveal whether email exists
-        return {"message": "If the email exists, a reset link has been sent"}
+        return {"message": "Se o e-mail existir, um link de redefinição foi enviado"}
 
     token = _create_email_token(user.id, "password_reset", expire_minutes=60)
     reset_url = f"{settings.app_url}/auth/reset-password?token={token}"
     html_body = _render_email_template("reset_password", name=user.email.split("@")[0], reset_url=reset_url, app_url=settings.app_url)
-    await _send_email(user.email, "Password Reset — AIOS", html_body or f"Reset your password: {reset_url}\n\nLink expires in 1 hour.")
-    return {"message": "If the email exists, a reset link has been sent"}
+    await _send_email(user.email, "Redefinição de senha — AIOS", html_body or f"Redefina sua senha: {reset_url}\n\nO link expira em 1 hora.")
+    return {"message": "Se o e-mail existir, um link de redefinição foi enviado"}
 
 
 class ResetPasswordRequest(BaseModel):
@@ -332,18 +332,18 @@ async def reset_password(body: ResetPasswordRequest, db: DatabaseBackend = Depen
     try:
         payload = jwt.decode(body.token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except jwt.PyJWTError:
-        raise HTTPException(400, "Invalid or expired reset token")
+        raise HTTPException(400, "Token de redefinição inválido ou expirado")
     if payload.get("purpose") != "password_reset":
-        raise HTTPException(400, "Invalid token purpose")
+        raise HTTPException(400, "Finalidade do token inválida")
 
     _validate_password(body.new_password)
     user = await db.get(User, payload["sub"])
     if not user:
-        raise HTTPException(404, "User not found")
+        raise HTTPException(404, "Usuário não encontrado")
 
     user.hashed_password = _hash_password(body.new_password)
     await db.commit()
-    return {"message": "Password reset successfully"}
+    return {"message": "Senha redefinida com sucesso"}
 
 
 # ─── OAuth ───
@@ -377,7 +377,7 @@ async def _oauth_exchange(provider: str, code: str, token_url: str, client_id: s
         )
         data = resp.json()
         if "access_token" not in data:
-            raise HTTPException(400, f"OAuth token exchange failed: {data.get('error_description', data.get('error', 'unknown'))}")
+            raise HTTPException(400, f"Falha na troca do token OAuth: {data.get('error_description', data.get('error', 'desconhecido'))}")
         return data["access_token"]
 
 
@@ -385,7 +385,7 @@ async def _oauth_exchange(provider: str, code: str, token_url: str, client_id: s
 async def google_login():
     """Redirect to Google OAuth."""
     if not settings.google_client_id:
-        return {"error": "Google OAuth not configured"}
+        return {"error": "Google OAuth não configurado"}
     return await _oauth_redirect(
         "google",
         "https://accounts.google.com/o/oauth2/v2/auth",
@@ -399,7 +399,7 @@ async def google_callback(code: str, state: str, db: DatabaseBackend = Depends(g
     """Handle Google OAuth callback."""
     stored = _oauth_states.pop(state, None)
     if not stored or stored["provider"] != "google":
-        raise HTTPException(400, "Invalid state parameter")
+        raise HTTPException(400, "Parâmetro de estado inválido")
 
     token = await _oauth_exchange("google", code,
                                    "https://oauth2.googleapis.com/token",
@@ -417,7 +417,7 @@ async def google_callback(code: str, state: str, db: DatabaseBackend = Depends(g
     name = data.get("name", email)
 
     if not provider_user_id or not email:
-        raise HTTPException(400, "Failed to get user info from Google")
+        raise HTTPException(400, "Falha ao obter informações do usuário do Google")
 
     return await _oauth_login_or_register(db, "google", provider_user_id, email, name)
 
@@ -426,7 +426,7 @@ async def google_callback(code: str, state: str, db: DatabaseBackend = Depends(g
 async def github_login():
     """Redirect to GitHub OAuth."""
     if not settings.github_client_id:
-        return {"error": "GitHub OAuth not configured"}
+        return {"error": "GitHub OAuth não configurado"}
     return await _oauth_redirect(
         "github",
         "https://github.com/login/oauth/authorize",
@@ -440,7 +440,7 @@ async def github_callback(code: str, state: str, db: DatabaseBackend = Depends(g
     """Handle GitHub OAuth callback."""
     stored = _oauth_states.pop(state, None)
     if not stored or stored["provider"] != "github":
-        raise HTTPException(400, "Invalid state parameter")
+        raise HTTPException(400, "Parâmetro de estado inválido")
 
     token = await _oauth_exchange("github", code,
                                    "https://github.com/login/oauth/access_token",
@@ -469,7 +469,7 @@ async def github_callback(code: str, state: str, db: DatabaseBackend = Depends(g
                     break
 
     if not provider_user_id or not email:
-        raise HTTPException(400, "Failed to get user info from GitHub")
+        raise HTTPException(400, "Falha ao obter informações do usuário do GitHub")
 
 
     return await _oauth_login_or_register(db, "github", provider_user_id, email.lower().strip(), data.get("login", email))

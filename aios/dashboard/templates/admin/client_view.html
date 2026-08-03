@@ -3,23 +3,23 @@
 <div class="flex-between mb-4">
     <div><h1>{{ instance.name }}</h1><p class="text-sm text-secondary mt-1">{{ instance.base_url }}</p></div>
     <div class="flex-center gap-2">
-        <button class="btn btn-ghost" onclick="refreshData()">⟳ Refresh</button>
-        <a href="/dashboard/admin/fleet/{{ instance.id }}/open" target="_blank" class="btn btn-primary">Open ↗</a>
-        <a href="/dashboard/admin" class="btn btn-ghost">← Fleet</a>
+        <button class="btn btn-ghost" onclick="refreshData()">⟳ Atualizar</button>
+        <a href="/dashboard/admin/fleet/{{ instance.id }}/open" target="_blank" class="btn btn-primary">Abrir ↗</a>
+        <a href="/dashboard/admin" class="btn btn-ghost">← Frota</a>
     </div>
 </div>
 
 <div class="grid-4 mb-4">
     <div class="stat-card">
-        <p class="stat-label">Agents</p>
+        <p class="stat-label">Agentes</p>
         <p class="stat-value">{{ agents|length }}</p>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Teams</p>
+        <p class="stat-label">Equipes</p>
         <p class="stat-value">{{ teams|length }}</p>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Conversations</p>
+        <p class="stat-label">Conversas</p>
         <p class="stat-value">{{ conversations|length }}</p>
     </div>
     <div class="stat-card">
@@ -29,7 +29,7 @@
 </div>
 
 <div class="card mb-4">
-    <h2 class="mb-2">Agents</h2>
+    <h2 class="mb-2">Agentes</h2>
     {% if agents %}
     <div class="flex-col gap-1">
         {% for a in agents %}
@@ -42,11 +42,11 @@
         </div>
         {% endfor %}
     </div>
-    {% else %}<p class="text-sm text-secondary">No agents</p>{% endif %}
+    {% else %}<p class="text-sm text-secondary">Nenhum agente</p>{% endif %}
 </div>
 
 <div class="card mb-4">
-    <h2 class="mb-2">Teams</h2>
+    <h2 class="mb-2">Equipes</h2>
     {% if teams %}
     <div class="flex-col gap-1">
         {% for t in teams %}
@@ -56,7 +56,7 @@
         </div>
         {% endfor %}
     </div>
-    {% else %}<p class="text-sm text-secondary">No teams</p>{% endif %}
+    {% else %}<p class="text-sm text-secondary">Nenhuma equipe</p>{% endif %}
 </div>
 
 <script>

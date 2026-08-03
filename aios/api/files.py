@@ -32,7 +32,7 @@ async def upload_file(
     """Upload a file as an artifact linked to a conversation."""
     content = await file.read()
     if len(content) > 50 * 1024 * 1024:
-        raise HTTPException(413, "File too large (max 50MB)")
+        raise HTTPException(413, "Arquivo muito grande (máx. 50MB)")
 
     # validate content type by magic bytes
     valid, content_type = validate_file(file.filename or "unnamed", content)

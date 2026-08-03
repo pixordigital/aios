@@ -44,12 +44,12 @@ MODEL_PRICING = {
 }
 
 TOOL_DESCRIPTIONS = {
-    "calculator": "Math expressions, safe eval",
-    "web_search": "Search the web",
-    "send_email": "Send email messages",
-    "read_file": "Read uploaded files by artifact ID",
-    "current_datetime": "Get current UTC / timezone-aware datetime",
-    "http_get": "Fetch HTTPS URLs",
+    "calculator": "Expressões matemáticas, avaliação segura",
+    "web_search": "Buscar na web",
+    "send_email": "Enviar mensagens por e-mail",
+    "read_file": "Ler arquivos enviados por ID do artefato",
+    "current_datetime": "Obter data/hora UTC atual com fuso",
+    "http_get": "Buscar URLs HTTPS",
 }
 
 
@@ -88,23 +88,23 @@ def _orchestrator_recommendation(agent_ids: list) -> str | None:
 def _team_compatibility(agents: list) -> dict:
     """Score team compatibility 0-100."""
     if not agents or len(agents) < 2:
-        return {"score": 0, "issues": ["Needs at least 2 agents"]}
+        return {"score": 0, "issues": ["Precisa de pelo menos 2 agentes"]}
     types = [a.agent_type for a in agents]
     score = 100
     issues = []
     if len(types) != len(set(types)):
         score -= 20
-        issues.append("Duplicate agent types — consider diversifying roles")
+        issues.append("Tipos de agente duplicados — considere diversificar as funções")
     if any(t == "data_scientist" for t in types) and "data_analyst" not in types:
         score -= 10
-        issues.append("Data Scientist works best paired with a Data Analyst")
+        issues.append("Cientista de Dados funciona melhor em par com um Analista de Dados")
     if any(t == "sdr" for t in types) and "closer" not in types:
         score -= 15
-        issues.append("SDR team missing a Closer to complete the sales pipeline")
+        issues.append("Equipe SDR sem Closer para completar o funil de vendas")
     drafted = [a for a in agents if a.status != "active"]
     if drafted:
         score -= 10 * len(drafted)
-        issues.append(f"{len(drafted)} agent(s) not deployed")
+        issues.append(f"{len(drafted)} {('agente não implantado' if len(drafted) == 1 else 'agentes não implantados')}")
     return {"score": max(score, 0), "issues": issues}
 
 
@@ -115,7 +115,7 @@ def _tool_conflicts(tools_list: list[list[str]]) -> list[str]:
     for i, tl in enumerate(tools_list):
         for t in tl:
             if t in all_tools:
-                conflicts.append(f"Tool '{t}' used by multiple agents — may cause contention")
+                conflicts.append(f"Ferramenta '{t}' usada por vários agentes — pode causar contenção")
             all_tools[t] = i
     return list(set(conflicts))
 
@@ -153,7 +153,7 @@ async def _render(name: str, request: Request, **kw) -> str:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str = ""):
-    return await _render("login.html", request, title="Login", error=error)
+    return await _render("login.html", request, title="Entrar", error=error)
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -164,12 +164,12 @@ async def login_action(request: Request, email: str = Form(...), password: str =
     try:
         await _rate_limit(f"{email.lower().strip()}:{client_ip}")
     except HTTPException:
-        return await login_page(request, error="Too many login attempts. Try again later.")
+        return await login_page(request, error="Muitas tentativas de login. Tente novamente mais tarde.")
     async with db_session() as db:
         result = await db.execute(select(User).where(User.email == email.lower().strip()))
         user = result.scalar_one_or_none()
         if not user or not _verify_password(password, user.hashed_password):
-            return await login_page(request, error="Invalid email or password")
+            return await login_page(request, error="E-mail ou senha inválidos")
 
         token = create_jwt_token(user.id, user.org_id)
         resp = RedirectResponse("/dashboard", status_code=303)
@@ -184,7 +184,7 @@ async def login_action(request: Request, email: str = Form(...), password: str =
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, error: str = ""):
-    return await _render("register.html", request, title="Register", error=error)
+    return await _render("register.html", request, title="Registrar", error=error)
 
 
 @router.post("/register", response_class=HTMLResponse)
@@ -203,7 +203,7 @@ async def register_action(
         from sqlalchemy import select
         existing = await db.execute(select(User).where(User.email == email.lower().strip()))
         if existing.scalar_one_or_none():
-            return await register_page(request, error="Email already registered")
+            return await register_page(request, error="E-mail já registrado")
 
         # first-ever user gets superadmin — count BEFORE creating the org so two
         # concurrent registrations can't both read 0 and both become superadmin
@@ -289,7 +289,7 @@ async def dashboard_home(request: Request):
 @router.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
     """Analytics & Telemetry dashboard."""
-    return await _render("analytics.html", request, title="Analytics")
+    return await _render("analytics.html", request, title="Análises")
 
 
 # ─── Agent CRUD ───
@@ -310,7 +310,7 @@ async def agent_list(request: Request):
         for t in result.scalars():
             for a in (t.agents or []):
                 teams_map.setdefault(a.id, []).append(t.name)
-    return await _render("agents.html", request, title="Agents", agents=agents, teams_map=teams_map)
+    return await _render("agents.html", request, title="Agentes", agents=agents, teams_map=teams_map)
 
 
 @router.get("/agents/new", response_class=HTMLResponse)
@@ -318,7 +318,7 @@ async def agent_new_form(request: Request):
     org_id = await _org_filter(request)
     async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
-    return await _render("agent_form.html", request, title="New Agent",
+    return await _render("agent_form.html", request, title="Novo Agente",
                    agent=None, agent_types=AGENT_TYPES, agents=agents)
 
 
@@ -330,7 +330,7 @@ async def agent_edit_form(request: Request, aid: str):
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         if not agent:
             return RedirectResponse("/dashboard/agents", status_code=303)
-    return await _render("agent_form.html", request, title="Edit Agent",
+    return await _render("agent_form.html", request, title="Editar Agente",
                    agent=agent, agent_types=AGENT_TYPES, agents=agents)
 
 
@@ -431,7 +431,7 @@ async def team_list(request: Request):
         )).scalars().all()
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         compat_scores = {t.id: _team_compatibility(t.agents or []) for t in teams}
-    return await _render("teams.html", request, title="Teams", teams=teams, agents=agents, compat_scores=compat_scores)
+    return await _render("teams.html", request, title="Equipes", teams=teams, agents=agents, compat_scores=compat_scores)
 
 
 @router.get("/teams/new", response_class=HTMLResponse)
@@ -439,7 +439,7 @@ async def team_new_form(request: Request):
     org_id = await _org_filter(request)
     async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
-    return await _render("team_form.html", request, title="New Team",
+    return await _render("team_form.html", request, title="Nova Equipe",
                    team=None, agents=agents, strategies=ROUTING_STRATEGIES)
 
 
@@ -454,7 +454,7 @@ async def team_edit_form(request: Request, tid: str):
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         if not team:
             return RedirectResponse("/dashboard/teams", status_code=303)
-    return await _render("team_form.html", request, title="Edit Team",
+    return await _render("team_form.html", request, title="Editar Equipe",
                    team=team, agents=agents, strategies=ROUTING_STRATEGIES)
 
 
@@ -467,10 +467,10 @@ async def recommend_orchestrator(tid: str):
             agents_list = [a for a in team.agents]
             return HTMLResponse(f"""
             <div style="font-size:0.8125rem;color:var(--accent);padding:0.5rem 0">
-                Recommendation: <strong>{next((a.name for a in agents_list if a.id == rec), '—')}</strong>
-                (based on role hierarchy)
+                Recomendação: <strong>{next((a.name for a in agents_list if a.id == rec), '—')}</strong>
+                (com base na hierarquia de funções)
             </div>""")
-    return HTMLResponse("<div style='font-size:0.8125rem;color:var(--text-tertiary);padding:0.5rem 0'>Select agents first</div>")
+    return HTMLResponse("<div style='font-size:0.8125rem;color:var(--text-tertiary);padding:0.5rem 0'>Selecione os agentes primeiro</div>")
 
 
 @router.post("/teams/save")
@@ -545,7 +545,7 @@ async def conversation_list(request: Request):
                 select(func.count(Message.id)).where(Message.conversation_id == conv.id)
             )).scalar() or 0
             conv._msg_count = cnt
-    return await _render("conversations.html", request, title="Conversations", conversations=convs)
+    return await _render("conversations.html", request, title="Conversas", conversations=convs)
 
 
 @router.get("/conversations/{conv_id}/delete")
@@ -567,11 +567,11 @@ async def conversation_detail(request: Request, conv_id: str):
     async with db_session() as db:
         conv = await db.get(Conversation, conv_id)
         if not conv or conv.org_id != org_id:
-            return HTMLResponse("<h2>Not found</h2><a href='/dashboard/conversations'>Back</a>", status_code=404)
+            return HTMLResponse("<h2>Não encontrado</h2><a href='/dashboard/conversations'>Voltar</a>", status_code=404)
         msgs = (await db.execute(
             select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.asc())
         )).scalars().all()
-    return await _render("conversation_detail.html", request, title="Conversation",
+    return await _render("conversation_detail.html", request, title="Conversa",
                    conv=conv, messages=msgs)
 
 
@@ -580,7 +580,7 @@ async def channel_list(request: Request):
     org_id = await _org_filter(request)
     async with db_session() as db:
         channels = (await db.execute(select(ChannelConnection).where(ChannelConnection.org_id == org_id).order_by(ChannelConnection.created_at.desc()))).scalars().all()
-    return await _render("channels.html", request, title="Channels", channels=channels)
+    return await _render("channels.html", request, title="Canais", channels=channels)
 
 
 @router.get("/channels/new", response_class=HTMLResponse)
@@ -589,7 +589,7 @@ async def channel_new_form(request: Request):
     async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         teams = (await db.execute(select(Team).where(Team.org_id == org_id).order_by(Team.name))).scalars().all()
-    return await _render("channel_form.html", request, title="New Channel", channel=None, agents=agents, teams=teams)
+    return await _render("channel_form.html", request, title="Novo Canal", channel=None, agents=agents, teams=teams)
 
 
 @router.get("/channels/{cid}/edit", response_class=HTMLResponse)
@@ -601,7 +601,7 @@ async def channel_edit_form(request: Request, cid: str):
         teams = (await db.execute(select(Team).where(Team.org_id == org_id).order_by(Team.name))).scalars().all()
         if not channel:
             return RedirectResponse("/dashboard/channels", status_code=303)
-    return await _render("channel_form.html", request, title="Edit Channel", channel=channel, agents=agents, teams=teams)
+    return await _render("channel_form.html", request, title="Editar Canal", channel=channel, agents=agents, teams=teams)
 
 
 CHANNEL_CONFIG_FIELDS = {
@@ -689,7 +689,7 @@ async def member_list(request: Request):
             select(Invitation).where(Invitation.org_id == org_id, Invitation.accepted == False).order_by(Invitation.created_at.desc())
         )).scalars().all()
     current_email = getattr(request.state, "user_email", "")
-    return await _render("members.html", request, title="Members", users=users, invites=invites, current_user_email=current_email)
+    return await _render("members.html", request, title="Membros", users=users, invites=invites, current_user_email=current_email)
 
 
 @router.post("/members/invite")
@@ -738,7 +738,7 @@ async def accept_invite(request: Request, token: str = ""):
             select(Invitation).where(Invitation.token == token, Invitation.accepted == False)
         )).scalar_one_or_none()
         if not inv:
-            return HTMLResponse("<h2>Invalid or expired invite</h2><p>This invite link is no longer valid.</p>")
+            return HTMLResponse("<h2>Convite inválido ou expirado</h2><p>Este link de convite não é mais válido.</p>")
 
         if getattr(request.state, "user_email", None):
             # logged in — add to org, but only for the invite's own email and
@@ -747,9 +747,9 @@ async def accept_invite(request: Request, token: str = ""):
             user = await get_dashboard_user(request)
             if user:
                 if user.email.lower() != inv.email.lower():
-                    return HTMLResponse("<h2>This invite is for a different email</h2><p>Log out and accept it with the invited address.</p>")
+                    return HTMLResponse("<h2>Este convite é para outro e-mail</h2><p>Sai da conta e aceite-o com o endereço convidado.</p>")
                 if inv.role == "superadmin":
-                    return HTMLResponse("<h2>Invalid invite</h2><p>Invites cannot grant superadmin.</p>")
+                    return HTMLResponse("<h2>Convite inválido</h2><p>Convites não podem conceder superadmin.</p>")
                 user.org_id = inv.org_id
                 user.role = inv.role
                 inv.accepted = True
@@ -768,7 +768,7 @@ async def _require_superadmin(request: Request):
     user = await get_dashboard_user(request)
     if not user or user.role != "superadmin":
         from fastapi.responses import HTMLResponse
-        return HTMLResponse("<h2>Access denied</h2><p>Superadmin privileges required.</p><a href='/dashboard'>Back</a>", status_code=403)
+        return HTMLResponse("<h2>Acesso negado</h2><p>Privilégios de superadmin necessários.</p><a href='/dashboard'>Voltar</a>", status_code=403)
     return user
 
 
@@ -787,7 +787,7 @@ async def admin_dashboard(request: Request):
             tc = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org.id))).scalar() or 0
             usage = await get_usage_summary(org.id, db)
             orgs_data.append({"org": org, "user_count": uc, "agent_count": ac, "team_count": tc, "usage": usage})
-    return await _render("admin/orgs.html", request, title="Admin", orgs=orgs_data)
+    return await _render("admin/orgs.html", request, title="Administração", orgs=orgs_data)
 
 
 @router.get("/admin/orgs/{oid}", response_class=HTMLResponse)
@@ -798,7 +798,7 @@ async def admin_org_detail(request: Request, oid: str):
     async with db_session() as db:
         org = await db.get(Organization, oid)
         if not org:
-            return HTMLResponse("<h2>Not found</h2>", status_code=404)
+            return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
         users = (await db.execute(select(User).where(User.org_id == oid).order_by(User.created_at))).scalars().all()
         agents = (await db.execute(select(Agent).where(Agent.org_id == oid).order_by(Agent.name))).scalars().all()
         teams = (await db.execute(select(Team).where(Team.org_id == oid).order_by(Team.name))).scalars().all()
@@ -855,7 +855,7 @@ async def admin_fleet(request: Request):
     from aios.db.models import RemoteInstance
     async with db_session() as db:
         instances = (await db.execute(select(RemoteInstance).order_by(RemoteInstance.name))).scalars().all()
-    return await _render("admin/fleet.html", request, title="Client Fleet", instances=instances)
+    return await _render("admin/fleet.html", request, title="Frota de Clientes", instances=instances)
 
 
 @router.post("/admin/fleet/add")
@@ -904,7 +904,7 @@ async def admin_fleet_view(request: Request, fid: str):
     async with db_session() as db:
         inst = await db.get(RemoteInstance, fid)
         if not inst:
-            return HTMLResponse("<h2>Not found</h2>", status_code=404)
+            return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
 
         # proxy to client instance for live data
         agents = []
@@ -945,7 +945,7 @@ async def admin_fleet_open(fid: str):
     async with db_session() as db:
         inst = await db.get(RemoteInstance, fid)
         if not inst:
-            return HTMLResponse("<h2>Not found</h2>", status_code=404)
+            return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
     from fastapi.responses import RedirectResponse
     return RedirectResponse(inst.base_url)
 
@@ -986,7 +986,7 @@ async def billing_page(request: Request):
     if settings.stripe_price_pro:
         stripe_prices["pro"] = settings.stripe_price_pro
 
-    return await _render("billing.html", request, title="Billing",
+    return await _render("billing.html", request, title="Cobrança",
                    current_plan=current_plan, plan_limits=plan_limits,
                    agent_count=agent_count, team_count=team_count,
                    daily_msgs=daily_msgs, plans=PLANS,
@@ -1001,7 +1001,7 @@ async def sandbox_page(request: Request):
     org_id = await _org_filter(request)
     async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active").order_by(Agent.name))).scalars().all()
-    return await _render("sandbox.html", request, title="Agent Sandbox", agents=agents)
+    return await _render("sandbox.html", request, title="Sandbox de Agentes", agents=agents)
 
 
 @router.post("/sandbox/chat")
@@ -1019,7 +1019,7 @@ async def sandbox_chat(
         async with db_session() as db:
             agent = await db.get(Agent, agent_id)
             if not agent or agent.org_id != org_id:
-                yield "data: " + json.dumps({"error": "Agent not found"}) + "\n\n"
+                yield "data: " + json.dumps({"error": "Agente não encontrado"}) + "\n\n"
                 return
 
             import uuid
@@ -1049,7 +1049,7 @@ async def files_list(request: Request):
     from aios.core.storage import list_artifacts
     async with db_session() as db:
         artifacts = await list_artifacts(db, org_id)
-    return await _render("files.html", request, title="Files", artifacts=artifacts)
+    return await _render("files.html", request, title="Arquivos", artifacts=artifacts)
 
 
 @router.post("/files/upload")
@@ -1067,7 +1067,7 @@ async def files_upload(request: Request):
 
     valid, content_type = validate_file(file_field.filename or "file", bytes(content))
     if not valid:
-        return HTMLResponse(f"<h2>Invalid file</h2><p>{content_type}</p><a href='/dashboard/files'>Back</a>", status_code=400)
+        return HTMLResponse(f"<h2>Arquivo inválido</h2><p>{content_type}</p><a href='/dashboard/files'>Voltar</a>", status_code=400)
 
     async with db_session() as db:
         await save_artifact(
@@ -1088,7 +1088,7 @@ async def files_view(request: Request, art_id: str):
     async with db_session() as db:
         art = await db.get(Artifact, art_id)
         if not art or art.org_id != org_id:
-            return HTMLResponse("<h2>Not found</h2>", status_code=404)
+            return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
         text = await read_artifact_text(art_id, db, max_chars=100000)
     return await _render("file_view.html", request, title=art.filename, artifact=art, content=text)
 

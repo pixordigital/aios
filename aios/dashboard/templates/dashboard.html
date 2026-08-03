@@ -3,49 +3,49 @@
 <div class="flex-between mb-4">
     <div>
         <h1>Dashboard</h1>
-        <p class="text-sm text-secondary mt-1">Your agent operations at a glance</p>
+        <p class="text-sm text-secondary mt-1">Suas operações de agentes em um relance</p>
     </div>
     <div class="flex-center gap-2">
-        <button class="btn btn-primary" onclick="document.getElementById('quick-create').showModal()">+ Quick create</button>
+        <button class="btn btn-primary" onclick="document.getElementById('quick-create').showModal()">+ Criação rápida</button>
     </div>
 </div>
 
 {% if stats.agents == 0 %}
 <div class="card mb-4" style="border-left:4px solid var(--accent)">
-    <h2 style="font-size:1.125rem;margin-bottom:0.5rem">👋 Welcome to AIOS</h2>
-    <p class="text-sm" style="margin-bottom:1rem">Get started in 3 steps:</p>
+    <h2 style="font-size:1.125rem;margin-bottom:0.5rem">👋 Bem-vindo ao AIOS</h2>
+    <p class="text-sm" style="margin-bottom:1rem">Comece em 3 passos:</p>
     <ol style="padding-left:1.25rem;margin:0;font-size:0.875rem;color:var(--text-secondary)">
-        <li style="margin-bottom:0.5rem"><strong>Create an agent</strong> — pick a type (SDR, support, closer, etc.) and give it a name</li>
-        <li style="margin-bottom:0.5rem"><strong>Add a channel</strong> — connect WhatsApp, email, Slack, or use the web chat</li>
-        <li><strong>Deploy</strong> — activate your agent and start sending messages</li>
+        <li style="margin-bottom:0.5rem"><strong>Crie um agente</strong> — escolha um tipo (SDR, suporte, closer, etc.) e dê um nome</li>
+        <li style="margin-bottom:0.5rem"><strong>Adicione um canal</strong> — conecte WhatsApp, e-mail, Slack ou use o chat web</li>
+        <li><strong>Implante</strong> — ative seu agente e comece a enviar mensagens</li>
     </ol>
     <div style="margin-top:1rem">
-        <a href="/dashboard/agents/new" class="btn btn-primary" style="font-size:0.8125rem">Create your first agent →</a>
+        <a href="/dashboard/agents/new" class="btn btn-primary" style="font-size:0.8125rem">Crie seu primeiro agente →</a>
     </div>
 </div>
 {% endif %}
 
 <div class="grid-4 mb-4">
     <div class="stat-card">
-        <p class="stat-label">Agents</p>
+        <p class="stat-label">Agentes</p>
         <p class="stat-value">{{ stats.agents }}</p>
-        <span class="text-xs text-tertiary">{{ stats.deployed }} deployed</span>
-        <a href="/dashboard/agents" class="stat-link">Manage agents</a>
+        <span class="text-xs text-tertiary">{{ stats.deployed }} implantados</span>
+        <a href="/dashboard/agents" class="stat-link">Gerenciar agentes</a>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Teams</p>
+        <p class="stat-label">Equipes</p>
         <p class="stat-value">{{ stats.teams }}</p>
-        <a href="/dashboard/teams" class="stat-link">Manage teams</a>
+        <a href="/dashboard/teams" class="stat-link">Gerenciar equipes</a>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Est. cost/req</p>
+        <p class="stat-label">Custo est./req</p>
         <p class="stat-value" style="font-size:1.25rem">${{ "%.2f"|format(stats.total_cost) }}</p>
-        <span class="text-xs text-tertiary">Across all agents</span>
+        <span class="text-xs text-tertiary">Em todos os agentes</span>
     </div>
     <div class="stat-card">
-        <p class="stat-label">Messages</p>
+        <p class="stat-label">Mensagens</p>
         <p class="stat-value">{{ stats.messages }}</p>
-        <span class="text-xs text-tertiary">{{ stats.conversations }} conversations</span>
+        <span class="text-xs text-tertiary">{{ stats.conversations }} conversas</span>
     </div>
 </div>
 
@@ -57,8 +57,8 @@
                 <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
             </div>
             <div>
-                <h2 style="font-size:0.9375rem">Create agent</h2>
-                <p class="text-sm text-secondary" style="margin:0">Pick a type, set a name — we'll fill the rest</p>
+                <h2 style="font-size:0.9375rem">Criar agente</h2>
+                <p class="text-sm text-secondary" style="margin:0">Escolha um tipo, defina um nome — preenchemos o resto</p>
             </div>
         </div>
     </div>
@@ -68,8 +68,8 @@
                 <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
             </div>
             <div>
-                <h2 style="font-size:0.9375rem">Create team</h2>
-                <p class="text-sm text-secondary" style="margin:0">Pick agents, set an orchestrator, we handle the rest</p>
+                <h2 style="font-size:0.9375rem">Criar equipe</h2>
+                <p class="text-sm text-secondary" style="margin:0">Escolha agentes, defina um orquestrador, cuidamos do resto</p>
             </div>
         </div>
     </div>
@@ -100,8 +100,8 @@
             {% endif %}
         </div>
         <div class="flex-center gap-1">
-            <a href="/dashboard/teams/{{ team.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
-            <a href="/dashboard/channels/new" class="btn btn-ghost btn-sm">+ Channel</a>
+            <a href="/dashboard/teams/{{ team.id }}/edit" class="btn btn-ghost btn-sm">Editar</a>
+            <a href="/dashboard/channels/new" class="btn btn-ghost btn-sm">+ Canal</a>
         </div>
     </div>
 
@@ -109,13 +109,13 @@
         {% if orch %}
         <div style="background:var(--accent-subtle);border:1px solid var(--accent-border);border-radius:var(--radius-sm);padding:0.375rem 0.75rem;text-align:center">
             <div style="font-size:0.6875rem;font-weight:600;color:var(--accent)">{{ orch.name }}</div>
-            <div style="font-size:0.6rem;color:var(--text-tertiary)">orchestrator</div>
+            <div style="font-size:0.6rem;color:var(--text-tertiary)">orquestrador</div>
         </div>
         {% endif %}
         {% if mgr %}
         <div style="background:var(--bg-hover);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.375rem 0.75rem;text-align:center">
             <div style="font-size:0.6875rem;font-weight:500">{{ mgr.name }}</div>
-            <div style="font-size:0.6rem;color:var(--text-tertiary)">manager</div>
+            <div style="font-size:0.6rem;color:var(--text-tertiary)">gerente</div>
         </div>
         {% endif %}
         {% for a in members %}
@@ -133,7 +133,7 @@
 <!-- Quick Create Modal -->
 <dialog id="quick-create" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(420px,94vw);color:var(--text);box-shadow:0 24px 80px rgba(0,0,0,0.5)">
     <div style="padding:1.25rem">
-        <h2 style="margin-bottom:1rem">Quick create</h2>
+        <h2 style="margin-bottom:1rem">Criação rápida</h2>
         <div class="flex-col gap-2">
             <div class="card card-hover" style="cursor:pointer;padding:0.875rem 1rem" onclick="closeModal('quick-create');document.getElementById('quick-agent').showModal()">
                 <div class="flex-center gap-3">
@@ -141,8 +141,8 @@
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
                     </div>
                     <div>
-                        <div style="font-weight:600;font-size:0.875rem">New agent</div>
-                        <div class="text-xs text-tertiary">SDR, Closer, Support, or custom</div>
+                        <div style="font-weight:600;font-size:0.875rem">Novo agente</div>
+                        <div class="text-xs text-tertiary">SDR, Closer, Suporte ou personalizado</div>
                     </div>
                 </div>
             </div>
@@ -152,8 +152,8 @@
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
                     </div>
                     <div>
-                        <div style="font-weight:600;font-size:0.875rem">New team</div>
-                        <div class="text-xs text-tertiary">Compose agents with an orchestrator</div>
+                        <div style="font-weight:600;font-size:0.875rem">Nova equipe</div>
+                        <div class="text-xs text-tertiary">Componha agentes com um orquestrador</div>
                     </div>
                 </div>
             </div>
@@ -163,8 +163,8 @@
                         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     </div>
                     <div>
-                        <div style="font-weight:600;font-size:0.875rem">Connect channel</div>
-                        <div class="text-xs text-tertiary">WhatsApp, Slack, Telegram, Discord, Email</div>
+                        <div style="font-weight:600;font-size:0.875rem">Conectar canal</div>
+                        <div class="text-xs text-tertiary">WhatsApp, Slack, Telegram, Discord, E-mail</div>
                     </div>
                 </div>
             </a>
@@ -177,29 +177,29 @@
 <dialog id="quick-team" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(520px,94vw);color:var(--text);box-shadow:0 24px 80px rgba(0,0,0,0.5)">
     <form method="POST" action="/dashboard/teams/save" style="padding:1.25rem">
         <div class="flex-between mb-3">
-            <h2>Create team</h2>
+            <h2>Criar equipe</h2>
             <button type="button" class="btn btn-ghost btn-sm" onclick="closeModal('quick-team')" style="border:none">✕</button>
         </div>
         <div class="flex-col gap-3">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
                 <div>
-                    <label>Team name</label>
-                    <input type="text" name="name" required class="input" placeholder="e.g. Sales Squad" autofocus>
+                    <label>Nome da equipe</label>
+                    <input type="text" name="name" required class="input" placeholder="ex.: Equipe de Vendas" autofocus>
                 </div>
                 <div>
-                    <label>Strategy</label>
+                    <label>Estratégia</label>
                     <select name="routing_strategy" class="input">
                         <option value="supervisor">Supervisor</option>
                         <option value="round_robin">Round Robin</option>
                         <option value="broadcast">Broadcast</option>
-                        <option value="semantic">Semantic</option>
+                        <option value="semantic">Semântica</option>
                     </select>
                 </div>
             </div>
             <div>
-                <label>Orchestrator <span class="text-xs text-tertiary">(routes work to team members)</span></label>
+                <label>Orquestrador <span class="text-xs text-tertiary">(encaminha o trabalho aos membros)</span></label>
                 <select name="orchestrator_agent_id" required class="input">
-                    <option value="">— Select orchestrator —</option>
+                    <option value="">— Selecione o orquestrador —</option>
                     {% for a in agents %}
                     <option value="{{ a.id }}" {% if a.agent_type == 'orchestrator' %}selected{% endif %}>
                         {{ a.name }} — {{ a.agent_type }} ({{ a.status }})
@@ -208,16 +208,16 @@
                 </select>
             </div>
             <div>
-                <label>Manager <span class="text-xs text-tertiary">(optional, oversees quality)</span></label>
+                <label>Gerente <span class="text-xs text-tertiary">(opcional, supervisiona a qualidade)</span></label>
                 <select name="manager_agent_id" class="input">
-                    <option value="">— No manager —</option>
+                    <option value="">— Sem gerente —</option>
                     {% for a in agents %}
                     <option value="{{ a.id }}">{{ a.name }} — {{ a.agent_type }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div>
-                <label>Members</label>
+                <label>Membros</label>
                 <div style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:0.25rem;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.25rem">
                     {% for a in agents %}
                     <label class="flex-center" style="padding:0.375rem 0.5rem;border-radius:var(--radius-xs);cursor:pointer;gap:0.5rem;font-size:0.8125rem" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
@@ -227,13 +227,13 @@
                         <span class="text-xs" style="color:{{ 'var(--green)' if a.status == 'active' else 'var(--text-tertiary)' }}">{{ a.status }}</span>
                     </label>
                     {% else %}
-                    <div class="text-sm text-secondary" style="padding:1rem;text-align:center">No agents yet. Create one first.</div>
+                    <div class="text-sm text-secondary" style="padding:1rem;text-align:center">Ainda não há agentes. Crie um primeiro.</div>
                     {% endfor %}
                 </div>
             </div>
             <div class="flex-between" style="padding-top:0.5rem;border-top:1px solid var(--border)">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('quick-team')">Cancel</button>
-                <button type="submit" class="btn btn-primary">Create team</button>
+                <button type="button" class="btn btn-ghost" onclick="closeModal('quick-team')">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Criar equipe</button>
             </div>
         </div>
     </form>

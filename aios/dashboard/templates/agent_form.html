@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>{% if agent %}Edit{% else %}New{% endif %} Agent</h1></div>
+    <div><h1>{% if agent %}Editar{% else %}Novo{% endif %} Agente</h1></div>
 </div>
 
 <form method="POST" action="/dashboard/agents/save">
@@ -10,14 +10,14 @@
 
         <div class="flex-col gap-4">
             <div class="card">
-                <h2 class="mb-3">Basic info</h2>
+                <h2 class="mb-3">Informações básicas</h2>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                     <div>
-                        <label for="name">Name</label>
-                        <input id="name" type="text" name="name" value="{{ agent.name if agent else '' }}" required class="input" placeholder="My Agent">
+                        <label for="name">Nome</label>
+                        <input id="name" type="text" name="name" value="{{ agent.name if agent else '' }}" required class="input" placeholder="Meu Agente">
                     </div>
                     <div>
-                        <label for="agent_type">Type</label>
+                        <label for="agent_type">Tipo</label>
                         <select id="agent_type" name="agent_type" class="input" onchange="updateTypeHint(this.value)">
                             {% for t in agent_types %}
                             <option value="{{ t }}" {% if agent and agent.agent_type == t %}selected{% endif %}>{{ t | replace('_', ' ') | title }}</option>
@@ -29,23 +29,23 @@
 
             <div class="card">
                 <div class="flex-between mb-3">
-                    <h2>System prompt</h2>
+                    <h2>Prompt do sistema</h2>
                     <div id="token-counter" class="badge" style="font-family:'JetBrains Mono',monospace;font-size:0.625rem">0 tok</div>
                 </div>
-                <textarea id="prompt-input" name="system_prompt" rows="12" oninput="updateTokenCount(this)" class="input input-mono" placeholder="You are an AI agent that...">{{ agent.system_prompt if agent else '' }}</textarea>
+                <textarea id="prompt-input" name="system_prompt" rows="12" oninput="updateTokenCount(this)" class="input input-mono" placeholder="Você é um agente de IA que...">{{ agent.system_prompt if agent else '' }}</textarea>
             </div>
 
             <div class="card">
                 <h2 class="mb-3">Model</h2>
                 <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:1rem">
                     <div class="model-search-wrap" style="position:relative">
-                        <label>Model</label>
+                        <label>Modelo</label>
                         <input type="text" id="model-search" name="model" autocomplete="off"
                                value="{{ agent.llm_config.get('model', 'openai/gpt-4o') if agent and agent.llm_config else 'openai/gpt-4o' }}"
                                oninput="filterModels(this);updateCost(this.value)"
                                onfocus="document.getElementById('model-dropdown').classList.add('open')"
                                onblur="setTimeout(function(){document.getElementById('model-dropdown').classList.remove('open')}, 200)"
-                               class="input input-mono" placeholder="Search models…">
+                               class="input input-mono" placeholder="Buscar modelos…">
                         <div id="model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;margin-top:2px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
                             {% set groups = {
                                 "OpenRouter": [
@@ -78,13 +78,13 @@
                                     "amazon/nova-pro-v1", "amazon/nova-lite-v1",
                                     "upstage/solar-pro-2", "ibm/granite-3.2-20b",
                                 ],
-                                "OpenCode (free)": [
+                                "OpenCode (grátis)": [
                                     "opencode/deepseek-v4", "opencode/deepseek-v4-flash",
                                     "opencode/qwen-3-235b-a22b", "opencode/qwen-3-30b-a3b",
                                     "opencode/llama-4-maverick", "opencode/llama-4-scout",
                                     "opencode/mistral-large-3",
                                 ],
-                                "Direct API": [
+                                "API direta": [
                                     "openai-direct/gpt-4o", "openai-direct/gpt-4o-mini",
                                     "anthropic-direct/claude-sonnet-4-20250514", "anthropic-direct/claude-3.5-haiku",
                                 ],
@@ -103,27 +103,27 @@
                         <p id="model-provider" style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem"></p>
                     </div>
                     <div>
-                        <label>Temperature</label>
+                        <label>Temperatura</label>
                         <input type="number" name="temperature" step="0.1" min="0" max="2" class="input"
                                value="{{ agent.llm_config.get('temperature', 0.7) if agent and agent.llm_config else 0.7 }}">
                     </div>
                     <div>
-                        <label>Max tokens</label>
+                        <label>Máx. de tokens</label>
                         <input type="number" name="max_tokens" id="max-tokens" step="1" min="256" max="16384" class="input"
                                value="{{ agent.llm_config.get('max_tokens', 4096) if agent and agent.llm_config else 4096 }}"
                                oninput="updateCost(document.getElementById('model-search').value)">
                     </div>
                 </div>
                 <div id="cost-estimate" class="flex-center gap-2 mt-2" style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.5rem 0.75rem;flex-wrap:wrap">
-                    <span>Estimated cost per request: <strong id="cost-value" style="color:var(--text);font-family:'JetBrains Mono',monospace">$0.0000</strong></span>
-                    <span class="text-xs text-tertiary">(input + output, 1:0.5 ratio)</span>
+                    <span>Custo estimado por requisição: <strong id="cost-value" style="color:var(--text);font-family:'JetBrains Mono',monospace">$0.0000</strong></span>
+                    <span class="text-xs text-tertiary">(entrada + saída, proporção 1:0,5)</span>
                 </div>
             </div>
 
             <div class="card">
-                <h2 class="mb-3">Tools</h2>
+                <h2 class="mb-3">Ferramentas</h2>
                 <div>
-                    <label>Tools</label>
+                    <label>Ferramentas</label>
                     <div style="display:flex;flex-wrap:wrap;gap:0.375rem;margin-bottom:0.5rem" id="tool-pills">
                         <span class="tool-pill" onclick="toggleTool(this,'calculator')" style="padding:0.25rem 0.5rem;border-radius:var(--radius-xs);border:1px solid var(--border);font-size:0.75rem;cursor:pointer;transition:all 0.1s;user-select:none">🧮 calculator</span>
                         <span class="tool-pill" onclick="toggleTool(this,'web_search')" style="padding:0.25rem 0.5rem;border-radius:var(--radius-xs);border:1px solid var(--border);font-size:0.75rem;cursor:pointer;transition:all 0.1s;user-select:none">🌐 web_search</span>
@@ -132,33 +132,33 @@
                         <span class="tool-pill" onclick="toggleTool(this,'send_email')" style="padding:0.25rem 0.5rem;border-radius:var(--radius-xs);border:1px solid var(--border);font-size:0.75rem;cursor:pointer;transition:all 0.1s;user-select:none">📧 send_email</span>
                         <span class="tool-pill" onclick="toggleTool(this,'read_file')" style="padding:0.25rem 0.5rem;border-radius:var(--radius-xs);border:1px solid var(--border);font-size:0.75rem;cursor:pointer;transition:all 0.1s;user-select:none">📄 read_file</span>
                     </div>
-                    <input type="text" name="tools" id="tools-input" value="{{ agent.tools | join(', ') if agent and agent.tools else '' }}" class="input input-mono" placeholder="Type custom tool names..." oninput="syncPills(this)">
+                    <input type="text" name="tools" id="tools-input" value="{{ agent.tools | join(', ') if agent and agent.tools else '' }}" class="input input-mono" placeholder="Digite nomes de ferramentas personalizadas..." oninput="syncPills(this)">
                 </div>
                 <div id="tool-descriptions" class="flex-col gap-1 mt-2">
                     {% for t in (agent.tools if agent else []) %}
                     <div style="font-size:0.6875rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content">
-                        <span style="font-family:'JetBrains Mono',monospace">{{ t }}</span>: {{ tool_descriptions.get(t, 'Custom tool') }}
+                        <span style="font-family:'JetBrains Mono',monospace">{{ t }}</span>: {{ tool_descriptions.get(t, 'Ferramenta personalizada') }}
                     </div>
                     {% endfor %}
                 </div>
             </div>
 
             <div class="card">
-                <h2 class="mb-3">Memory</h2>
+                <h2 class="mb-3">Memória</h2>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
                     <div>
-                        <label>Short-term buffer (messages)</label>
+                        <label>Buffer de curto prazo (mensagens)</label>
                         <input type="number" name="short_term_buffer" min="5" max="500" class="input"
                                value="{{ agent.memory_config.get('short_term', {}).get('max_messages', 50) if agent and agent.memory_config else 50 }}">
                     </div>
                     <div class="flex-col gap-2" style="justify-content:flex-end;padding-bottom:0.25rem">
                         <label class="flex-center" style="gap:0.5rem;font-size:0.8125rem;cursor:pointer;font-weight:400;color:var(--text)">
                             <input type="checkbox" name="long_term_enabled" {% if agent and agent.memory_config and agent.memory_config.get('long_term', {}).get('enabled') %}checked{% endif %} style="accent-color:var(--accent);width:1rem;height:1rem">
-                            Long-term memory
+                            Memória de longo prazo
                         </label>
                         <label class="flex-center" style="gap:0.5rem;font-size:0.8125rem;cursor:pointer;font-weight:400;color:var(--text)">
                             <input type="checkbox" name="episodic_enabled" {% if agent and agent.memory_config and agent.memory_config.get('episodic', {}).get('enabled') %}checked{% endif %} style="accent-color:var(--accent);width:1rem;height:1rem">
-                            Episodic summarization
+                            Resumo episódico
                         </label>
                     </div>
                 </div>
@@ -168,7 +168,7 @@
         <!-- Sidebar: Insights -->
         <div class="flex-col gap-3">
             <div class="card">
-                <h2 class="mb-2">Compatible teammates</h2>
+                <h2 class="mb-2">Colegas compatíveis</h2>
                 {% set compat = compatible_types(agent.agent_type if agent else 'custom') %}
                 <div class="flex-col gap-1">
                     {% for ct in compat %}
@@ -181,18 +181,18 @@
             </div>
 
             <div class="card">
-                <h2 class="mb-2">Quick actions</h2>
+                <h2 class="mb-2">Ações rápidas</h2>
                 <div class="flex-col gap-1">
-                    <a href="/dashboard/agents/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ New agent</a>
-                    <a href="/dashboard/teams/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ New team</a>
-                    <a href="/dashboard/channels/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ New channel</a>
+                    <a href="/dashboard/agents/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ Novo agente</a>
+                    <a href="/dashboard/teams/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ Nova equipe</a>
+                    <a href="/dashboard/channels/new" class="btn btn-ghost w-full" style="justify-content:flex-start;font-size:0.75rem">+ Novo canal</a>
                 </div>
             </div>
 
             <div style="flex:1"></div>
             <div class="flex-col gap-2" style="position:sticky;bottom:0">
-                <button type="submit" class="btn btn-primary w-full" style="padding:0.625rem">{% if agent %}Save changes{% else %}Create agent{% endif %}</button>
-                <a href="/dashboard/agents" class="btn btn-ghost w-full">Cancel</a>
+                <button type="submit" class="btn btn-primary w-full" style="padding:0.625rem">{% if agent %}Salvar alterações{% else %}Criar agente{% endif %}</button>
+                <a href="/dashboard/agents" class="btn btn-ghost w-full">Cancelar</a>
             </div>
         </div>
 
@@ -223,9 +223,9 @@
     function updateToolDescriptions(input){
         var names=input.value.split(/[\s,]+/).filter(Boolean);
         var desc=document.getElementById('tool-descriptions');
-        var known={"calculator":"Math expressions, safe eval","web_search":"Search the web","http_get":"Fetch HTTPS URLs","current_datetime":"Current UTC/timezone time","send_email":"Send email messages","read_file":"Read uploaded files"};
+        var known={"calculator":"Expressões matemáticas, avaliação segura","web_search":"Buscar na web","http_get":"Buscar URLs HTTPS","current_datetime":"Hora atual UTC/fuso","send_email":"Enviar mensagens de e-mail","read_file":"Ler arquivos enviados"};
         desc.innerHTML=names.map(function(n){
-            var d=known[n]||'Custom tool';
+            var d=known[n]||'Ferramenta personalizada';
             return '<div style="font-size:0.6875rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content"><span style="font-family:JetBrains Mono,monospace">'+n+'</span>: '+d+'</div>';
         }).join('');
     }
