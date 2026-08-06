@@ -203,3 +203,77 @@ class ChannelOut(BaseModel):
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+# --- Approval ---
+
+class ApprovalDecision(BaseModel):
+    action_id: str
+    decision: str = Field(pattern=r"^(approve|reject)$")
+
+
+class PendingActionOut(BaseModel):
+    id: str
+    agent_id: str
+    conversation_id: str
+    tool_name: str
+    tool_args: dict
+    context_summary: str
+    status: str
+    created_at: float
+
+    model_config = {"from_attributes": True}
+
+
+# --- Skill ---
+
+class SkillCreate(BaseModel):
+    agent_id: str
+    name: str = Field(min_length=1, max_length=255)
+    description: str = ""
+    skill_type: str = "tool_pattern"
+    content: str = ""
+    input_schema: dict = {}
+    tags: list[str] = []
+
+
+class SkillOut(BaseModel):
+    id: str
+    agent_id: str
+    name: str
+    description: str
+    skill_type: str
+    content: str
+    tags: list
+    usage_count: int
+    success_rate: float
+    org_id: str
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+# --- Thread ---
+
+class ThreadOut(BaseModel):
+    """Thread = conversation for user-facing API clarity."""
+    id: str
+    name: str
+    channel: str
+    agent_id: str | None = None
+    created_at: str = ""
+    message_count: int = 0
+
+
+# --- Rubric ---
+
+class RubricCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str = ""
+    criteria: list[str] = []
+    weights: dict = {}
+
+
+class RubricScore(BaseModel):
+    rubric_id: str
+    response: str = Field(min_length=1, max_length=100000)

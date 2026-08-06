@@ -33,6 +33,7 @@ class SyscallType(Enum):
     AGENT_RUN = "agent.run"
     AGENT_RUN_STRUCTURED = "agent.run_structured"
     AGENT_CONTEXT_BUILD = "agent.context_build"
+    AGENT_SPAWN = "agent.spawn"
 
 
 @dataclass

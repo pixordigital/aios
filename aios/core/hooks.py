@@ -36,6 +36,8 @@ class HookPoint(Enum):
     AGENT_QUEUED = "agent_queued"
     AGENT_DEQUEUED = "agent_dequeued"
     AGENT_PREEMPTED = "agent_preempted"
+    # Approval
+    APPROVAL_REQUESTED = "approval_requested"
     # System
     ON_ERROR = "on_error"
 
