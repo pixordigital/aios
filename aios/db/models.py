@@ -303,3 +303,20 @@ class OAuthAccount(Base, TimestampMixin):
     provider: Mapped[str] = mapped_column(String(50), index=True)  # "google" | "github"
     provider_user_id: Mapped[str] = mapped_column(String(255), index=True)
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class DeadLetter(Base, TimestampMixin):
+    """Failed inbound/outbound messages awaiting manual retry."""
+    __tablename__ = "dead_letters"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=True)
+    channel_type: Mapped[str] = mapped_column(String(50))
+    channel_connection_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), index=True, nullable=True)
+    direction: Mapped[str] = mapped_column(String(20))  # inbound|outbound
+    job_name: Mapped[str] = mapped_column(String(255))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)  # full args to re-run job
+    error: Mapped[str] = mapped_column(Text, default="")
+    attempts: Mapped[int] = mapped_column(default=0)
+    status: Mapped[str] = mapped_column(String(20), default="failed")  # failed|retried|resolved
+    retried_at: Mapped[datetime | None] = mapped_column(nullable=True)

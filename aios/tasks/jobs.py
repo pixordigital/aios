@@ -12,6 +12,10 @@ from aios.core.delivery import deliver_message
 logger = logging.getLogger(__name__)
 
 
+_INBOUND_MAX_RETRIES = 3
+_INBOUND_BASE_DELAY_S = 5.0
+
+
 async def process_inbound(
     ctx,
     channel_type: str,
@@ -20,11 +24,58 @@ async def process_inbound(
     text: str,
     user_id: str = "",
     extra_data: str = "{}",
+    attempt: int = 1,
 ):
-    """Process an inbound message from any channel.
+    """Process an inbound message from any channel, with retry + DLQ.
 
     Runs in ARQ worker: finds agent, runs it, sends reply via channel.
+    Transient failures re-enqueue with backoff; after max attempts the
+    message lands in the dead-letter queue.
     """
+    try:
+        await _process_inbound_once(
+            ctx, channel_type, channel_connection_id, conversation_id, text, user_id, extra_data
+        )
+    except Exception as exc:
+        logger.warning("process_inbound attempt %d/%d failed for %s/%s: %s",
+                       attempt, _INBOUND_MAX_RETRIES, channel_type, conversation_id[:8], exc)
+        if attempt < _INBOUND_MAX_RETRIES:
+            from aios.tasks.queue import get_redis_pool
+            pool = await get_redis_pool()
+            await pool.enqueue_job(
+                "aios.tasks.jobs.process_inbound",
+                channel_type, channel_connection_id, conversation_id, text, user_id, extra_data,
+                attempt + 1,
+                _defer_seconds=_INBOUND_BASE_DELAY_S * (2 ** (attempt - 1)),
+            )
+        else:
+            from aios.core.dead_letter import write_dlq
+            await write_dlq(
+                direction="inbound",
+                channel_type=channel_type,
+                job_name="aios.tasks.jobs.process_inbound",
+                payload={
+                    "args": [channel_type, channel_connection_id, conversation_id, text, user_id, extra_data],
+                    "kwargs": {},
+                },
+                error=str(exc),
+                channel_connection_id=channel_connection_id,
+                conversation_id=conversation_id or None,
+            )
+            logger.error("DLQ: inbound %s/%s failed after %d attempts",
+                         channel_type, conversation_id[:8], _INBOUND_MAX_RETRIES)
+
+
+async def _process_inbound_once(
+    ctx,
+    channel_type: str,
+    channel_connection_id: str,
+    conversation_id: str,
+    text: str,
+    user_id: str = "",
+    extra_data: str = "{}",
+):
+    """Single attempt at processing an inbound message."""
     from aios.db.backend import db_session
     from aios.db.models import Agent, ChannelConnection, Conversation, Message, Team
     from aios.core.limits import check_org_limits, track_usage
@@ -99,56 +150,54 @@ async def process_inbound(
             return
 
         # run agent with retry + team failover
+        # Exceptions propagate to process_inbound wrapper for retry/DLQ.
         reply_text = None
-        try:
-            if hasattr(agent_or_team, "agents"):  # Team
-                from aios.core.orchestrator import TeamOrchestrator
-                from aios.core.agent_health import health_tracker
-                agents = list(agent_or_team.agents)
-                # filter to available agents
-                available = [a for a in agents if health_tracker.is_available(a.id)]
-                if not available:
-                    logger.warning("process_inbound: all agents in team %s are stopped", agent_or_team.id)
-                    return
-                orch = TeamOrchestrator(agent_or_team, available)
-                reply_text = await orch.handle_message(conv.id, text)
-                # if team failed, try each agent individually
-                if not reply_text and len(available) > 1:
-                    for agent in available:
-                        try:
-                            runtime = AgentRuntime(agent)
-                            reply_text = await runtime.run(conv.id, text)
-                            if reply_text:
-                                break
-                        except Exception:
-                            logger.exception("Team failover: agent %s failed", agent.id)
-            else:  # Agent
-                from aios.core.agent import AgentRuntime
-                runtime = AgentRuntime(agent_or_team)
-                reply_text = await runtime.run(conv.id, text)
+        if hasattr(agent_or_team, "agents"):  # Team
+            from aios.core.orchestrator import TeamOrchestrator
+            from aios.core.agent_health import health_tracker
+            agents = list(agent_or_team.agents)
+            # filter to available agents
+            available = [a for a in agents if health_tracker.is_available(a.id)]
+            if not available:
+                logger.warning("process_inbound: all agents in team %s are stopped", agent_or_team.id)
+                return
+            orch = TeamOrchestrator(agent_or_team, available)
+            reply_text = await orch.handle_message(conv.id, text)
+            # if team failed, try each agent individually
+            if not reply_text and len(available) > 1:
+                for agent in available:
+                    try:
+                        runtime = AgentRuntime(agent)
+                        reply_text = await runtime.run(conv.id, text)
+                        if reply_text:
+                            break
+                    except Exception:
+                        logger.exception("Team failover: agent %s failed", agent.id)
+        else:  # Agent
+            from aios.core.agent import AgentRuntime
+            runtime = AgentRuntime(agent_or_team)
+            reply_text = await runtime.run(conv.id, text)
 
-            if reply_text:
-                # save reply
-                db.add(Message(
-                    conversation_id=conv.id,
-                    org_id=conn.org_id,
-                    role="assistant",
-                    content=reply_text,
-                    agent_id=getattr(agent_or_team, "id", None),
-                ))
-                await db.commit()
-                await track_usage(conn.org_id, db, messages=1, tokens=len(reply_text))
+        if reply_text:
+            # save reply
+            db.add(Message(
+                conversation_id=conv.id,
+                org_id=conn.org_id,
+                role="assistant",
+                content=reply_text,
+                agent_id=getattr(agent_or_team, "id", None),
+            ))
+            await db.commit()
+            await track_usage(conn.org_id, db, messages=1, tokens=len(reply_text))
 
-                # deliver reply via channel (with retry + DLQ)
-                await deliver_message(
-                    ctx,
-                    channel_connection_id,
-                    conv.id,
-                    reply_text,
-                    json.dumps(extra),
-                )
-        except Exception as e:
-            logger.exception("process_inbound: agent failed for conversation %s", conv.id)
+            # deliver reply via channel (with retry + DLQ)
+            await deliver_message(
+                ctx,
+                channel_connection_id,
+                conv.id,
+                reply_text,
+                json.dumps(extra),
+            )
 
 
 # ARQ worker function registry

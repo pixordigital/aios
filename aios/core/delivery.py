@@ -6,8 +6,8 @@ Failed messages after max retries land in a DB DLQ table.
 
 import json
 import logging
-import uuid
 
+from aios.core.dead_letter import write_dlq
 from aios.db.backend import db_session
 from aios.db.models import ChannelConnection
 
@@ -36,6 +36,7 @@ async def deliver_message(
     except json.JSONDecodeError:
         extra = {}
 
+    conn = None
     try:
         async with db_session() as db:
             conn = await db.get(ChannelConnection, channel_connection_id)
@@ -89,55 +90,15 @@ async def deliver_message(
             )
         else:
             # max retries exceeded — DLQ
-            await _write_dlq(channel_connection_id, conversation_id, text, str(exc))
+            await write_dlq(
+                direction="outbound",
+                channel_type=getattr(conn, "channel_type", ""),
+                job_name="aios.core.delivery.deliver_message",
+                payload={"args": [channel_connection_id, conversation_id, text, extra_data], "kwargs": {}},
+                error=str(exc),
+                org_id=getattr(conn, "org_id", None),
+                channel_connection_id=channel_connection_id,
+                conversation_id=conversation_id,
+            )
             logger.error("DLQ: message to channel %s failed after %d attempts",
                          channel_connection_id, _MAX_RETRIES)
-
-
-async def _write_dlq(channel_id: str, conv_id: str, text: str, error: str):
-    """Persist failed message to dead-letter queue."""
-    async with db_session() as db:
-        from aios.db.models import Artifact
-        art = Artifact(
-            org_id="dlq",
-            conversation_id=conv_id,
-            filename=f"dlq_{channel_id}_{uuid.uuid4().hex[:8]}.txt",
-            content_type="text/plain",
-            size_bytes=len(text),
-            storage_path="dlq",
-            description=json.dumps({"channel_id": channel_id, "error": error}),
-        )
-        db.add(art)
-        await db.commit()
-        logger.info("DLQ entry written for channel %s", channel_id)
-
-
-async def list_dlq(limit: int = 50) -> list[dict]:
-    """List dead-letter queue entries."""
-    from aios.core.storage import list_artifacts
-    async with db_session() as db:
-        return await list_artifacts(db, org_id="dlq", limit=limit)
-
-
-async def retry_dlq(artifact_id: str):
-    """Re-enqueue a DLQ'd message for delivery."""
-    from aios.core.storage import get_artifact_content, list_artifacts
-    async with db_session() as db:
-        arts = await list_artifacts(db, org_id="dlq", limit=1)
-        art = next((a for a in arts if a["id"] == artifact_id), None)
-        if not art:
-            return
-        desc = json.loads(art["description"])
-        content = await get_artifact_content(artifact_id, db)
-        text = content.decode("utf-8") if content else ""
-
-    from aios.tasks.queue import get_redis_pool
-    pool = await get_redis_pool()
-    await pool.enqueue_job(
-        "aios.core.delivery.deliver_message",
-        desc.get("channel_id", ""),
-        art["conversation_id"],
-        text,
-        "{}",
-        1,
-    )
