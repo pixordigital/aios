@@ -11,6 +11,12 @@ from .billing import router as billing_router
 from .files import router as files_router
 from .admin_api import router as admin_api_router
 from .ws import router as ws_router
+from .approvals import router as approvals_router
+from .skills import router as skills_router
+from .library import router as library_router
+from .rubrics import router as rubrics_router
+from .threads import router as threads_router
+from .meta import router as meta_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
@@ -24,3 +30,9 @@ api_router.include_router(billing_router)
 api_router.include_router(files_router)
 api_router.include_router(admin_api_router)
 api_router.include_router(ws_router)
+api_router.include_router(approvals_router)
+api_router.include_router(skills_router)
+api_router.include_router(library_router)
+api_router.include_router(rubrics_router)
+api_router.include_router(threads_router)
+api_router.include_router(meta_router)

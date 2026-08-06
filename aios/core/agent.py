@@ -4,8 +4,10 @@ Uses syscall layer for all kernel interactions (LLM, memory, tools).
 Agent scheduler manages queue and lifecycle.
 """
 
+import asyncio
 import json
 import logging
+import uuid
 
 from typing import AsyncGenerator
 from aios.db.backend import DatabaseBackend
@@ -275,6 +277,37 @@ class AgentRuntime:
                         elif self._allowed_tools != "__all__" and fn_name not in self._allowed_tools:
                             result = f"Tool '{fn_name}' is not in the allowed list."
                             logger.warning("Governance blocked tool '%s' (not in allow-list) for agent %s", fn_name, self.agent.id)
+                        elif self._autonomy in ("ask_tools", "ask_all"):
+                            # approval mode — block until human decides
+                            from aios.core.approval import approval_manager
+                            action_id = str(uuid.uuid4())
+                            hooks.fire(HookPoint.APPROVAL_REQUESTED, HookContext(
+                                agent_id=self.agent.id,
+                                conversation_id=conversation_id,
+                                data={"action_id": action_id, "tool_name": fn_name},
+                            ))
+                            approved = await approval_manager.request_approval(
+                                action_id=action_id,
+                                agent_id=self.agent.id,
+                                conversation_id=conversation_id,
+                                tool_name=fn_name,
+                                tool_args=json.loads(fn_args) if isinstance(fn_args, str) else fn_args,
+                                context_summary=response_content[:200],
+                            )
+                            if not approved:
+                                result = f"Tool '{fn_name}' was not approved by human."
+                                logger.info("Approval denied for tool '%s' on agent %s", fn_name, self.agent.id)
+                            else:
+                                cached_result = tool_cache.get(fn_name, fn_args)
+                                if cached_result is not None:
+                                    result = cached_result
+                                else:
+                                    try:
+                                        result = await self.tool_engine.execute(fn_name, fn_args)
+                                        tool_cache.set(fn_name, fn_args, result)
+                                    except Exception as e:
+                                        logger.exception("Tool execution failed: %s", fn_name)
+                                        result = f"Tool error: {e}"
                         else:
                             cached_result = tool_cache.get(fn_name, fn_args)
                             if cached_result is not None:
@@ -299,6 +332,23 @@ class AgentRuntime:
                                 agent_id=self.agent.id,
                                 tool_results={"id": tc["id"], "name": fn.get("name")},
                             ))
+                        # skill extraction — fire-and-forget after successful tool call
+                        if result and "Tool error" not in str(result):
+                            try:
+                                from aios.core.skills import skill_store
+                                asyncio.create_task(
+                                    skill_store.create(
+                                        agent_id=self.agent.id,
+                                        org_id=self.agent.org_id,
+                                        name=f"auto:{fn_name}",
+                                        description=f"Auto-extracted from tool call {fn_name}",
+                                        skill_type="tool_pattern",
+                                        content=f"Tool: {fn_name}\nArgs: {fn_args}\nResult: {str(result)[:500]}",
+                                        source_conversation_id=conversation_id,
+                                    )
+                                )
+                            except Exception:
+                                pass  # skill extraction is best-effort
                     scheduler.unblock(self.agent.id)
                     yield {"type": STREAM_TOKEN, "content": "\n"}
                     continue
@@ -354,6 +404,24 @@ class AgentRuntime:
     ) -> list[dict]:
         return await self._build_context(conversation_id, user_message, db)
 
+    async def _spawn_subagent(self, task_prompt: str, timeout: float = 120.0) -> str:
+        """Spawn an isolated subprocess agent. Returns result output."""
+        from aios.core.subagent import subagent_pool
+        result = await subagent_pool.spawn(
+            agent_config={
+                "id": self.agent.id,
+                "name": self.agent.name,
+                "llm_config": self.agent.llm_config,
+                "system_prompt": self.agent.system_prompt,
+                "tools": self.agent.tools or [],
+                "governance_config": self.agent.governance_config or {},
+                "org_id": self.agent.org_id,
+            },
+            task_prompt=task_prompt,
+            timeout=timeout,
+        )
+        return result.output or f"Subagent {result.status}: {result.error}"
+
     async def _build_context(
         self, conversation_id: str, user_message: str, db: DatabaseBackend | None = None
     ) -> list[dict]:
@@ -367,9 +435,22 @@ class AgentRuntime:
         injections = await self.memory.get_context_injections(user_message, top_k=3)
         ctx.extend(injections)
 
+        # skill injection — load relevant skills for this task
+        try:
+            from aios.core.skills import skill_store
+            skills = await skill_store.list(agent_id=self.agent.id, q=user_message[:100])
+            if skills:
+                skill_lines = [f"- {s.name}: {s.description}" for s in skills[:5]]
+                ctx.append({"role": "system", "content": "Relevant skills:\n" + "\n".join(skill_lines)})
+        except Exception:
+            pass  # skill injection is best-effort
+
         ctx.append({"role": "user", "content": user_message})
 
-        # enforce token budget via context manager
-        ctx = context_manager.enforce_budget(ctx, max_tokens=max_ctx, reserve_tokens=max_ctx // 2)
+        # compress oldest messages to fit token budget
+        ctx = await context_manager.compress_and_fit(
+            ctx, max_tokens=max_ctx, reserve_tokens=max_ctx // 2,
+            llm_provider=self.llm,
+        )
 
         return ctx

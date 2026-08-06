@@ -138,6 +138,24 @@ class ContextManager:
             "active_contexts": len(self._active),
         }
 
+    async def compress_and_fit(self, messages: list[dict], max_tokens: int,
+                               reserve_tokens: int = 1000,
+                               llm_provider=None) -> list[dict]:
+        """Compress oldest messages to fit token budget instead of truncating.
+
+        Falls back to enforce_budget if compression fails or no LLM provider.
+        """
+        from aios.core.compression import compressor
+        try:
+            return await compressor.compress_and_fit(
+                messages, max_tokens=max_tokens,
+                reserve_tokens=reserve_tokens,
+                llm_provider=llm_provider,
+            )
+        except Exception:
+            logger.exception("Compression failed, falling back to truncation")
+            return self.enforce_budget(messages, max_tokens=max_tokens, reserve_tokens=reserve_tokens)
+
 
 def _fire_hook(event: str, agent_id: str, conv_id: str):
     """Fire hook with a minimal context."""

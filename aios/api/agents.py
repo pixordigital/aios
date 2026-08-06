@@ -259,3 +259,44 @@ async def push_agent_to_fleet(
             logger.exception("Failed to push agent to instance %s", instance_id)
 
     return {"results": results}
+
+
+@router.post("/{agent_id}/spawn")
+async def spawn_subagent(
+    agent_id: str,
+    body: dict = Body(...),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Spawn an isolated subprocess agent for parallel work."""
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+
+    task_prompt = body.get("prompt", "")
+    if not task_prompt:
+        raise HTTPException(400, "prompt is required")
+
+    timeout = body.get("timeout", 120.0)
+    from aios.core.subagent import subagent_pool
+    result = await subagent_pool.spawn(
+        agent_config={
+            "id": agent.id,
+            "name": agent.name,
+            "llm_config": agent.llm_config,
+            "system_prompt": agent.system_prompt,
+            "tools": agent.tools or [],
+            "governance_config": agent.governance_config or {},
+            "org_id": agent.org_id,
+        },
+        task_prompt=task_prompt,
+        timeout=timeout,
+    )
+    return {
+        "task_id": result.task_id,
+        "status": result.status,
+        "output": result.output,
+        "error": result.error,
+        "duration_ms": result.duration_ms,
+    }

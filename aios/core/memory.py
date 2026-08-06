@@ -30,12 +30,17 @@ _EMBED_DIM = 384  # matches all-MiniLM-L6-v2 if installed
 
 
 def _vec_db(agent_id: str) -> sqlite3.Connection:
-    """Lazy-init per-agent vector store."""
+    """Lazy-init per-agent vector store with FTS5."""
     if agent_id not in _VEC_DB:
         db_path = Path(settings.app_data_dir) / "vectors" / f"{agent_id}.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(db_path))
         conn.execute("CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, embedding BLOB, content TEXT, created_at TEXT)")
+        # FTS5 for full-text search alongside vector search
+        try:
+            conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(id, content, content=memories, content_rowid=rowid)")
+        except sqlite3.OperationalError:
+            pass  # FTS5 already exists
         _VEC_DB[agent_id] = conn
     return _VEC_DB[agent_id]
 
@@ -99,21 +104,38 @@ def _embed(text: str) -> list[float]:
 # ─── Memory Pipeline ───
 
 class Extractor:
-    """Extract key information from conversation messages for memory."""
+    """Extract key information from conversation messages for memory.
+
+    Three-part memory: classify into skill (how-to), fact (user preference/
+    identity), or rubric (expectation/standard). Stores type in DB Memory.type.
+    """
 
     KEY_PATTERNS = ["remember", "note", "important", "my name is", "i am",
                     "don't forget", "save this", "key fact", "user prefers"]
+    SKILL_PATTERNS = ["always", "never", "whenever", "how to", "steps", "workflow",
+                      "you should", "make sure to", "remember to"]
+    RUBRIC_PATTERNS = ["should", "must", "expected", "standard", "quality",
+                       "i expect", "i want you to", "make sure"]
 
-    def extract(self, role: str, content: str) -> str | None:
-        """Return extracted key info or None if nothing notable."""
+    def extract(self, role: str, content: str) -> dict | None:
+        """Return {type, content} extracted info or None if nothing notable."""
         if role != "user":
             return None
         lower = content.lower()
-        for pattern in self.KEY_PATTERNS:
+        # require an explicit memory signal (remember/note/prefers...) first
+        triggered = any(p in lower for p in self.KEY_PATTERNS)
+        if not triggered:
+            return None
+        memory_type = "fact"
+        for pattern in self.SKILL_PATTERNS:
             if pattern in lower:
-                # return truncated version of the relevant message
-                return content[:300]
-        return None
+                memory_type = "skill"
+                break
+        for pattern in self.RUBRIC_PATTERNS:
+            if pattern in lower:
+                memory_type = "rubric"
+                break
+        return {"type": memory_type, "content": content[:300]}
 
 
 class Injector:
@@ -184,10 +206,11 @@ class MemoryManager:
             return
         self._buffers[conversation_id].append({"role": role, "content": content})
 
-        # extract key info for long-term memory
+        # extract key info for long-term memory (three-part: skill/fact/rubric)
         extracted = self.extractor.extract(role, content)
         if extracted and self.write_barrier.allow(f"extract:{conversation_id}"):
-            await self._store_vector(f"[extracted] {extracted}")
+            mtype = extracted["type"]
+            await self._store_vector(f"[{mtype}] {extracted['content']}")
 
         # tier 1: sliding window
         max_short = 50
@@ -206,10 +229,10 @@ class MemoryManager:
     async def get_context_injections(self, query: str, top_k: int = 3) -> list[dict]:
         """Get formatted memory injections for context building.
 
-        Runs the full pipeline: search → injector select → formatter render.
+        Runs the full pipeline: hybrid search → injector select → formatter render.
         Returns list of system-prompt-style dicts to append to context.
         """
-        similar = await self.search_similar(query, top_k=top_k * 2)
+        similar = await self.search_hybrid(query, top_k=top_k * 2)
         selected = self.injector.select(similar, recent_top_k=top_k)
         formatted = self.formatter.format(selected)
         if formatted:
@@ -232,15 +255,56 @@ class MemoryManager:
         scored.sort(key=lambda x: -x[0])
         return [{"id": r[1], "content": r[2], "score": round(r[0], 3)} for r in scored[:top_k]]
 
+    async def search_fts(self, query: str, top_k: int = 5) -> list[dict]:
+        """FTS5 full-text search for exact keyword matches."""
+        conn = _vec_db(self.agent_id)
+        try:
+            rows = conn.execute(
+                "SELECT id, content, rank FROM memories_fts WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?",
+                (query, top_k),
+            ).fetchall()
+            return [{"id": r[0], "content": r[1], "score": abs(r[2])} for r in rows]
+        except sqlite3.OperationalError:
+            return []
+
+    async def search_hybrid(self, query: str, top_k: int = 5) -> list[dict]:
+        """Hybrid search: merge FTS5 exact + vector semantic results."""
+        vec_results = await self.search_similar(query, top_k=top_k)
+        fts_results = await self.search_fts(query, top_k=top_k)
+
+        # merge by id, take max score
+        merged: dict[str, dict] = {}
+        for r in vec_results + fts_results:
+            rid = r["id"]
+            if rid not in merged or r["score"] > merged[rid]["score"]:
+                merged[rid] = r
+        results = sorted(merged.values(), key=lambda x: -x["score"])
+        return results[:top_k]
+
+    async def get_agent_memories(self, top_k: int = 10) -> list[dict]:
+        """Load memories across all conversations for this agent (cross-conversation)."""
+        conn = _vec_db(self.agent_id)
+        rows = conn.execute(
+            "SELECT id, content, created_at FROM memories ORDER BY rowid DESC LIMIT ?",
+            (top_k,),
+        ).fetchall()
+        return [{"id": r[0], "content": r[1], "created_at": r[2]} for r in rows]
+
     async def _store_vector(self, content: str) -> None:
-        """Store content + embedding in vector DB."""
+        """Store content + embedding in vector DB. Also indexes in FTS5."""
         import uuid
         conn = _vec_db(self.agent_id)
         vec = _embed(content)
+        rid = str(uuid.uuid4())
         conn.execute(
             "INSERT INTO memories (id, embedding, content, created_at) VALUES (?, ?, ?, datetime('now'))",
-            (str(uuid.uuid4()), json.dumps(vec), content),
+            (rid, json.dumps(vec), content),
         )
+        # FTS5 index
+        try:
+            conn.execute("INSERT INTO memories_fts(id, content) VALUES (?, ?)", (rid, content))
+        except Exception:
+            pass
         conn.commit()
 
     async def _summarize(self, conversation_id: str, dropped_content: str) -> None:

@@ -191,6 +191,7 @@ class Artifact(Base, TimestampMixin):
     size_bytes: Mapped[int] = mapped_column(default=0)
     storage_path: Mapped[str] = mapped_column(String(1000))
     description: Mapped[str] = mapped_column(Text, default="")
+    searchable_content: Mapped[str] = mapped_column(Text, default="")
 
 
 class UsageRecord(Base):
@@ -261,6 +262,38 @@ class AgentMetric(Base):
     errors: Mapped[int] = mapped_column(default=0)
     avg_response_ms: Mapped[int] = mapped_column(default=0)
     tool_calls: Mapped[int] = mapped_column(default=0)
+
+
+class PendingAction(Base, TimestampMixin):
+    """Human-in-the-loop approval queue for agent tool calls."""
+    __tablename__ = "pending_actions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    tool_name: Mapped[str] = mapped_column(String(255))
+    tool_args: Mapped[dict] = mapped_column(JSON, default=dict)
+    context_summary: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|approved|rejected|expired
+    decided_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class Skill(Base, TimestampMixin, OrgScopedMixin):
+    """Reusable skill patterns extracted from successful agent runs."""
+    __tablename__ = "skills"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    skill_type: Mapped[str] = mapped_column(String(50), default="tool_pattern")
+    content: Mapped[str] = mapped_column(Text, default="")
+    input_schema: Mapped[dict] = mapped_column(JSON, default=dict)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    usage_count: Mapped[int] = mapped_column(default=0)
+    success_rate: Mapped[float] = mapped_column(default=1.0)
+    source_conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True)
+
+    agent = relationship("Agent")
 
 
 class OAuthAccount(Base, TimestampMixin):
