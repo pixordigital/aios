@@ -15,6 +15,7 @@ class TestUnauthenticatedEndpoints:
         ("POST", "/api/analytics/telemetry/flush", 401),
         ("GET", "/api/admin/dlq", 403),
         ("POST", "/api/admin/dlq/clear", 403),
+        ("POST", "/api/admin/dlq/abc/retry", 403),
         ("GET", "/api/admin/health", 403),
         ("GET", "/api/admin/health/agents", 403),
     ]

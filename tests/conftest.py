@@ -26,6 +26,7 @@ settings.debug = True
 settings.database_url = TEST_DATABASE_URL
 settings.redis_url = ""
 settings.storage_backend = "local"
+settings.admin_master_key = "test-admin-key"
 
 from aios.db.engine import Base, async_session, get_db, engine
 from aios.db.models import Organization, User

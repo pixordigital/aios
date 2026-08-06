@@ -66,16 +66,27 @@ async def remote_health(_: None = Depends(require_admin_key)):
 
 @router.get("/dlq")
 async def get_dlq(limit: int = 50, _: None = Depends(require_admin_key)):
-    """Get dead letter queue entries (failed webhook messages)."""
-    from aios.core.retry import get_dlq
-    return {"entries": get_dlq(limit), "count": len(get_dlq())}
+    """Get dead letter queue entries (failed messages)."""
+    from aios.core.dead_letter import list_dlq
+    entries = await list_dlq(limit)
+    return {"entries": entries, "count": len(entries)}
 
 
 @router.post("/dlq/clear")
 async def clear_dlq(_: None = Depends(require_admin_key)):
     """Clear dead letter queue."""
-    from aios.core.retry import clear_dlq
-    clear_dlq()
+    from aios.core.dead_letter import clear_dlq
+    n = await clear_dlq()
+    return {"status": "ok", "cleared": n}
+
+
+@router.post("/dlq/{entry_id}/retry")
+async def retry_dlq_endpoint(entry_id: str, _: None = Depends(require_admin_key)):
+    """Re-enqueue a dead-lettered message for processing."""
+    from aios.core.dead_letter import retry_dlq
+    result = await retry_dlq(entry_id)
+    if not result["ok"]:
+        raise HTTPException(404, "DLQ entry not found")
     return {"status": "ok"}
 
 

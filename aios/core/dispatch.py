@@ -26,13 +26,30 @@ async def dispatch_inbound(
     from aios.tasks.queue import get_redis_pool
 
     pool = await get_redis_pool()
-    await pool.enqueue_job(
-        "aios.tasks.jobs.process_inbound",
-        channel_type,
-        channel_connection_id,
-        conversation_id,
-        text,
-        user_id,
-        json.dumps(extra_data or {}),
-    )
-    logger.info("Dispatched inbound %s/%s to worker", channel_type, conversation_id[:8])
+    try:
+        await pool.enqueue_job(
+            "aios.tasks.jobs.process_inbound",
+            channel_type,
+            channel_connection_id,
+            conversation_id,
+            text,
+            user_id,
+            json.dumps(extra_data or {}),
+        )
+        logger.info("Dispatched inbound %s/%s to worker", channel_type, conversation_id[:8])
+    except Exception as exc:
+        # Redis down or queue error — don't lose the message, land in DLQ.
+        from aios.core.dead_letter import write_dlq
+        await write_dlq(
+            direction="inbound",
+            channel_type=channel_type,
+            job_name="aios.tasks.jobs.process_inbound",
+            payload={
+                "args": [channel_type, channel_connection_id, conversation_id, text, user_id, json.dumps(extra_data or {})],
+                "kwargs": {},
+            },
+            error=f"enqueue failed: {exc}",
+            channel_connection_id=channel_connection_id,
+            conversation_id=conversation_id or None,
+        )
+        logger.exception("dispatch_inbound enqueue failed for %s/%s", channel_type, conversation_id[:8])
