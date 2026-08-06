@@ -38,6 +38,14 @@ if settings.redis_url:
     _storage_uri = settings.redis_url
 
 if _storage_uri:
-    limiter = Limiter(key_func=_get_org_key, default_limits=[f"{_rpm}/minute"], storage_uri=_storage_uri)
+    # in_memory_fallback_enabled: on Redis outage, slowapi flips to a per-process
+    # MemoryStorage limiter inheriting the same limits, with auto-recovery ping.
+    # Prevents the raw ConnectionError from bubbling (fail-open 200 or 500).
+    limiter = Limiter(
+        key_func=_get_org_key,
+        default_limits=[f"{_rpm}/minute"],
+        storage_uri=_storage_uri,
+        in_memory_fallback_enabled=True,
+    )
 else:
     limiter = Limiter(key_func=_get_org_key, default_limits=[f"{_rpm}/minute"])

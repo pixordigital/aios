@@ -131,6 +131,17 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.debug("Default org already exists (concurrent seed)")
 
+        # Pixor owner org gets the unlimited plan
+        try:
+            pixor = (await sess.execute(select(Organization).where(Organization.slug == "pixor"))).scalar_one_or_none()
+            if pixor and not pixor.extra_data.get("unlimited"):
+                pixor.extra_data["plan"] = "unlimited"
+                pixor.extra_data["unlimited"] = True
+                await sess.commit()
+                logger.info("Pixor org set to unlimited plan: %s", pixor.id)
+        except Exception:
+            logger.debug("Pixor org unlimited check failed (org may not exist)")
+
         await sess.commit()
     logger.info("Cleared stale AgentInstance statuses")
 
@@ -229,12 +240,13 @@ if not settings.debug:
     # handler and would 500 every rate-limited route. Wrap it to fail open:
     # log and let the request through instead of taking the API down.
     class _SlowAPIFailOpenMiddleware:
-        """Fail open when the rate-limit storage backend (Redis) is down.
+        """Fail closed on residual rate-limit storage errors.
 
         slowapi's sync_check_limits lets the raw storage error (e.g.
-        ConnectionError) escape, which would 500 every rate-limited route.
-        When that happens, log and send an empty 200 instead of crashing —
-        an unthrottled request is better than a dead API.
+        ConnectionError) escape. With in_memory_fallback_enabled on the
+        Limiter, the normal path flips to in-memory storage instead of
+        raising, so this only catches genuine slowapi bugs. On those, return
+        429 rather than silently disabling rate limiting.
         """
 
         def __init__(self, app):
@@ -253,8 +265,14 @@ if not settings.debug:
                     for frame in traceback.extract_tb(exc.__traceback__)
                 )
                 if from_slowapi and not isinstance(exc, RateLimitExceeded):
-                    logger.exception("Rate limiter storage error — failing open")
-                    response = JSONResponse(status_code=200, content={})
+                    # Fail CLOSED: never silently disable rate limiting. With
+                    # in_memory_fallback_enabled the normal path never reaches
+                    # here; this catches any residual slowapi storage bug.
+                    logger.exception("Rate limiter failure (Redis down or slowapi bug) — failing closed")
+                    response = JSONResponse(status_code=429, content={
+                        "type": "about:blank", "title": "Rate limit exceeded",
+                        "status": 429, "detail": "Try again later.", "instance": str(scope["path"]),
+                    })
                     await response(scope, receive, send)
                     return
                 raise
