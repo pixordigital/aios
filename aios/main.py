@@ -129,6 +129,18 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.debug("Default org already exists (concurrent seed)")
 
+        # Pixor owner org — force Ilimitado (also backfills pre-existing row that
+        # the before_flush hook never saw because it wasn't dirty).
+        try:
+            pixor = (await sess.execute(select(Organization).where(Organization.slug == "pixor"))).scalar_one_or_none()
+            if pixor and pixor.extra_data.get("plan") != "unlimited":
+                pixor.extra_data["plan"] = "unlimited"
+                pixor.extra_data["unlimited"] = True
+                await sess.commit()
+                logger.info("Pixor org set to unlimited plan: %s", pixor.id)
+        except Exception:
+            logger.debug("Pixor org unlimited check failed (org may not exist)")
+
         await sess.commit()
     logger.info("Cleared stale AgentInstance statuses")
 
@@ -207,6 +219,8 @@ from aios.api.whatsapp_webhook import router as wa_router
 app.include_router(wa_router)
 from aios.api.evolution_webhook import router as evo_router
 app.include_router(evo_router)
+from aios.api.zernio_webhook import router as zernio_router
+app.include_router(zernio_router)
 
 # Prometheus metrics instrumentation
 Instrumentator().instrument(app).expose(app)

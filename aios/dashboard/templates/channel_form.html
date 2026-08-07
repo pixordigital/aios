@@ -31,8 +31,22 @@
             <h2 class="mb-3">Credenciais</h2>
             <div id="creds-web" class="channel-creds" style="display:none"><p class="text-sm text-secondary">Os canais web não precisam de configuração.</p></div>
             <div id="creds-whatsapp" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Token de acesso</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
-                <div><label>ID do número de telefone</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
+                <div><label>Provedor</label>
+                    <select name="config_whatsapp_provider" class="input" onchange="showWaProvider(this.value)">
+                        <option value="meta" {% if channel and channel.config and channel.config.get('provider') != 'zernio' %}selected{% endif %}>Meta (WhatsApp Cloud API)</option>
+                        <option value="zernio" {% if channel and channel.config and channel.config.get('provider') == 'zernio' %}selected{% endif %}>Zernio</option>
+                    </select>
+                </div>
+                <div id="wa-meta">
+                    <div><label>Token de acesso</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
+                    <div><label>ID do número de telefone</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
+                </div>
+                <div id="wa-zernio" style="display:none;flex-direction:column;gap:0.75rem">
+                    <div><label>Chave da API</label><input type="text" name="config_zernio_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="zrk_..."></div>
+                    <div><label>ID da conta</label><input type="text" name="config_zernio_account" value="{{ channel.config.get('account_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="66b2e19d..."></div>
+                    <div><label>Nome do template (cold outreach)</label><input type="text" name="config_zernio_template" value="{{ channel.config.get('template_name', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="sdr_hello"></div>
+                    <div><label>Idioma do template</label><input type="text" name="config_zernio_lang" value="{{ channel.config.get('template_language', 'en_US') if channel and channel.config else 'en_US' }}" class="input input-mono" placeholder="en_US"></div>
+                </div>
             </div>
             <div id="creds-slack" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div><label>Token do bot</label><input type="text" name="config_slack_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="xoxb-..."></div>
@@ -130,7 +144,13 @@ async function testConnection() {
 </form>
 
 <script>
-    function showChannelCreds(t){document.querySelectorAll('.channel-creds').forEach(function(e){e.style.display='none'});var el=document.getElementById('creds-'+t);if(el)el.style.display='flex';}
+    function showWaProvider(v){
+        var meta=document.getElementById('wa-meta'), zn=document.getElementById('wa-zernio');
+        if(!meta||!zn)return;
+        if(v==='zernio'){meta.style.display='none';zn.style.display='flex';}
+        else{meta.style.display='block';zn.style.display='none';}
+    }
+    function showChannelCreds(t){document.querySelectorAll('.channel-creds').forEach(function(e){e.style.display='none'});var el=document.getElementById('creds-'+t);if(el)el.style.display='flex';if(t==='whatsapp')showWaProvider(document.querySelector('select[name="config_whatsapp_provider"]')?.value||'meta');}
     document.addEventListener('DOMContentLoaded',function(){showChannelCreds(document.querySelector('select[name="channel_type"]').value);});
 </script>
 {% endblock %}
