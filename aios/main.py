@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from aios.api.errors import _problem, register_error_handlers
 from aios.api.router import api_router
 from aios.config import settings
 from aios.core.storage import ensure_storage
@@ -61,10 +62,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Sentry initialized (DSN configured)")
 
-    # Mount unified error handlers
-    from aios.api.errors import register_error_handlers
-    register_error_handlers(app)
-    logger.info("Error handlers registered")
+    # Unified error handlers mounted at module scope in __init__ below.
 
     
     # Register syscall handlers
@@ -130,17 +128,6 @@ async def lifespan(app: FastAPI):
                 logger.info("Seeded default organization: %s", org.id)
         except Exception:
             logger.debug("Default org already exists (concurrent seed)")
-
-        # Pixor owner org gets the unlimited plan
-        try:
-            pixor = (await sess.execute(select(Organization).where(Organization.slug == "pixor"))).scalar_one_or_none()
-            if pixor and not pixor.extra_data.get("unlimited"):
-                pixor.extra_data["plan"] = "unlimited"
-                pixor.extra_data["unlimited"] = True
-                await sess.commit()
-                logger.info("Pixor org set to unlimited plan: %s", pixor.id)
-        except Exception:
-            logger.debug("Pixor org unlimited check failed (org may not exist)")
 
         await sess.commit()
     logger.info("Cleared stale AgentInstance statuses")
@@ -212,6 +199,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(api_router)
+register_error_handlers(app)
 
 # WhatsApp + Evolution webhook routes — mounted at build time so they're
 # reachable in tests and don't depend on lifespan startup order
@@ -389,7 +377,7 @@ async def dashboard_csrf(request: Request, call_next):
         referer = request.headers.get("referer", "")
         if not referer.startswith(str(request.base_url)):
             if _DASHBOARD_REFERER_OK:
-                return JSONResponse(status_code=403, content={"error": "CSRF: invalid origin"})
+                return JSONResponse(status_code=403, content=_problem(403, detail="CSRF: invalid origin", instance=str(request.url.path)))
     return await call_next(request)
 
 
@@ -397,7 +385,7 @@ async def dashboard_csrf(request: Request, call_next):
 async def limit_body_size(request: Request, call_next):
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > 10 * 1024 * 1024:
-        return JSONResponse(status_code=413, content={"error": "Request too large"})
+        return JSONResponse(status_code=413, content=_problem(413, detail="Request too large", instance=str(request.url.path)))
     response = await call_next(request)
     return response
 
