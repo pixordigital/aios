@@ -43,6 +43,33 @@ class Organization(Base, TimestampMixin):
     channels = relationship("ChannelConnection", back_populates="organization")
 
 
+# Pixor owner org always holds the unlimited plan. One choke point — every ORM
+# write (register, billing upgrade/downgrade, admin edits) flows through flush,
+# so a before_flush hook beats guarding each call site.
+_PIXOR_SLUG = "pixor"
+
+
+def _pixor_is_unlimited(org: "Organization") -> None:
+    # Force every flush, not just the first: billing downgrade sets plan="free"
+    # and must be overridden again. Guard on slug, not on the flag.
+    if org.slug == _PIXOR_SLUG and org.extra_data.get("plan") != "unlimited":
+        org.extra_data["plan"] = "unlimited"
+        org.extra_data["unlimited"] = True
+
+
+from sqlalchemy import event  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
+
+@event.listens_for(Session, "before_flush")
+def _org_before_flush(session, context, instances):
+    for org in session.new:
+        if isinstance(org, Organization):
+            _pixor_is_unlimited(org)
+    for org in session.dirty:
+        if isinstance(org, Organization):
+            _pixor_is_unlimited(org)
+
+
 # --- User ---
 
 class User(Base, TimestampMixin):
