@@ -39,3 +39,18 @@ async def test_non_pixor_org_keeps_plan(test_session):
 
     await test_session.refresh(org)
     assert org.extra_data["plan"] == "pro"
+
+
+@pytest.mark.asyncio
+async def test_default_org_prefers_pixor(test_session):
+    from aios.dashboard.app import _default_org_id
+    from aios.db.models import Organization
+
+    other = Organization(name="Default", slug="default", extra_data={"plan": "free"})
+    pix = Organization(name="Pixor", slug="pixor", extra_data={"plan": "unlimited", "unlimited": True})
+    test_session.add_all([other, pix])
+    await test_session.commit()
+
+    oid = await _default_org_id()
+    assert oid == pix.id
+    assert oid != other.id
