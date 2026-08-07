@@ -676,6 +676,9 @@ async def channel_save(
     channel_id: str = Form(""), label: str = Form(...), channel_type: str = Form(...),
     agent_id: str = Form(""), team_id: str = Form(""),
     config_whatsapp_token: str = Form(""), config_whatsapp_phone: str = Form(""),
+    config_whatsapp_provider: str = Form("meta"),
+    config_zernio_key: str = Form(""), config_zernio_account: str = Form(""),
+    config_zernio_template: str = Form(""), config_zernio_lang: str = Form("en_US"),
     config_evo_server: str = Form(""), config_evo_key: str = Form(""), config_evo_instance: str = Form(""),
     config_slack_token: str = Form(""), config_slack_secret: str = Form(""),
     config_telegram_token: str = Form(""), config_discord_token: str = Form(""),
@@ -684,7 +687,16 @@ async def channel_save(
 ):
     config = {"web": {"platform": "WebSocket"}}.get(channel_type, {})
     if channel_type == "whatsapp":
-        config = {"access_token": config_whatsapp_token, "phone_id": config_whatsapp_phone}
+        if config_whatsapp_provider == "zernio":
+            config = {
+                "provider": "zernio",
+                "api_key": config_zernio_key,
+                "account_id": config_zernio_account,
+                "template_name": config_zernio_template,
+                "template_language": config_zernio_lang,
+            }
+        else:
+            config = {"access_token": config_whatsapp_token, "phone_id": config_whatsapp_phone}
     elif channel_type == "slack":
         config = {"bot_token": config_slack_token, "signing_secret": config_slack_secret}
     elif channel_type == "telegram":

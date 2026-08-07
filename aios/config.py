@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     admin_master_key: str = ""  # set in production — used for fleet management auth
     whatsapp_app_secret: str = ""  # Meta app secret for webhook signature verification
     whatsapp_verify_token: str = ""  # Meta webhook subscribe verification token
+    zernio_webhook_secret: str = ""  # Zernio webhook signature secret (X-Zernio-Signature)
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
