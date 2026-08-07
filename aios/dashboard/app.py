@@ -308,6 +308,9 @@ async def _resolve_org_id(request: Request) -> str:
 
 async def _default_org_id() -> str:
     async with db_session() as db:
+        org = (await db.execute(select(Organization).where(Organization.slug == "pixor"))).scalar_one_or_none()
+        if org:
+            return org.id
         org = (await db.execute(select(Organization).where(Organization.slug == "default"))).scalar_one_or_none()
         return org.id if org else "none"
 
