@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from aios.channels.base import OutboundMessage
 from aios.channels.whatsapp import WhatsAppChannel
+from aios.api.zernio_webhook import _zernio_matches
 from aios.main import app
 
 
@@ -128,6 +129,20 @@ async def test_webhook_rejects_bad_signature(monkeypatch):
         r = await c.post("/api/zernio/webhook", content=body,
                          headers={"X-Zernio-Signature": "bad"})
     assert r.json() == {"status": "ignored"}
+
+
+def test_zernio_matches():
+    zernio = {"provider": "zernio", "account_id": "acct_a"}
+    # same account → match
+    assert _zernio_matches(zernio, "acct_a")
+    # different pinned account → no
+    assert not _zernio_matches(zernio, "acct_b")
+    # webhook w/o account → accept (can't disprove)
+    assert _zernio_matches(zernio, "")
+    # channel w/o account → accept
+    assert _zernio_matches({"provider": "zernio"}, "acct_a")
+    # wrong provider → no
+    assert not _zernio_matches({"provider": "meta", "account_id": "acct_a"}, "acct_a")
 
 
 @pytest.mark.asyncio

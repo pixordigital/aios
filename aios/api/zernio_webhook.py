@@ -22,6 +22,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/zernio", tags=["zernio"])
 
 
+def _zernio_matches(cfg: dict, account_id: str) -> bool:
+    """True if this zernio channel is a valid route for the webhook's account.
+
+    Reject a channel pinned to a *different* account. Accept when the channel
+    doesn't pin one, the webhook doesn't name one, or they agree.
+    """
+    if cfg.get("provider") != "zernio":
+        return False
+    ch_account = cfg.get("account_id", "")
+    return not ch_account or not account_id or ch_account == account_id
+
+
 @router.get("/webhook")
 async def verify_webhook(request: Request):
     mode = request.query_params.get("hub.mode")
@@ -79,14 +91,10 @@ async def inbound_webhook(request: Request):
                 ChannelConnection.is_active == True,
             )
         )
-        conn = None
-        for ch in result.scalars():
-            cfg = ch.config or {}
-            if cfg.get("provider") == "zernio":
-                if not account_id or cfg.get("account_id") == account_id or not cfg.get("account_id"):
-                    conn = ch
-                    break
-
+        conn = next(
+            (ch for ch in result.scalars() if _zernio_matches(ch.config or {}, account_id)),
+            None,
+        )
         if not conn:
             logger.warning("No active Zernio whatsapp channel for account=%s", account_id)
             return {"status": "ok"}
