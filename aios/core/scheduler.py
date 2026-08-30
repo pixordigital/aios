@@ -73,8 +73,8 @@ class AgentScheduler:
     # ─── Agent lifecycle ───
 
     def enqueue(self, agent_id: str, conv_id: str = "", agent_name: str = "",
-                priority: int = 0) -> AgentProcess:
-        """Add agent to request queue."""
+                priority: int = 0, org_id: str = "") -> AgentProcess:
+        """Add agent to request queue + persist AgentInstance."""
         proc = AgentProcess(
             agent_id=agent_id,
             agent_name=agent_name,
@@ -85,6 +85,16 @@ class AgentScheduler:
         )
         self._processes[agent_id] = proc
         self._queue.put_nowait(proc)
+        try:
+            import asyncio as _aio
+            _aio.create_task(self._persist_instance(agent_id, org_id, conv_id, "queued"))
+        except Exception:
+            pass
+        try:
+            from aios.tasks.queue import enqueue_task
+            _aio.create_task(enqueue_task("agent_run", {"agent_id": agent_id, "conv_id": conv_id}))
+        except Exception:
+            pass
 
         hctx = HookContext()
         hctx.agent_id = agent_id
@@ -93,15 +103,34 @@ class AgentScheduler:
 
         return proc
 
+    async def _persist_instance(self, agent_id: str, org_id: str, conv_id: str, status: str):
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import AgentInstance
+            async with async_session() as sess:
+                inst = AgentInstance(agent_id=agent_id, org_id=org_id or "default", status=status, extra_data={"conversation_id": conv_id})
+                sess.add(inst)
+                await sess.commit()
+        except Exception:
+            logger.debug("persist instance failed", exc_info=True)
+
     def start(self, agent_id: str) -> AgentProcess | None:
         """Mark agent as running."""
         proc = self._processes.get(agent_id)
         if not proc:
             return None
+        if self._running_count >= self._max_concurrent:
+            logger.warning("Scheduler at capacity %d, queuing %s", self._max_concurrent, agent_id)
+            return None
         proc.state = AgentState.RUNNING
         proc.started_at = time.time()
         self._running[agent_id] = proc
         self._running_count += 1
+        try:
+            import asyncio as _aio
+            _aio.create_task(self._persist_instance(agent_id, "", proc.conversation_id, "running"))
+        except Exception:
+            pass
         return proc
 
     async def pop(self) -> AgentProcess | None:

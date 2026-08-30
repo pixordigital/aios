@@ -30,13 +30,31 @@ def _parse_redis(redis_url: str) -> RedisSettings:
 
 class WorkerSettings:
     """ARQ worker configuration — used by `arq aios.tasks.worker.WorkerSettings`."""
-    functions = [f"{f.__module__}.{f.__name__}" for f in FUNCTIONS]
+    functions = FUNCTIONS
     redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379"))
-    max_jobs = 10
+    max_jobs = 20
     job_timeout = 300
-    poll_delay = 0.5
-    health_check_interval = 3600
+    poll_delay = 0.2
+    health_check_interval = 60
     log_results = True
+    keep_result = 3600
+    retry_jobs = True
+
+    @staticmethod
+    async def on_startup(ctx):
+        from aios.db.engine import init_db
+        try:
+            await init_db()
+        except Exception:
+            pass
+
+    @staticmethod
+    async def on_shutdown(ctx):
+        from aios.tasks.queue import close_pool
+        try:
+            await close_pool()
+        except Exception:
+            pass
 
 
 # ponytail: async def run() kept for backward compat with aios-worker script

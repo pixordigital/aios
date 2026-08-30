@@ -1,0 +1,414 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div><h1>Lab — IDE leve</h1><p class="text-sm text-secondary mt-1">Editor • Teste de ferramentas • Traces • Arquivos</p></div>
+  <div style="display:flex;gap:0.5rem"><a href="/dashboard/agents/new" class="btn btn-ghost btn-sm">+ Agente</a><a href="/dashboard/sandbox" class="btn btn-ghost btn-sm">Playground</a></div>
+</div>
+
+<div style="display:flex;gap:0.375rem;margin-bottom:1rem;flex-wrap:wrap" id="lab-tabs">
+  <button class="btn btn-primary btn-sm" data-tab="tools" onclick="switchTab('tools')">🔧 Testar Ferramenta</button>
+  <button class="btn btn-ghost btn-sm" data-tab="traces" onclick="switchTab('traces')">📊 Traces</button>
+  <button class="btn btn-ghost btn-sm" data-tab="files" onclick="switchTab('files')">📁 Arquivos</button>
+  <button class="btn btn-ghost btn-sm" data-tab="workflows" onclick="switchTab('workflows')">🕸 Workflows</button>
+  <button class="btn btn-ghost btn-sm" data-tab="versions" onclick="switchTab('versions')">🏷 Versões</button>
+  <button class="btn btn-ghost btn-sm" data-tab="editor" onclick="switchTab('editor')">📝 Editor rápido</button>
+</div>
+
+<!-- TOOLS TAB -->
+<div id="tab-tools" class="card">
+  <div style="display:grid;grid-template-columns:280px 1fr;gap:1rem">
+    <div>
+      <label>Ferramenta</label>
+      <select id="tool-select" class="input" onchange="onToolChange()">
+        {% for t in tools %}<option value="{{t.name}}" data-desc="{{t.desc}}">{{t.name}} — {{t.desc}}</option>{% endfor %}
+      </select>
+      <p id="tool-desc" class="text-xs text-tertiary mt-1">{{tools[0].desc if tools else ''}}</p>
+      <div style="display:flex;flex-wrap:wrap;gap:0.375rem;margin-top:0.75rem">
+        <button class="btn btn-ghost btn-sm" onclick="loadToolExample()">Carregar exemplo</button>
+        <button class="btn btn-ghost btn-sm" onclick="pasteArtifactId()">Colar artifact_id</button>
+      </div>
+      <div class="mt-3" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.625rem">
+        <div style="font-size:0.6875rem;font-weight:600;color:var(--text-tertiary);margin-bottom:0.375rem">DICA</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.4">Executa direto via <span class="font-mono">ToolEngine</span> — sem LLM. Timeout 30s, limite 100k chars.</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <label style="margin:0">Args (JSON)</label>
+        <span id="json-status" class="text-xs" style="font-family:monospace"></span>
+      </div>
+      <div id="monaco-args" style="height:200px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"></div>
+      <textarea id="tool-args" style="display:none">{}</textarea>
+      <div style="display:flex;gap:0.5rem">
+        <button class="btn btn-primary" onclick="runTool()">▶ Executar</button>
+        <button class="btn btn-ghost" onclick="formatArgs()">Formatar</button>
+        <span id="tool-timing" class="text-xs text-tertiary" style="align-self:center"></span>
+      </div>
+      <div id="tool-output" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.75rem;max-height:320px;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+          <span style="font-size:0.75rem;font-weight:600">Resultado</span>
+          <button class="btn btn-ghost btn-sm" onclick="copyOutput()">Copiar</button>
+        </div>
+        <pre id="tool-output-pre" class="font-mono" style="font-size:0.75rem;white-space:pre-wrap;word-break:break-all;margin:0"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TRACES TAB -->
+<div id="tab-traces" class="card" style="display:none">
+  <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap">
+    <input id="trace-input" class="input" placeholder="trace_id (hex 12) — copie do Sandbox ou do header X-Trace-ID" style="flex:1;min-width:220px;font-family:monospace">
+    <button class="btn btn-primary btn-sm" onclick="loadTrace()">Buscar</button>
+    <button class="btn btn-ghost btn-sm" onclick="loadRecentTraces()">Recentes</button>
+  </div>
+  <div id="trace-timeline"></div>
+  <div id="trace-recent" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.5rem"></div>
+  <pre id="trace-raw" class="font-mono" style="display:none;margin-top:1rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.75rem;font-size:0.6875rem;overflow:auto;max-height:300px"></pre>
+</div>
+
+<!-- FILES TAB -->
+<div id="tab-files" class="card" style="display:none">
+  <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem">
+    <input id="file-search" class="input" placeholder="Buscar arquivo..." oninput="filterFiles(this.value)" style="flex:1">
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('upload-modal-lab').showModal()">+ Enviar</button>
+  </div>
+  <dialog id="upload-modal-lab" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.25rem;max-width:420px;width:90%">
+    <form method="POST" action="/dashboard/files/upload" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.75rem">
+      <h3>Enviar arquivo</h3><input type="file" name="file" required class="input"><input type="text" name="description" class="input" placeholder="Descrição opcional">
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end"><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancelar</button><button class="btn btn-primary btn-sm">Enviar</button></div>
+    </form>
+  </dialog>
+  <div id="file-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:0.5rem">
+    {% for a in artifacts %}
+    <div class="file-card" data-name="{{a.filename|lower}} {{a.description|lower}}" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.75rem;display:flex;flex-direction:column;gap:0.375rem">
+      <div style="font-weight:500;font-size:0.8125rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{a.filename}}</div>
+      <div style="font-size:0.6875rem;color:var(--text-tertiary)">{{a.content_type}} • {{a.size_bytes}} B • {{a.created_at[:10] if a.created_at else ''}}</div>
+      {% if a.description %}<div style="font-size:0.6875rem;color:var(--text-secondary)">{{a.description}}</div>{% endif %}
+      <div style="display:flex;gap:0.375rem;margin-top:0.25rem">
+        <button class="btn btn-ghost btn-sm" onclick="previewFile('{{a.id}}','{{a.filename}}')">Preview</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyId('{{a.id}}')">Copiar ID</button>
+        <a href="/dashboard/files/{{a.id}}/view" class="btn btn-ghost btn-sm">Abrir</a>
+      </div>
+    </div>
+    {% else %}
+    <div style="grid-column:1/-1;text-align:center;color:var(--text-tertiary);padding:1.5rem">Sem arquivos. Envie um para testar read_file.</div>
+    {% endfor %}
+  </div>
+  <div id="file-preview" style="display:none;margin-top:1rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg-elevated)">
+      <span id="preview-title" style="font-size:0.8125rem;font-weight:500"></span><button class="btn btn-ghost btn-sm" onclick="document.getElementById('file-preview').style.display='none'">×</button>
+    </div>
+    <pre id="preview-body" class="font-mono" style="margin:0;padding:0.75rem;font-size:0.75rem;max-height:360px;overflow:auto;white-space:pre-wrap"></pre>
+  </div>
+</div>
+
+<!-- WORKFLOWS TAB -->
+<div id="tab-workflows" class="card" style="display:none">
+  <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap">
+    <input id="wf-name" class="input" placeholder="Nome do workflow..." style="flex:1;min-width:180px">
+    <input id="wf-desc" class="input" placeholder="Descrição..." style="flex:1;min-width:180px">
+    <button class="btn btn-primary btn-sm" onclick="createWorkflow()">+ Criar</button>
+    <button class="btn btn-ghost btn-sm" onclick="loadWorkflows()">↻</button>
+  </div>
+  <div id="wf-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0.5rem"></div>
+  <div id="wf-detail" style="display:none;margin-top:1rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.75rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem"><span id="wf-detail-title" style="font-weight:600"></span>
+      <div style="display:flex;gap:0.375rem"><button class="btn btn-ghost btn-sm" onclick="validateDAG()">✓ Validar</button><button class="btn btn-ghost btn-sm" onclick="document.getElementById('wf-detail').style.display='none'">×</button></div>
+    </div>
+    <div id="wf-dag" style="position:relative;height:360px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:auto;margin-bottom:0.5rem">
+      <svg id="wf-edges" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg>
+      <div id="wf-canvas" style="position:relative;width:900px;height:360px"></div>
+    </div>
+    <div id="wf-validation" style="font-size:0.75rem;margin-bottom:0.5rem"></div>
+    <div id="wf-nodes" style="display:flex;flex-direction:column;gap:0.375rem"></div>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap">
+      <select id="wf-node-agent" class="input" style="flex:1;min-width:160px"><option value="">— agente —</option>{% for ag in agents %}<option value="{{ag.id}}">{{ag.name}}</option>{% endfor %}</select>
+      <input id="wf-node-tool" class="input" placeholder="tool_name" style="width:160px">
+      <input id="wf-node-label" class="input" placeholder="label" style="width:140px">
+      <input id="wf-node-deps" class="input" placeholder="depends_on ids (vírgula)" style="width:180px">
+      <button class="btn btn-ghost btn-sm" onclick="addWorkflowNode()">+ Nó</button>
+    </div>
+    <div style="display:flex;gap:0.5rem;margin-top:0.75rem"><input id="wf-run-input" class="input" placeholder="Input inicial..." style="flex:1"><button class="btn btn-primary btn-sm" onclick="runWorkflow()">▶ Rodar</button></div>
+    <pre id="wf-run-out" class="font-mono" style="display:none;margin-top:0.5rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.5rem;font-size:0.75rem;white-space:pre-wrap"></pre>
+  </div>
+</div>
+
+<!-- VERSIONS TAB -->
+<div id="tab-versions" class="card" style="display:none">
+  <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem">
+    <select id="ver-agent" class="input" style="flex:1"><option value="">— agente —</option>{% for ag in agents %}<option value="{{ag.id}}">{{ag.name}}</option>{% endfor %}</select>
+    <button class="btn btn-ghost btn-sm" onclick="loadVersions()">Carregar</button>
+    <button class="btn btn-primary btn-sm" onclick="publishVersion()">+ Publicar versão atual</button>
+  </div>
+  <div id="ver-list" style="display:flex;flex-direction:column;gap:0.375rem"></div>
+</div>
+
+<!-- EDITOR TAB -->
+<div id="tab-editor" class="card" style="display:none">
+  <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap">
+    <select id="editor-agent" class="input" style="flex:1;min-width:180px">
+      <option value="">— selecione agente para editar prompt —</option>
+      {% for ag in agents %}<option value="{{ag.id}}" data-prompt="{{ag.system_prompt|e}}">{{ag.name}} ({{ag.agent_type}})</option>{% endfor %}
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="loadAgentPrompt()">Carregar</button>
+    <button class="btn btn-primary btn-sm" onclick="saveAgentPrompt()">Salvar</button>
+    <span id="editor-status" class="text-xs text-tertiary"></span>
+  </div>
+  <div id="monaco-quick" style="height:360px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"></div>
+  <div style="display:flex;gap:0.375rem;margin-top:0.5rem;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" onclick="quickSnippet('PT-BR base')">PT-BR</button>
+    <button class="btn btn-ghost btn-sm" onclick="quickSnippet('Seja conciso. Pense passo a passo.')">CoT</button>
+    <button class="btn btn-ghost btn-sm" onclick="if(quickEditor) quickEditor.setValue('')">Limpar</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+<script>
+let argsEditor=null, quickEditor=null, lastTraceId='';
+require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'}});
+require(['vs/editor/editor.main'], function(){
+  monaco.editor.defineTheme('aios-dark',{base:'vs-dark',inherit:true,rules:[],colors:{'editor.background':'#0a0a0a','editor.foreground':'#E5E5E5','editor.lineHighlightBackground':'#161616','editorCursor.foreground':'#00E5A0'}});
+  monaco.editor.setTheme('aios-dark');
+  argsEditor=monaco.editor.create(document.getElementById('monaco-args'),{value:'{\n  "expression": "2 + 2 * 10"\n}',language:'json',minimap:{enabled:false},fontSize:12,fontFamily:'JetBrains Mono, monospace',automaticLayout:true,scrollBeyondLastLine:false});
+  argsEditor.onDidChangeModelContent(function(){ document.getElementById('tool-args').value=argsEditor.getValue(); validateJson(); });
+  document.getElementById('tool-args').value=argsEditor.getValue();
+  quickEditor=monaco.editor.create(document.getElementById('monaco-quick'),{value:'Selecione um agente e clique Carregar...',language:'markdown',minimap:{enabled:false},fontSize:13,fontFamily:'JetBrains Mono, monospace',wordWrap:'on',automaticLayout:true});
+  onToolChange();
+});
+
+function switchTab(t){
+  document.querySelectorAll('[id^="tab-"]').forEach(function(el){ el.style.display='none'; });
+  document.getElementById('tab-'+t).style.display='';
+  document.querySelectorAll('#lab-tabs button').forEach(function(b){ b.className = b.dataset.tab===t ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; });
+  if(argsEditor) setTimeout(function(){ argsEditor.layout(); }, 50);
+  if(quickEditor) setTimeout(function(){ quickEditor.layout(); }, 50);
+  if(t==='workflows') loadWorkflows();
+  if(t==='traces' && !lastTraceId) loadRecentTraces();
+}
+function validateJson(){
+  var el=document.getElementById('json-status');
+  try{ JSON.parse(argsEditor?argsEditor.getValue():document.getElementById('tool-args').value); el.textContent='✓ JSON válido'; el.style.color='var(--green)'; }
+  catch(e){ el.textContent='✗ '+e.message.slice(0,60); el.style.color='var(--red)'; }
+}
+function onToolChange(){
+  var sel=document.getElementById('tool-select'); if(!sel) return;
+  var opt=sel.options[sel.selectedIndex]; document.getElementById('tool-desc').textContent=opt?opt.dataset.desc:'';
+}
+function loadToolExample(){
+  var tool=document.getElementById('tool-select').value;
+  var ex={
+    calculator:'{\n  "expression": "15 * (3 + 2) / 5"\n}',
+    web_search:'{\n  "query": "AIOS agent OS"\n}',
+    http_get:'{\n  "url": "https://httpbin.org/json"\n}',
+    current_datetime:'{\n  "timezone": "America/Sao_Paulo"\n}',
+    send_email:'{\n  "to": "test@example.com",\n  "subject": "Teste AIOS",\n  "body": "Olá do Lab!"\n}',
+    read_file:'{\n  "artifact_id": "cole_um_id_de_arquivo_aqui"\n}'
+  };
+  var v=ex[tool]||'{}';
+  if(argsEditor) argsEditor.setValue(v); else document.getElementById('tool-args').value=v;
+  validateJson();
+}
+function formatArgs(){
+  try{ var v=JSON.parse(argsEditor?argsEditor.getValue():document.getElementById('tool-args').value); var f=JSON.stringify(v,null,2); if(argsEditor) argsEditor.setValue(f); validateJson(); }catch(e){}
+}
+async function runTool(){
+  var tool=document.getElementById('tool-select').value;
+  var args=argsEditor?argsEditor.getValue():document.getElementById('tool-args').value;
+  try{ JSON.parse(args); }catch(e){ alert('JSON inválido: '+e.message); return; }
+  var out=document.getElementById('tool-output'), pre=document.getElementById('tool-output-pre'), timing=document.getElementById('tool-timing');
+  out.style.display=''; pre.textContent='⏳ Executando...'; timing.textContent='';
+  var t0=performance.now();
+  try{
+    var r=await fetch('/dashboard/lab/tool-run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool:tool,args:JSON.parse(args)})});
+    var j=await r.json();
+    pre.textContent=JSON.stringify(j,null,2);
+    pre.style.color=j.ok?'var(--text)':'var(--red)';
+    timing.textContent=((performance.now()-t0)/1000).toFixed(2)+'s • '+(r.status)+' '+ (j.ok?'OK':'ERRO');
+  }catch(e){ pre.textContent='Erro de rede: '+e.message; }
+}
+function copyOutput(){ var t=document.getElementById('tool-output-pre').textContent; navigator.clipboard.writeText(t); }
+function pasteArtifactId(){
+  var cards=document.querySelectorAll('.file-card'); if(!cards.length){ alert('Sem arquivos'); return; }
+  var id=cards[0].querySelector('button[onclick^="copyId"]').getAttribute('onclick').match(/'([^']+)'/)[1];
+  var cur=argsEditor?argsEditor.getValue():'{}';
+  try{ var j=JSON.parse(cur); j.artifact_id=id; var f=JSON.stringify(j,null,2); if(argsEditor) argsEditor.setValue(f); }catch(e){}
+}
+
+// Traces
+async function loadTrace(){
+  var id=document.getElementById('trace-input').value.trim(); if(!id) return;
+  lastTraceId=id;
+  var res=await fetch('/dashboard/lab/traces/'+encodeURIComponent(id));
+  var j=await res.json();
+  renderTimeline(j);
+}
+async function loadRecentTraces(){
+  var res=await fetch('/dashboard/lab/traces/recent');
+  var j=await res.json();
+  if(j.recent && j.recent.length){
+    document.getElementById('trace-recent').innerHTML=j.recent.map(function(r){
+      return '<button onclick="document.getElementById(\'trace-input\').value=\''+r.trace_id+'\';loadTrace()" style="text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.5rem;cursor:pointer"><div style="font-family:monospace;font-size:0.75rem">'+r.trace_id+'</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">'+r.span_type+' • '+r.model+' • '+r.duration_ms+'ms</div></button>';
+    }).join('');
+  }
+}
+function renderTimeline(j){
+  var el=document.getElementById('trace-timeline'), raw=document.getElementById('trace-raw');
+  if(!j.spans || !j.spans.length){
+    el.innerHTML='<div style="color:var(--text-tertiary);text-align:center;padding:1.5rem">Sem spans para '+j.trace_id+' — pode ter expirado (memória) ou ID inválido. Veja recentes abaixo.</div>';
+    raw.style.display='none';
+    return;
+  }
+  el.innerHTML=j.spans.map(function(s){
+    var w=Math.min(100, Math.max(4, (s.duration_ms||1)/2));
+    return '<div style="display:flex;gap:0.75rem;align-items:center;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:0.375rem">'
+      +'<div style="width:10px;height:10px;border-radius:99px;background:'+(s.error?'var(--red)':s.type==="llm"?"var(--accent)":"var(--amber)")+'"></div>'
+      +'<div style="flex:1"><div style="font-size:0.8125rem;font-weight:500">'+s.type+' '+(s.model?'<span style="color:var(--text-tertiary);font-weight:400">• '+s.model+'</span>':'')+'</div><div style="height:6px;background:var(--bg-hover);border-radius:99px;margin-top:0.25rem"><div style="height:6px;width:'+w+'%;background:'+(s.error?'var(--red)':'var(--accent)')+';border-radius:99px"></div></div></div>'
+      +'<div style="text-align:right"><div style="font-family:monospace;font-size:0.75rem">'+(s.duration_ms||0)+'ms</div>'+(s.error?'<div style="font-size:0.6875rem;color:var(--red)">'+s.error.slice(0,60)+'</div>':'')+'</div></div>';
+  }).join('');
+  raw.textContent=JSON.stringify(j,null,2); raw.style.display='';
+}
+
+// Files
+function filterFiles(q){
+  var qq=q.toLowerCase();
+  document.querySelectorAll('.file-card').forEach(function(c){ c.style.display=c.dataset.name.includes(qq)?'':'none'; });
+}
+async function previewFile(id, name){
+  var box=document.getElementById('file-preview'), title=document.getElementById('preview-title'), body=document.getElementById('preview-body');
+  box.style.display=''; title.textContent=name+' — carregando...'; body.textContent='Carregando...';
+  var r=await fetch('/dashboard/lab/artifacts/'+id+'/raw'); var j=await r.json();
+  title.textContent=j.filename+' ('+j.content_type+', '+j.size_bytes+' B)';
+  body.textContent=j.text || '(vazio)';
+  if(j.is_binary) body.textContent='[Arquivo binário — não previewável]\n'+body.textContent;
+}
+function copyId(id){ navigator.clipboard.writeText(id); }
+
+let currentWfId=null;
+async function loadWorkflows(){
+  var r=await fetch('/dashboard/lab/workflows'); var j=await r.json();
+  var el=document.getElementById('wf-list');
+  if(!j.length){ el.innerHTML='<div style="color:var(--text-tertiary);padding:1rem">Nenhum workflow. Crie o primeiro.</div>'; return; }
+  el.innerHTML=j.map(function(w){ return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.625rem;display:flex;flex-direction:column;gap:0.25rem"><div style="font-weight:500;font-size:0.8125rem">'+w.name+'</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">'+w.status+' • '+w.timeout_seconds+'s</div><button class="btn btn-ghost btn-sm" onclick="openWorkflow(\''+w.id+'\')">Abrir</button></div>'; }).join('');
+}
+async function createWorkflow(){
+  var fd=new FormData(); fd.set('name',document.getElementById('wf-name').value||'Workflow'); fd.set('description',document.getElementById('wf-desc').value||'');
+  var r=await fetch('/dashboard/lab/workflows',{method:'POST',body:fd}); if(r.ok) loadWorkflows();
+}
+let wfNodesCache=[];
+async function openWorkflow(id){
+  currentWfId=id;
+  var r=await fetch('/api/workflows/'+id); var j=await r.json();
+  wfNodesCache=j.nodes;
+  document.getElementById('wf-detail').style.display=''; document.getElementById('wf-detail-title').textContent=j.name+' ('+j.nodes.length+' nós)';
+  renderDAG(j.nodes);
+  var nodesEl=document.getElementById('wf-nodes');
+  nodesEl.innerHTML=j.nodes.length? j.nodes.map(function(n){ return '<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:0.375rem 0.5rem;font-size:0.75rem"><span style="flex:1">'+(n.label||n.id.slice(0,8))+' '+(n.agent_id?'🤖':'🔧 '+(n.tool_name||''))+'</span><span style="color:var(--text-tertiary)">deps:'+(n.depends_on||[]).join(',')+'</span><button class="btn btn-ghost btn-sm" onclick="deleteNode(\''+n.id+'\')">×</button></div>'; }).join('') : '<div style="color:var(--text-tertiary);font-size:0.75rem">Sem nós. Adicione agente ou tool.</div>';
+  validateDAG();
+}
+function renderDAG(nodes){
+  var canvas=document.getElementById('wf-canvas'); var svg=document.getElementById('wf-edges');
+  canvas.innerHTML=''; svg.innerHTML='';
+  if(!nodes.length) return;
+  nodes.forEach(function(n,i){
+    var x=(n.position&&n.position.x)||(20 + (i%4)*210);
+    var y=(n.position&&n.position.y)||(20 + Math.floor(i/4)*90);
+    var el=document.createElement('div');
+    el.style.cssText='position:absolute;left:'+x+'px;top:'+y+'px;width:190px;background:var(--bg);border:1px solid '+(n.agent_id?'var(--accent)':'var(--amber)')+';border-radius:8px;padding:0.5rem;cursor:grab;font-size:0.75rem';
+    el.draggable=true; el.id='node-'+n.id;
+    el.innerHTML='<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(n.label||n.id.slice(0,8))+'</div><div style="color:var(--text-tertiary);font-size:0.6875rem">'+(n.agent_id?'🤖 '+n.agent_id.slice(0,6):'🔧 '+(n.tool_name||'-'))+'</div><div style="font-family:monospace;font-size:0.6rem;color:var(--text-tertiary)">→ '+(n.output_key||'result')+'</div>';
+    el.addEventListener('dragstart', function(e){ e.dataTransfer.setData('text/plain', n.id); });
+    el.addEventListener('dragend', function(e){ var rect=canvas.getBoundingClientRect(); var nx=Math.max(0, e.clientX - rect.left - 95); var ny=Math.max(0, e.clientY - rect.top - 30); n.position={x:nx,y:ny}; renderDAG(nodes); });
+    canvas.appendChild(el);
+  });
+  nodes.forEach(function(n){
+    var deps=n.depends_on||[];
+    deps.forEach(function(dep){
+      var from=nodes.find(function(x){ return x.id===dep; });
+      if(!from) return;
+      var fx=(from.position&&from.position.x)||0, fy=(from.position&&from.position.y)||0;
+      var tx=(n.position&&n.position.x)||0, ty=(n.position&&n.position.y)||0;
+      var line=document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', fx+190); line.setAttribute('y1', fy+30); line.setAttribute('x2', tx); line.setAttribute('y2', ty+30);
+      line.setAttribute('stroke','var(--accent)'); line.setAttribute('stroke-width','2'); line.setAttribute('marker-end','url(#arrow)');
+      svg.appendChild(line);
+    });
+  });
+  if(!document.getElementById('arrow-def')){
+    var defs=document.createElementNS('http://www.w3.org/2000/svg','defs'); defs.id='arrow-def';
+    defs.innerHTML='<marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker>';
+    svg.appendChild(defs);
+  }
+}
+function validateDAG(){
+  var el=document.getElementById('wf-validation');
+  if(!wfNodesCache.length){ el.textContent=''; return; }
+  var ids=new Set(wfNodesCache.map(function(n){ return n.id; }));
+  var hasMissing=false, hasCycle=false;
+  wfNodesCache.forEach(function(n){ (n.depends_on||[]).forEach(function(d){ if(!ids.has(d)) hasMissing=true; }); });
+  // cycle detect via DFS
+  var vis={}, stack={};
+  function dfs(id){ if(stack[id]) return true; if(vis[id]) return false; vis[id]=true; stack[id]=true; var node=wfNodesCache.find(function(x){return x.id===id;}); if(node){ for(var i=0;i<(node.depends_on||[]).length;i++){ if(dfs(node.depends_on[i])) return true; } } stack[id]=false; return false; }
+  wfNodesCache.forEach(function(n){ if(dfs(n.id)) hasCycle=true; });
+  if(hasCycle) el.innerHTML='<span style="color:var(--red)">✗ Ciclo detectado — corrija depends_on</span>';
+  else if(hasMissing) el.innerHTML='<span style="color:var(--amber)">⚠ depends_on inexistente</span>';
+  else el.innerHTML='<span style="color:var(--green)">✓ DAG válido ('+wfNodesCache.length+' nós)</span>';
+}
+async function addWorkflowNode(){
+  if(!currentWfId) return alert('Abra um workflow');
+  var deps=(document.getElementById('wf-node-deps').value||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
+  var body={label:document.getElementById('wf-node-label').value, agent_id:document.getElementById('wf-node-agent').value||null, tool_name:document.getElementById('wf-node-tool').value||null, tool_args:{}, depends_on:deps, output_key:'result', position:{x: Math.random()*600, y: Math.random()*200}};
+  var r=await fetch('/api/workflows/'+currentWfId+'/nodes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){ var e=await r.json(); alert(e.detail||'erro'); return; }
+  openWorkflow(currentWfId);
+}
+async function deleteNode(nid){ var r=await fetch('/api/workflows/'+currentWfId+'/nodes/'+nid,{method:'DELETE'}); if(r.ok) openWorkflow(currentWfId); }
+async function runWorkflow(){
+  if(!currentWfId) return;
+  var inp=document.getElementById('wf-run-input').value; var out=document.getElementById('wf-run-out'); out.style.display=''; out.textContent='⏳ Rodando...';
+  var r=await fetch('/api/workflows/'+currentWfId+'/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:inp})});
+  var j=await r.json(); out.textContent=JSON.stringify(j,null,2);
+}
+
+async function loadVersions(){
+  var id=document.getElementById('ver-agent').value; if(!id) return;
+  var r=await fetch('/dashboard/lab/agents/'+id+'/versions'); var j=await r.json();
+  var el=document.getElementById('ver-list');
+  if(!j.length){ el.innerHTML='<div style="color:var(--text-tertiary);padding:0.5rem">Nenhuma versão publicada. Clique Publicar.</div>'; return; }
+  el.innerHTML=j.map(function(v){ return '<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem"><span style="font-family:monospace;font-size:0.75rem">v'+v.version+'</span><span style="flex:1;font-size:0.8125rem">'+v.change_note+'</span><span style="font-size:0.6875rem;color:var(--text-tertiary)">'+v.created_at.slice(0,16)+'</span><button class="btn btn-ghost btn-sm" onclick="rollbackVersion(\''+id+'\',\''+v.id+'\')">↩ Rollback</button></div>'; }).join('');
+}
+async function publishVersion(){
+  var id=document.getElementById('ver-agent').value; if(!id) return alert('Selecione agente');
+  var note=prompt('Nota da versão:')||'';
+  var fd=new FormData(); fd.set('note',note);
+  var r=await fetch('/dashboard/lab/agents/'+id+'/publish',{method:'POST',body:fd}); if(r.ok) loadVersions();
+}
+async function rollbackVersion(aid, vid){
+  if(!confirm('Rollback para esta versão?')) return;
+  var r=await fetch('/api/agents/'+aid+'/versions/'+vid+'/rollback',{method:'POST'}); var j=await r.json(); alert(j.ok? 'Rollback v'+j.new_version+' OK' : 'Falha');
+  loadVersions();
+}
+
+// Quick editor
+function loadAgentPrompt(){
+  var sel=document.getElementById('editor-agent'); var opt=sel.options[sel.selectedIndex]; if(!opt||!opt.value) return;
+  var v=opt.dataset.prompt||'';
+  if(quickEditor) quickEditor.setValue(v);
+  document.getElementById('editor-status').textContent='Carregado: '+opt.text;
+}
+function quickSnippet(t){ if(quickEditor){ var s=quickEditor.getSelection(); quickEditor.executeEdits('snip',{edits:[{range:s,text:(quickEditor.getValue()?'\n\n':'')+t}]}); } }
+async function saveAgentPrompt(){
+  var sel=document.getElementById('editor-agent'); var id=sel.value; if(!id){ alert('Selecione agente'); return; }
+  var prompt=quickEditor?quickEditor.getValue():'';
+  var opt=sel.options[sel.selectedIndex];
+  document.getElementById('editor-status').textContent='Salvando...';
+  // fetch current agent to preserve other fields, then save
+  var fd=new FormData(); fd.set('agent_id',id); fd.set('name',opt.text.split(' (')[0]); fd.set('agent_type',opt.text.match(/\(([^)]+)\)/)?.[1]||'custom'); fd.set('system_prompt',prompt);
+  // need model etc — fetch via API fallback: minimal save keeps existing llm_config via server side? agent_save requires model — send defaults
+  fd.set('model','openai/gpt-4o'); fd.set('temperature','0.7'); fd.set('max_tokens','4096'); fd.set('tools',''); fd.set('short_term_buffer','50');
+  var r=await fetch('/dashboard/agents/save',{method:'POST',body:fd});
+  document.getElementById('editor-status').textContent=r.ok?'✓ Salvo':'✗ Falha';
+  if(r.ok) opt.dataset.prompt=prompt;
+}
+</script>
+{% endblock %}

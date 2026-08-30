@@ -1098,6 +1098,10 @@ async def sandbox_chat(
             runtime = AgentRuntime(agent, async_session)
             yield "data: " + json.dumps({"conversation_id": cid}) + "\n\n"
 
+            from aios.core.tracing import current_trace_id
+            tid = current_trace_id()
+            if tid:
+                yield "data: " + json.dumps({"type": "trace", "trace_id": tid}) + "\n\n"
             async for event in runtime.run_stream(cid, message, db):
                 if event["type"] == "token":
                     yield "data: " + json.dumps({"type": "token", "content": event["content"]}) + "\n\n"
@@ -1106,7 +1110,8 @@ async def sandbox_chat(
                 elif event["type"] == "tool_call":
                     yield "data: " + json.dumps({"type": "tool_call", "tool_calls": event["tool_calls"]}) + "\n\n"
                 elif event["type"] == "done":
-                    yield "data: " + json.dumps({"type": "done"}) + "\n\n"
+                    tid2 = current_trace_id()
+                    yield "data: " + json.dumps({"type": "done", "trace_id": tid2}) + "\n\n"
 
     from fastapi.responses import StreamingResponse
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
@@ -1162,6 +1167,147 @@ async def files_view(request: Request, art_id: str):
             return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
         text = await read_artifact_text(art_id, db, max_chars=100000)
     return await _render("file_view.html", request, title=art.filename, artifact=art, content=text)
+
+
+# ─── IDE Lab (Monaco + Tool Runner + Traces) ───
+
+@router.get("/lab", response_class=HTMLResponse)
+async def lab_page(request: Request):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
+        artifacts = await __import__("aios.core.storage", fromlist=["list_artifacts"]).list_artifacts(db, org_id)  # type: ignore
+        from aios.db.models import Workflow
+        wfs = (await db.execute(select(Workflow).where(Workflow.org_id == org_id).order_by(Workflow.created_at.desc()).limit(50))).scalars().all()
+    from aios.tools.registry import TOOL_REGISTRY
+    tools = [{"name": k, "desc": v.get("description", ""), "schema": v.get("input_schema", {})} for k, v in TOOL_REGISTRY.items()]
+    if not tools:
+        tools = [
+            {"name": "calculator", "desc": "Expressões matemáticas", "schema": {"expression": "string"}},
+            {"name": "web_search", "desc": "Buscar na web", "schema": {"query": "string"}},
+            {"name": "http_get", "desc": "Buscar URLs HTTPS", "schema": {"url": "string"}},
+            {"name": "current_datetime", "desc": "Hora atual", "schema": {"timezone": "string"}},
+            {"name": "send_email", "desc": "Enviar e-mail", "schema": {"to": "string", "subject": "string", "body": "string"}},
+            {"name": "read_file", "desc": "Ler arquivo por ID", "schema": {"artifact_id": "string"}},
+        ]
+    return await _render("lab.html", request, title="Lab — IDE leve", agents=agents, tools=tools, artifacts=artifacts, workflows=wfs)
+
+
+@router.post("/lab/tool-run")
+async def lab_tool_run(request: Request):
+    from fastapi.responses import JSONResponse
+    import json as _json
+    try:
+        body = await request.json()
+    except Exception:
+        form = await request.form()
+        body = dict(form)
+    tool_name = (body.get("tool") or body.get("tool_name") or "").strip()
+    raw_args = body.get("args") or body.get("arguments") or "{}"
+    if isinstance(raw_args, dict):
+        raw_args = _json.dumps(raw_args)
+    if not tool_name:
+        return JSONResponse({"error": "tool required"}, status_code=400)
+    from aios.core.tools import ToolEngine
+    from aios.tools.registry import TOOL_REGISTRY
+    if tool_name not in TOOL_REGISTRY:
+        return JSONResponse({"error": f"tool '{tool_name}' not registered"}, status_code=404)
+    eng = ToolEngine([tool_name])
+    try:
+        out = await eng.execute(tool_name, raw_args if isinstance(raw_args, str) else _json.dumps(raw_args))
+        return JSONResponse({"ok": True, "tool": tool_name, "output": out})
+    except Exception as e:
+        return JSONResponse({"ok": False, "tool": tool_name, "error": str(e)}, status_code=200)
+
+
+@router.get("/lab/traces/{trace_id}")
+async def lab_trace_proxy(request: Request, trace_id: str):
+    from fastapi.responses import JSONResponse
+    from aios.core.tracing import get_trace, TRACES
+    if trace_id == "recent":
+        recent = [{"key": k, "trace_id": v.trace_id, "span_type": v.span_type, "model": v.model, "duration_ms": round((v.end - v.start)*1000,1) if v.end else 0}
+                  for k, v in list(TRACES.items())[-30:]]
+        return JSONResponse({"trace_id": "recent", "spans": [], "recent": recent})
+    spans = get_trace(trace_id)
+    if not spans:
+        recent = [{"key": k, "trace_id": v.trace_id, "span_type": v.span_type, "model": v.model, "duration_ms": round((v.end - v.start)*1000,1) if v.end else 0}
+                  for k, v in list(TRACES.items())[-30:]]
+        return JSONResponse({"trace_id": trace_id, "spans": [], "recent": recent})
+    return JSONResponse({"trace_id": trace_id, "spans": spans})
+
+
+@router.get("/lab/workflows")
+async def lab_workflows(request: Request):
+    org_id = await _org_filter(request)
+    from fastapi.responses import JSONResponse
+    from aios.db.models import Workflow
+    async with db_session() as db:
+        wfs = (await db.execute(select(Workflow).where(Workflow.org_id == org_id).order_by(Workflow.created_at.desc()))).scalars().all()
+        return JSONResponse([{"id": w.id, "name": w.name, "status": w.status, "timeout_seconds": w.timeout_seconds} for w in wfs])
+
+
+@router.post("/lab/workflows")
+async def lab_workflow_create(request: Request):
+    org_id = await _org_filter(request)
+    from fastapi.responses import JSONResponse
+    from aios.db.models import Workflow
+    form = await request.form()
+    name = form.get("name") or "Workflow"
+    desc = form.get("description") or ""
+    async with db_session() as db:
+        wf = Workflow(org_id=org_id, name=name, description=desc)
+        db.add(wf)
+        await db.commit()
+        await db.refresh(wf)
+        return JSONResponse({"id": wf.id, "name": wf.name})
+    return JSONResponse({"ok": True})
+
+
+@router.get("/lab/agents/{agent_id}/versions")
+async def lab_agent_versions(request: Request, agent_id: str):
+    org_id = await _org_filter(request)
+    from fastapi.responses import JSONResponse
+    from aios.db.models import Agent, AgentVersion
+    async with db_session() as db:
+        ag = await db.get(Agent, agent_id)
+        if not ag or ag.org_id != org_id:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        vers = (await db.execute(select(AgentVersion).where(AgentVersion.agent_id == agent_id).order_by(AgentVersion.version.desc()).limit(20))).scalars().all()
+        return JSONResponse([{"id": v.id, "version": v.version, "name": v.name, "change_note": v.change_note, "created_at": str(v.created_at)} for v in vers])
+
+
+@router.post("/lab/agents/{agent_id}/publish")
+async def lab_agent_publish(request: Request, agent_id: str):
+    org_id = await _org_filter(request)
+    from fastapi.responses import JSONResponse
+    from aios.db.models import Agent, AgentVersion
+    from sqlalchemy import func as _func
+    form = await request.form()
+    note = form.get("note") or ""
+    async with db_session() as db:
+        ag = await db.get(Agent, agent_id)
+        if not ag or ag.org_id != org_id:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        max_v = (await db.execute(select(_func.max(AgentVersion.version)).where(AgentVersion.agent_id == agent_id))).scalar() or 0
+        v = AgentVersion(agent_id=ag.id, org_id=org_id, version=max_v + 1, name=ag.name, system_prompt=ag.system_prompt, llm_config=dict(ag.llm_config or {}), tools=list(ag.tools or []), memory_config=dict(ag.memory_config or {}), governance_config=dict(ag.governance_config or {}), agent_type=ag.agent_type, change_note=note)
+        db.add(v)
+        await db.commit()
+        return JSONResponse({"ok": True, "version": v.version})
+
+
+@router.get("/lab/artifacts/{art_id}/raw")
+async def lab_artifact_raw(request: Request, art_id: str):
+    org_id = await _org_filter(request)
+    from aios.core.storage import read_artifact_text, get_artifact_content
+    from aios.db.models import Artifact
+    from fastapi.responses import JSONResponse
+    async with db_session() as db:
+        art = await db.get(Artifact, art_id)
+        if not art or art.org_id != org_id:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        text = await read_artifact_text(art_id, db, max_chars=20000)
+        raw = await get_artifact_content(art_id, db, org_id=org_id)
+        return JSONResponse({"id": art.id, "filename": art.filename, "content_type": art.content_type, "size_bytes": art.size_bytes, "text": text[:20000], "is_binary": raw is not None and len(raw) > 0 and text.startswith("Binary file")})
 
 
 # ─── Org Switcher (superadmin only) ───

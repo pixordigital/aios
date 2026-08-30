@@ -153,7 +153,8 @@ async def send_message(
                         db.add(reply_msg)
                         await db.commit()
                         await db.refresh(reply_msg)
-                        await track_usage(org_id, db, messages=1, tokens=len(reply))
+                        tokens = getattr(runtime, "_last_tokens", len(reply)) if 'runtime' in locals() else len(reply)
+                        await track_usage(org_id, db, messages=1, tokens=tokens, llm_calls=1)
                     elif len(available) > 1:
                         # team failed, try each agent individually
                         for agent in available:
@@ -170,7 +171,7 @@ async def send_message(
                                     db.add(reply_msg)
                                     await db.commit()
                                     await db.refresh(reply_msg)
-                                    await track_usage(org_id, db, messages=1, tokens=len(reply))
+                                    await track_usage(org_id, db, messages=1, tokens=getattr(runtime, "_last_tokens", len(reply)), llm_calls=1)
                                     break
                             except Exception:
                                 logger.exception("Failover: agent %s failed", agent.id)
@@ -189,7 +190,7 @@ async def send_message(
                     db.add(reply_msg)
                     await db.commit()
                     await db.refresh(reply_msg)
-                    await track_usage(org_id, db, messages=1, tokens=len(reply))
+                    await track_usage(org_id, db, messages=1, tokens=getattr(runtime, "_last_tokens", len(reply)), llm_calls=1)
     except Exception:
         logger.exception("Agent/team routing failed for conversation %s", conversation_id)
 
@@ -227,21 +228,27 @@ async def send_message_stream(
                 team = await db.get(Team, conv.team_id)
                 if team and team.agents:
                     orch = TeamOrchestrator(team, list(team.agents))
+                    toks = 0
                     async for ev in orch.handle_message_stream(conversation_id, body.content, db):
+                        if ev.get("tokens"):
+                            toks = ev["tokens"]
                         yield f"data: {json.dumps(ev)}\n\n"
                         if ev["type"] == "done":
                             break
-                    await track_usage(org_id, db, messages=1, tokens=0)
+                    await track_usage(org_id, db, messages=1, tokens=toks, llm_calls=1)
                     return
             elif conv.agent_id:
                 agent_model = await db.get(Agent, conv.agent_id)
                 if agent_model:
                     runtime = AgentRuntime(agent_model)
+                    toks = 0
                     async for ev in runtime.run_stream(conversation_id, body.content, db):
+                        if ev.get("tokens"):
+                            toks = ev["tokens"]
                         yield f"data: {json.dumps(ev)}\n\n"
                         if ev["type"] == "done":
                             break
-                    await track_usage(org_id, db, messages=1, tokens=0)
+                    await track_usage(org_id, db, messages=1, tokens=toks, llm_calls=1)
                     return
         except Exception:
             logger.exception("Stream failed for conversation %s", conversation_id)

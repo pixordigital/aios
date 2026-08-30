@@ -132,17 +132,43 @@ class WorkflowEngine:
     ) -> WorkflowResult:
         """Execute single node — either agent run or tool call."""
         result.node_status[node.id] = "running"
+        if node.condition:
+            try:
+                import ast
+                tree = ast.parse(node.condition, mode="eval")
+                for n in ast.walk(tree):
+                    if isinstance(n, (ast.Import, ast.ImportFrom, ast.Call)):
+                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in ("__import__", "eval", "exec", "open"):
+                            raise ValueError("blocked")
+                if not eval(compile(tree, "<cond>", "eval"), {"__builtins__": {}}, {"shared": shared, "outputs": result.outputs}):
+                    result.node_status[node.id] = "skipped"
+                    return result
+            except Exception:
+                pass
 
         if node.agent_id:
-            # mock agent runtime — real impl would load from DB
-            agent_model = type("obj", (object,), {
-                "id": node.agent_id,
-                "name": node.agent_id,
-                "llm_config": {"model": "openai/gpt-4o", "temperature": 0.5, "max_tokens": 4096},
-                "system_prompt": shared.get("initial_input", ""),
-                "tools": [],
-                "memory_config": {},
-            })()
+            from sqlalchemy import select
+            from aios.db.engine import async_session
+            from aios.db.models import Agent as AgentModel
+            agent_model = None
+            try:
+                async with async_session() as sess:
+                    agent_model = await sess.get(AgentModel, node.agent_id)
+                    if agent_model:
+                        sess.expunge(agent_model)
+            except Exception:
+                pass
+            if not agent_model:
+                agent_model = type("obj", (object,), {
+                    "id": node.agent_id,
+                    "name": node.agent_id,
+                    "llm_config": {"model": "openai/gpt-4o", "temperature": 0.5, "max_tokens": 4096},
+                    "system_prompt": shared.get("initial_input", ""),
+                    "tools": [],
+                    "memory_config": {},
+                    "governance_config": {},
+                    "org_id": "",
+                })()
             runtime = AgentRuntime(agent_model, self._db_factory)
             msg = shared.get(node.output_key, shared.get("initial_input", ""))
             output = await runtime.run(conv_id, msg)

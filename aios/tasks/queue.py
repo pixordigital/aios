@@ -47,6 +47,15 @@ async def enqueue_job(func_name: str, *args, **kwargs):
     logger.debug("Enqueued job %s", func_name)
 
 
+async def enqueue_task(task_name: str, payload: dict):
+    """Lightweight task enqueue — falls back to no-op if Redis unavailable."""
+    try:
+        pool = await get_redis_pool()
+        await pool.enqueue_job(task_name, payload)
+    except Exception:
+        logger.debug("enqueue_task fallback (no redis): %s", task_name)
+
+
 async def close_pool():
     global _redis_pool
     if _redis_pool is not None:
