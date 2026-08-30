@@ -46,6 +46,12 @@ async def create_tool(
     db.add(tool)
     await db.commit()
     await db.refresh(tool)
+    if tool.code_reference and tool.code_reference.startswith("code:"):
+        from aios.tools.dynamic import register_dynamic_tool
+        try:
+            register_dynamic_tool(tool.name, tool.description, tool.code_reference[5:], tool.input_schema)
+        except Exception:
+            pass
     return tool
 
 
@@ -70,6 +76,31 @@ async def list_tools(
 async def tool_audit_calls(user=Depends(get_current_user)):
     """Get tool call audit counters (in-memory, since app start)."""
     return ToolEngine.audit_summary()
+
+
+@router.post("/{tool_id}/test")
+async def test_tool(
+    tool_id: str,
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    tool = await db.get(Tool, tool_id)
+    if not tool or tool.org_id != org_id:
+        raise HTTPException(404)
+    args = body.get("args") or body.get("arguments") or {}
+    import json
+    from aios.core.tools import ToolEngine
+    if tool.code_reference and tool.code_reference.startswith("code:"):
+        from aios.tools.dynamic import register_dynamic_tool
+        register_dynamic_tool(tool.name, tool.description, tool.code_reference[5:], tool.input_schema)
+    eng = ToolEngine([tool.name])
+    try:
+        out = await eng.execute(tool.name, json.dumps(args))
+        return {"ok": True, "output": out}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.get("/{tool_id}", response_model=ToolOut)

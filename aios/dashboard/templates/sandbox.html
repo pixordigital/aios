@@ -87,6 +87,17 @@
       </div>
     </div>
 
+    <!-- Trace Timeline -->
+    <div class="card" style="padding:0.75rem" id="trace-card" style="display:none">
+      <h3 style="font-size:0.875rem;font-weight:600;margin-bottom:0.5rem">Trace Timeline</h3>
+      <div id="sandbox-trace-id" style="font-family:monospace;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.375rem"></div>
+      <div id="sandbox-timeline" style="display:flex;flex-direction:column;gap:0.25rem"><span style="font-size:0.75rem;color:var(--text-tertiary)">Aguardando resposta…</span></div>
+      <div style="display:flex;gap:0.375rem;margin-top:0.5rem">
+        <button class="btn btn-ghost btn-sm" onclick="openTraceInLab()">Lab →</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyTraceId()">Copiar ID</button>
+      </div>
+    </div>
+
     <!-- Quick Actions -->
     <div class="card" style="padding:0.75rem">
       <h3 style="font-size:0.875rem;font-weight:600;margin-bottom:0.5rem">Ações Rápidas</h3>
@@ -94,6 +105,7 @@
         <button class="btn btn-ghost" style="font-size:0.8125rem;width:100%;text-align:left" onclick="saveTestResult()">📋 Salvar resultado do teste</button>
         <button class="btn btn-ghost" style="font-size:0.8125rem;width:100%;text-align:left" onclick="exportChat()">📤 Exportar chat</button>
         <button class="btn btn-ghost" style="font-size:0.8125rem;width:100%;text-align:left" onclick="runAllScenarios()">🚀 Executar todos os cenários</button>
+        <a href="/dashboard/lab" class="btn btn-ghost" style="font-size:0.8125rem;width:100%;text-align:left">🔧 Lab IDE →</a>
       </div>
     </div>
   </div>
@@ -102,11 +114,26 @@
 <script>
   let currentConvId = '';
   let currentAbort = null;
+  let currentTraceId = '';
   let testStartTime = 0;
   let msgCount = 0;
   let toolCount = 0;
   let errorCount = 0;
   let totalTime = 0;
+  function setTraceId(id){
+    currentTraceId=id;
+    document.getElementById('sandbox-trace-id').textContent=id?'trace: '+id:'';
+    if(id) fetch('/dashboard/lab/traces/'+id).then(function(r){return r.json()}).then(function(j){ renderSandboxTimeline(j); });
+  }
+  function renderSandboxTimeline(j){
+    var el=document.getElementById('sandbox-timeline');
+    if(!j.spans||!j.spans.length){ el.innerHTML='<span style="font-size:0.75rem;color:var(--text-tertiary)">Sem spans ainda (aguarde done)</span>'; return; }
+    el.innerHTML=j.spans.map(function(s){
+      return '<div style="display:flex;gap:0.5rem;align-items:center;font-size:0.75rem;padding:0.25rem 0.375rem;background:var(--bg-hover);border-radius:4px"><span style="width:7px;height:7px;border-radius:99px;background:'+(s.error?'var(--red)':s.type==='llm'?'var(--accent)':'var(--amber)')+'"></span><span style="flex:1">'+s.type+(s.model?' • '+s.model:'')+'</span><span style="font-family:monospace;color:var(--text-tertiary)">'+(s.duration_ms||0)+'ms</span></div>';
+    }).join('');
+  }
+  function openTraceInLab(){ if(currentTraceId) window.open('/dashboard/lab#'+currentTraceId,'_blank'); else window.open('/dashboard/lab','_blank'); }
+  function copyTraceId(){ if(currentTraceId) navigator.clipboard.writeText(currentTraceId); }
 
   document.getElementById('sandbox-agent').onchange = function() {
     const disabled = !this.value;
@@ -216,6 +243,8 @@
 
           if (data.conversation_id) {
             currentConvId = data.conversation_id;
+          } else if (data.type === 'trace') {
+            setTraceId(data.trace_id);
           } else if (data.type === 'token') {
             buffer += data.content;
             if (!assistantEl) {
@@ -233,9 +262,11 @@
             updateMetrics();
           } else if (data.type === 'done') {
             if (assistantEl) assistantEl.innerHTML = escapeHtml(buffer);
+            if (data.trace_id) setTraceId(data.trace_id);
+            else if (currentTraceId) fetch('/dashboard/lab/traces/'+currentTraceId).then(function(r){return r.json()}).then(function(j){ renderSandboxTimeline(j); });
             const responseTime = (performance.now() - responseStart) / 1000;
             totalTime += responseTime;
-            document.getElementById('sandbox-status').textContent = '✓ Concluído (' + responseTime.toFixed(1) + 's)';
+            document.getElementById('sandbox-status').textContent = '✓ Concluído (' + responseTime.toFixed(1) + 's)' + (currentTraceId?' • '+currentTraceId:'');
             updateMetrics();
           } else if (data.type === 'error') {
             appendMessage('tool', '❌ Erro: ' + (data.error || 'desconhecido'));

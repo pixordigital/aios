@@ -347,3 +347,65 @@ class DeadLetter(Base, TimestampMixin):
     attempts: Mapped[int] = mapped_column(default=0)
     status: Mapped[str] = mapped_column(String(20), default="failed")  # failed|retried|resolved
     retried_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class AgentVersion(Base, TimestampMixin):
+    """Immutable snapshot of agent config for versioning/rollback."""
+    __tablename__ = "agent_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    name: Mapped[str] = mapped_column(String(255))
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    llm_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    tools: Mapped[list] = mapped_column(JSON, default=list)
+    memory_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    governance_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    agent_type: Mapped[str] = mapped_column(String(50), default="custom")
+    change_note: Mapped[str] = mapped_column(Text, default="")
+
+
+class Workflow(Base, TimestampMixin, OrgScopedMixin):
+    """DAG workflow definition."""
+    __tablename__ = "workflows"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    entry_node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    timeout_seconds: Mapped[int] = mapped_column(default=120)
+    status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|active|archived
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    nodes = relationship("WorkflowNode", back_populates="workflow", cascade="all, delete-orphan", order_by="WorkflowNode.created_at")
+
+
+class WorkflowNode(Base, TimestampMixin):
+    """Node in workflow DAG — agent or tool."""
+    __tablename__ = "workflow_nodes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workflow_id: Mapped[str] = mapped_column(ForeignKey("workflows.id"), index=True)
+    label: Mapped[str] = mapped_column(String(255), default="")
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tool_args: Mapped[dict] = mapped_column(JSON, default=dict)
+    depends_on: Mapped[list] = mapped_column(JSON, default=list)  # list[node_id]
+    condition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_key: Mapped[str] = mapped_column(String(100), default="result")
+    timeout_seconds: Mapped[int] = mapped_column(default=60)
+    position: Mapped[dict] = mapped_column(JSON, default=dict)  # {x,y} for UI
+    workflow = relationship("Workflow", back_populates="nodes")
+
+
+class WorkflowRun(Base, TimestampMixin):
+    """Execution of a workflow."""
+    __tablename__ = "workflow_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workflow_id: Mapped[str] = mapped_column(ForeignKey("workflows.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|running|done|failed
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    outputs: Mapped[dict] = mapped_column(JSON, default=dict)
+    node_status: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    workflow = relationship("Workflow")

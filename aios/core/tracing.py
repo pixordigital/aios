@@ -68,9 +68,63 @@ def end_span(span: TraceSpan, tokens: int = 0, error: str = ""):
     if error:
         METRICS["errors"] += 1
     _log_span_event("end", span)
+    try:
+        import asyncio as _aio
+        _aio.create_task(_persist_span(span))
+    except Exception:
+        pass
+    try:
+        _maybe_otel_export(span)
+    except Exception:
+        pass
 
     # persist metrics to disk periodically
     _maybe_flush_metrics()
+
+
+async def _persist_span(span: TraceSpan):
+    try:
+        from aios.db.engine import async_session
+        from aios.db.models import AgentMetric
+        from datetime import datetime, timezone
+        hour = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
+        extra = span.extra or {}
+        agent_id = extra.get("agent_id") or "unknown"
+        org_id = extra.get("org_id") or "unknown"
+        async with async_session() as sess:
+            from sqlalchemy import select
+            m = (await sess.execute(select(AgentMetric).where(AgentMetric.agent_id == agent_id, AgentMetric.hour == hour))).scalar_one_or_none()
+            dur = int((span.end - span.start) * 1000) if span.end else 0
+            if m:
+                m.tokens += tokens if (tokens := span.tokens) else 0
+                m.errors += 1 if span.error else 0
+                m.tool_calls += 1 if span.span_type == "tool" else 0
+                m.messages += 1 if span.span_type == "agent_run" else 0
+                m.avg_response_ms = int((m.avg_response_ms + dur) / 2) if m.avg_response_ms else dur
+            else:
+                m = AgentMetric(agent_id=agent_id, org_id=org_id, hour=hour, tokens=span.tokens, errors=1 if span.error else 0, tool_calls=1 if span.span_type == "tool" else 0, messages=1 if span.span_type == "agent_run" else 0, avg_response_ms=dur)
+                sess.add(m)
+            await sess.commit()
+    except Exception:
+        pass
+
+
+def _maybe_otel_export(span: TraceSpan):
+    try:
+        import os
+        ep = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if not ep:
+            return
+        from opentelemetry import trace as _trace
+        from opentelemetry.trace import SpanKind
+        tracer = _trace.get_tracer("aios")
+        with tracer.start_as_current_span(span.span_type, kind=SpanKind.INTERNAL) as s:
+            s.set_attribute("trace_id", span.trace_id)
+            s.set_attribute("model", span.model)
+            if span.error:
+                s.set_attribute("error", span.error)
+    except Exception:
+        pass
 
 
 def _log_span_event(event: str, span: TraceSpan) -> None:

@@ -3,9 +3,12 @@
 import asyncio
 import importlib
 import json
+import logging
 from typing import Any
 
 from aios.tools.registry import TOOL_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 # Built-in tool modules that are safe to import
 _ALLOWED_MODULES = {
@@ -15,6 +18,7 @@ _ALLOWED_MODULES = {
     "aios.tools.read_file",
     "aios.tools.current_datetime",
     "aios.tools.http_get",
+    "aios.tools.dynamic",
 }
 
 # Safety limits
@@ -103,6 +107,8 @@ class ToolEngine:
         entry = TOOL_REGISTRY.get(name)
         if not entry:
             raise ValueError(f"Tool '{name}' not registered")
+        if entry.get("dynamic") and entry.get("instance"):
+            return entry["instance"]
         mod_path = entry["code_reference"]
         module_name = mod_path.rsplit(".", 1)[0]
         if module_name not in _ALLOWED_MODULES:
@@ -111,3 +117,20 @@ class ToolEngine:
         cls_name = mod_path.rsplit(".", 1)[1]
         cls = getattr(mod, cls_name)
         return cls()
+
+    @staticmethod
+    def register_runtime_tool(name: str, description: str, code: str, input_schema: dict = None):
+        from aios.tools.dynamic import register_dynamic_tool
+        return register_dynamic_tool(name, description, code, input_schema)
+
+    @staticmethod
+    def load_db_tools(db_tools: list):
+        for t in db_tools:
+            if t.name in TOOL_REGISTRY:
+                continue
+            if t.code_reference and t.code_reference.startswith("code:"):
+                code = t.code_reference[5:]
+                from aios.tools.dynamic import register_dynamic_tool
+                register_dynamic_tool(t.name, t.description, code, t.input_schema)
+            else:
+                TOOL_REGISTRY[t.name] = {"code_reference": t.code_reference or f"aios.tools.dynamic.{t.name}", "description": t.description, "input_schema": t.input_schema}

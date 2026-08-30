@@ -200,8 +200,74 @@ async def _process_inbound_once(
             )
 
 
+async def agent_run(ctx, payload: dict):
+    """Distributed agent run via ARQ — dequeues scheduler, runs AgentRuntime with retry/DLQ."""
+    agent_id = payload.get("agent_id")
+    conv_id = payload.get("conv_id") or payload.get("conversation_id") or ""
+    text = payload.get("text") or payload.get("message") or ""
+    org_id = payload.get("org_id") or ""
+    attempt = payload.get("attempt", 1)
+    try:
+        from aios.db.backend import db_session
+        from aios.db.models import Agent as AgentModel
+        from aios.core.agent import AgentRuntime
+        from aios.db.engine import async_session as _sess
+        async with _sess() as sess:
+            agent = await sess.get(AgentModel, agent_id)
+            if not agent:
+                return {"error": "agent not found"}
+            rt = AgentRuntime(agent)
+            out = await rt.run(conv_id, text)
+            return {"ok": True, "output": out[:2000]}
+    except Exception as exc:
+        if attempt < 3:
+            from aios.tasks.queue import get_redis_pool
+            try:
+                pool = await get_redis_pool()
+                await pool.enqueue_job("aios.tasks.jobs.agent_run", {**payload, "attempt": attempt + 1}, _defer_by=5 * (2 ** (attempt - 1)))
+            except Exception:
+                pass
+        else:
+            from aios.core.dead_letter import write_dlq
+            await write_dlq(direction="outbound", channel_type="agent_run", job_name="aios.tasks.jobs.agent_run", payload=payload, error=str(exc), org_id=org_id or None, conversation_id=conv_id or None)
+        raise
+
+
+async def workflow_run_job(ctx, payload: dict):
+    wf_id = payload.get("workflow_id")
+    run_id = payload.get("run_id")
+    try:
+        from aios.db.backend import db_session
+        from aios.db.models import Workflow, WorkflowRun
+        from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
+        from sqlalchemy.orm import selectinload
+        from aios.db.engine import async_session as _sess
+        async with _sess() as sess:
+            wf = await sess.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+            run = await sess.get(WorkflowRun, run_id)
+            if not wf or not run:
+                return
+            wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id)
+            for n in wf.nodes:
+                wdef.nodes[n.id] = WNode(id=n.id, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=n.tool_args or {}, depends_on=n.depends_on or [], condition=n.condition, output_key=n.output_key, timeout=n.timeout_seconds)
+            eng = WorkflowEngine()
+            res = await eng.run(wdef, run.conversation_id or run.id, (run.inputs or {}).get("input", ""))
+            run.status = "done" if res.ok() else "failed"
+            run.outputs = res.outputs
+            run.node_status = res.node_status
+            if res.errors:
+                run.error = str(res.errors)
+            await sess.commit()
+    except Exception as exc:
+        from aios.core.dead_letter import write_dlq
+        await write_dlq(direction="outbound", channel_type="workflow", job_name="aios.tasks.jobs.workflow_run_job", payload=payload, error=str(exc))
+        raise
+
+
 # ARQ worker function registry
 FUNCTIONS = [
     process_inbound,
     deliver_message,
+    agent_run,
+    workflow_run_job,
 ]

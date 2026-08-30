@@ -17,11 +17,15 @@ from .library import router as library_router
 from .rubrics import router as rubrics_router
 from .threads import router as threads_router
 from .meta import router as meta_router
+from .workflows import router as workflows_router
+from .versions import router as versions_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
 api_router.include_router(agents_router)
+api_router.include_router(versions_router)
 api_router.include_router(teams_router)
+api_router.include_router(workflows_router)
 api_router.include_router(conversations_router)
 api_router.include_router(channels_router)
 api_router.include_router(tools_router)

@@ -115,13 +115,48 @@ async def deploy_agent(
     agent = await db.get(Agent, agent_id)
     if not agent or agent.org_id != org_id:
         raise HTTPException(404)
+    from aios.core.agent_health import health_tracker
+    if not health_tracker.is_available(agent_id):
+        raise HTTPException(409, detail=f"agent {agent.name} circuit breaker open (stopped). Reset health first.")
+    # per-agent quota: max active per plan
+    from aios.config import PLANS
+    from aios.db.models import Organization
+    org = await db.get(Organization, org_id)
+    plan = (org.extra_data.get("plan", "free") if org else "free")
+    if plan not in ("unlimited",):
+        limits = PLANS.get(plan, PLANS["free"])
+        cnt = (await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active"))).scalars().all()
+        if len(cnt) >= limits.get("max_agents", 2) and agent.status != "active":
+            raise HTTPException(403, detail=f"quota max_agents {limits['max_agents']} for {plan}")
+    # blue/green: keep old instance as canary
+    prev_active = agent.status == "active"
     agent.status = "active"
-    instance = AgentInstance(agent_id=agent_id, org_id=org_id, status="running")
-    db.add(instance)
-    await log_audit(db, org_id, "agent.deploy", "agent", user_id=user.id, resource_id=agent_id, details={"name": agent.name})
+    if not prev_active:
+        instance = AgentInstance(agent_id=agent_id, org_id=org_id, status="running", extra_data={"deploy": "blue"})
+        db.add(instance)
+    else:
+        instance = AgentInstance(agent_id=agent_id, org_id=org_id, status="running", extra_data={"deploy": "green", "canary": True})
+        db.add(instance)
+    await log_audit(db, org_id, "agent.deploy", "agent", user_id=user.id, resource_id=agent_id, details={"name": agent.name, "blue_green": "green" if prev_active else "blue"})
     await db.commit()
     await db.refresh(agent)
     return agent
+
+
+@router.post("/{agent_id}/health/reset")
+async def reset_agent_health(
+    agent_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+    from aios.core.agent_health import health_tracker
+    health_tracker.reset(agent_id)
+    await log_audit(db, org_id, "agent.health.reset", "agent", user_id=user.id, resource_id=agent_id)
+    return {"ok": True, "status": health_tracker.get_status(agent_id)}
 
 
 @router.post("/{agent_id}/stop", response_model=AgentOut)

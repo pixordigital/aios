@@ -61,10 +61,22 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         if record and record.messages >= max_msgs:
             return False, f"Daily message limit reached ({max_msgs}/{plan_name} plan)"
 
+    # monthly token check
+    max_tokens = limits.get("max_tokens_per_month", 999999999)
+    if max_tokens != 999999999:
+        from sqlalchemy import extract as _extract
+        import datetime as _dt
+        now = _dt.date.today()
+        start_month = now.replace(day=1).isoformat()
+        q = select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month)
+        total = (await db.execute(q)).scalar() or 0
+        if total >= max_tokens:
+            return False, f"Monthly token limit reached ({max_tokens}/{plan_name} plan)"
+
     return True, ""
 
 
-async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0):
+async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_calls: int = 1):
     """Increment daily usage counter for org."""
     today = date.today().isoformat()
     record = (await db.execute(
@@ -74,11 +86,11 @@ async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0):
     if record:
         record.messages += messages
         record.llm_tokens += tokens
-        record.llm_calls += 1
+        record.llm_calls += llm_calls
     else:
         db.add(UsageRecord(
             org_id=org_id, date=today,
-            messages=messages, llm_tokens=tokens, llm_calls=1,
+            messages=messages, llm_tokens=tokens, llm_calls=llm_calls,
         ))
     await db.commit()
 

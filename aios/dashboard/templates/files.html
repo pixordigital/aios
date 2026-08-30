@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>Arquivos</h1><p class="text-sm text-secondary mt-1">{{ artifacts|length }} arquivo{{ 's' if artifacts|length != 1 }}</p></div>
-    <button class="btn btn-primary" onclick="document.getElementById('upload-modal').showModal()">+ Enviar</button>
+    <div><h1>Arquivos</h1><p class="text-sm text-secondary mt-1">{{ artifacts|length }} arquivo{{ 's' if artifacts|length != 1 }} • <a href="/dashboard/lab" style="color:var(--accent)">Abrir no Lab IDE →</a></p></div>
+    <div style="display:flex;gap:0.5rem"><input id="file-q" class="input" placeholder="Buscar..." oninput="filterRows(this.value)" style="width:180px"><button class="btn btn-primary" onclick="document.getElementById('upload-modal').showModal()">+ Enviar</button></div>
 </div>
 
 <dialog id="upload-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.5rem;max-width:450px;width:90%">
@@ -29,10 +29,11 @@
         <thead><tr><th>Arquivo</th><th>Tipo</th><th>Tamanho</th><th>Adicionado</th><th></th></tr></thead>
         <tbody>
             {% for a in artifacts %}
-            <tr>
+            <tr data-name="{{a.filename|lower}} {{a.description|lower}} {{a.content_type|lower}}">
                 <td>
                     <div style="font-weight:500;font-size:0.8125rem">{{ a.filename }}</div>
                     {% if a.description %}<div class="text-xs text-tertiary">{{ a.description }}</div>{% endif %}
+                    <div class="text-xs font-mono text-tertiary" style="font-size:0.6rem">{{a.id[:8]}}</div>
                 </td>
                 <td><span class="text-xs text-tertiary">{{ a.content_type }}</span></td>
                 <td>
@@ -45,7 +46,9 @@
                     {% endif %}
                 </td>
                 <td><span class="text-xs text-tertiary">{{ a.created_at[:10] }}</span></td>
-                <td style="text-align:right">
+                <td style="text-align:right;display:flex;gap:0.25rem;justify-content:flex-end">
+                    <button class="btn btn-ghost btn-sm" onclick="previewRow('{{a.id}}','{{a.filename}}')">Preview</button>
+                    <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('{{a.id}}')">ID</button>
                     <a href="/dashboard/files/{{ a.id }}/view" class="btn btn-ghost btn-sm">Ver</a>
                 </td>
             </tr>
@@ -65,4 +68,17 @@
     </div>
 </div>
 {% endif %}
+<div id="row-preview" style="display:none;margin-top:1rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border)"><span id="row-preview-title" style="font-size:0.8125rem;font-weight:600"></span><button class="btn btn-ghost btn-sm" onclick="document.getElementById('row-preview').style.display='none'">×</button></div>
+  <pre id="row-preview-body" class="font-mono" style="margin:0;padding:0.75rem;font-size:0.75rem;max-height:320px;overflow:auto;white-space:pre-wrap"></pre>
+</div>
+<script>
+function filterRows(q){ var qq=q.toLowerCase(); document.querySelectorAll('tbody tr').forEach(function(r){ r.style.display=(r.dataset.name||'').includes(qq)?'':'none'; }); }
+async function previewRow(id,name){
+  var box=document.getElementById('row-preview'), t=document.getElementById('row-preview-title'), b=document.getElementById('row-preview-body');
+  box.style.display=''; t.textContent=name+' — carregando...'; b.textContent='...';
+  var res=await fetch('/dashboard/lab/artifacts/'+id+'/raw'); var j=await res.json();
+  t.textContent=j.filename+' ('+j.size_bytes+' B)'; b.textContent=j.text||'(vazio)';
+}
+</script>
 {% endblock %}
