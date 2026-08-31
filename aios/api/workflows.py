@@ -44,6 +44,8 @@ class NodeCreate(BaseModel):
     output_key: str = "result"
     timeout_seconds: int = 60
     position: dict = {}
+    on_failure: str = "fail"
+    retry_count: int = 0
 
 
 @router.post("", response_model=WorkflowOut)
@@ -247,6 +249,8 @@ async def add_node(
         output_key=body.output_key,
         timeout_seconds=body.timeout_seconds,
         position=body.position,
+        on_failure=body.on_failure,
+        retry_count=body.retry_count,
     )
     db.add(node)
     await db.flush()

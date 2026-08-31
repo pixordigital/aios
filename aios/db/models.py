@@ -396,6 +396,8 @@ class WorkflowNode(Base, TimestampMixin):
     output_key: Mapped[str] = mapped_column(String(100), default="result")
     timeout_seconds: Mapped[int] = mapped_column(default=60)
     position: Mapped[dict] = mapped_column(JSON, default=dict)  # {x,y} for UI
+    on_failure: Mapped[str] = mapped_column(String(20), default="fail")  # fail|continue|retry
+    retry_count: Mapped[int] = mapped_column(default=0)
     workflow = relationship("Workflow", back_populates="nodes")
 
 

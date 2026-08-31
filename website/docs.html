@@ -206,7 +206,31 @@
     </div>
 
     <div class="section">
-        <div class="section-label">07 / Primeiros passos</div>
+        <div class="section-label">07 / Workflows</div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/workflows/{id}/run</span></h3>
+            <p>Executa DAG async (202) + <code>WS /ws/workflows/{run_id}</code> streaming. <code>resume</code> pula nós done, <code>on_failure: continue</code> tolera falha.</p>
+        </div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/api/workflows/{id}/runs/{run_id}</span></h3>
+            <p>Status com RLS <code>org_id</code>, custo e tokens.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">08 / PromptLab & Eval</div>
+        <div class="card">
+            <h3><span class="method post">POST</span><span class="endpoint">/api/promptlab/test</span></h3>
+            <p>A/B de prompts com latência. <code>/api/agents/{id}/datasets</code> CSV e <code>/eval</code> com judge.</p>
+        </div>
+        <div class="card">
+            <h3><span class="method get">GET</span><span class="endpoint">/metrics</span></h3>
+            <p>Prometheus + custo. Dashboard em <code>/dashboard/promptlab</code>.</p>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-label">09 / Primeiros passos</div>
         <div class="card">
             <h3>1. Crie um agente</h3>
             <p>Escolha um tipo (SDR, suporte, closer, etc.) e defina o modelo e o prompt do sistema.</p>
