@@ -38,6 +38,36 @@ async def deliver_message(
 
     conn = None
     try:
+        if text and len(text) > 4096:
+            text = text[:4096]
+        if channel_connection_id:
+            try:
+                from aios.core.whatsapp_guard import guard_send
+
+                extra_j = json.loads(extra_data) if isinstance(extra_data, str) else extra_data
+                contact = extra_j.get("from_number") or extra_j.get("to") or conversation_id
+                window_open = extra_j.get("window_open", True)
+                is_template = extra_j.get("is_template", False)
+                ok, reason = await guard_send(contact, text, is_template=is_template, window_open=window_open)
+                if not ok:
+                    logger.warning("Guard block %s: %s", contact, reason)
+                    if "opt-out" in reason:
+                        return
+                    from aios.tasks.queue import get_redis_pool as _pool
+
+                    pool = await _pool()
+                    await pool.enqueue_job(
+                        "aios.core.delivery.deliver_message",
+                        channel_connection_id,
+                        conversation_id,
+                        text,
+                        extra_data,
+                        attempt,
+                        _defer_seconds=30,
+                    )
+                    return
+            except Exception:
+                pass
         async with db_session() as db:
             conn = await db.get(ChannelConnection, channel_connection_id)
             if not conn:
