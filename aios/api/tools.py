@@ -35,6 +35,11 @@ async def create_tool(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    existing = await db.execute(
+        select(Tool).where(Tool.org_id == org_id, Tool.name == body.name)
+    )
+    if existing.scalars().first():
+        raise HTTPException(409, detail=f"tool {body.name} already exists in this org")
     tool = Tool(
         org_id=org_id,
         name=body.name,
@@ -44,7 +49,13 @@ async def create_tool(
         code_reference=body.code_reference,
     )
     db.add(tool)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            raise HTTPException(409, detail="tool name conflict")
+        raise
     await db.refresh(tool)
     if tool.code_reference and tool.code_reference.startswith("code:"):
         from aios.tools.dynamic import register_dynamic_tool

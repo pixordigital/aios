@@ -15,10 +15,37 @@ async def list_approvals(
     agent_id: str = "",
     user: User = Depends(get_current_user),
 ):
-    """List pending approval actions."""
     pending = approval_manager.get_pending(agent_id=agent_id)
     if status != "pending":
         pending = [p for p in pending if p["status"] == status]
+    if not pending:
+        try:
+            from sqlalchemy import select
+
+            from aios.db.backend import db_session
+            from aios.db.models import PendingAction as DBAction
+
+            async with db_session() as db:
+                q = select(DBAction).where(DBAction.status == status)
+                if agent_id:
+                    q = q.where(DBAction.agent_id == agent_id)
+                q = q.order_by(DBAction.created_at.desc()).limit(50)
+                rows = (await db.execute(q)).scalars().all()
+                pending = [
+                    {
+                        "id": r.id,
+                        "agent_id": r.agent_id,
+                        "conversation_id": r.conversation_id,
+                        "tool_name": r.tool_name,
+                        "tool_args": r.tool_args,
+                        "context_summary": r.context_summary,
+                        "status": r.status,
+                        "created_at": str(r.created_at),
+                    }
+                    for r in rows
+                ]
+        except Exception:
+            pass
     return {"actions": pending}
 
 

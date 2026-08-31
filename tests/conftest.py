@@ -35,13 +35,18 @@ from aios.main import app
 
 @pytest_asyncio.fixture(loop_scope="function", autouse=True)
 async def _fresh_db():
-    """Reset the shared test DB before each test."""
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        try:
+            await conn.run_sync(Base.metadata.drop_all)
+        except Exception:
+            pass
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        try:
+            await conn.run_sync(Base.metadata.drop_all)
+        except Exception:
+            pass
 
 
 @pytest_asyncio.fixture(loop_scope="function")

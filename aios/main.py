@@ -133,9 +133,11 @@ async def lifespan(app: FastAPI):
         # the before_flush hook never saw because it wasn't dirty).
         try:
             pixor = (await sess.execute(select(Organization).where(Organization.slug == "pixor"))).scalar_one_or_none()
-            if pixor and pixor.extra_data.get("plan") != "unlimited":
-                pixor.extra_data["plan"] = "unlimited"
-                pixor.extra_data["unlimited"] = True
+            if pixor and (not isinstance(pixor.extra_data, dict) or pixor.extra_data.get("plan") != "unlimited"):
+                data = pixor.extra_data if isinstance(pixor.extra_data, dict) else {}
+                data["plan"] = "unlimited"
+                data["unlimited"] = True
+                pixor.extra_data = data
                 await sess.commit()
                 logger.info("Pixor org set to unlimited plan: %s", pixor.id)
         except Exception:
@@ -262,14 +264,14 @@ if not settings.debug:
                 await self.app(scope, receive, send)
             except Exception as exc:
                 import traceback
+                tb = traceback.extract_tb(exc.__traceback__)
                 from_slowapi = any(
                     frame.filename.endswith(("slowapi/middleware.py", "slowapi/extension.py"))
-                    for frame in traceback.extract_tb(exc.__traceback__)
+                    for frame in tb
                 )
-                if from_slowapi and not isinstance(exc, RateLimitExceeded):
-                    # Fail CLOSED: never silently disable rate limiting. With
-                    # in_memory_fallback_enabled the normal path never reaches
-                    # here; this catches any residual slowapi storage bug.
+                from_app = any("aios/" in frame.filename for frame in tb)
+                is_storage_error = exc.__class__.__name__ in ("ConnectionError", "RedisError", "StorageError", "LimitsError") or "redis" in exc.__class__.__name__.lower() or "storage" in str(type(exc)).lower()
+                if from_slowapi and not from_app and is_storage_error and not isinstance(exc, RateLimitExceeded):
                     logger.exception("Rate limiter failure (Redis down or slowapi bug) — failing closed")
                     response = JSONResponse(status_code=429, content={
                         "type": "about:blank", "title": "Rate limit exceeded",
@@ -425,13 +427,30 @@ async def trace_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def rls_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.url.path not in ("/api/docs", "/api/redoc", "/openapi.json"):
+        auth = request.headers.get("authorization", "") or request.headers.get("Authorization", "")
+        if not auth and not request.cookies.get("aios_token"):
+            pass
+        elif not getattr(request.state, "org_id", None):
+            try:
+                from aios.api.deps import get_dashboard_user
+
+                user = await get_dashboard_user(request)
+                if user:
+                    request.state.org_id = user.org_id
+            except Exception:
+                pass
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def request_logging(request: Request, call_next):
     """Log every request with method, path, status, duration."""
     import time
     start = time.time()
     response = await call_next(request)
     duration_ms = round((time.time() - start) * 1000, 1)
-    # skip health checks and static assets to reduce noise
     path = request.url.path
     if not path.startswith("/health") and not path.endswith((".css", ".js", ".ico")):
         logger.info("%s %s %d %dms", request.method, path, response.status_code, duration_ms)

@@ -116,31 +116,138 @@ async def deploy_agent(
     if not agent or agent.org_id != org_id:
         raise HTTPException(404)
     from aios.core.agent_health import health_tracker
+
     if not health_tracker.is_available(agent_id):
-        raise HTTPException(409, detail=f"agent {agent.name} circuit breaker open (stopped). Reset health first.")
-    # per-agent quota: max active per plan
+        raise HTTPException(
+            409,
+            detail=f"agent {agent.name} circuit breaker open (stopped). Reset health first.",
+        )
     from aios.config import PLANS
     from aios.db.models import Organization
+
     org = await db.get(Organization, org_id)
-    plan = (org.extra_data.get("plan", "free") if org else "free")
+    plan = ((org.extra_data or {}).get("plan", "free") if org else "free")
     if plan not in ("unlimited",):
         limits = PLANS.get(plan, PLANS["free"])
-        cnt = (await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active"))).scalars().all()
+        cnt = (
+            await db.execute(
+                select(Agent).where(Agent.org_id == org_id, Agent.status == "active")
+            )
+        ).scalars().all()
         if len(cnt) >= limits.get("max_agents", 2) and agent.status != "active":
-            raise HTTPException(403, detail=f"quota max_agents {limits['max_agents']} for {plan}")
-    # blue/green: keep old instance as canary
+            raise HTTPException(
+                403, detail=f"quota max_agents {limits['max_agents']} for {plan}"
+            )
     prev_active = agent.status == "active"
     agent.status = "active"
+    import datetime
+
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     if not prev_active:
-        instance = AgentInstance(agent_id=agent_id, org_id=org_id, status="running", extra_data={"deploy": "blue"})
+        instance = AgentInstance(
+            agent_id=agent_id,
+            org_id=org_id,
+            status="running",
+            extra_data={"deploy": "blue", "deployed_at": now_iso, "deployed_by": user.id},
+        )
         db.add(instance)
     else:
-        instance = AgentInstance(agent_id=agent_id, org_id=org_id, status="running", extra_data={"deploy": "green", "canary": True})
+        instance = AgentInstance(
+            agent_id=agent_id,
+            org_id=org_id,
+            status="running",
+            extra_data={
+                "deploy": "green",
+                "canary": True,
+                "deployed_at": now_iso,
+                "deployed_by": user.id,
+            },
+        )
         db.add(instance)
-    await log_audit(db, org_id, "agent.deploy", "agent", user_id=user.id, resource_id=agent_id, details={"name": agent.name, "blue_green": "green" if prev_active else "blue"})
+    await log_audit(
+        db,
+        org_id,
+        "agent.deploy",
+        "agent",
+        user_id=user.id,
+        resource_id=agent_id,
+        details={"name": agent.name, "blue_green": "green" if prev_active else "blue"},
+    )
     await db.commit()
     await db.refresh(agent)
+    try:
+        from aios.tasks.queue import enqueue_task
+
+        await enqueue_task(
+            "aios.tasks.jobs.agent_run",
+            {
+                "agent_id": agent_id,
+                "conv_id": f"health_{agent_id}",
+                "text": "health check",
+                "org_id": org_id,
+            },
+        )
+    except Exception:
+        pass
+    try:
+        health_tracker.record_success(agent_id)
+    except Exception:
+        pass
     return agent
+
+
+@router.post("/{agent_id}/canary/promote")
+async def promote_canary(
+    agent_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+    rows = (
+        await db.execute(
+            select(AgentInstance).where(AgentInstance.agent_id == agent_id, AgentInstance.status == "running")
+        )
+    ).scalars().all()
+    canary = next((r for r in rows if (r.extra_data or {}).get("canary")), None)
+    if not canary:
+        raise HTTPException(400, detail="no canary deployment found")
+    canary.extra_data = {**(canary.extra_data or {}), "canary": False, "promoted_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()}
+    for r in rows:
+        if r.id != canary.id:
+            r.status = "stopped"
+    await log_audit(db, org_id, "agent.canary.promote", "agent", user_id=user.id, resource_id=agent_id)
+    await db.commit()
+    return {"ok": True, "promoted": canary.id}
+
+
+@router.post("/{agent_id}/canary/rollback")
+async def rollback_canary(
+    agent_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+    rows = (
+        await db.execute(
+            select(AgentInstance).where(AgentInstance.agent_id == agent_id, AgentInstance.status == "running")
+        )
+    ).scalars().all()
+    canary = next((r for r in rows if (r.extra_data or {}).get("canary")), None)
+    if not canary:
+        raise HTTPException(400, detail="no canary found")
+    canary.status = "stopped"
+    prev = next((r for r in rows if r.id != canary.id and r.status == "stopped"), None)
+    if prev:
+        prev.status = "running"
+    await log_audit(db, org_id, "agent.canary.rollback", "agent", user_id=user.id, resource_id=agent_id)
+    await db.commit()
+    return {"ok": True, "rolled_back": canary.id}
 
 
 @router.post("/{agent_id}/health/reset")
@@ -154,6 +261,7 @@ async def reset_agent_health(
     if not agent or agent.org_id != org_id:
         raise HTTPException(404)
     from aios.core.agent_health import health_tracker
+
     health_tracker.reset(agent_id)
     await log_audit(db, org_id, "agent.health.reset", "agent", user_id=user.id, resource_id=agent_id)
     return {"ok": True, "status": health_tracker.get_status(agent_id)}
