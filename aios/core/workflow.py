@@ -30,6 +30,8 @@ class WorkflowNode:
     condition: str | None = None  # opt: python expr on previous results
     output_key: str = "result"  # key in shared context
     timeout: float = 60.0
+    on_failure: str = "fail"
+    retry_count: int = 0
 
 
 @dataclass
@@ -246,9 +248,20 @@ class WorkflowEngine:
                                         await ready.put(nid2)
                             await _persist()
                         except Exception as e:
-                            logger.exception("Workflow node %s failed", nid)
-                            result.errors[nid] = str(e)
-                            result.node_status[nid] = "failed"
+                            node = workflow.nodes.get(nid)
+                            on_fail = getattr(node, "on_failure", "fail") if node else "fail"
+                            if on_fail == "continue":
+                                logger.warning("Workflow node %s failed but on_failure=continue: %s", nid, e)
+                                result.node_status[nid] = "failed_continue"
+                                result.errors.pop(nid, None)
+                                for nid2, node2 in workflow.nodes.items():
+                                    if nid in node2.depends_on and nid2 in pending:
+                                        if all(d not in pending for d in node2.depends_on):
+                                            await ready.put(nid2)
+                            else:
+                                logger.exception("Workflow node %s failed", nid)
+                                result.errors[nid] = str(e)
+                                result.node_status[nid] = "failed"
                             await _persist()
 
             for nid in pending:
