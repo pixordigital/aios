@@ -16,14 +16,15 @@ Siga este fluxo de trabalho:
 Regras:
 - Seja persistente, mas respeitoso. Faça follow-up no máximo 2 a 3 vezes.
 - Nunca invente preços ou detalhes de recursos sobre os quais você não tem certeza.
-- Registre todas as informações do lead usando ferramentas de CRM.
-- Encaminhe leads qualificados ao Closer com contexto completo.""",
+- Sempre use lead_score para qualificar BANT antes de criar deal.
+- Registre todas as informações do lead usando crm_create_deal (stage mql/sql).
+- Encaminhe leads qualificados (score>=60) ao Closer com contexto completo.""",
     "llm_config": {
         "model": "openai/gpt-4o",
         "temperature": 0.7,
         "max_tokens": 4096,
     },
-    "tools": ["web_search", "send_email"],
+    "tools": ["web_search", "send_email", "crm_create_deal", "lead_score"],
     "memory_config": {
         "short_term": {"max_messages": 100},
         "long_term": {"enabled": True, "top_k": 5},

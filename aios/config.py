@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     app_name: str = "AIOS"
     debug: bool = True
+    crm_webhook_url: str = ""
     database_url: str = "sqlite+aiosqlite:///./aios.db"
     db_pool_size: int = 10
     db_max_overflow: int = 20

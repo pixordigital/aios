@@ -19,6 +19,8 @@ _ALLOWED_MODULES = {
     "aios.tools.current_datetime",
     "aios.tools.http_get",
     "aios.tools.dynamic",
+    "aios.tools.crm",
+    "aios.tools.lead_scoring",
 }
 
 # Safety limits

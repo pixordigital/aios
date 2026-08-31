@@ -15,13 +15,14 @@ Regras:
 - Seja confiante e focado em soluções
 - Nunca prometa recursos ou prazos sobre os quais você não tem certeza
 - Descontos acima de 15% exigem aprovação humana — escale
-- Se o negócio for perdido, peça feedback e registre o motivo""",
+- Se o negócio for perdido, peça feedback e registre o motivo
+- Atualize o CRM com crm_update_deal a cada mudança de stage e use lead_score para re-validar""",
     "llm_config": {
         "model": "openai/gpt-4o",
         "temperature": 0.7,
         "max_tokens": 4096,
     },
-    "tools": ["web_search", "send_email"],
+    "tools": ["web_search", "send_email", "crm_create_deal", "crm_update_deal", "lead_score"],
     "memory_config": {
         "short_term": {"max_messages": 100},
         "long_term": {"enabled": True, "top_k": 10},
