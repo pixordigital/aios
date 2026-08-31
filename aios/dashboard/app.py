@@ -266,16 +266,38 @@ async def register_action(
         user_count = (await db.execute(select(func.count(User.id)))).scalar() or 0
         role = "superadmin" if user_count == 0 else "org_admin"
 
-        org = Organization(name=org_name, slug=org_name.lower().replace(" ", "-"))
-        db.add(org); await db.flush()
-
+        slug = org_name.lower().strip().replace(" ", "-")
+        slug = "".join(c for c in slug if c.isalnum() or c in "-_") or "org"
+        if slug in ("pixor", "default", "admin", "api", "dashboard"):
+            return await register_page(request, error="Nome da organização reservado. Escolha outro nome.")
+        existing_org = await db.execute(select(Organization).where(Organization.slug == slug))
+        if existing_org.scalar_one_or_none():
+            return await register_page(request, error="Nome da organização já existe. Escolha outro nome.")
+        org = Organization(name=org_name, slug=slug)
+        db.add(org)
+        try:
+            await db.flush()
+        except Exception as e:
+            from sqlalchemy.exc import IntegrityError
+            if isinstance(e, IntegrityError) or "UniqueViolation" in type(e).__name__ or "duplicate key" in str(e).lower():
+                await db.rollback()
+                return await register_page(request, error="Nome da organização já existe. Escolha outro nome.")
+            raise
         user = User(
             email=email.lower().strip(),
             hashed_password=_hash_password(password),
             org_id=org.id,
             role=role,
         )
-        db.add(user); await db.commit()
+        db.add(user)
+        try:
+            await db.commit()
+        except Exception as e:
+            from sqlalchemy.exc import IntegrityError
+            if isinstance(e, IntegrityError) or "duplicate key" in str(e).lower():
+                await db.rollback()
+                return await register_page(request, error="E-mail já registrado")
+            raise
 
         token = create_jwt_token(user.id, user.org_id)
         resp = RedirectResponse("/dashboard", status_code=303)
@@ -438,11 +460,14 @@ async def agent_save(
         if agent_id:
             agent = await db.get(Agent, agent_id)
             if agent and agent.org_id == await _resolve_org_id(request):
+                from sqlalchemy import select as _select, func as _func
+                from aios.db.models import AgentVersion
+                max_v = (await db.execute(_select(_func.max(AgentVersion.version)).where(AgentVersion.agent_id == agent.id))).scalar() or 0
+                db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=max_v+1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="pre-edit snapshot"))
                 agent.name = name; agent.agent_type = agent_type
                 agent.system_prompt = system_prompt; agent.llm_config = llm_config
                 agent.tools = tools_list; agent.memory_config = memory_config
         else:
-            # apply template defaults unless user explicitly set values
             tpl = apply_template(agent_type) if agent_type != "custom" and not system_prompt else None
             agent = Agent(
                 org_id=await _resolve_org_id(request),
@@ -453,6 +478,10 @@ async def agent_save(
                 memory_config=memory_config if system_prompt else (tpl.get("memory_config", memory_config) if tpl else memory_config),
             )
             db.add(agent)
+            await db.flush()
+            from sqlalchemy import select as _select2, func as _func2
+            from aios.db.models import AgentVersion
+            db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="initial"))
         await db.commit()
     return RedirectResponse("/dashboard/agents", status_code=303)
 
@@ -1063,6 +1092,11 @@ async def billing_page(request: Request):
                    daily_msgs=daily_msgs, plans=PLANS,
                    org_id=org_id, stripe_prices=json.dumps(stripe_prices),
                    subscription_id=org.extra_data.get("stripe_subscription_id") if org else None)
+
+
+@router.get("/promptlab", response_class=HTMLResponse)
+async def promptlab_page(request: Request):
+    return await _render("promptlab.html", request, title="PromptLab")
 
 
 # ─── Agent Sandbox (chat playground) ───

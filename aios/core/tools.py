@@ -60,17 +60,36 @@ class ToolEngine:
 
         # input size limit
         if len(args_json) > _TOOL_MAX_INPUT_ARGS:
-            raise ToolExecutionError(f"Tool args too large ({len(args_json)} chars, max {_TOOL_MAX_INPUT_ARGS})")
+            raise ToolExecutionError(
+                f"Tool args too large ({len(args_json)} chars, max {_TOOL_MAX_INPUT_ARGS})"
+            )
 
         try:
             args = json.loads(args_json)
         except json.JSONDecodeError:
-            raise ToolExecutionError(f"Invalid JSON args")
+            raise ToolExecutionError("Invalid JSON args")
 
         # audit tracking
         _TOOL_CALL_TRACKING[name] = _TOOL_CALL_TRACKING.get(name, 0) + 1
 
-        # retry loop with timeout
+        is_dynamic = entry.get("dynamic") if entry else False
+        if is_dynamic:
+            from aios.core.sandbox import run_isolated
+
+            code = entry.get("instance_code") or ""
+            runner = (
+                f"{code}\n"
+                f"import json, asyncio\n"
+                f"args=json.loads({args_json!r})\n"
+                f"result=asyncio.run(tool_instance.run(**args))\n"
+                f"print(json.dumps(result) if isinstance(result, dict) else str(result))\n"
+            )
+            sb = await run_isolated(runner, timeout=_TOOL_TIMEOUT)
+            if sb["ok"]:
+                return sb["stdout"][:_TOOL_MAX_OUTPUT]
+            raise ToolExecutionError(
+                sb.get("stderr") or sb.get("error") or "sandbox failed"
+            )
         last_err = None
         for attempt in range(_TOOL_MAX_RETRIES + 1):
             try:
@@ -83,7 +102,7 @@ class ToolEngine:
                 if len(output) > _TOOL_MAX_OUTPUT:
                     output = output[:_TOOL_MAX_OUTPUT] + "\n... [truncated]"
                 return output
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 last_err = f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s"
                 if attempt < _TOOL_MAX_RETRIES:
                     await asyncio.sleep(0.5)
@@ -119,8 +138,11 @@ class ToolEngine:
         return cls()
 
     @staticmethod
-    def register_runtime_tool(name: str, description: str, code: str, input_schema: dict = None):
+    def register_runtime_tool(
+        name: str, description: str, code: str, input_schema: dict = None
+    ):
         from aios.tools.dynamic import register_dynamic_tool
+
         return register_dynamic_tool(name, description, code, input_schema)
 
     @staticmethod
@@ -131,6 +153,12 @@ class ToolEngine:
             if t.code_reference and t.code_reference.startswith("code:"):
                 code = t.code_reference[5:]
                 from aios.tools.dynamic import register_dynamic_tool
+
                 register_dynamic_tool(t.name, t.description, code, t.input_schema)
             else:
-                TOOL_REGISTRY[t.name] = {"code_reference": t.code_reference or f"aios.tools.dynamic.{t.name}", "description": t.description, "input_schema": t.input_schema}
+                TOOL_REGISTRY[t.name] = {
+                    "code_reference": t.code_reference
+                    or f"aios.tools.dynamic.{t.name}",
+                    "description": t.description,
+                    "input_schema": t.input_schema,
+                }

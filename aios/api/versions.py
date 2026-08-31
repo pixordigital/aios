@@ -68,3 +68,42 @@ async def get_version(agent_id: str, version_id: str, db: DatabaseBackend = Depe
     if not ver or ver.agent_id != agent_id or ver.org_id != org_id:
         raise HTTPException(404)
     return ver
+
+
+@router.get("/{agent_id}/versions/{version_id}/diff")
+async def diff_version(
+    agent_id: str,
+    version_id: str,
+    compare: str | None = Query(None, description="compare to version id, default previous"),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    import difflib
+
+    ver = await db.get(AgentVersion, version_id)
+    if not ver or ver.agent_id != agent_id or ver.org_id != org_id:
+        raise HTTPException(404)
+    other = None
+    if compare:
+        other = await db.get(AgentVersion, compare)
+    else:
+        res = await db.execute(
+            select(AgentVersion)
+            .where(AgentVersion.agent_id == agent_id, AgentVersion.version < ver.version)
+            .order_by(AgentVersion.version.desc())
+            .limit(1)
+        )
+        other = res.scalars().first()
+    if not other:
+        return {"version": ver.version, "diff": "no previous version"}
+    diffs = {}
+    for field in ["system_prompt", "llm_config", "tools", "memory_config", "governance_config"]:
+        a = str(getattr(other, field) or "")
+        b = str(getattr(ver, field) or "")
+        if a != b:
+            diffs[field] = "\n".join(
+                difflib.unified_diff(
+                    a.splitlines(), b.splitlines(), fromfile=f"v{other.version}", tofile=f"v{ver.version}", lineterm=""
+                )
+            )[:4000]
+    return {"from": other.version, "to": ver.version, "diffs": diffs}

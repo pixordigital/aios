@@ -25,6 +25,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "sentry-sdk>=2.0.0",
     "aioboto3>=14.0.0",
+    "cryptography>=42.0.0",
 ]
 
 [project.scripts]

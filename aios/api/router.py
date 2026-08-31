@@ -19,11 +19,21 @@ from .threads import router as threads_router
 from .meta import router as meta_router
 from .workflows import router as workflows_router
 from .versions import router as versions_router
+from .mcp import router as mcp_router
+from .promptlab import router as promptlab_router
+from .secrets import router as secrets_router
+from .eval import router as eval_router
+from .gdpr import router as gdpr_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
 api_router.include_router(agents_router)
 api_router.include_router(versions_router)
+api_router.include_router(promptlab_router)
+api_router.include_router(mcp_router)
+api_router.include_router(secrets_router)
+api_router.include_router(eval_router)
+api_router.include_router(gdpr_router)
 api_router.include_router(teams_router)
 api_router.include_router(workflows_router)
 api_router.include_router(conversations_router)

@@ -26,3 +26,7 @@ Thumbs.db
 
 # Convex (TypeScript node_modules — not a TS project root here)
 node_modules/
+
+# db
+*.db
+aios.db

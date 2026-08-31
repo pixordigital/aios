@@ -21,6 +21,61 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.websocket("/ws/workflows/{run_id}")
+async def websocket_workflow(websocket: WebSocket, run_id: str):
+    await websocket.accept()
+    token = websocket.query_params.get("token", "")
+    user = None
+    if token:
+        import jwt as _jwt
+
+        try:
+            payload = _jwt.decode(
+                token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
+            )
+            user_id = payload.get("sub")
+            if user_id:
+                async with db_session() as db:
+                    user = await db.get(User, user_id)
+        except Exception:
+            pass
+    if not user:
+        await websocket.send_json({"type": "error", "error": "Not authenticated"})
+        await websocket.close()
+        return
+    from aios.db.models import WorkflowRun
+
+    try:
+        while True:
+            async with db_session() as db:
+                run = await db.get(WorkflowRun, run_id)
+                if not run or run.org_id != user.org_id:
+                    await websocket.send_json(
+                        {"type": "error", "error": "run not found"}
+                    )
+                    break
+                await websocket.send_json(
+                    {
+                        "type": "progress",
+                        "run_id": run.id,
+                        "status": run.status,
+                        "node_status": run.node_status,
+                        "outputs": run.outputs,
+                        "error": run.error,
+                    }
+                )
+                if run.status in ("done", "failed"):
+                    break
+            await __import__("asyncio").sleep(1)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @router.websocket("/ws/{channel_connection_id}")
 async def websocket_chat(websocket: WebSocket, channel_connection_id: str):
     """WebSocket endpoint for web channel chat.
@@ -34,8 +89,11 @@ async def websocket_chat(websocket: WebSocket, channel_connection_id: str):
     user = None
     if token:
         import jwt
+
         try:
-            payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+            payload = jwt.decode(
+                token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
+            )
             user_id = payload.get("sub")
             if user_id:
                 async with db_session() as db:
@@ -57,13 +115,21 @@ async def websocket_chat(websocket: WebSocket, channel_connection_id: str):
             return
 
         # find or create conversation for this user
-        conv = (await db.execute(
-            select(Conversation).where(
-                Conversation.channel == "web",
-                Conversation.channel_connection_id == channel_connection_id,
-                Conversation.org_id == user.org_id,
-            ).order_by(Conversation.created_at.desc())
-        )).scalars().first()
+        conv = (
+            (
+                await db.execute(
+                    select(Conversation)
+                    .where(
+                        Conversation.channel == "web",
+                        Conversation.channel_connection_id == channel_connection_id,
+                        Conversation.org_id == user.org_id,
+                    )
+                    .order_by(Conversation.created_at.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
 
         if not conv:
             conv = Conversation(
@@ -101,6 +167,7 @@ async def websocket_chat(websocket: WebSocket, channel_connection_id: str):
 
             # dispatch to ARQ worker for async processing
             from aios.core.dispatch import dispatch_inbound
+
             await dispatch_inbound(
                 channel_type="web",
                 channel_connection_id=channel_connection_id,

@@ -50,11 +50,13 @@ _PIXOR_SLUG = "pixor"
 
 
 def _pixor_is_unlimited(org: "Organization") -> None:
-    # Force every flush, not just the first: billing downgrade sets plan="free"
-    # and must be overridden again. Guard on slug, not on the flag.
-    if org.slug == _PIXOR_SLUG and org.extra_data.get("plan") != "unlimited":
-        org.extra_data["plan"] = "unlimited"
-        org.extra_data["unlimited"] = True
+    if org.slug != _PIXOR_SLUG:
+        return
+    data = org.extra_data if isinstance(org.extra_data, dict) else {}
+    if data.get("plan") != "unlimited":
+        data["plan"] = "unlimited"
+        data["unlimited"] = True
+        org.extra_data = data
 
 
 from sqlalchemy import event  # noqa: E402
@@ -229,6 +231,7 @@ class UsageRecord(Base):
     messages: Mapped[int] = mapped_column(default=0)
     llm_tokens: Mapped[int] = mapped_column(default=0)
     llm_calls: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[float] = mapped_column(default=0.0)
 
 
 class RemoteInstance(Base, TimestampMixin):
@@ -408,4 +411,32 @@ class WorkflowRun(Base, TimestampMixin):
     outputs: Mapped[dict] = mapped_column(JSON, default=dict)
     node_status: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str] = mapped_column(Text, default="")
+    tokens: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[float] = mapped_column(default=0.0)
     workflow = relationship("Workflow")
+
+
+class Dataset(Base, TimestampMixin, OrgScopedMixin):
+    """Eval dataset — reusable test cases for agent evaluation."""
+
+    __tablename__ = "datasets"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    cases: Mapped[list] = mapped_column(JSON, default=list)  # [{input, expected}]
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class EvalRun(Base, TimestampMixin):
+    """Persisted evaluation run."""
+
+    __tablename__ = "eval_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    dataset_id: Mapped[str | None] = mapped_column(ForeignKey("datasets.id"), nullable=True)
+    version_id: Mapped[str | None] = mapped_column(ForeignKey("agent_versions.id"), nullable=True)
+    judge_model: Mapped[str] = mapped_column(String(100), default="openai/gpt-4o-mini")
+    avg_score: Mapped[float] = mapped_column(default=0.0)
+    results: Mapped[list] = mapped_column(JSON, default=list)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)

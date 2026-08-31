@@ -11,7 +11,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
+trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "trace_id", default=""
+)
 
 TRACES: dict[str, "TraceSpan"] = {}
 METRICS: dict = {"llm_calls": 0, "llm_tokens": 0, "tool_calls": 0, "errors": 0}
@@ -70,6 +72,7 @@ def end_span(span: TraceSpan, tokens: int = 0, error: str = ""):
     _log_span_event("end", span)
     try:
         import asyncio as _aio
+
         _aio.create_task(_persist_span(span))
     except Exception:
         pass
@@ -87,42 +90,83 @@ async def _persist_span(span: TraceSpan):
         from aios.db.engine import async_session
         from aios.db.models import AgentMetric
         from datetime import datetime, timezone
+
         hour = datetime.now(timezone.utc).strftime("%Y-%m-%d-%H")
         extra = span.extra or {}
         agent_id = extra.get("agent_id") or "unknown"
         org_id = extra.get("org_id") or "unknown"
         async with async_session() as sess:
             from sqlalchemy import select
-            m = (await sess.execute(select(AgentMetric).where(AgentMetric.agent_id == agent_id, AgentMetric.hour == hour))).scalar_one_or_none()
+
+            m = (
+                await sess.execute(
+                    select(AgentMetric).where(
+                        AgentMetric.agent_id == agent_id, AgentMetric.hour == hour
+                    )
+                )
+            ).scalar_one_or_none()
             dur = int((span.end - span.start) * 1000) if span.end else 0
             if m:
                 m.tokens += tokens if (tokens := span.tokens) else 0
                 m.errors += 1 if span.error else 0
                 m.tool_calls += 1 if span.span_type == "tool" else 0
                 m.messages += 1 if span.span_type == "agent_run" else 0
-                m.avg_response_ms = int((m.avg_response_ms + dur) / 2) if m.avg_response_ms else dur
+                m.avg_response_ms = (
+                    int((m.avg_response_ms + dur) / 2) if m.avg_response_ms else dur
+                )
             else:
-                m = AgentMetric(agent_id=agent_id, org_id=org_id, hour=hour, tokens=span.tokens, errors=1 if span.error else 0, tool_calls=1 if span.span_type == "tool" else 0, messages=1 if span.span_type == "agent_run" else 0, avg_response_ms=dur)
+                m = AgentMetric(
+                    agent_id=agent_id,
+                    org_id=org_id,
+                    hour=hour,
+                    tokens=span.tokens,
+                    errors=1 if span.error else 0,
+                    tool_calls=1 if span.span_type == "tool" else 0,
+                    messages=1 if span.span_type == "agent_run" else 0,
+                    avg_response_ms=dur,
+                )
                 sess.add(m)
             await sess.commit()
     except Exception:
         pass
 
 
+_COST_PER_1K = {
+    "openai/gpt-4o": 0.005,
+    "openai/gpt-4o-mini": 0.00015,
+    "openai/gpt-3.5-turbo": 0.0005,
+    "anthropic/claude-3-5-sonnet": 0.003,
+}
+
+
+def estimate_cost(model: str, tokens: int) -> float:
+    rate = _COST_PER_1K.get(model, 0.002)
+    return round(tokens / 1000 * rate, 6)
+
+
 def _maybe_otel_export(span: TraceSpan):
     try:
         import os
+
         ep = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
         if not ep:
             return
         from opentelemetry import trace as _trace
         from opentelemetry.trace import SpanKind
+
         tracer = _trace.get_tracer("aios")
         with tracer.start_as_current_span(span.span_type, kind=SpanKind.INTERNAL) as s:
             s.set_attribute("trace_id", span.trace_id)
             s.set_attribute("model", span.model)
+            s.set_attribute("tokens", span.tokens)
+            s.set_attribute("cost_usd", estimate_cost(span.model, span.tokens))
             if span.error:
                 s.set_attribute("error", span.error)
+            for k, v in (span.extra or {}).items():
+                try:
+                    s.set_attribute(k, str(v)[:256])
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -151,7 +195,8 @@ def get_trace(trace_id: str) -> list[dict]:
             "tokens": s.tokens,
             "error": s.error,
         }
-        for key, s in TRACES.items() if s.trace_id == trace_id
+        for key, s in TRACES.items()
+        if s.trace_id == trace_id
     ]
 
 
@@ -171,6 +216,7 @@ def _metrics_path() -> str:
     global _METRICS_DIR
     if _METRICS_DIR is None:
         from aios.config import settings
+
         _METRICS_DIR = os.path.join(settings.app_data_dir, "metrics")
         os.makedirs(_METRICS_DIR, exist_ok=True)
     return _METRICS_DIR

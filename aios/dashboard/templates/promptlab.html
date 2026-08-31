@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}PromptLab{% endblock %}
+{% block content %}
+<div class="page-header"><h1>PromptLab</h1><p class="subtitle">Teste A/B de prompts com latência</p></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+<div class="card">
+<h3>Prompt A</h3>
+<textarea id="pa" rows="6" style="width:100%">Você é um assistente útil</textarea>
+<h3 style="margin-top:1rem">Prompt B</h3>
+<textarea id="pb" rows="6" style="width:100%">Você é um assistente criativo e conciso</textarea>
+<input id="inp" placeholder="input usuário" style="width:100%;margin-top:0.75rem;padding:0.5rem" value="Olá, quem é você?"/>
+<button class="btn btn-primary" style="margin-top:0.75rem" onclick="runAB()">Comparar</button>
+</div>
+<div class="card">
+<h3>Resultado</h3>
+<div id="res" style="white-space:pre-wrap;font-size:0.875rem"></div>
+<div id="metric" style="font-size:0.75rem;color:var(--text-tertiary);margin-top:0.5rem"></div>
+</div>
+</div>
+<script>
+async function runAB(){
+ let a=document.getElementById('pa').value,b=document.getElementById('pb').value,inp=document.getElementById('inp').value;
+ document.getElementById('res').textContent='Testando...';
+ let r=await fetch('/api/promptlab/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({system_prompt:a,user_input:inp,compare_prompt:b})});
+ let j=await r.json();
+ document.getElementById('res').textContent='A: '+j.output+'\n\nB: '+(j.compare_output||'');
+ document.getElementById('metric').textContent='A '+j.latency_ms+'ms | B '+(j.compare_latency_ms||'')+'ms';
+}
+</script>
+{% endblock %}

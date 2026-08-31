@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_plan(org: Organization) -> str:
-    return org.extra_data.get("plan", DEFAULT_PLAN)
+    return (org.extra_data or {}).get("plan", DEFAULT_PLAN)
 
 
 def _plan_limit(org: Organization, key: str):
@@ -30,8 +30,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     if not org.is_active:
         return False, "Organization is suspended"
 
-    # unlimited orgs bypass all limits
-    if org.extra_data.get("unlimited"):
+    if (org.extra_data or {}).get("unlimited"):
         return True, ""
 
     plan_name = _get_plan(org)
@@ -76,33 +75,46 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     return True, ""
 
 
-async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_calls: int = 1):
-    """Increment daily usage counter for org."""
+async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_calls: int = 1, cost_usd: float = 0.0):
     today = date.today().isoformat()
-    record = (await db.execute(
-        select(UsageRecord).where(UsageRecord.org_id == org_id, UsageRecord.date == today)
-    )).scalar_one_or_none()
+    record = (
+        await db.execute(select(UsageRecord).where(UsageRecord.org_id == org_id, UsageRecord.date == today))
+    ).scalar_one_or_none()
 
     if record:
         record.messages += messages
         record.llm_tokens += tokens
         record.llm_calls += llm_calls
+        record.cost_usd = (record.cost_usd or 0) + cost_usd
     else:
-        db.add(UsageRecord(
-            org_id=org_id, date=today,
-            messages=messages, llm_tokens=tokens, llm_calls=llm_calls,
-        ))
+        db.add(
+            UsageRecord(
+                org_id=org_id,
+                date=today,
+                messages=messages,
+                llm_tokens=tokens,
+                llm_calls=llm_calls,
+                cost_usd=cost_usd,
+            )
+        )
     await db.commit()
+    try:
+        if cost_usd:
+            from prometheus_client import Counter as _PC
+
+            _PC("aios_cost_usd_total", "cost").inc(cost_usd)
+    except Exception:
+        pass
 
 
 async def get_usage_summary(org_id: str, db) -> dict:
-    """Return usage stats for dashboard display."""
     today = date.today().isoformat()
-    record = (await db.execute(
-        select(UsageRecord).where(UsageRecord.org_id == org_id, UsageRecord.date == today)
-    )).scalar_one_or_none()
+    record = (
+        await db.execute(select(UsageRecord).where(UsageRecord.org_id == org_id, UsageRecord.date == today))
+    ).scalar_one_or_none()
     return {
         "messages_today": record.messages if record else 0,
         "llm_calls_today": record.llm_calls if record else 0,
         "tokens_today": record.llm_tokens if record else 0,
+        "cost_today": round(record.cost_usd if record and record.cost_usd else 0, 4),
     }

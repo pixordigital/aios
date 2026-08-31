@@ -1,0 +1,12 @@
+{
+  "dashboard": {
+    "title": "AIOS Enterprise",
+    "panels": [
+      {"title": "P95 Latency", "type": "graph", "targets": [{"expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))"}]},
+      {"title": "Tokens / Org", "type": "stat", "targets": [{"expr": "sum by (org_id) (increase(llm_tokens_total[5m]))"}]},
+      {"title": "Cost / Day", "type": "graph", "targets": [{"expr": "sum(increase(llm_cost_usd[1d]))"}]},
+      {"title": "Error Rate", "type": "graph", "targets": [{"expr": "rate(http_requests_total{status=~'5..'}[5m])"}]},
+      {"title": "Queue Depth", "type": "stat", "targets": [{"expr": "scheduler_queued"}]}
+    ]
+  }
+}
