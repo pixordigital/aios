@@ -23,7 +23,7 @@ Regras:
         "temperature": 0.3,
         "max_tokens": 8192,
     },
-    "tools": ["web_search", "calculator"],
+    "tools": ["web_search", "calculator", "sql_query", "python_sandbox", "read_file", "http_get"],
     "memory_config": {
         "short_term": {"max_messages": 50},
         "long_term": {"enabled": True, "top_k": 10},
