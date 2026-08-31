@@ -76,12 +76,26 @@ async def inbound_webhook(request: Request):
     conversation_id = msg.get("conversationId", "")
     text = msg.get("text") or ""
     sender = msg.get("sender") or {}
-    # sender.id = phone without '+' ; phoneNumber = E.164 with '+'
     from_number = sender.get("id") or sender.get("phoneNumber") or ""
     account_id = (body.get("account") or {}).get("id", "")
 
     if not text or not from_number:
         return {"status": "ok"}
+
+    try:
+        from aios.core.whatsapp_guard import is_opt_out, is_opt_in, record_opt_out, record_opt_in, human_handover_needed
+
+        low = text.strip().lower()
+        if is_opt_out(low):
+            record_opt_out(from_number)
+            logger.info("Opt-out %s", from_number)
+            return {"status": "opt-out"}
+        if is_opt_in(low):
+            record_opt_in(from_number)
+        if human_handover_needed(text):
+            logger.info("Handover %s", from_number)
+    except Exception:
+        pass
 
     # find matching active whatsapp channel configured for zernio
     async with db_session() as db:
