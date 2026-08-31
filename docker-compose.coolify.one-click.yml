@@ -68,6 +68,7 @@ services:
       AIOS_DASHBOARD_ENABLED: "true"
     volumes:
       - app-data:/data
+      - postgres-data:/var/lib/postgresql/data:ro
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -78,14 +79,20 @@ services:
       start_period: 20s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 1G }
+        reservations: { cpus: "0.5", memory: 512M }
 
   worker:
     build: .
     command: ["python", "-m", "aios.tasks.worker"]
     environment:
+      AIOS_DEBUG: "false"
       AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
+      AIOS_LOG_FORMAT: "json"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4317"
     volumes:
       - app-data:/data
@@ -93,6 +100,9 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 1G }
 
 volumes:
   postgres-data:
