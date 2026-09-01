@@ -70,7 +70,21 @@ async def evolution_webhook(instance: str, request: Request):
     if not msg_text or not msg_from:
         return {"status": "ok"}
 
-    # find channel connection
+    try:
+        from aios.core.whatsapp_guard import human_handover_needed, is_opt_in, is_opt_out, record_opt_in, record_opt_out
+
+        low = msg_text.strip().lower()
+        if is_opt_out(low):
+            record_opt_out(msg_from)
+            logger.info("Evolution opt-out %s", msg_from)
+            return {"status": "opt-out"}
+        if is_opt_in(low):
+            record_opt_in(msg_from)
+        if human_handover_needed(msg_text):
+            logger.info("Evolution handover %s", msg_from)
+    except Exception:
+        pass
+
     async with db_session() as db:
         result = await db.execute(
             select(ChannelConnection).where(

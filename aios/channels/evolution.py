@@ -19,6 +19,9 @@ class EvolutionChannel(Channel):
         self._config = connection.config if connection else {}
 
     async def send(self, message: OutboundMessage) -> str | None:
+        import asyncio
+        import random
+
         instance = self._config.get("instance", "")
         api_key = self._config.get("api_key", "")
         base_url = self._config.get("server_url", "http://localhost:8080").rstrip("/")
@@ -27,44 +30,70 @@ class EvolutionChannel(Channel):
             logger.warning("Evolution API not configured: instance=%s", instance)
             return None
 
-        # SSRF guard: never send to private/internal hosts
         from urllib.parse import urlparse
         from aios.tools.http_get import _is_private
+
         host = urlparse(base_url).hostname
         if not host or _is_private(host):
             logger.warning("Evolution API send blocked: private server_url (%s)", host)
             return None
 
-        # Get recipient number from message extra_data
         to = message.extra_data.get("from_number") if message.extra_data else ""
         if not to:
             to = self._config.get("default_number", "")
-
         if not to:
             logger.warning("No recipient number for Evolution API send")
             return None
 
         try:
+            from aios.core.whatsapp_guard import guard_send, humanize_delay
+
+            ok, reason = await guard_send(to, message.text, provider="evolution")
+            if not ok:
+                logger.warning("Evolution guard block %s: %s", to, reason)
+                return None
+        except Exception:
+            pass
+
+        try:
+            from aios.core.whatsapp_guard import humanize_delay
+
+            delay = humanize_delay(message.text)
+            await asyncio.sleep(delay)
             async with httpx.AsyncClient(timeout=30) as client:
+                try:
+                    await client.post(
+                        f"{base_url}/chat/whatsappNumbers/{instance}",
+                        headers={"apikey": api_key},
+                        json={"numbers": [to]},
+                    )
+                except Exception:
+                    pass
+                try:
+                    await client.post(
+                        f"{base_url}/chat/updatePresence/{instance}",
+                        headers={"apikey": api_key},
+                        json={"number": to, "presence": "composing"},
+                    )
+                    await asyncio.sleep(random.uniform(1.0, 2.5))
+                except Exception:
+                    pass
                 resp = await client.post(
                     f"{base_url}/message/sendText/{instance}",
-                    headers={
-                        "apikey": api_key,
-                        "Content-Type": "application/json",
-                    },
+                    headers={"apikey": api_key, "Content-Type": "application/json"},
                     json={
                         "number": to,
                         "textMessage": {"text": message.text},
+                        "options": {"delay": int(delay * 1000), "presence": "composing"},
                     },
                 )
-                if resp.status_code == 201 or resp.status_code == 200:
+                if resp.status_code in (200, 201):
                     data = resp.json()
                     msg_key = data.get("key", {})
                     return msg_key.get("id") or msg_key.get("remoteJid")
-                else:
-                    logger.warning("Evolution API send failed: %d %s", resp.status_code, resp.text)
-                    return None
-        except Exception as e:
+                logger.warning("Evolution API send failed: %d %s", resp.status_code, resp.text[:500])
+                return None
+        except Exception:
             logger.exception("Evolution API send error")
             return None
 
