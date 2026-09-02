@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:900px;margin:0 auto">
+  <div class="flex-between" style="margin-bottom:1.25rem">
+    <div>
+      <h1>Configurações</h1>
+      <p class="text-secondary text-sm" style="margin:0.25rem 0 0">Chaves por organização — isoladas, sem .env global. Vazias herdam do servidor.</p>
+    </div>
+    {% if request.query_params.get('saved') %}<span class="badge" style="background:var(--green-subtle);border-color:var(--green);color:var(--green)">Salvo</span>{% endif %}
+  </div>
+
+  <form method="POST" action="/dashboard/settings/save" style="display:flex;flex-direction:column;gap:1rem">
+    <div class="card">
+      <h3 style="margin-bottom:0.125rem">LLM — Provedores</h3>
+      <p class="text-xs text-tertiary" style="margin:0 0 1rem">Pelo menos 1 obrigatória para agentes rodarem live. OpenRouter recomendado (agrega todos modelos).</p>
+      <div class="grid-2">
+        <div>
+          <label>OpenRouter API Key <span class="text-tertiary">{{ masked.openrouter_api_key or '—' }}</span></label>
+          <input class="input input-mono" name="openrouter_api_key" type="password" placeholder="{{ masked.openrouter_api_key or 'sk-or-...' }}" autocomplete="off">
+          <div style="display:flex;gap:0.5rem;margin-top:0.375rem"><button type="button" class="btn btn-ghost btn-sm" onclick="testKey('openrouter')">Testar</button><label class="text-xs" style="display:flex;align-items:center;gap:0.25rem"><input type="checkbox" name="clear_openrouter_api_key" value="1"> limpar</label><span id="test-openrouter" class="text-xs"></span></div>
+        </div>
+        <div>
+          <label>OpenAI API Key <span class="text-tertiary">{{ masked.openai_api_key or '—' }}</span></label>
+          <input class="input input-mono" name="openai_api_key" type="password" placeholder="{{ masked.openai_api_key or 'sk-...' }}" autocomplete="off">
+          <div style="display:flex;gap:0.5rem;margin-top:0.375rem"><button type="button" class="btn btn-ghost btn-sm" onclick="testKey('openai')">Testar</button><label class="text-xs" style="display:flex;align-items:center;gap:0.25rem"><input type="checkbox" name="clear_openai_api_key" value="1"> limpar</label><span id="test-openai" class="text-xs"></span></div>
+        </div>
+        <div>
+          <label>Anthropic API Key <span class="text-tertiary">{{ masked.anthropic_api_key or '—' }}</span></label>
+          <input class="input input-mono" name="anthropic_api_key" type="password" placeholder="{{ masked.anthropic_api_key or 'sk-ant-...' }}" autocomplete="off">
+          <div style="display:flex;gap:0.5rem;margin-top:0.375rem"><button type="button" class="btn btn-ghost btn-sm" onclick="testKey('anthropic')">Testar</button><label class="text-xs" style="display:flex;align-items:center;gap:0.25rem"><input type="checkbox" name="clear_anthropic_api_key" value="1"> limpar</label><span id="test-anthropic" class="text-xs"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Storage — S3 / Supabase</h3>
+      <p class="text-xs text-tertiary" style="margin:0.125rem 0 1rem">Deixe vazio para usar <code>local</code> (/data). Preencha para S3/R2.</p>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem">
+        <label class="text-xs" style="display:flex;align-items:center;gap:0.375rem"><input type="radio" name="storage_backend" value="local" {% if secrets.storage_backend != 's3' %}checked{% endif %}> local</label>
+        <label class="text-xs" style="display:flex;align-items:center;gap:0.375rem"><input type="radio" name="storage_backend" value="s3" {% if secrets.storage_backend == 's3' %}checked{% endif %}> s3</label>
+      </div>
+      <div class="grid-2">
+        <div><label>S3 Bucket <span class="text-tertiary">{{ secrets.s3_bucket or '' }}</span></label><input class="input" name="s3_bucket" value="{{ secrets.s3_bucket or '' }}" placeholder="aios-artifacts"></div>
+        <div><label>S3 Region</label><input class="input" name="s3_region" value="{{ secrets.s3_region or '' }}" placeholder="auto"></div>
+        <div><label>S3 Endpoint</label><input class="input" name="s3_endpoint" value="{{ secrets.s3_endpoint or '' }}" placeholder="https://.../storage/v1/s3"></div>
+        <div><label>S3 Access Key <span class="text-tertiary">{{ masked.s3_access_key or '' }}</span></label><input class="input input-mono" name="s3_access_key" type="password" placeholder="{{ masked.s3_access_key or '' }}"></div>
+        <div><label>S3 Secret Key <span class="text-tertiary">{{ masked.s3_secret_key or '' }}</span></label><input class="input input-mono" name="s3_secret_key" type="password" placeholder="{{ masked.s3_secret_key or '' }}"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>SMTP — E-mail</h3>
+      <div class="grid-2">
+        <div><label>SMTP Host</label><input class="input" name="smtp_host" value="{{ secrets.smtp_host or '' }}" placeholder="smtp.resend.com"></div>
+        <div><label>SMTP Port</label><input class="input" name="smtp_port" value="{{ secrets.smtp_port or '' }}" placeholder="587"></div>
+        <div><label>SMTP User</label><input class="input" name="smtp_user" value="{{ secrets.smtp_user or '' }}" placeholder="resend"></div>
+        <div><label>SMTP Password <span class="text-tertiary">{{ masked.smtp_password or '' }}</span></label><input class="input input-mono" name="smtp_password" type="password" placeholder="{{ masked.smtp_password or '' }}"></div>
+        <div><label>From Email</label><input class="input" name="smtp_from_email" value="{{ secrets.smtp_from_email or '' }}" placeholder="noreply@seudominio.com"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Stripe / OAuth / Outros</h3>
+      <div class="grid-2">
+        <div><label>Stripe Secret <span class="text-tertiary">{{ masked.stripe_secret_key or '' }}</span></label><input class="input input-mono" name="stripe_secret_key" type="password" placeholder="{{ masked.stripe_secret_key or '' }}"></div>
+        <div><label>Stripe Webhook Secret <span class="text-tertiary">{{ masked.stripe_webhook_secret or '' }}</span></label><input class="input input-mono" name="stripe_webhook_secret" type="password" placeholder="{{ masked.stripe_webhook_secret or '' }}"></div>
+        <div><label>Google Client ID</label><input class="input" name="google_client_id" value="{{ secrets.google_client_id or '' }}"></div>
+        <div><label>Google Secret <span class="text-tertiary">{{ masked.google_client_secret or '' }}</span></label><input class="input input-mono" name="google_client_secret" type="password" placeholder="{{ masked.google_client_secret or '' }}"></div>
+        <div><label>GitHub Client ID</label><input class="input" name="github_client_id" value="{{ secrets.github_client_id or '' }}"></div>
+        <div><label>GitHub Secret <span class="text-tertiary">{{ masked.github_client_secret or '' }}</span></label><input class="input input-mono" name="github_client_secret" type="password" placeholder="{{ masked.github_client_secret or '' }}"></div>
+        <div><label>WhatsApp App Secret <span class="text-tertiary">{{ masked.whatsapp_app_secret or '' }}</span></label><input class="input input-mono" name="whatsapp_app_secret" type="password" placeholder="{{ masked.whatsapp_app_secret or '' }}"></div>
+        <div><label>Zernio Webhook Secret <span class="text-tertiary">{{ masked.zernio_webhook_secret or '' }}</span></label><input class="input input-mono" name="zernio_webhook_secret" type="password" placeholder="{{ masked.zernio_webhook_secret or '' }}"></div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0.5rem;justify-content:flex-end;position:sticky;bottom:1rem;background:var(--bg);padding:0.75rem;border:1px solid var(--border);border-radius:var(--radius)">
+      <a href="/dashboard" class="btn btn-ghost">Cancelar</a>
+      <button type="submit" class="btn btn-primary">Salvar chaves</button>
+    </div>
+  </form>
+</div>
+<script>
+async function testKey(provider){
+  const el=document.getElementById('test-'+provider);
+  el.textContent='testando...'; el.style.color='var(--text-tertiary)';
+  const fd=new FormData(document.querySelector('form'));
+  fd.set('provider', provider);
+  try{
+    const r=await fetch('/dashboard/settings/test',{method:'POST', body: fd});
+    const j=await r.json();
+    el.textContent=j.ok?'✓ ok ('+j.status+')':'✗ '+ (j.error||j.status);
+    el.style.color=j.ok?'var(--green)':'var(--red)';
+  }catch(e){ el.textContent='erro'; el.style.color='var(--red)';}
+}
+</script>
+{% endblock %}
