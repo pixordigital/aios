@@ -17,10 +17,10 @@ wait_for_postgres() {
 }
 
 wait_for_redis() {
-  if [ -n "${AIOS_REDIS_URL:-}" ] || [ -n "${REDIS_PASSWORD:-}" ]; then
+  if [ -n "${AIOS_REDIS_URL:-}" ] || [ -n "${REDIS_PASSWORD:-}" ] || [ -n "${AIOS_REDIS_PASSWORD:-}" ]; then
     echo "[entrypoint] waiting for redis..."
     i=0
-    until redis-cli -h "${REDIS_HOST:-redis}" -p "${REDIS_PORT:-6379}" -a "${REDIS_PASSWORD:-${AIOS_REDIS_PASSWORD:-}}" ping 2>/dev/null | grep -q PONG; do
+    until python3 -c "import os,redis;from urllib.parse import urlparse;u=os.environ.get('AIOS_REDIS_URL','') or 'redis://:'+os.environ.get('REDIS_PASSWORD',os.environ.get('AIOS_REDIS_PASSWORD',''))+'@'+os.environ.get('REDIS_HOST','redis')+':'+os.environ.get('REDIS_PORT','6379')+'/0';p=urlparse(u);r=redis.Redis(host=p.hostname or os.environ.get('REDIS_HOST','redis'),port=p.port or 6379,password=p.password or os.environ.get('REDIS_PASSWORD') or os.environ.get('AIOS_REDIS_PASSWORD'));r.ping()" 2>/dev/null; do
       i=$((i+1))
       if [ "$i" -ge 15 ]; then
         echo "[entrypoint] redis not ready after 15 tries, continuing anyway"
