@@ -27,11 +27,17 @@ RUN mkdir -p /data/artifacts && \
     groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser && \
     chown -R appuser:appuser /app /data
 
+COPY deploy/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh && chown appuser:appuser /entrypoint.sh
+
 USER appuser
 
 EXPOSE 8777
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+ENTRYPOINT ["/entrypoint.sh"]
+
+# start-period 40s — DB migrations + seeding + channel workers take >15s cold
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
     CMD curl -sf http://localhost:8777/health/ready || exit 1
 
 STOPSIGNAL SIGTERM
