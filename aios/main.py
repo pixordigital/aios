@@ -553,11 +553,27 @@ async def _register_syscall_handlers():
     from aios.db.backend import db_session
 
     async def handle_llm_chat(req, **extra):
+        from aios.core.org_settings import get_org_secret, model_to_secret_key
         params = req.params
-        llm = get_provider(params.get("model", "openai/gpt-4o"))
+        model = params.get("model", "openai/gpt-4o")
+        api_key = None
+        try:
+            from aios.db.models import Agent
+            async with db_session() as db:
+                ag = await db.get(Agent, req.agent_id) if req.agent_id else None
+                if ag:
+                    from aios.db.models import Organization
+                    org = await db.get(Organization, ag.org_id)
+                    if org:
+                        skey = model_to_secret_key(model)
+                        if skey:
+                            api_key = get_org_secret(org.extra_data, skey)
+        except Exception:
+            pass
+        llm = get_provider(model, api_key=api_key)
         return await llm.chat_retry(
             messages=params["messages"],
-            model=params.get("model", "openai/gpt-4o"),
+            model=model,
             temperature=params.get("temperature", 0.7),
             max_tokens=params.get("max_tokens", 4096),
             tools=params.get("tools"),
@@ -565,11 +581,27 @@ async def _register_syscall_handlers():
         )
 
     async def handle_llm_chat_stream(req, **extra):
+        from aios.core.org_settings import get_org_secret, model_to_secret_key
         params = req.params
-        llm = get_provider(params.get("model", "openai/gpt-4o"))
+        model = params.get("model", "openai/gpt-4o")
+        api_key = None
+        try:
+            from aios.db.models import Agent
+            async with db_session() as db:
+                ag = await db.get(Agent, req.agent_id) if req.agent_id else None
+                if ag:
+                    from aios.db.models import Organization
+                    org = await db.get(Organization, ag.org_id)
+                    if org:
+                        skey = model_to_secret_key(model)
+                        if skey:
+                            api_key = get_org_secret(org.extra_data, skey)
+        except Exception:
+            pass
+        llm = get_provider(model, api_key=api_key)
         return llm.chat_stream_retry(
             messages=params["messages"],
-            model=params.get("model", "openai/gpt-4o"),
+            model=model,
             temperature=params.get("temperature", 0.7),
             max_tokens=params.get("max_tokens", 4096),
             tools=params.get("tools"),

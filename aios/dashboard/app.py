@@ -1344,6 +1344,95 @@ async def lab_artifact_raw(request: Request, art_id: str):
         return JSONResponse({"id": art.id, "filename": art.filename, "content_type": art.content_type, "size_bytes": art.size_bytes, "text": text[:20000], "is_binary": raw is not None and len(raw) > 0 and text.startswith("Binary file")})
 
 
+# ─── Settings (API Keys per org) ───
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    org_id = await _org_filter(request)
+    from aios.core.org_settings import ALLOWED_KEYS, mask_key
+    async with db_session() as db:
+        from aios.db.models import Organization
+        org = await db.get(Organization, org_id)
+        secrets = {}
+        if org and isinstance(org.extra_data, dict):
+            secrets = org.extra_data.get("secrets", {}) if isinstance(org.extra_data.get("secrets"), dict) else {}
+        masked = {k: mask_key(v) if v else "" for k, v in secrets.items()}
+        has_key = {k: bool(secrets.get(k)) for k in ALLOWED_KEYS}
+    return await _render("settings.html", request, title="Configurações", secrets=secrets, masked=masked, has_key=has_key)
+
+
+@router.post("/settings/save")
+async def settings_save(request: Request):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    from aios.core.org_settings import ALLOWED_KEYS
+    async with db_session() as db:
+        from aios.db.models import Organization
+        org = await db.get(Organization, org_id)
+        if not org:
+            return RedirectResponse("/dashboard/settings", status_code=303)
+        data = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
+        secrets = dict(data.get("secrets", {})) if isinstance(data.get("secrets"), dict) else {}
+        for k in ALLOWED_KEYS:
+            val = form.get(k, "")
+            if val is not None:
+                val = val.strip()
+                if val == "" or val.startswith("••••"):
+                    continue
+                if val:
+                    secrets[k] = val
+                elif k in secrets:
+                    del secrets[k]
+            clear_key = f"clear_{k}"
+            if form.get(clear_key):
+                secrets.pop(k, None)
+        data["secrets"] = secrets
+        org.extra_data = data
+        await db.commit()
+    return RedirectResponse("/dashboard/settings?saved=1", status_code=303)
+
+
+@router.post("/settings/test")
+async def settings_test(request: Request):
+    from fastapi.responses import JSONResponse
+    org_id = await _org_filter(request)
+    form = await request.form()
+    provider = form.get("provider", "openrouter")
+    key_map = {"openrouter": "openrouter_api_key", "openai": "openai_api_key", "anthropic": "anthropic_api_key"}
+    skey = key_map.get(provider, "openrouter_api_key")
+    test_key = form.get(skey, "").strip()
+    if not test_key or test_key.startswith("••••"):
+        async with db_session() as db:
+            from aios.db.models import Organization
+            from aios.core.org_settings import get_org_secret
+            org = await db.get(Organization, org_id)
+            test_key = get_org_secret(org.extra_data if org else {}, skey) if org else ""
+    if not test_key:
+        return JSONResponse({"ok": False, "error": "Chave vazia"})
+    try:
+        import httpx
+        if provider == "openrouter":
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {test_key}"})
+                ok = r.status_code == 200
+                return JSONResponse({"ok": ok, "status": r.status_code, "error": None if ok else r.text[:300]})
+        elif provider == "openai":
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {test_key}"})
+                ok = r.status_code == 200
+                return JSONResponse({"ok": ok, "status": r.status_code, "error": None if ok else r.text[:300]})
+        elif provider == "anthropic":
+            async with httpx.AsyncClient(timeout=15) as c:
+                r = await c.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": test_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}, json={"model": "claude-3-haiku-20240307", "max_tokens": 5, "messages": [{"role": "user", "content": "hi"}]})
+                ok = r.status_code in (200, 400)
+                if r.status_code == 401:
+                    return JSONResponse({"ok": False, "status": 401, "error": "Chave inválida"})
+                return JSONResponse({"ok": ok, "status": r.status_code, "error": None if ok else r.text[:300]})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    return JSONResponse({"ok": False, "error": "provider desconhecido"})
+
+
 # ─── Org Switcher (superadmin only) ───
 
 @router.get("/switch-org/{org_id}")
