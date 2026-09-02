@@ -15,9 +15,10 @@ services:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aios} -d ${POSTGRES_DB:-aios}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
   redis:
@@ -27,9 +28,10 @@ services:
       - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   app:
@@ -37,11 +39,18 @@ services:
     ports:
       - "8777:8777"
     environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-aios}
+      POSTGRES_DB: ${POSTGRES_DB:-aios}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       AIOS_DEBUG: "false"
       AIOS_APP_URL: ${AIOS_APP_URL:-http://localhost:8777}
       AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
-      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:?set AIOS_JWT_SECRET - openssl rand -hex 32}"
+      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:-}"
       AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
       AIOS_OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
       AIOS_OPENAI_API_KEY: ${AIOS_OPENAI_API_KEY:-}
@@ -67,25 +76,33 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8777/health/ready"]
-      interval: 30s
+      test: ["CMD", "curl", "-sf", "http://localhost:8777/health/live"]
+      interval: 15s
       timeout: 10s
-      start_period: 40s
-      retries: 5
+      start_period: 90s
+      start_interval: 5s
+      retries: 10
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1", memory: 1G }
-        reservations: { cpus: "0.25", memory: 256M }
+        limits: { cpus: "1", memory: 1536M }
+        reservations: { cpus: "0.25", memory: 512M }
 
   worker:
     build: .
     command: ["python", "-m", "aios.tasks.worker"]
     environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-aios}
+      POSTGRES_DB: ${POSTGRES_DB:-aios}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       AIOS_DEBUG: "false"
       AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
-      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:?set AIOS_JWT_SECRET - openssl rand -hex 32}"
+      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:-}"
       AIOS_LOG_FORMAT: "json"
     volumes:
       - app-data:/data
@@ -94,10 +111,17 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os,redis;from urllib.parse import urlparse;u=os.environ.get('AIOS_REDIS_URL','redis://redis:6379/0');p=urlparse(u);r=redis.Redis(host=p.hostname or 'redis',port=p.port or 6379,password=p.password or os.environ.get('REDIS_PASSWORD',''));r.ping()\""]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "0.5", memory: 512M }
+        limits: { cpus: "0.5", memory: 768M }
+        reservations: { cpus: "0.1", memory: 256M }
 
 volumes:
   postgres-data:
