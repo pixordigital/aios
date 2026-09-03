@@ -36,20 +36,56 @@ def record_opt_in(contact: str):
     _opt_out.discard(contact)
 
 
-def can_send(contact: str, now: float | None = None, provider: str = "meta") -> tuple[bool, str]:
+_global_daily: dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
+_instance_created: dict[str, float] = {}
+_blocked_until: dict[str, float] = {}
+
+def set_instance_warmup(instance: str, created_at: float | None = None):
+    if created_at:
+        _instance_created[instance] = created_at
+
+def _warmup_limits(instance: str, now: float) -> tuple[int, int, int]:
+    created = _instance_created.get(instance, 0)
+    age_days = (now - created) / 86400 if created else 999
+    if age_days < 7:
+        return 1, 3, 15
+    if age_days < 14:
+        return 1, 5, 30
+    if age_days < 30:
+        return 2, 8, 40
+    return 2, 10, 60
+
+def _global_quota(instance: str, now: float) -> tuple[bool, str]:
+    if not instance:
+        return True, ""
+    dq = _global_daily[instance]
+    dq = deque([t for t in dq if now - t < 86400], maxlen=500)
+    _global_daily[instance] = dq
+    _, _, daily = _warmup_limits(instance, now)
+    if len(dq) >= daily:
+        return False, f"global {daily}/d warmup"
+    return True, ""
+
+def can_send(contact: str, now: float | None = None, provider: str = "meta", instance: str = "") -> tuple[bool, str]:
     if check_opt_out(contact):
         return False, "opt-out"
     now = now or time.time()
+    if _blocked_until.get(contact, 0) > now:
+        return False, "cooldown"
     q = _contact_queues[contact]
     q = deque([t for t in q if now - t < 3600], maxlen=100)
     _contact_queues[contact] = q
     if provider == "evolution":
-        if len([t for t in q if now - t < 60]) >= 1:
-            return False, "evolution 1/min"
-        if len(q) >= 5:
-            return False, "evolution 5/h"
-        if len([t for t in q if now - t < 86400]) >= 20:
-            return False, "evolution 20/d warmup"
+        per_min, per_hour, per_day = _warmup_limits(instance, now)
+        if len([t for t in q if now - t < 60]) >= per_min:
+            return False, f"evolution {per_min}/min"
+        if len(q) >= per_hour:
+            return False, f"evolution {per_hour}/h"
+        if len([t for t in q if now - t < 86400]) >= per_day:
+            return False, f"evolution {per_day}/d warmup"
+        ok, reason = _global_quota(instance, now)
+        if not ok:
+            return False, reason
     else:
         if len([t for t in q if now - t < 60]) >= 3:
             return False, "rate 3/min"
@@ -67,11 +103,42 @@ def is_duplicate(contact: str, text: str, window: int = 300) -> bool:
     return False
 
 
+def is_allowed_hour(now: float | None = None, tz: str = "America/Sao_Paulo") -> bool:
+    try:
+        import datetime, zoneinfo
+        dt = datetime.datetime.fromtimestamp(now or time.time(), tz=zoneinfo.ZoneInfo(tz))
+        return 8 <= dt.hour < 20
+    except Exception:
+        import datetime
+        return 8 <= datetime.datetime.now().hour < 20
+
+def vary_text(text: str) -> str:
+    import random
+    variants = {
+        "Olá": ["Olá", "Oi", "Olá!"],
+        "obrigado": ["obrigado", "obrigado!", "muito obrigado"],
+    }
+    for k, vals in variants.items():
+        if k.lower() in text.lower():
+            text = text.replace(k, random.choice(vals), 1)
+            break
+    if random.random() < 0.15:
+        text = text.rstrip() + random.choice([" 🙂", " 👍", ""])
+    return text
+
 def humanize_delay(text: str) -> float:
     import random
+    base = min(len(text) * 0.045, 4.0)
+    jitter = random.uniform(0.8, 2.2)
+    return round(random.uniform(1.8 + base + jitter, 3.5 + base + jitter), 2)
 
-    base = min(len(text) * 0.04, 3.0)
-    return round(random.uniform(1.5 + base, 3.0 + base), 2)
+def record_ban_signal(contact: str, minutes: int = 60):
+    import time
+    _blocked_until[contact] = time.time() + minutes * 60
+
+def record_global_send(instance: str):
+    if instance:
+        _global_daily[instance].append(time.time())
 
 
 def has_spam_signals(text: str) -> str | None:
@@ -89,23 +156,28 @@ def record_send(contact: str):
 
 
 async def guard_send(
-    contact: str, text: str, is_template: bool = False, window_open: bool = True, provider: str = "meta"
+    contact: str, text: str, is_template: bool = False, window_open: bool = True, provider: str = "meta", instance: str = ""
 ) -> tuple[bool, str]:
     if is_opt_out(text):
         record_opt_out(contact)
         return False, "user opt-out recorded"
     if not window_open and not is_template and provider == "meta":
         return False, "fora da janela 24h exige template"
+    if not is_allowed_hour() and provider == "evolution":
+        return False, "fora do horário 8-20"
     if is_duplicate(contact, text):
         return False, "duplicate 5min"
     spam = has_spam_signals(text)
     if spam:
         logger.warning("Spam signal %s for %s", spam, contact)
-    ok, reason = can_send(contact, provider=provider)
+        if provider == "evolution":
+            return False, f"spam {spam}"
+    ok, reason = can_send(contact, provider=provider, instance=instance)
     if not ok:
         logger.warning("WhatsApp guard block %s [%s]: %s", contact, provider, reason)
         return False, reason
     record_send(contact)
+    record_global_send(instance)
     _last_text[contact] = (text.strip(), time.time())
     return True, ""
 
