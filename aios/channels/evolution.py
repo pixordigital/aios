@@ -46,20 +46,25 @@ class EvolutionChannel(Channel):
             return None
 
         try:
-            from aios.core.whatsapp_guard import guard_send, humanize_delay
-
-            ok, reason = await guard_send(to, message.text, provider="evolution")
+            from aios.core.whatsapp_guard import guard_send, humanize_delay, vary_text
+            varied = vary_text(message.text)
+            if varied != message.text:
+                message.text = varied
+            ok, reason = await guard_send(to, message.text, provider="evolution", instance=instance)
             if not ok:
                 logger.warning("Evolution guard block %s: %s", to, reason)
+                if "global" in reason or "warmup" in reason:
+                    from aios.core.whatsapp_guard import record_ban_signal
+                    record_ban_signal(to, 30)
                 return None
         except Exception:
-            pass
+            varied = False
 
         try:
             from aios.core.whatsapp_guard import humanize_delay
 
             delay = humanize_delay(message.text)
-            await asyncio.sleep(delay)
+            await asyncio.sleep(delay + random.uniform(0.5, 1.5))
             async with httpx.AsyncClient(timeout=30) as client:
                 try:
                     await client.post(
@@ -91,6 +96,12 @@ class EvolutionChannel(Channel):
                     data = resp.json()
                     msg_key = data.get("key", {})
                     return msg_key.get("id") or msg_key.get("remoteJid")
+                if resp.status_code in (401, 403, 429):
+                    from aios.core.whatsapp_guard import record_ban_signal
+                    txt = resp.text[:500].lower()
+                    if any(k in txt for k in ["ban", "blocked", "forbidden", "rate"]):
+                        record_ban_signal(to, 120)
+                        logger.warning("Evolution ban signal %s: %d %s", to, resp.status_code, txt[:200])
                 logger.warning("Evolution API send failed: %d %s", resp.status_code, resp.text[:500])
                 return None
         except Exception:
