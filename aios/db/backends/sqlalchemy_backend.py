@@ -31,9 +31,9 @@ class SQLAlchemyBackend(DatabaseBackend):
             self._session = async_session()
         return self._session
 
-    async def get(self, model: type, ident: Any) -> Any | None:
+    async def get(self, model: type, ident: Any, *args, **kwargs) -> Any | None:
         s = await self._sess()
-        return await s.get(model, ident)
+        return await s.get(model, ident, *args, **kwargs)
 
     async def execute(self, stmt) -> Any:
         s = await self._sess()

@@ -359,10 +359,12 @@ async def dashboard_home(request: Request):
         )).scalars().all()
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         total_cost = sum(_cost_estimate(a.llm_config.get("model", ""), a.llm_config.get("max_tokens", 4096)) for a in agents if a.llm_config)
+        from aios.core.limits import get_monthly_usage
+        usage_monthly = await get_monthly_usage(org_id, db)
     return await _render("dashboard.html", request, title="Dashboard",
                    stats={"agents": ac, "teams": tc, "conversations": cc, "messages": mc,
                           "total_cost": total_cost, "deployed": sum(1 for a in agents if a.status == "active")},
-                   teams=teams, agents=agents)
+                   teams=teams, agents=agents, usage_monthly=usage_monthly)
 
 
 # ─── Analytics Dashboard ───
@@ -709,6 +711,7 @@ async def channel_save(
     agent_id: str = Form(""), team_id: str = Form(""),
     config_whatsapp_token: str = Form(""), config_whatsapp_phone: str = Form(""),
     config_whatsapp_provider: str = Form("meta"),
+    config_whatsapp_template: str = Form(""), config_whatsapp_lang: str = Form("pt_BR"),
     config_zernio_key: str = Form(""), config_zernio_account: str = Form(""),
     config_zernio_template: str = Form(""), config_zernio_lang: str = Form("en_US"),
     config_evo_server: str = Form(""), config_evo_key: str = Form(""), config_evo_instance: str = Form(""),
@@ -729,6 +732,9 @@ async def channel_save(
             }
         else:
             config = {"access_token": config_whatsapp_token, "phone_id": config_whatsapp_phone}
+            if config_whatsapp_template:
+                config["template_name"] = config_whatsapp_template
+                config["template_language"] = config_whatsapp_lang or "pt_BR"
     elif channel_type == "slack":
         config = {"bot_token": config_slack_token, "signing_secret": config_slack_secret}
     elif channel_type == "telegram":
@@ -1074,9 +1080,31 @@ async def billing_page(request: Request):
     current_plan = org.extra_data.get("plan", "free") if org else "free"
     plan_limits = PLANS.get(current_plan, PLANS["free"])
 
-    from aios.core.limits import get_usage_summary
+    from aios.core.limits import get_usage_summary, get_monthly_usage, get_agent_usage_breakdown
     async with db_session() as db:
         usage = await get_usage_summary(org_id, db)
+        monthly = await get_monthly_usage(org_id, db)
+        agent_breakdown = await get_agent_usage_breakdown(org_id, db)
+        # model breakdown inline
+        from sqlalchemy import select as _select
+        from aios.db.models import AgentMetric, Agent as _Agent
+
+        rows = (await db.execute(_select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(AgentMetric.hour.desc()).limit(200))).scalars().all()
+        model_map: dict = {}
+        if rows:
+            aids = list({r.agent_id for r in rows})
+            agents_q = (await db.execute(_select(_Agent).where(_Agent.id.in_(aids)))).scalars().all()
+            amap = {a.id: a.llm_config.get("model", "openai/gpt-4o-mini") for a in agents_q}
+            for r in rows:
+                m = amap.get(r.agent_id, "unknown")
+                model_map.setdefault(m, {"model": m, "tokens": 0, "cost": 0})
+                model_map[m]["tokens"] += r.tokens
+                from aios.core.tracing import estimate_cost
+
+                model_map[m]["cost"] += estimate_cost(m, r.tokens)
+            for v in model_map.values():
+                v["cost"] = round(v["cost"], 4)
+        model_breakdown = sorted(model_map.values(), key=lambda x: x["tokens"], reverse=True)
     daily_msgs = usage["messages_today"]
 
     stripe_prices = {}
@@ -1089,7 +1117,7 @@ async def billing_page(request: Request):
     return await _render("billing.html", request, title="Cobrança",
                    current_plan=current_plan, plan_limits=plan_limits,
                    agent_count=agent_count, team_count=team_count,
-                   daily_msgs=daily_msgs, plans=PLANS,
+                   daily_msgs=daily_msgs, monthly=monthly, agent_breakdown=agent_breakdown, model_breakdown=model_breakdown, plans=PLANS,
                    org_id=org_id, stripe_prices=json.dumps(stripe_prices),
                    subscription_id=org.extra_data.get("stripe_subscription_id") if org else None)
 
@@ -1343,6 +1371,338 @@ async def lab_artifact_raw(request: Request, art_id: str):
         raw = await get_artifact_content(art_id, db, org_id=org_id)
         return JSONResponse({"id": art.id, "filename": art.filename, "content_type": art.content_type, "size_bytes": art.size_bytes, "text": text[:20000], "is_binary": raw is not None and len(raw) > 0 and text.startswith("Binary file")})
 
+
+# ─── Automations (no-code workflows sem n8n) ───
+
+@router.get("/automations", response_class=HTMLResponse)
+async def automations_list(request: Request, filter: str = "all"):
+    org_id = await _org_filter(request)
+    from aios.db.models import Workflow, AutomationTrigger, WorkflowRun, Credential
+    from aios.api.automations import AUTOMATION_TEMPLATES
+    async with db_session() as db:
+        wfs = (await db.execute(select(Workflow).where(Workflow.org_id == org_id).order_by(Workflow.created_at.desc()))).scalars().all()
+        trigs = (await db.execute(select(AutomationTrigger).where(AutomationTrigger.org_id == org_id))).scalars().all()
+        triggers_map = {}
+        for t in trigs:
+            triggers_map.setdefault(t.workflow_id, []).append(t)
+        # filter
+        if filter != "all":
+            if filter in ("webhook","cron","event"):
+                wfs = [w for w in wfs if any(t.type==filter for t in triggers_map.get(w.id,[]))]
+            elif filter == "failed":
+                failed_ids = set((await db.execute(select(WorkflowRun.workflow_id).where(WorkflowRun.org_id==org_id, WorkflowRun.status=="failed"))).scalars().all())
+                wfs = [w for w in wfs if w.id in failed_ids]
+        runs_map = {}
+        for w in wfs:
+            last = (await db.execute(select(WorkflowRun).where(WorkflowRun.workflow_id==w.id).order_by(WorkflowRun.created_at.desc()).limit(1))).scalars().first()
+            if last:
+                runs_map[w.id] = last
+        recent_runs = (await db.execute(select(WorkflowRun).where(WorkflowRun.org_id==org_id).order_by(WorkflowRun.created_at.desc()).limit(20))).scalars().all()
+        creds = (await db.execute(select(Credential).where(Credential.org_id==org_id))).scalars().all()
+        runs_today = sum(1 for r in recent_runs if r.created_at and (datetime.now(timezone.utc).replace(tzinfo=None) - r.created_at).days == 0)
+        failed_count = sum(1 for r in recent_runs if r.status=="failed")
+        active_count = sum(1 for t in trigs if t.is_active)
+    return await _render("automations.html", request, title="Automações", workflows=wfs, triggers=trigs, triggers_map=triggers_map, runs_map=runs_map, recent_runs=recent_runs, credentials=creds, templates=AUTOMATION_TEMPLATES, filter=filter, active_count=active_count, runs_today=runs_today, failed_count=failed_count)
+
+@router.get("/automations/{wf_id}", response_class=HTMLResponse)
+async def automation_detail(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import Workflow, WorkflowNode, AutomationTrigger, WorkflowRun
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        if not wf or wf.org_id != org_id:
+            return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
+        nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id).order_by(WorkflowNode.created_at))).scalars().all()
+        triggers = (await db.execute(select(AutomationTrigger).where(AutomationTrigger.workflow_id==wf_id))).scalars().all()
+        runs = (await db.execute(select(WorkflowRun).where(WorkflowRun.workflow_id==wf_id).order_by(WorkflowRun.created_at.desc()).limit(20))).scalars().all()
+        agents = (await db.execute(select(Agent).where(Agent.org_id==org_id).order_by(Agent.name))).scalars().all()
+    return await _render("automation_detail.html", request, title=wf.name, wf=wf, nodes=nodes, triggers=triggers, runs=runs, agents=agents, last_result=request.query_params.get("result",""))
+
+@router.post("/automations/create")
+async def automations_create(request: Request):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    name = form.get("name") or "Automação"
+    desc = form.get("description") or ""
+    ttype = form.get("trigger_type") or "webhook"
+    tval = form.get("trigger_value") or ""
+    from aios.db.models import Workflow, AutomationTrigger
+    import uuid
+    async with db_session() as db:
+        wf = Workflow(org_id=org_id, name=name, description=desc, timeout_seconds=120)
+        db.add(wf)
+        await db.flush()
+        if ttype == "webhook":
+            db.add(AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="webhook", name="Webhook", config={}, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True))
+        elif ttype == "cron":
+            cron_expr = tval or "0 9 * * *"
+            trig = AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="cron", name="Agendamento", config={}, cron_expr=cron_expr, is_active=True)
+            try:
+                from croniter import croniter
+                trig.next_run_at = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
+            except Exception:
+                pass
+            db.add(trig)
+        elif ttype == "event":
+            db.add(AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="event", name="Evento", config={}, event_type=tval or "message.received", is_active=True))
+        await db.commit()
+        await db.refresh(wf)
+    return RedirectResponse(f"/dashboard/automations/{wf.id}", status_code=303)
+
+@router.post("/automations/from-template/{tid}")
+async def automations_from_template(request: Request, tid: str):
+    org_id = await _org_filter(request)
+    from aios.api.automations import AUTOMATION_TEMPLATES
+    tpl = AUTOMATION_TEMPLATES.get(tid)
+    if not tpl:
+        return RedirectResponse("/dashboard/automations", status_code=303)
+    from aios.db.models import Workflow, WorkflowNode, AutomationTrigger
+    import uuid
+    async with db_session() as db:
+        wf = Workflow(org_id=org_id, name=tpl["name"], description=tpl["description"], timeout_seconds=120)
+        db.add(wf)
+        await db.flush()
+        prev_id = None
+        for nd in tpl.get("nodes", []):
+            deps = [prev_id] if nd.get("depends_on")==["__prev__"] and prev_id else []
+            node = WorkflowNode(workflow_id=wf.id, label=nd.get("label",""), tool_name=nd.get("tool_name"), tool_args=nd.get("tool_args",{}), depends_on=deps, condition=nd.get("condition"), output_key=nd.get("output_key","result"))
+            db.add(node)
+            await db.flush()
+            prev_id = node.id
+        trig = tpl.get("trigger", {})
+        ttype = trig.get("type","webhook")
+        if ttype == "webhook":
+            db.add(AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="webhook", name=trig.get("name",""), config={}, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True))
+        elif ttype == "cron":
+            cron_expr = trig.get("cron","0 9 * * *")
+            tr = AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="cron", name=trig.get("name",""), config={}, cron_expr=cron_expr, is_active=True)
+            try:
+                from croniter import croniter
+                tr.next_run_at = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
+            except Exception:
+                pass
+            db.add(tr)
+        await db.commit()
+        await db.refresh(wf)
+    return RedirectResponse(f"/dashboard/automations/{wf.id}", status_code=303)
+
+@router.post("/automations/{wf_id}/trigger")
+async def automations_add_trigger(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    ttype = form.get("type") or "webhook"
+    name = form.get("name") or ""
+    val = form.get("value") or ""
+    from aios.db.models import Workflow, AutomationTrigger
+    import uuid
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        if not wf or wf.org_id != org_id:
+            return RedirectResponse("/dashboard/automations", status_code=303)
+        if ttype == "webhook":
+            db.add(AutomationTrigger(workflow_id=wf_id, org_id=org_id, type="webhook", name=name, config={}, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True))
+        elif ttype == "cron":
+            cron_expr = val or "0 9 * * *"
+            tr = AutomationTrigger(workflow_id=wf_id, org_id=org_id, type="cron", name=name, config={}, cron_expr=cron_expr, is_active=True)
+            try:
+                from croniter import croniter
+                tr.next_run_at = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
+            except Exception:
+                pass
+            db.add(tr)
+        else:
+            db.add(AutomationTrigger(workflow_id=wf_id, org_id=org_id, type="event", name=name, config={}, event_type=val, is_active=True))
+        await db.commit()
+    return RedirectResponse(f"/dashboard/automations/{wf_id}", status_code=303)
+
+@router.get("/automations/{wf_id}/trigger/{tid}/toggle")
+async def automations_toggle_trigger(request: Request, wf_id: str, tid: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import AutomationTrigger
+    async with db_session() as db:
+        tr = await db.get(AutomationTrigger, tid)
+        if tr and tr.org_id == org_id:
+            tr.is_active = not tr.is_active
+            await db.commit()
+    return RedirectResponse(f"/dashboard/automations/{wf_id}", status_code=303)
+
+@router.get("/automations/{wf_id}/trigger/{tid}/delete")
+async def automations_delete_trigger(request: Request, wf_id: str, tid: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import AutomationTrigger
+    async with db_session() as db:
+        tr = await db.get(AutomationTrigger, tid)
+        if tr and tr.org_id == org_id:
+            await db.delete(tr)
+            await db.commit()
+    return RedirectResponse(f"/dashboard/automations/{wf_id}", status_code=303)
+
+@router.post("/automations/{wf_id}/node")
+async def automations_add_node(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    label = form.get("label") or ""
+    tool_val = form.get("tool_name") or ""
+    deps_raw = form.get("depends_on") or ""
+    from aios.db.models import Workflow, WorkflowNode
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        if not wf or wf.org_id != org_id:
+            return RedirectResponse("/dashboard/automations", status_code=303)
+        agent_id = None
+        tool_name = None
+        if tool_val.startswith("agent:"):
+            agent_id = tool_val.split(":",1)[1]
+        elif tool_val:
+            tool_name = tool_val
+        # resolve depends_on by label or id
+        depends = []
+        if deps_raw.strip():
+            all_nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()
+            label_map = {n.label: n.id for n in all_nodes if n.label}
+            for part in deps_raw.split(","):
+                part=part.strip()
+                if not part:
+                    continue
+                depends.append(label_map.get(part, part))
+        default_args = {}
+        if tool_name == "http_request":
+            default_args = {"url": "https://httpbin.org/post", "method": "POST", "body": {"msg": "hello {{json.input}}"}, "headers": {}}
+        elif tool_name == "wait":
+            default_args = {"seconds": 2}
+        elif tool_name == "transform":
+            default_args = {"input": {"raw": "{{json}}"}, "mapping": {"msg": "valor {{input.raw}}"} }
+        elif tool_name == "code":
+            default_args = {"code": "output = {'echo': input_data}", "input_data": {}}
+        elif tool_name == "if_branch":
+            default_args = {"condition": "input.get('valor',0) > 10", "input": {"valor": 5}}
+        node = WorkflowNode(workflow_id=wf_id, label=label, agent_id=agent_id, tool_name=tool_name, tool_args=default_args, depends_on=depends, output_key="result")
+        db.add(node)
+        await db.commit()
+    return RedirectResponse(f"/dashboard/automations/{wf_id}", status_code=303)
+
+@router.post("/automations/{wf_id}/node/{nid}/delete")
+async def automations_delete_node(request: Request, wf_id: str, nid: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import Workflow, WorkflowNode
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        nd = await db.get(WorkflowNode, nid)
+        if wf and nd and wf.org_id == org_id and nd.workflow_id == wf_id:
+            await db.delete(nd)
+            await db.commit()
+    return RedirectResponse(f"/dashboard/automations/{wf_id}", status_code=303)
+
+@router.post("/automations/{wf_id}/run")
+async def automations_run(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    inp = form.get("input") or form.get("message") or "{}"
+    from aios.db.models import Workflow, WorkflowRun
+    from sqlalchemy.orm import selectinload
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+        if not wf or wf.org_id != org_id:
+            return RedirectResponse("/dashboard/automations", status_code=303)
+        run = WorkflowRun(workflow_id=wf_id, org_id=org_id, status="pending", inputs={"input": inp})
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        try:
+            from aios.tasks.queue import enqueue_job
+            await enqueue_job("aios.tasks.jobs.workflow_run_job", {"workflow_id": wf_id, "run_id": run.id})
+        except Exception:
+            from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
+            wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds)
+            for n in wf.nodes:
+                wdef.nodes[n.id] = WNode(id=n.id, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=n.tool_args or {}, depends_on=n.depends_on or [], condition=n.condition, output_key=n.output_key, timeout=n.timeout_seconds)
+            eng = WorkflowEngine()
+            res = await eng.run(wdef, run.id, inp)
+            run.status = "done" if res.ok() else "failed"
+            run.outputs = res.outputs
+            run.node_status = res.node_status
+            if res.errors:
+                run.error = str(res.errors)[:2000]
+            await db.commit()
+    return RedirectResponse(f"/dashboard/automations/{wf_id}?result=ok", status_code=303)
+
+@router.post("/automations/{wf_id}/duplicate")
+async def automations_duplicate(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import Workflow, WorkflowNode
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        if not wf or wf.org_id != org_id:
+            return RedirectResponse("/dashboard/automations", status_code=303)
+        nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()
+        new_wf = Workflow(org_id=org_id, name=wf.name+" (cópia)", description=wf.description, timeout_seconds=wf.timeout_seconds)
+        db.add(new_wf)
+        await db.flush()
+        id_map = {}
+        for n in nodes:
+            nn = WorkflowNode(workflow_id=new_wf.id, label=n.label, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=dict(n.tool_args or {}), depends_on=[], condition=n.condition, output_key=n.output_key, timeout_seconds=n.timeout_seconds, position=dict(n.position or {}))
+            db.add(nn)
+            await db.flush()
+            id_map[n.id] = nn.id
+        # fix deps
+        for n in nodes:
+            if n.depends_on:
+                nn_id = id_map[n.id]
+                nn = await db.get(WorkflowNode, nn_id)
+                nn.depends_on = [id_map.get(d, d) for d in n.depends_on]
+        await db.commit()
+    return RedirectResponse("/dashboard/automations", status_code=303)
+
+@router.get("/automations/{wf_id}/delete")
+async def automations_delete(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import Workflow
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        if wf and wf.org_id == org_id:
+            await db.delete(wf)
+            await db.commit()
+    return RedirectResponse("/dashboard/automations", status_code=303)
+
+@router.get("/automations/{wf_id}/run/{run_id}")
+async def automations_run_detail(request: Request, wf_id: str, run_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import WorkflowRun
+    async with db_session() as db:
+        run = await db.get(WorkflowRun, run_id)
+        if not run or run.org_id != org_id:
+            return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
+        return await _render("automation_run.html", request, title="Execução", run=run)
+
+@router.post("/automations/credentials")
+async def automations_cred_create(request: Request):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    name = form.get("name") or ""
+    ctype = form.get("cred_type") or "bearer"
+    val = form.get("value") or ""
+    if not name or not val:
+        return RedirectResponse("/dashboard/automations", status_code=303)
+    from aios.db.models import Credential
+    from aios.core.secrets import encrypt_secret
+    import json
+    async with db_session() as db:
+        data = {"value": val, "token": val, "key": val}
+        enc = encrypt_secret(json.dumps(data))
+        db.add(Credential(org_id=org_id, name=name, cred_type=ctype, data_enc=enc))
+        await db.commit()
+    return RedirectResponse("/dashboard/automations", status_code=303)
+
+@router.get("/automations/credentials/{cid}/delete")
+async def automations_cred_delete(request: Request, cid: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import Credential
+    async with db_session() as db:
+        c = await db.get(Credential, cid)
+        if c and c.org_id == org_id:
+            await db.delete(c)
+            await db.commit()
+    return RedirectResponse("/dashboard/automations", status_code=303)
 
 # ─── Settings (API Keys per org) ───
 

@@ -135,6 +135,54 @@ async def telemetry_health(
     return {"agents": list(all_health.values())}
 
 
+@router.get("/usage/monthly")
+async def usage_monthly(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    from aios.core.limits import get_monthly_usage
+
+    return await get_monthly_usage(org_id, db)
+
+
+@router.get("/usage/daily")
+async def usage_daily(days: int = 30, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    from sqlalchemy import select
+    from aios.db.models import UsageRecord
+
+    rows = (await db.execute(select(UsageRecord).where(UsageRecord.org_id == org_id).order_by(UsageRecord.date.desc()).limit(days))).scalars().all()
+    return [{"date": r.date, "tokens": r.llm_tokens, "cost": round(r.cost_usd or 0, 4), "messages": r.messages, "calls": r.llm_calls} for r in reversed(rows)]
+
+
+@router.get("/usage/agents")
+async def usage_agents(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    from aios.core.limits import get_agent_usage_breakdown
+
+    return await get_agent_usage_breakdown(org_id, db)
+
+
+@router.get("/usage/models")
+async def usage_models(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    from sqlalchemy import select
+    from aios.db.models import AgentMetric, Agent
+
+    rows = (await db.execute(select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(AgentMetric.hour.desc()).limit(200))).scalars().all()
+    # group by model? AgentMetric doesn't store model — fetch from Agent llm_config
+    agent_ids = list({r.agent_id for r in rows})
+    models: dict[str, dict] = {}
+    if agent_ids:
+        agents = (await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))).scalars().all()
+        amap = {a.id: a.llm_config.get("model", "openai/gpt-4o-mini") for a in agents}
+        for r in rows:
+            model = amap.get(r.agent_id, "unknown")
+            models.setdefault(model, {"model": model, "tokens": 0, "messages": 0, "cost": 0})
+            models[model]["tokens"] += r.tokens
+            models[model]["messages"] += r.messages
+            from aios.core.tracing import estimate_cost
+
+            models[model]["cost"] += estimate_cost(model, r.tokens)
+        for v in models.values():
+            v["cost"] = round(v["cost"], 4)
+    return sorted(models.values(), key=lambda x: x["tokens"], reverse=True)
+
+
 @router.post("/telemetry/flush")
 async def telemetry_flush(user=Depends(get_current_user)):
     """Manually flush telemetry metrics to DB."""

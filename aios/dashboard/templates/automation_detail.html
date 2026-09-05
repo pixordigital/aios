@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem">
+  <a href="/dashboard/automations" class="btn btn-ghost btn-sm">← Voltar</a>
+  <h1 style="flex:1">{{wf.name}}</h1>
+  <span class="badge">{{wf.status}}</span>
+</div>
+<p class="text-sm text-secondary" style="margin-bottom:1rem">{{wf.description or 'Sem descrição'}} • timeout {{wf.timeout_seconds}}s • id <span class="font-mono">{{wf.id[:8]}}</span></p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem" class="mb-4">
+<div class="card">
+  <h2 style="margin-bottom:0.5rem">🔗 Gatilhos</h2>
+  {% for tr in triggers %}
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;margin-bottom:0.375rem;font-size:0.75rem;display:flex;gap:0.5rem;align-items:center">
+    <span class="badge" style="font-size:0.625rem">{{tr.type}}</span>
+    <span style="flex:1">{{tr.name or tr.type}} {% if tr.cron_expr %}<span class="font-mono">{{tr.cron_expr}}</span>{% endif %} {% if tr.event_type %}{{tr.event_type}}{% endif %}</span>
+    {% if tr.webhook_path %}<span class="font-mono text-tertiary">{{tr.webhook_path}}</span>{% endif %}
+    <span style="color:{{'var(--green)' if tr.is_active else 'var(--text-tertiary)'}}">{{'●' if tr.is_active else '○'}}</span>
+    <a href="/dashboard/automations/{{wf.id}}/trigger/{{tr.id}}/toggle" class="btn btn-ghost btn-sm">{{'Pausar' if tr.is_active else 'Ativar'}}</a>
+    <a href="/dashboard/automations/{{wf.id}}/trigger/{{tr.id}}/delete" class="btn btn-ghost btn-sm" style="color:var(--red)">×</a>
+  </div>
+  {% else %}<div class="text-sm text-tertiary">Nenhum gatilho — execução manual apenas</div>{% endfor %}
+  <form method="POST" action="/dashboard/automations/{{wf.id}}/trigger" style="display:flex;gap:0.375rem;margin-top:0.5rem;flex-wrap:wrap">
+    <select name="type" class="input" style="width:130px"><option value="webhook">Webhook</option><option value="cron">Cron</option><option value="event">Evento</option></select>
+    <input name="name" class="input" placeholder="nome" style="flex:1;min-width:100px">
+    <input name="value" class="input" placeholder="cron/evento" style="flex:1;min-width:120px">
+    <button class="btn btn-primary btn-sm">+ Gatilho</button>
+  </form>
+  {% for tr in triggers if tr.type=='webhook' and tr.webhook_path %}
+  <div style="margin-top:0.5rem;background:var(--bg-elevated);border:1px dashed var(--border);border-radius:4px;padding:0.5rem;font-size:0.6875rem">
+    <b>URL webhook:</b> <span class="font-mono">{{request.base_url}}api/automations/webhook/{{tr.webhook_path}}</span>
+    <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('{{request.base_url}}api/automations/webhook/{{tr.webhook_path}}')">Copiar</button>
+  </div>
+  {% endfor %}
+</div>
+<div class="card">
+  <h2 style="margin-bottom:0.5rem">▶ Testar</h2>
+  <form method="POST" action="/dashboard/automations/{{wf.id}}/run" style="display:flex;flex-direction:column;gap:0.5rem">
+    <textarea name="input" class="input font-mono" rows="3" placeholder='{"msg":"hello"}'>{"test": true}</textarea>
+    <button class="btn btn-primary btn-sm">▶ Executar agora</button>
+  </form>
+  {% if last_result %}<pre class="font-mono" style="margin-top:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.6875rem;max-height:200px;overflow:auto">{{last_result}}</pre>{% endif %}
+</div>
+</div>
+
+<div class="card mb-4">
+  <div class="flex-between mb-2"><h2>Fluxo (DAG)</h2><span class="text-xs text-tertiary">{{nodes|length}} passos • paralelo onde depende permite</span></div>
+  {% if nodes %}
+  <div style="display:flex;gap:0.5rem;overflow-x:auto;padding-bottom:0.5rem">
+    {% for n in nodes %}
+    <div style="min-width:180px;background:var(--bg);border:1px solid var(--border);border-left:3px solid {{'var(--accent)' if n.agent_id else 'var(--amber)'}};border-radius:6px;padding:0.625rem;display:flex;flex-direction:column;gap:0.25rem">
+      <div style="font-weight:600;font-size:0.8125rem">{{loop.index}}. {{n.label or n.id[:8]}}</div>
+      <div style="font-size:0.6875rem;color:var(--text-tertiary)">{{'🤖 '+n.agent_id[:8] if n.agent_id else '🔧 '+(n.tool_name or '-')}} → {{n.output_key}}</div>
+      {% if n.tool_name %}<div style="font-size:0.625rem" class="font-mono text-tertiary">{{n.tool_name}}</div>{% endif %}
+      {% if n.depends_on %}<div style="font-size:0.625rem;color:var(--text-secondary)">dep: {{n.depends_on|join(', ')}}</div>{% endif %}
+      {% if n.condition %}<div style="font-size:0.625rem;color:var(--amber)">if: {{n.condition[:40]}}</div>{% endif %}
+      <form method="POST" action="/dashboard/automations/{{wf.id}}/node/{{n.id}}/delete" style="margin-top:0.25rem"><button class="btn btn-ghost btn-sm" style="color:var(--red);width:100%">Remover</button></form>
+    </div>
+    {% if not loop.last %}<div style="align-self:center;color:var(--text-tertiary)">→</div>{% endif %}
+    {% endfor %}
+  </div>
+  {% else %}<div class="text-sm text-tertiary">Sem passos. Adicione abaixo.</div>{% endif %}
+  <form method="POST" action="/dashboard/automations/{{wf.id}}/node" style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;margin-top:0.75rem;align-items:end">
+    <div><label>Nome do passo</label><input name="label" class="input" placeholder="ex. Notificar Slack"></div>
+    <div><label>Ferramenta / Agente</label>
+      <select name="tool_name" class="input">
+        <option value="">— agente IA —</option>
+        {% for ag in agents %}<option value="agent:{{ag.id}}">🤖 {{ag.name}}</option>{% endfor %}
+        <option value="http_request">🔗 HTTP Request</option>
+        <option value="code">📝 Código Python</option>
+        <option value="transform">🔄 Transform (map)</option>
+        <option value="if_branch">🔀 IF condição</option>
+        <option value="wait">⏳ Wait</option>
+        <option value="calculator">🧮 Calculator</option>
+        <option value="http_get">🌐 HTTP GET</option>
+      </select>
+    </div>
+    <div><label>Depende de (label anterior)</label><input name="depends_on" class="input" placeholder="deixe vazio = paralelo"></div>
+    <button class="btn btn-primary btn-sm" style="height:2rem">+ Passo</button>
+  </form>
+  <details style="margin-top:0.5rem"><summary style="font-size:0.75rem;color:var(--text-tertiary);cursor:pointer">JSON avançado (tool_args com templating)</summary>
+    <div style="font-size:0.6875rem;color:var(--text-secondary);margin-top:0.5rem">Edite via API: <span class="font-mono">POST /api/workflows/{{wf.id}}/nodes {"tool_name":"http_request","tool_args":{"url":"https://.../{{"{{json.id}}"}}}</span> — use <span class="font-mono">{{"{{json}}"}} {{"{{outputs.node_id}}"}} </span></div>
+  </details>
+</div>
+
+<div class="card">
+  <h2 style="margin-bottom:0.5rem">Execuções</h2>
+  {% for r in runs %}
+  <div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;margin-bottom:0.375rem;font-size:0.75rem">
+    <span class="badge" style="font-size:0.625rem;border-color:{{'var(--green)' if r.status=='done' else 'var(--amber)' if r.status=='running' else 'var(--red)'}};color:{{'var(--green)' if r.status=='done' else 'var(--amber)' if r.status=='running' else 'var(--red)'}}">{{r.status}}</span>
+    <span class="font-mono">{{r.id[:8]}}</span>
+    <span style="flex:1;color:var(--text-tertiary)">{{r.created_at.strftime('%d/%m %H:%M:%S') if r.created_at else ''}} • {{r.node_status|length if r.node_status else 0}} nós</span>
+    {% if r.error %}<span style="color:var(--red);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{r.error[:60]}}</span>{% endif %}
+    <a href="/dashboard/automations/{{wf.id}}/run/{{r.id}}" class="btn btn-ghost btn-sm">Detalhe</a>
+  </div>
+  {% else %}<div class="text-sm text-tertiary">Nenhuma execução ainda. Clique Testar.</div>{% endfor %}
+</div>
+{% endblock %}

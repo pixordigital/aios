@@ -442,3 +442,40 @@ class EvalRun(Base, TimestampMixin):
     avg_score: Mapped[float] = mapped_column(default=0.0)
     results: Mapped[list] = mapped_column(JSON, default=list)
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AutomationTrigger(Base, TimestampMixin):
+    __tablename__ = "automation_triggers"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    workflow_id: Mapped[str] = mapped_column(ForeignKey("workflows.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    type: Mapped[str] = mapped_column(String(30), index=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    is_active: Mapped[bool] = mapped_column(default=True)
+    config: Mapped[dict] = mapped_column(JSON, default=dict)
+    webhook_path: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True, index=True)
+    cron_expr: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    event_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class Credential(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "credentials"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    cred_type: Mapped[str] = mapped_column(String(50))
+    data_enc: Mapped[str] = mapped_column(Text, default="")
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class WorkflowExecutionLog(Base, TimestampMixin):
+    __tablename__ = "workflow_execution_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("workflow_runs.id"), index=True)
+    workflow_id: Mapped[str] = mapped_column(ForeignKey("workflows.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    level: Mapped[str] = mapped_column(String(20), default="info")
+    message: Mapped[str] = mapped_column(Text, default="")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)

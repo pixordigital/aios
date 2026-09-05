@@ -81,7 +81,7 @@ class ConvexBackend(DatabaseBackend):
             logger.info("Convex client connected to %s", self._url)
         return self._client
 
-    async def get(self, model: type, ident: Any) -> Any | None:
+    async def get(self, model: type, ident: Any, *args, **kwargs) -> Any | None:
         client = await self._get_client()
         try:
             return await client.query("tables:get", {"table": _table(model), "id": str(ident)})

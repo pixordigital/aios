@@ -40,6 +40,16 @@
                 <div id="wa-meta">
                     <div><label>Token de acesso</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
                     <div><label>ID do número de telefone</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
+                    <details style="margin-top:0.5rem"><summary style="font-size:0.75rem;color:var(--text-tertiary);cursor:pointer">Templates / janela 24h (opcional)</summary>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
+                            <div><label>Template padrão (fallback 24h)</label><input type="text" name="config_whatsapp_template" value="{{ channel.config.get('template_name', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="hello_world"></div>
+                            <div><label>Idioma</label><input type="text" name="config_whatsapp_lang" value="{{ channel.config.get('template_language', 'pt_BR') if channel and channel.config else 'pt_BR' }}" class="input input-mono" placeholder="pt_BR"></div>
+                        </div>
+                        <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.375rem">Usado se envio fora da janela 24h falhar (erro 131047). Deixe vazio se não tem template aprovado.</div>
+                    </details>
+                    <div style="margin-top:0.5rem;padding:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:0.6875rem;color:var(--text-secondary)">
+                        <b>Recursos prontos:</b> texto, imagem/doc/áudio/vídeo por URL ou media_id, templates, botões/list, localização, contatos, áudio voz, marcação lido automática. Webhook recebe todos tipos + status.
+                    </div>
                 </div>
                 <div id="wa-zernio" style="display:none;flex-direction:column;gap:0.75rem">
                     <div><label>Chave da API</label><input type="text" name="config_zernio_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="zrk_..."></div>

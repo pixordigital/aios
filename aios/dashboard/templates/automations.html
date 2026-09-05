@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
+  <div><h1>Automações</h1><p class="text-sm text-secondary mt-1">Workflows visuais • Gatilhos • Credenciais • Execuções — sem n8n</p></div>
+  <div style="display:flex;gap:0.5rem">
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('cred-modal').showModal()">🔑 Credenciais</button>
+    <button class="btn btn-primary" onclick="document.getElementById('new-modal').showModal()">+ Nova automação</button>
+  </div>
+</div>
+
+<div class="grid-4 mb-4">
+  <div class="stat-card"><p class="stat-label">Total</p><p class="stat-value">{{ workflows|length }}</p><span class="text-xs text-tertiary">{{ triggers|length }} gatilhos</span></div>
+  <div class="stat-card"><p class="stat-label">Ativas</p><p class="stat-value">{{ active_count }}</p><span class="text-xs text-tertiary">gatilhos ligados</span></div>
+  <div class="stat-card"><p class="stat-label">Execuções hoje</p><p class="stat-value">{{ runs_today }}</p><span class="text-xs text-tertiary">últimas 24h</span></div>
+  <div class="stat-card"><p class="stat-label">Falhas</p><p class="stat-value" style="color:var(--red)">{{ failed_count }}</p><span class="text-xs text-tertiary">requer atenção</span></div>
+</div>
+
+<div style="display:flex;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap">
+  <a href="/dashboard/automations" class="btn {{ 'btn-primary' if filter=='all' else 'btn-ghost' }} btn-sm">Todas</a>
+  <a href="/dashboard/automations?filter=webhook" class="btn {{ 'btn-primary' if filter=='webhook' else 'btn-ghost' }} btn-sm">Webhook</a>
+  <a href="/dashboard/automations?filter=cron" class="btn {{ 'btn-primary' if filter=='cron' else 'btn-ghost' }} btn-sm">Agendadas</a>
+  <a href="/dashboard/automations?filter=event" class="btn {{ 'btn-primary' if filter=='event' else 'btn-ghost' }} btn-sm">Evento</a>
+  <a href="/dashboard/automations?filter=failed" class="btn {{ 'btn-primary' if filter=='failed' else 'btn-ghost' }} btn-sm">Com falha</a>
+</div>
+
+{% if not workflows %}
+<div class="card" style="text-align:center;padding:2rem">
+  <div style="font-size:2rem;margin-bottom:0.5rem">⚡</div>
+  <h2>Nenhuma automação</h2>
+  <p class="text-sm text-secondary" style="max-width:420px;margin:0.5rem auto">Crie em 30s a partir de um template ou do zero. Webhook, cron e eventos sem código.</p>
+  <div style="display:flex;gap:0.5rem;justify-content:center;margin-top:1rem">
+    <button class="btn btn-primary" onclick="document.getElementById('new-modal').showModal()">Criar primeira</button>
+    <a href="/dashboard/lab" class="btn btn-ghost">Lab avançado</a>
+  </div>
+</div>
+{% endif %}
+
+{% if templates and not workflows %}
+<div class="card mb-4">
+  <h2 style="margin-bottom:0.75rem">📚 Templates — 1 clique para começar</h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.5rem">
+    {% for tid, t in templates.items() %}
+    <form method="POST" action="/dashboard/automations/from-template/{{tid}}" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.75rem;display:flex;flex-direction:column;gap:0.5rem">
+      <div style="font-size:1.25rem">{{t.icon}}</div>
+      <div style="font-weight:600;font-size:0.875rem">{{t.name}}</div>
+      <div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.3">{{t.description}}</div>
+      <div style="font-size:0.6875rem;color:var(--text-tertiary)">{{t.nodes|length}} passos • {{t.trigger.type}}</div>
+      <button class="btn btn-primary btn-sm" style="margin-top:auto">Usar template</button>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:0.75rem" class="mb-4">
+{% for wf in workflows %}
+  {% set wf_trigs = triggers_map.get(wf.id, []) %}
+  {% set last_run = runs_map.get(wf.id) %}
+  <div class="card" style="display:flex;flex-direction:column;gap:0.5rem;position:relative">
+    <div class="flex-between">
+      <div style="font-weight:600;font-size:0.9375rem">{{wf.name}}</div>
+      <span class="badge" style="font-size:0.625rem;border-color:{{ 'var(--green)' if wf.status!='failed' else 'var(--red)' }};color:{{ 'var(--green)' if wf.status!='failed' else 'var(--red)' }}">{{wf.status}}</span>
+    </div>
+    <div style="font-size:0.75rem;color:var(--text-secondary)">{{wf.description or 'Sem descrição'}} • {{wf.timeout_seconds}}s timeout</div>
+    <div style="display:flex;gap:0.375rem;flex-wrap:wrap">
+      {% for tr in wf_trigs %}
+        <span class="badge" style="font-size:0.625rem;background:{{ 'var(--green-subtle)' if tr.is_active else 'var(--bg-hover)' }};border-color:{{ 'var(--green)' if tr.is_active else 'var(--border)' }}">
+          {% if tr.type=='webhook' %}🔗{% elif tr.type=='cron' %}⏰{% else %}⚡{% endif %} {{tr.type}} {{'• '+tr.cron_expr if tr.cron_expr else ''}} {{'• '+tr.event_type if tr.event_type else ''}}
+        </span>
+      {% else %}
+        <span class="badge" style="font-size:0.625rem;color:var(--text-tertiary)">sem gatilho - manual</span>
+      {% endfor %}
+    </div>
+    {% for tr in wf_trigs if tr.type=='webhook' and tr.webhook_path %}
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.375rem 0.5rem;display:flex;gap:0.375rem;align-items:center">
+      <span class="font-mono" style="font-size:0.6875rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">/api/automations/webhook/{{tr.webhook_path}}</span>
+      <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(location.origin+'/api/automations/webhook/{{tr.webhook_path}}');this.textContent='✓'">Copiar</button>
+    </div>
+    {% endfor %}
+    {% if last_run %}
+    <div style="font-size:0.6875rem;color:var(--text-tertiary)">Último: <span class="font-mono">{{last_run.status}}</span> • {{last_run.created_at.strftime('%d/%m %H:%M') if last_run.created_at else ''}}</div>
+    {% endif %}
+    <div style="display:flex;gap:0.375rem;margin-top:0.25rem;flex-wrap:wrap">
+      <a href="/dashboard/automations/{{wf.id}}" class="btn btn-primary btn-sm">Abrir</a>
+      <form method="POST" action="/dashboard/automations/{{wf.id}}/run" style="display:inline"><input type="hidden" name="input" value='{"test":true}'><button class="btn btn-ghost btn-sm">▶ Testar</button></form>
+      <form method="POST" action="/dashboard/automations/{{wf.id}}/duplicate" style="display:inline"><button class="btn btn-ghost btn-sm">⎘ Duplicar</button></form>
+      <a href="/dashboard/automations/{{wf.id}}/delete" class="btn btn-ghost btn-sm" onclick="return confirm('Excluir?')" style="color:var(--red)">×</a>
+    </div>
+  </div>
+{% endfor %}
+</div>
+
+{% if recent_runs %}
+<div class="card mb-4">
+  <h2 style="margin-bottom:0.75rem">Execuções recentes</h2>
+  <div style="display:flex;flex-direction:column;gap:0.375rem">
+    {% for r in recent_runs[:12] %}
+    <div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.75rem">
+      <span class="badge" style="font-size:0.625rem;border-color:{{ 'var(--green)' if r.status=='done' else 'var(--amber)' if r.status=='running' else 'var(--red)' }};color:{{ 'var(--green)' if r.status=='done' else 'var(--amber)' if r.status=='running' else 'var(--red)' }}">{{r.status}}</span>
+      <span style="flex:1" class="font-mono">{{r.workflow_id[:8]}} • {{r.id[:8]}}</span>
+      <span style="color:var(--text-tertiary)">{{r.created_at.strftime('%H:%M %d/%m') if r.created_at else ''}}</span>
+      <a href="/dashboard/automations/{{r.workflow_id}}" class="btn btn-ghost btn-sm">Ver</a>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="border-left:3px solid var(--accent)">
+  <h2 style="font-size:0.875rem;margin-bottom:0.5rem">💡 Como usar sem n8n</h2>
+  <ol style="margin:0;padding-left:1.25rem;font-size:0.8125rem;color:var(--text-secondary);line-height:1.6">
+    <li><b>Gatilho:</b> webhook (URL única), cron (<span class="font-mono">0 9 * * *</span> diário), evento ou manual</li>
+    <li><b>Ações:</b> HTTP Request, Código Python, Transform, Agente IA, IF, Wait — encadeados em DAG</li>
+    <li><b>Dados:</b> use <span class="font-mono">{{"{{json.campo}}"}} / {{"{{outputs.node_id}}"}} </span> entre passos</li>
+    <li><b>Credenciais:</b> salve token/api_key uma vez e reuse via <span class="font-mono">credential_id</span></li>
+  </ol>
+</div>
+
+<dialog id="new-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(560px,94vw);color:var(--text)">
+  <div style="padding:1.25rem">
+    <div class="flex-between mb-3"><h2>Nova automação</h2><button class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">✕</button></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.5rem;margin-bottom:1rem">
+      {% for tid, t in templates.items() %}
+      <form method="POST" action="/dashboard/automations/from-template/{{tid}}" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem;cursor:pointer" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-size:1.1rem">{{t.icon}}</div><div style="font-weight:600">{{t.name}}</div><div style="font-size:0.75rem;color:var(--text-secondary)">{{t.description}}</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:0.5rem;width:100%">Usar</button>
+      </form>
+      {% endfor %}
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:1rem">
+      <form method="POST" action="/dashboard/automations/create" style="display:flex;flex-direction:column;gap:0.75rem">
+        <h3 style="font-size:0.875rem">Ou começar do zero</h3>
+        <input name="name" required class="input" placeholder="Nome: ex. Lead → Slack">
+        <input name="description" class="input" placeholder="Descrição (opcional)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+          <select name="trigger_type" class="input"><option value="webhook">🔗 Webhook</option><option value="cron">⏰ Agendamento</option><option value="manual">▶ Manual</option><option value="event">⚡ Evento</option></select>
+          <input name="trigger_value" class="input" placeholder="cron: 0 9 * * * ou evento: message.received">
+        </div>
+        <button class="btn btn-primary">Criar automação</button>
+      </form>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="cred-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);padding:0;width:min(520px,94vw);color:var(--text)">
+  <div style="padding:1.25rem">
+    <div class="flex-between mb-3"><h2>🔑 Credenciais</h2><button class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">✕</button></div>
+    <form method="POST" action="/dashboard/automations/credentials" style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1rem">
+      <input name="name" required class="input" placeholder="Nome: ex. Slack Webhook">
+      <div style="display:flex;gap:0.5rem">
+        <select name="cred_type" class="input" style="flex:1"><option value="bearer">Bearer Token</option><option value="api_key">API Key</option><option value="basic">Basic (user:pass)</option></select>
+        <input name="value" required class="input" placeholder="token ou key" style="flex:2">
+      </div>
+      <button class="btn btn-primary btn-sm">Salvar credencial</button>
+    </form>
+    <div style="display:flex;flex-direction:column;gap:0.375rem">
+      {% for c in credentials %}
+      <div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.75rem">
+        <span style="flex:1"><b>{{c.name}}</b> <span class="text-tertiary">{{c.cred_type}}</span></span>
+        <span class="font-mono text-tertiary">{{c.id[:8]}}</span>
+        <a href="/dashboard/automations/credentials/{{c.id}}/delete" class="btn btn-ghost btn-sm" style="color:var(--red)">×</a>
+      </div>
+      {% else %}<div class="text-sm text-tertiary" style="text-align:center;padding:1rem">Nenhuma credencial. Crie para usar em HTTP Request sem expor segredo.</div>{% endfor %}
+    </div>
+  </div>
+</dialog>
+{% endblock %}

@@ -50,6 +50,10 @@ async def lifespan(app: FastAPI):
     await init_backends()
     await init_db()
     await ensure_storage()
+    try:
+        import aios.tools  # noqa: F401 ensure TOOL_REGISTRY populated
+    except Exception:
+        pass
 
     # Sentry — only if DSN configured
     if settings.sentry_dsn:
@@ -93,6 +97,13 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception("Telemetry flush failed")
     asyncio.create_task(_flush_telemetry())
+
+    try:
+        from aios.core.cron_scheduler import start_cron_scheduler
+        start_cron_scheduler()
+        logger.info("Cron scheduler started")
+    except Exception:
+        logger.exception("Cron scheduler failed to start")
 
     # Periodic DB failover check
     async def _failover_watch():
@@ -189,6 +200,11 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Channel stop failed")
 
+    try:
+        from aios.core.cron_scheduler import stop_cron_scheduler
+        stop_cron_scheduler()
+    except Exception:
+        pass
     # close Redis pool
     from aios.tasks.queue import close_pool
     try:

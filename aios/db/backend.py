@@ -30,7 +30,7 @@ class DatabaseBackend(ABC):
     """Abstract database backend. Implementations: SQLAlchemyBackend, ConvexBackend."""
 
     @abstractmethod
-    async def get(self, model: type, ident: Any) -> Any | None: ...
+    async def get(self, model: type, ident: Any, *args, **kwargs) -> Any | None: ...
 
     @abstractmethod
     async def execute(self, stmt) -> Any:

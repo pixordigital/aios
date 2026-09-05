@@ -1,3 +1,5 @@
+import json
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -31,7 +33,8 @@ class WorkflowOut(BaseModel):
     timeout_seconds: int
     entry_node_id: str | None
     org_id: str
-    created_at: str | None = None
+    created_at: datetime | str | None = None
+    model_config = {"from_attributes": True}
 
 
 class NodeCreate(BaseModel):
@@ -46,6 +49,7 @@ class NodeCreate(BaseModel):
     position: dict = {}
     on_failure: str = "fail"
     retry_count: int = 0
+    node_type: str | None = None
 
 
 @router.post("", response_model=WorkflowOut)
@@ -496,6 +500,42 @@ async def resume_run(
         orig.error = str(res.errors)[:4000]
     await db.commit()
     return {"run_id": orig.id, "status": orig.status, "outputs": orig.outputs}
+
+
+@router.get("/{wf_id}/export")
+async def export_workflow(wf_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    from sqlalchemy.orm import selectinload
+    wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+    if not wf or wf.org_id != org_id:
+        raise HTTPException(404)
+    from aios.db.models import AutomationTrigger
+    trigs = (await db.execute(select(AutomationTrigger).where(AutomationTrigger.workflow_id==wf_id))).scalars().all()
+    return {"workflow": {"id": wf.id, "name": wf.name, "description": wf.description, "timeout_seconds": wf.timeout_seconds, "entry_node_id": wf.entry_node_id, "nodes": [{"label": n.label, "tool_name": n.tool_name, "tool_args": n.tool_args, "depends_on": n.depends_on, "condition": n.condition, "output_key": n.output_key, "timeout_seconds": n.timeout_seconds, "position": n.position, "on_failure": n.on_failure, "retry_count": n.retry_count} for n in wf.nodes]}, "triggers": [{"type": t.type, "name": t.name, "config": t.config, "cron_expr": t.cron_expr, "event_type": t.event_type} for t in trigs]}
+
+
+@router.post("/import")
+async def import_workflow(body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    _require_role(user, ["admin","org_admin"])
+    data = body.get("workflow") or body
+    name = data.get("name", "Imported")
+    wf = Workflow(org_id=org_id, name=name, description=data.get("description",""), timeout_seconds=data.get("timeout_seconds",120), entry_node_id=data.get("entry_node_id"))
+    db.add(wf)
+    await db.flush()
+    id_map = {}
+    for nd in data.get("nodes") or []:
+        node = __import__('aios.db.models', fromlist=['WorkflowNode']).WorkflowNode(workflow_id=wf.id, label=nd.get("label",""), tool_name=nd.get("tool_name"), tool_args=nd.get("tool_args",{}), depends_on=[], condition=nd.get("condition"), output_key=nd.get("output_key","result"), timeout_seconds=nd.get("timeout_seconds",60), position=nd.get("position",{}), on_failure=nd.get("on_failure","fail"), retry_count=nd.get("retry_count",0))
+        if nd.get("agent_id"):
+            node.agent_id = nd.get("agent_id")
+        db.add(node)
+        await db.flush()
+        id_map[nd.get("id","")] = node.id
+    # fix depends_on with new ids if original had ids
+    for nd, node in zip(data.get("nodes") or [], (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf.id))).scalars().all()):
+        new_deps = [id_map.get(d, d) for d in (nd.get("depends_on") or [])]
+        node.depends_on = new_deps
+    await db.commit()
+    await db.refresh(wf)
+    return {"id": wf.id, "name": wf.name}
 
 
 @router.post("/{wf_id}/replay/{run_id}")

@@ -6,6 +6,7 @@
         <p class="text-sm text-secondary mt-1">Suas operações de agentes em um relance</p>
     </div>
     <div class="flex-center gap-2">
+        <a href="/dashboard/automations" class="btn btn-ghost" style="border-color:var(--accent);color:var(--accent)">⚡ Automações</a>
         <button class="btn btn-primary" onclick="document.getElementById('quick-create').showModal()">+ Criação rápida</button>
     </div>
 </div>
@@ -48,6 +49,18 @@
         <span class="text-xs text-tertiary">{{ stats.conversations }} conversas</span>
     </div>
 </div>
+
+{% if usage_monthly %}
+<div class="card mb-4" style="border-left:3px solid {{ 'var(--red)' if usage_monthly.status=='critical' else 'var(--amber)' if usage_monthly.status in ['warning','attention'] else 'var(--accent)' }}">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem">
+        <div><h2 style="font-size:0.9375rem">Uso no mês • ${{"%.2f"|format(usage_monthly.total_cost)}} <span style="font-weight:400;color:var(--text-tertiary)">/ {{usage_monthly.pct_tokens}}% do limite</span></h2>
+        <div style="font-size:0.75rem;color:var(--text-secondary)">{{usage_monthly.total_tokens}} tokens • previsão ${{"%.2f"|format(usage_monthly.forecast_cost)}} até {{usage_monthly.next_billing}} ({{usage_monthly.remaining_days}} dias)</div></div>
+        <a href="/dashboard/billing" class="btn btn-ghost btn-sm">Detalhar →</a>
+    </div>
+    <div style="height:6px;background:var(--bg);border-radius:99px;margin-top:0.5rem;overflow:hidden"><div style="height:100%;width:{{ [usage_monthly.pct_tokens,100]|min }}%;background:{{ 'var(--red)' if usage_monthly.status=='critical' else 'var(--amber)' if usage_monthly.status=='warning' else 'var(--accent)' }}"></div></div>
+    {% if usage_monthly.will_exceed %}<div style="font-size:0.75rem;color:var(--red);margin-top:0.375rem">⚠️ Vai estourar limite projetado ({{usage_monthly.forecast_tokens}} > {{usage_monthly.max_tokens}}). <a href="/dashboard/billing" style="color:var(--red)">Upgrade</a></div>{% endif %}
+</div>
+{% endif %}
 
 <!-- Quick Action Cards -->
 <div class="grid-2 mb-4">

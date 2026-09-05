@@ -24,8 +24,10 @@ from .promptlab import router as promptlab_router
 from .secrets import router as secrets_router
 from .eval import router as eval_router
 from .gdpr import router as gdpr_router
+from .automations import router as automations_router
 
 api_router = APIRouter()
+api_router.include_router(automations_router)
 api_router.include_router(auth_router)
 api_router.include_router(agents_router)
 api_router.include_router(versions_router)

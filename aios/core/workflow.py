@@ -316,6 +316,19 @@ class WorkflowEngine:
                 result.node_status[node.id] = "skipped"
                 return result
 
+        try:
+            from aios.core.expressions import render_value
+            ctx = {"outputs": result.outputs, "shared": shared, "input": shared.get("initial_input",""), "json": shared}
+            ctx.update(shared)
+            ctx["outputs"] = result.outputs
+            if isinstance(shared.get("initial_input"), str):
+                try:
+                    ctx["json"] = json.loads(shared["initial_input"])
+                except Exception:
+                    ctx["json"] = shared.get("initial_input")
+        except Exception:
+            ctx = shared
+
         if node.agent_id:
             from aios.db.engine import async_session
             from aios.db.models import Agent as AgentModel
@@ -349,19 +362,55 @@ class WorkflowEngine:
                 )()
             runtime = AgentRuntime(agent_model, self._db_factory)
             msg = shared.get(node.output_key, shared.get("initial_input", ""))
-            output = await runtime.run(conv_id, msg)
+            try:
+                from aios.core.expressions import render_value as _rv
+                msg = _rv(msg, ctx) if isinstance(msg, str) and "{{" in msg else msg
+            except Exception:
+                pass
+            output = await runtime.run(conv_id, str(msg))
             result.outputs[node.id] = output
             result.node_status[node.id] = "done"
+            try:
+                shared[node.output_key] = output
+                shared[node.id] = output
+            except Exception:
+                pass
         elif node.tool_name:
             from aios.core.tools import ToolEngine
-
+            try:
+                from aios.core.expressions import render_value as _rv2
+                rendered_args = _rv2(dict(node.tool_args or {}), ctx)
+                if isinstance(rendered_args, dict):
+                    for k,v in list(rendered_args.items()):
+                        if isinstance(v, str) and v.startswith("{") and v.endswith("}"):
+                            try:
+                                rendered_args[k] = json.loads(v)
+                            except Exception:
+                                pass
+                else:
+                    rendered_args = node.tool_args
+            except Exception:
+                rendered_args = node.tool_args
+            if node.tool_name == "loop" and isinstance(rendered_args, dict):
+                items = rendered_args.get("items") or rendered_args.get("input") or []
+                if isinstance(items, str):
+                    try:
+                        items = json.loads(items)
+                    except Exception:
+                        items = []
+                if not isinstance(items, list):
+                    items = [items]
+                result.outputs[node.id] = json.dumps(items)
+                result.node_status[node.id] = "done"
+                try:
+                    shared[node.output_key] = json.dumps(items)
+                    shared[node.id] = json.dumps(items)
+                    shared[f"{node.id}_items"] = items
+                except Exception:
+                    pass
+                return result
             engine = ToolEngine([node.tool_name])
-            args_json = json.dumps(node.tool_args)
-            org = (
-                getattr(shared, "get", lambda k, d=None: d)("org_id")
-                if isinstance(shared, dict)
-                else ""
-            )
+            args_json = json.dumps(rendered_args if isinstance(rendered_args, dict) else (node.tool_args or {}))
             org = shared.get("org_id") or shared.get("initial_input_org") or ""
             sem = _get_org_semaphore(org or "global")
             try:
@@ -371,6 +420,20 @@ class WorkflowEngine:
                     )
                 result.outputs[node.id] = output
                 result.node_status[node.id] = "done"
+                try:
+                    parsed = json.loads(output) if isinstance(output, str) and output.strip().startswith("{") else output
+                    if isinstance(parsed, dict) and "output" in parsed:
+                        shared[node.output_key] = json.dumps(parsed["output"]) if isinstance(parsed["output"], (dict,list)) else str(parsed["output"])
+                        shared[node.id] = shared[node.output_key]
+                    elif isinstance(parsed, dict) and "branch" in parsed:
+                        shared[node.output_key] = json.dumps(parsed)
+                        shared[node.id] = json.dumps(parsed)
+                    else:
+                        shared[node.output_key] = output
+                        shared[node.id] = output
+                except Exception:
+                    shared[node.output_key] = output
+                    shared[node.id] = output
             except Exception as e:
                 logger.exception("Workflow node execution failed: %s", node.id)
                 result.errors[node.id] = str(e)

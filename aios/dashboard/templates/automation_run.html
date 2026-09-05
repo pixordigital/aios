@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<a href="/dashboard/automations" class="btn btn-ghost btn-sm" style="margin-bottom:1rem">← Voltar</a>
+<h1>Execução {{run.id[:8]}}</h1>
+<p class="text-sm text-secondary">{{run.status}} • {{run.created_at.strftime('%d/%m %Y %H:%M:%S') if run.created_at else ''}}</p>
+<div class="card mt-3">
+  <h2>Inputs</h2><pre class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem;font-size:0.75rem;white-space:pre-wrap">{{run.inputs | tojson(indent=2)}}</pre>
+</div>
+<div class="card mt-3">
+  <h2>Outputs</h2><pre class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem;font-size:0.75rem;white-space:pre-wrap">{{run.outputs | tojson(indent=2) if run.outputs else '(vazio)'}}</pre>
+</div>
+<div class="card mt-3">
+  <h2>Status por nó</h2><pre class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem;font-size:0.75rem;white-space:pre-wrap">{{run.node_status | tojson(indent=2) if run.node_status else '{}'}}</pre>
+  {% if run.error %}<div style="margin-top:0.5rem;color:var(--red);font-size:0.75rem">{{run.error}}</div>{% endif %}
+</div>
+{% endblock %}
