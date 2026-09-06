@@ -72,6 +72,37 @@ async def get_conversation(
     return conv
 
 
+@router.get("/search/semantic")
+async def semantic_search(q: str = "", top_k: int = 10, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    if not q:
+        return {"results": []}
+    from sqlalchemy import select as _sel
+    from aios.db.models import Conversation, Message
+    from aios.core.memory import _embed
+    try:
+        qvec = _embed(q)
+    except Exception:
+        qvec = None
+    convs = (await db.execute(_sel(Conversation).where(Conversation.org_id == org_id).order_by(Conversation.created_at.desc()).limit(30))).scalars().all()
+    scored = []
+    for c in convs:
+        # last message content
+        last = (await db.execute(_sel(Message).where(Message.conversation_id == c.id).order_by(Message.created_at.desc()).limit(1))).scalars().first()
+        text = (last.content if last else "") + " " + (c.external_id or "") + " " + c.channel
+        if qvec:
+            try:
+                tvec = _embed(text[:500])
+                dot = sum(a*b for a,b in zip(qvec, tvec))
+                scored.append((dot, c))
+            except Exception:
+                if q.lower() in text.lower():
+                    scored.append((0.5, c))
+        else:
+            if q.lower() in text.lower():
+                scored.append((1, c))
+    scored.sort(key=lambda x: -x[0])
+    return {"results": [{"id": c.id, "channel": c.channel, "external_id": c.external_id, "score": round(s,3)} for s,_ in scored[:top_k]]}
+
 @router.get("/{conversation_id}/handover")
 async def get_handover(conversation_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     conv = await db.get(Conversation, conversation_id)
