@@ -261,14 +261,32 @@ class TeamOrchestrator:
     ) -> str:
         if not self.agents:
             return "No agents in team"
-        routed = await self._llm_route(msg, conv_id)
-        idx = min(max(0, routed["agent_index"]), len(self.agents) - 1)
-        agent = AgentRuntime(self.agents[idx], self._db)
-        out = await agent.run(conv_id, routed.get("handoff_message", msg), db)
-        await self.update_blackboard(
-            conv_id, f"last_{self.agents[idx].name}", out[:1000]
-        )
-        return out
+        # sharding para 8+ agentes: hash conversa → shard 4
+        agents = self.agents
+        if len(agents) >= 8:
+            import hashlib
+
+            h = int(hashlib.md5(conv_id.encode()).hexdigest(), 16) % 4
+            agents = [a for i, a in enumerate(agents) if i % 4 == h] or agents
+        try:
+            routed = await self._llm_route(msg, conv_id)
+            idx = min(max(0, routed["agent_index"]), len(agents) - 1)
+            agent = AgentRuntime(agents[idx], self._db)
+            out = await agent.run(conv_id, routed.get("handoff_message", msg), db)
+            await self.update_blackboard(conv_id, f"last_{agents[idx].name}", out[:1000])
+            try:
+                from aios.core.telemetry import telemetry
+
+                telemetry.record(agents[idx].id, getattr(agents[idx], "org_id", ""), tokens=len(out))
+            except Exception:
+                pass
+            return out
+        except Exception:
+            # fallback: semantic → round_robin
+            try:
+                return await self._semantic_route(conv_id, msg, db)
+            except Exception:
+                return await self._round_robin(conv_id, msg, db)
 
     async def _supervisor_route_stream(
         self, conv_id: str, msg: str, db: DatabaseBackend | None = None

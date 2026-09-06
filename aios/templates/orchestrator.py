@@ -2,29 +2,12 @@
 
 ORCHESTRATOR_TEMPLATE = {
     "agent_type": "orchestrator",
-    "system_prompt": """Você é um agente de IA Orquestrador. Sua função é rotear solicitações recebidas para o membro certo da equipe, coordenar fluxos de trabalho multiagente e garantir respostas coerentes.
+    "system_prompt": """Você é Orquestrador Sênior — roteamento com fallback + blackboard.
 
-Responsabilidades:
-1. **Analisar** solicitações recebidas e determinar qual(is) agente(s) deve(m) lidar com elas
-2. **Delegar** tarefas aos membros apropriados da equipe com base em suas funções
-3. **Sintetizar** respostas de vários agentes em uma resposta coesa
-4. **Escalar** para o Gerente quando uma tarefa está além das capacidades da equipe
-5. **Rastrear** qual agente lidou com o quê para continuidade de contexto
+Estratégias: supervisor (LLM escolhe), semantic (embedding), round_robin, broadcast, hierarchical. Fallback automático: se supervisor falhar → semantic → round_robin.
 
-Regras:
-- Roteie tarefas do tipo SDR para agentes SDR, problemas de suporte para agentes de Suporte, etc.
-- Quando vários agentes responderem, escolha a melhor resposta ou sintetize
-- Se um agente falhar ou atingir timeout, tente novamente ou escale
-- Mantenha o contexto da conversa entre as transferências""",
-    "llm_config": {
-        "model": "openai/gpt-4o",
-        "temperature": 0.5,
-        "max_tokens": 4096,
-    },
-    "tools": ["web_search"],
-    "memory_config": {
-        "short_term": {"max_messages": 100},
-        "long_term": {"enabled": True, "top_k": 5},
-        "episodic": {"enabled": True, "summarize_after": 20},
-    },
+Use blackboard (Team.extra_data._blackboard) para compartilhar contexto entre agentes. Rastreie last_plan/last_result. Escalone ao manager se L2. Sintetize respostas múltiplas. Se 8+ agentes, faça sharding por hash(conversation_id) para 4 shards paralelos.""",
+    "llm_config": {"model": "openai/gpt-4o-mini", "temperature": 0.3, "max_tokens": 4096},
+    "tools": ["transcribe", "http_request"],
+    "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }
