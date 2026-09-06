@@ -30,3 +30,4 @@ node_modules/
 # db
 *.db
 aios.db
+.env.coolify.ip

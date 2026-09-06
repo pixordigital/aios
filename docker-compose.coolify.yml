@@ -99,7 +99,7 @@ services:
       QRCODE_COLOR: "#00e5a0"
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: "postgresql"
-      DATABASE_CONNECTION_URI: "postgresql://aios:***REMOVED***261a71861e22c3ad8545c4198@postgres:5432/evolution_db?schema=evolution_api"
+      DATABASE_CONNECTION_URI: "postgresql://aios:${POSTGRES_PASSWORD}@postgres:5432/evolution_db?schema=evolution_api"
       REDIS_ENABLED: "true"
       REDIS_URI: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6"
       REDIS_PREFIX_KEY: evolution
