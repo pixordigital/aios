@@ -1813,8 +1813,11 @@ async def proposal_page(request: Request):
         from aios.core.limits import get_monthly_usage
         org = await db.get(Organization, org_id)
         monthly = await get_monthly_usage(org_id, db)
+        from sqlalchemy import func as _func2
+        from aios.db.models import Agent as _Ag2
+        agent_count = (await db.execute(select(func.count(_Ag2.id)).where(_Ag2.org_id == org_id))).scalar() or 0
         economia = int(monthly["total_messages"] * 1.25) or 1200
-        return await _render("proposal.html", request, title="Proposta", org=org, date=__import__("datetime").date.today().isoformat(), economia=economia, msgs=monthly["total_messages"], cost=monthly["total_cost"], roi="8", plan=monthly["plan"], agents=monthly["max_tokens"], channels="whatsapp")
+        return await _render("proposal.html", request, title="Proposta", org=org, date=__import__("datetime").date.today().isoformat(), economia=economia, msgs=monthly["total_messages"], cost=monthly["total_cost"], roi="8", plan=monthly["plan"], agents=agent_count, channels="whatsapp")
 
 @router.post("/billing/trial")
 async def billing_trial(request: Request):
@@ -1842,6 +1845,9 @@ async def wizard_create(request: Request, phone: str = Form(...), vertical: str 
     from aios.db.models import Agent, ChannelConnection
     from aios.core.secrets import encrypt_channel_config
     from aios.config import settings
+    import re as _re, uuid as _uuid
+    if not _re.match(r"^\d{10,15}$", phone):
+        return await _render("wizard.html", request, title="Assistente 60s", error="WhatsApp inválido: use 5511999999999 (10-15 dígitos)")
     # cria agente do vertical
     tpl_map = {"clinica": "support", "imobiliaria": "sdr", "ecommerce": "support"}
     atype = tpl_map.get(vertical, vertical)
@@ -1850,9 +1856,9 @@ async def wizard_create(request: Request, phone: str = Form(...), vertical: str 
         ag = Agent(org_id=org_id, name=f"Bot {vertical.capitalize()}", agent_type=atype, system_prompt=tpl.get("system_prompt",""), llm_config=tpl.get("llm_config",{}), tools=tpl.get("tools",[]), memory_config=tpl.get("memory_config",{}))
         db.add(ag)
         await db.flush()
-        # cria instância evolution
+        # cria instância evolution com uuid para evitar colisão
         from aios.core.evolution_api import evo_create_instance
-        inst_name = f"wizard{phone[-4:]}"
+        inst_name = f"wizard{_uuid.uuid4().hex[:6]}"
         try:
             await evo_create_instance(inst_name)
         except Exception:

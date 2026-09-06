@@ -10,7 +10,6 @@
 </div>
 
 {% set pct = monthly.pct_tokens or 0 %}
-{% set pct = monthly.pct_tokens or 0 %}
 {% set status_color = 'var(--green)' if monthly.status=='ok' else 'var(--amber)' if monthly.status in ['attention','warning'] else 'var(--red)' %}
 {% set status_bg = 'var(--green-subtle)' if monthly.status=='ok' else 'var(--amber-subtle)' if monthly.status in ['attention','warning'] else 'var(--red-subtle)' %}
 {% set conversas = (monthly.total_tokens / 800)|int %}
@@ -42,7 +41,7 @@
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;margin-top:0.75rem">
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Custo AIOS</div><div style="font-weight:600">${{"%.2f"|format(monthly.total_cost)}}</div></div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Economia líquida</div><div style="font-weight:700;color:var(--green)">R$ {{ "%.0f"|format(roi*5.5) }}</div><div style="font-size:0.6rem;color:var(--text-tertiary)">*R$×5.5 câmbio ref</div></div>
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">ROI</div><div style="font-weight:700">{{ "%.0f"|format((roi*5.5)/(monthly.total_cost*5.5+1)*100) }}x</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">ROI</div><div style="font-weight:700">{{ "%.0f"|format((roi*5.5)/((monthly.total_cost*5.5) if monthly.total_cost>0 else 0.01)*100) if monthly.total_cost>0 else "∞" }}x</div></div>
     </div>
     <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.5rem">Cálculo: {{monthly.total_messages}} msgs × 3min × R$25/h = R$ {{ "%.0f"|format(economia) }} — custo AIOS ${{ "%.2f"|format(monthly.total_cost) }}. Com 3 atendentes (R$9k/mês) você já economiza 70%.</div>
 </div>

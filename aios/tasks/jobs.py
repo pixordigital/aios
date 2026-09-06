@@ -264,10 +264,17 @@ async def workflow_run_job(ctx, payload: dict):
         raise
 
 
+async def quota_alert_job(ctx, payload: dict):
+    from aios.core.limits import _send_quota_alert
+
+    await _send_quota_alert(payload.get("org_id"), payload.get("pct", 0), payload.get("plan", ""))
+
+
 # ARQ worker function registry
 FUNCTIONS = [
     process_inbound,
     deliver_message,
     agent_run,
     workflow_run_job,
+    quota_alert_job,
 ]

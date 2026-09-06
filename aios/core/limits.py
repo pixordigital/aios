@@ -80,13 +80,12 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         pct = monthly.get("pct_tokens", 0)
         if 80 <= pct < 100:
             logger.warning("Quota soft limit %s%% for org %s (plan %s)", pct, org_id, plan_name)
-            # async alert best-effort
             try:
-                import asyncio as _aio
-
-                _aio.create_task(_send_quota_alert(org_id, pct, plan_name))
+                from aios.tasks.queue import enqueue_job
+                await enqueue_job("aios.tasks.jobs.quota_alert_job", {"org_id": org_id, "pct": pct, "plan": plan_name})
             except Exception:
-                pass
+                import asyncio as _aio
+                _aio.create_task(_send_quota_alert(org_id, pct, plan_name))
     except Exception:
         pass
     return True, ""

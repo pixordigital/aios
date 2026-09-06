@@ -137,13 +137,28 @@ async def inbound_webhook(request: Request):
                     extra["contact_name"] = contacts[from_number].get("profile", {}).get("name", "")
                 if extra.get("media_id") and extra.get("whatsapp_type") in ("audio","voice"):
                     try:
+                        import asyncio as _aio
                         from aios.tools.transcribe import TranscribeTool
-                        tr = await TranscribeTool().run(media_id=extra["media_id"], language="pt", diarize=True)
-                        if tr.get("text"):
-                            text = tr["text"]
-                            extra["transcribed"] = text
-                            extra["segments"] = tr.get("segments", [])
-                            extra["original_type"] = "voice"
+
+                        try:
+                            tr = await _aio.wait_for(TranscribeTool().run(media_id=extra["media_id"], language="pt", diarize=True), timeout=5)
+                            if tr.get("text"):
+                                text = tr["text"]
+                                extra["transcribed"] = text
+                                extra["segments"] = tr.get("segments", [])
+                                extra["original_type"] = "voice"
+                        except _aio.TimeoutError:
+                            extra["transcribe_pending"] = True
+                            # background retry
+                            async def _bg_transcribe(mid, conv_extra):
+                                try:
+                                    tr2 = await TranscribeTool().run(media_id=mid, language="pt", diarize=True)
+                                    if tr2.get("text"):
+                                        conv_extra["transcribed_bg"] = tr2["text"]
+                                except Exception:
+                                    pass
+
+                            _aio.create_task(_bg_transcribe(extra["media_id"], extra))
                     except Exception:
                         pass
 
