@@ -54,6 +54,12 @@ async def lifespan(app: FastAPI):
         import aios.tools  # noqa: F401 ensure TOOL_REGISTRY populated
     except Exception:
         pass
+    try:
+        from aios.core.rag import ensure_vector_extension
+        await ensure_vector_extension()
+        logger.info("pgvector HNSW ready")
+    except Exception:
+        logger.debug("pgvector not available, fallback sqlite")
 
     # Sentry — only if DSN configured
     if settings.sentry_dsn:

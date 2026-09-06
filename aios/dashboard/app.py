@@ -622,20 +622,19 @@ async def team_delete(request: Request, tid: str):
 # ─── Conversations, Channels (unchanged) ───
 
 @router.get("/conversations", response_class=HTMLResponse)
-async def conversation_list(request: Request):
+async def conversation_list(request: Request, q: str = "", page: int = 1):
     org_id = await _org_filter(request)
+    per = 20
     async with db_session() as db:
-        convs = (await db.execute(
-            select(Conversation).where(Conversation.org_id == org_id).order_by(Conversation.created_at.desc())
-        )).scalars().all()
-        # eagerly count messages per conversation
-        msg_counts = {}
+        base = select(Conversation).where(Conversation.org_id == org_id)
+        if q:
+            base = base.where((Conversation.channel.ilike(f"%{q}%")) | (Conversation.external_id.ilike(f"%{q}%")))
+        total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0
+        convs = (await db.execute(base.order_by(Conversation.created_at.desc()).limit(per).offset((page-1)*per))).scalars().all()
         for conv in convs:
-            cnt = (await db.execute(
-                select(func.count(Message.id)).where(Message.conversation_id == conv.id)
-            )).scalar() or 0
+            cnt = (await db.execute(select(func.count(Message.id)).where(Message.conversation_id == conv.id))).scalar() or 0
             conv._msg_count = cnt
-    return await _render("conversations.html", request, title="Conversas", conversations=convs)
+    return await _render("conversations.html", request, title="Conversas", conversations=convs, q=q, page=page, total=total, per=per)
 
 
 @router.post("/conversations/{conv_id}/handover")
@@ -1801,6 +1800,10 @@ async def automations_cred_delete(request: Request, cid: str):
             await db.delete(c)
             await db.commit()
     return RedirectResponse("/dashboard/automations", status_code=303)
+
+@router.get("/flows", response_class=HTMLResponse)
+async def flows_page(request: Request, wf: str = ""):
+    return await _render("flow_editor.html", request, title="Flow Editor", wf_id=wf)
 
 @router.get("/knowledge", response_class=HTMLResponse)
 async def knowledge_page(request: Request):

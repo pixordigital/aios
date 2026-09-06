@@ -26,6 +26,7 @@ _ALLOWED_MODULES = {
     "aios.tools.hubspot",
     "aios.tools.pipedrive",
     "aios.tools.rdstation",
+    "aios.tools.transcribe",
     "aios.tools.dynamic",
     "aios.tools.crm",
     "aios.tools.lead_scoring",
