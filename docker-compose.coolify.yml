@@ -88,6 +88,43 @@ services:
         limits: { cpus: "1", memory: 1536M }
         reservations: { cpus: "0.25", memory: 512M }
 
+  evolution:
+    image: atendai/evolution-api:latest
+    environment:
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution:8080}
+      AUTHENTICATION_TYPE: apikey
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-evolution_secret_change_me}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#00e5a0"
+      DATABASE_ENABLED: "false"
+      REDIS_ENABLED: "true"
+      REDIS_URI: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6"
+      REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6"
+      CACHE_REDIS_PREFIX_KEY: evolution-cache
+      S3_ENABLED: "false"
+      WEBHOOK_GLOBAL_URL: "${AIOS_APP_URL:-http://app:8777}/api/evolution/webhook"
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: "false"
+      LANGUAGE: pt-BR
+    volumes:
+      - evolution-data:/evolution/instances
+      - evolution-store:/evolution/store
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    restart: unless-stopped
+
   worker:
     build: .
     command: ["python", "-m", "aios.tasks.worker"]
@@ -127,3 +164,5 @@ volumes:
   postgres-data:
   redis-data:
   app-data:
+  evolution-data:
+  evolution-store:

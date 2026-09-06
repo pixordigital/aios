@@ -79,7 +79,7 @@
                 </div>
             </div>
             <div id="creds-evolution" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>URL do servidor</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://localhost:8080"></div>
+                <div><label>URL do servidor</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else 'http://evolution:8080' }}" class="input input-mono" placeholder="http://evolution:8080 (integrado)"></div>
                 <div><label>Chave da API</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
                 <div><label>Nome da instância</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="my-whatsapp-instance"></div>
             </div>
