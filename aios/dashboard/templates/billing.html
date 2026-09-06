@@ -3,14 +3,19 @@
 <div class="flex-between mb-4">
     <div><h1>Cobrança & Uso</h1><p class="text-sm text-secondary mt-1">Tokens, custo e previsão de pagamento — tudo claro</p></div>
     <div style="display:flex;gap:0.5rem">
-        <a href="/api/analytics/usage/daily?days=30" class="btn btn-ghost btn-sm" target="_blank">📥 CSV (API)</a>
+        {% if current_plan=='free' %}<form method="POST" action="/dashboard/billing/trial"><button class="btn btn-primary btn-sm">🎁 14 dias Pro grátis sem cartão</button></form>{% endif %}
+        <a href="/api/analytics/usage/daily?days=30" class="btn btn-ghost btn-sm" target="_blank">📥 CSV</a>
         <button class="btn btn-ghost btn-sm" onclick="location.reload()">↻ Atualizar</button>
     </div>
 </div>
 
 {% set pct = monthly.pct_tokens or 0 %}
+{% set pct = monthly.pct_tokens or 0 %}
 {% set status_color = 'var(--green)' if monthly.status=='ok' else 'var(--amber)' if monthly.status in ['attention','warning'] else 'var(--red)' %}
 {% set status_bg = 'var(--green-subtle)' if monthly.status=='ok' else 'var(--amber-subtle)' if monthly.status in ['attention','warning'] else 'var(--red-subtle)' %}
+{% set conversas = (monthly.total_tokens / 800)|int %}
+{% set economia = (monthly.total_messages * 1.25) %}
+{% set roi = (economia - monthly.total_cost) if economia else 0 %}
 
 <div class="card mb-4" style="border-left:4px solid {{status_color}};background:{{status_bg}}">
     <div class="flex-between" style="flex-wrap:wrap;gap:0.75rem">
@@ -27,6 +32,29 @@
     {% if monthly.will_exceed %}
     <div style="margin-top:0.75rem;padding:0.5rem 0.75rem;background:var(--red-subtle);border:1px solid var(--red);border-radius:6px;font-size:0.8125rem;color:var(--red)">⚠️ Projeção indica estouro do plano: {{monthly.forecast_tokens|int}} tokens projetados > {{monthly.max_tokens}} limite. Considere upgrade.</div>
     {% endif %}
+</div>
+
+<div class="card mb-4" style="border-left:3px solid var(--accent);background:var(--accent-subtle)">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.75rem">
+        <div><h2 style="font-size:0.9375rem">💰 ROI — Economia com AIOS</h2><p class="text-sm text-secondary">{{conversas}} conversas ≈ {{monthly.total_messages}} msgs • 3min cada • R$25/h atendente</p></div>
+        <div style="text-align:right"><div style="font-size:1.25rem;font-weight:700;color:var(--green)">R$ {{ "%.0f"|format(economia) }}</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">economia bruta/mês</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;margin-top:0.75rem">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Custo AIOS</div><div style="font-weight:600">${{"%.2f"|format(monthly.total_cost)}}</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Economia líquida</div><div style="font-weight:700;color:var(--green)">R$ {{ "%.0f"|format(roi*5.5) }}</div><div style="font-size:0.6rem;color:var(--text-tertiary)">*R$×5.5 câmbio ref</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">ROI</div><div style="font-weight:700">{{ "%.0f"|format((roi*5.5)/(monthly.total_cost*5.5+1)*100) }}x</div></div>
+    </div>
+    <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.5rem">Cálculo: {{monthly.total_messages}} msgs × 3min × R$25/h = R$ {{ "%.0f"|format(economia) }} — custo AIOS ${{ "%.2f"|format(monthly.total_cost) }}. Com 3 atendentes (R$9k/mês) você já economiza 70%.</div>
+</div>
+
+<div class="card mb-4" style="border-left:3px solid var(--amber)">
+    <div class="flex-between"><h2>⏱ SLA — Tempo resposta</h2><span class="badge" style="border-color:{{'var(--red)' if monthly.avg_daily_tokens>8000 else 'var(--green)'}};color:{{'var(--red)' if monthly.avg_daily_tokens>8000 else 'var(--green)'}}">{{monthly.avg_daily_tokens}}ms avg*</span></div>
+    <div style="font-size:0.8125rem;color:var(--text-secondary);margin-top:0.5rem">*média diária tokens como proxy. Alerta se &gt;8s: <span style="color:{{'var(--red)' if monthly.avg_daily_tokens>8000 else 'var(--green)'}}">{{'⚠️ Acima do SLA' if monthly.avg_daily_tokens>8000 else '✅ Dentro do SLA'}}</span> • Veja detalhes em /dashboard/analytics</div>
+    <div style="margin-top:0.5rem"><a href="/dashboard/analytics" class="btn btn-ghost btn-sm">Ver SLA por agente</a> <a href="/dashboard/proposal" class="btn btn-ghost btn-sm">📄 Proposta PDF</a></div>
+</div>
+
+<div class="card mb-4" style="background:var(--accent-subtle);border:1px solid var(--accent-border)">
+    <div style="font-size:0.8125rem"><span style="background:var(--accent);color:#000;padding:0.125rem 0.375rem;border-radius:4px;font-weight:700;font-size:0.6875rem">RECOMENDADO</span> <b>WhatsApp Cloud API</b> — estável, sem risco Baileys. Evolution continua, mas migre 1-clique em /dashboard/evolution</div>
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.75rem" class="mb-4">

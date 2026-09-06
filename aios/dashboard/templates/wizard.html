@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:520px;margin:2rem auto">
+  <div class="card" style="text-align:center;padding:2rem">
+    <div style="font-size:2rem">🧙</div><h1>Seu robô em 60s</h1><p class="text-sm text-secondary">1 pergunta: qual seu WhatsApp?</p>
+    <form method="POST" action="/dashboard/wizard/create" style="display:flex;flex-direction:column;gap:0.75rem;margin-top:1rem">
+      <input name="phone" required class="input input-mono" placeholder="5511999999999">
+      <select name="vertical" class="input"><option value="support">Suporte</option><option value="sdr">Vendas SDR</option><option value="clinica">Clínica</option><option value="imobiliaria">Imobiliária</option><option value="ecommerce">E-commerce</option></select>
+      <button class="btn btn-primary" style="width:100%">Criar meu robô →</button>
+    </form>
+    <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.5rem">Cria agente + instância Evolution + canal + template. QR na próxima tela.</div>
+  </div>
+</div>
+{% endblock %}

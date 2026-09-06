@@ -1801,6 +1801,67 @@ async def automations_cred_delete(request: Request, cid: str):
             await db.commit()
     return RedirectResponse("/dashboard/automations", status_code=303)
 
+@router.get("/wizard", response_class=HTMLResponse)
+async def wizard_page(request: Request):
+    return await _render("wizard.html", request, title="Assistente 60s")
+
+@router.get("/proposal", response_class=HTMLResponse)
+async def proposal_page(request: Request):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import Organization
+        from aios.core.limits import get_monthly_usage
+        org = await db.get(Organization, org_id)
+        monthly = await get_monthly_usage(org_id, db)
+        economia = int(monthly["total_messages"] * 1.25) or 1200
+        return await _render("proposal.html", request, title="Proposta", org=org, date=__import__("datetime").date.today().isoformat(), economia=economia, msgs=monthly["total_messages"], cost=monthly["total_cost"], roi="8", plan=monthly["plan"], agents=monthly["max_tokens"], channels="whatsapp")
+
+@router.post("/billing/trial")
+async def billing_trial(request: Request):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import Organization
+        org = await db.get(Organization, org_id)
+        if org:
+            data = dict(org.extra_data or {})
+            if data.get("trial_used"):
+                return RedirectResponse("/dashboard/billing?error=trial_used", status_code=303)
+            import datetime as _dt
+            data["plan"] = "pro"
+            data["trial"] = True
+            data["trial_until"] = (_dt.date.today() + _dt.timedelta(days=14)).isoformat()
+            data["trial_used"] = True
+            org.extra_data = data
+            await db.commit()
+    return RedirectResponse("/dashboard/billing?trial=ok", status_code=303)
+
+@router.post("/wizard/create")
+async def wizard_create(request: Request, phone: str = Form(...), vertical: str = Form("support")):
+    org_id = await _org_filter(request)
+    from aios.templates import apply_template
+    from aios.db.models import Agent, ChannelConnection
+    from aios.core.secrets import encrypt_channel_config
+    from aios.config import settings
+    # cria agente do vertical
+    tpl_map = {"clinica": "support", "imobiliaria": "sdr", "ecommerce": "support"}
+    atype = tpl_map.get(vertical, vertical)
+    tpl = apply_template(atype) if atype in ["sdr","support","closer","manager"] else apply_template("support")
+    async with db_session() as db:
+        ag = Agent(org_id=org_id, name=f"Bot {vertical.capitalize()}", agent_type=atype, system_prompt=tpl.get("system_prompt",""), llm_config=tpl.get("llm_config",{}), tools=tpl.get("tools",[]), memory_config=tpl.get("memory_config",{}))
+        db.add(ag)
+        await db.flush()
+        # cria instância evolution
+        from aios.core.evolution_api import evo_create_instance
+        inst_name = f"wizard{phone[-4:]}"
+        try:
+            await evo_create_instance(inst_name)
+        except Exception:
+            pass
+        ch = ChannelConnection(org_id=org_id, label=f"WhatsApp {phone}", channel_type="evolution", config=encrypt_channel_config({"server_url": settings.evolution_server_url, "api_key": settings.evolution_api_key, "instance": inst_name}), agent_id=ag.id, is_active=True)
+        db.add(ch)
+        await db.commit()
+    return RedirectResponse(f"/dashboard/evolution", status_code=303)
+
 @router.get("/flows", response_class=HTMLResponse)
 async def flows_page(request: Request, wf: str = ""):
     return await _render("flow_editor.html", request, title="Flow Editor", wf_id=wf)

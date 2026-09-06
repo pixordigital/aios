@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width:700px;margin:0 auto;background:white;color:#111;padding:2rem;border-radius:10px">
+<h1>Proposta — {{org.name}} + Pixor AIOS</h1><p>Logo: {{org.name}} • Data: {{date}}</p>
+<div style="border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0">
+<h2>Economia projetada: R$ {{economia}}</h2><p>{{msgs}} msgs/mês × 3min × R$25/h</p><p>Custo AIOS: ${{cost}} → ROI {{roi}}x</p>
+</div>
+<p>Plano recomendado: <b>{{plan}}</b> • Inclui {{agents}} agentes, {{channels}}</p>
+<p style="font-size:0.8125rem;color:#666">Assine em /dashboard/billing</p>
+</div>
+{% endblock %}
