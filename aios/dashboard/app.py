@@ -1838,6 +1838,87 @@ async def knowledge_ingest(request: Request):
         await db.commit()
     return RedirectResponse("/dashboard/knowledge", status_code=303)
 
+# ─── Evolution Instances (gerenciar direto no AIOS) ───
+
+@router.get("/evolution", response_class=HTMLResponse)
+async def evolution_page(request: Request):
+    from aios.core.evolution_api import evo_fetch_instances
+    instances = await evo_fetch_instances()
+    # map to channels
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import ChannelConnection
+        chans = (await db.execute(select(ChannelConnection).where(ChannelConnection.channel_type=="evolution", ChannelConnection.org_id==org_id))).scalars().all()
+        chan_map = {c.config.get("instance"): c for c in chans if c.config}
+    # enrich instances with channel link
+    for inst in instances:
+        name = inst.get("name") or inst.get("instanceName") or inst.get("instance", {}).get("instanceName","")
+        inst["_name"] = name
+        inst["_channel"] = chan_map.get(name)
+        inst["_state"] = inst.get("state") or inst.get("instance",{}).get("state","")
+    return await _render("evolution.html", request, title="Evolution — Instâncias", instances=instances, chan_map=chan_map)
+
+@router.post("/evolution/create")
+async def evolution_create(request: Request, instanceName: str = Form(...), agent_id: str = Form(""), team_id: str = Form("")):
+    org_id = await _org_filter(request)
+    name = "".join(c for c in instanceName.lower().strip() if c.isalnum() or c in "-_") or "inst01"
+    from aios.core.evolution_api import evo_create_instance
+    res = await evo_create_instance(name)
+    if res.get("ok"):
+        # auto-cria canal Evolution vinculado
+        from aios.db.models import ChannelConnection
+        from aios.config import settings
+        async with db_session() as db:
+            ch = ChannelConnection(org_id=org_id, label=f"WhatsApp {name}", channel_type="evolution", config={"server_url": settings.evolution_server_url, "api_key": settings.evolution_api_key, "instance": name}, agent_id=agent_id or None, team_id=team_id or None, is_active=True)
+            from aios.core.secrets import encrypt_channel_config
+            ch.config = encrypt_channel_config(ch.config)
+            db.add(ch)
+            await db.commit()
+    return RedirectResponse("/dashboard/evolution", status_code=303)
+
+@router.get("/evolution/{name}/connect")
+async def evolution_connect_page(request: Request, name: str):
+    from aios.core.evolution_api import evo_connect, evo_status
+    conn = await evo_connect(name)
+    st = await evo_status(name)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"connect": conn, "status": st})
+
+@router.get("/evolution/{name}/qrcode")
+async def evolution_qrcode(request: Request, name: str):
+    from aios.core.evolution_api import evo_connect
+    data = await evo_connect(name)
+    # evolution returns base64 qrcode in data
+    from fastapi.responses import JSONResponse
+    return JSONResponse(data)
+
+@router.post("/evolution/{name}/logout")
+async def evolution_logout(request: Request, name: str):
+    from aios.core.evolution_api import evo_logout
+    await evo_logout(name)
+    return RedirectResponse("/dashboard/evolution", status_code=303)
+
+@router.post("/evolution/{name}/delete")
+async def evolution_delete(request: Request, name: str):
+    from aios.core.evolution_api import evo_delete
+    await evo_delete(name)
+    # remove canal
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import ChannelConnection
+        chans = (await db.execute(select(ChannelConnection).where(ChannelConnection.channel_type=="evolution"))).scalars().all()
+        for c in chans:
+            if c.config.get("instance")==name and c.org_id==org_id:
+                await db.delete(c)
+        await db.commit()
+    return RedirectResponse("/dashboard/evolution", status_code=303)
+
+@router.post("/evolution/{name}/restart")
+async def evolution_restart(request: Request, name: str):
+    from aios.core.evolution_api import evo_restart
+    await evo_restart(name)
+    return RedirectResponse("/dashboard/evolution", status_code=303)
+
 # ─── Settings (API Keys per org) ───
 
 @router.get("/settings", response_class=HTMLResponse)

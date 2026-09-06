@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     github_client_id: str = ""
     github_client_secret: str = ""
     sentry_dsn: str = ""
+    evolution_server_url: str = "http://evolution:8080"
+    evolution_api_key: str = ""
 
     class Config:
         env_file = ".env"
