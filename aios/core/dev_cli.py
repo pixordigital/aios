@@ -10,12 +10,23 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 TIMEOUT_CLAUDE = 180
 TIMEOUT_CODEX = 180
 
+def _validate_cwd(cwd: str) -> str:
+    if not cwd:
+        return str(REPO_ROOT)
+    p = (REPO_ROOT / cwd).resolve() if not Path(cwd).is_absolute() else Path(cwd).resolve()
+    try:
+        p.relative_to(REPO_ROOT.resolve())
+    except ValueError:
+        raise ValueError(f"cwd fora do repo: {cwd}")
+    return str(p)
+
 async def _run(cmd: list[str], cwd: str = "", timeout: int = 120) -> dict:
+    cwd_valid = _validate_cwd(cwd) if cwd else str(REPO_ROOT)
     start = time.time()
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
-            cwd=cwd or str(REPO_ROOT),
+            cwd=cwd_valid,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -49,10 +60,11 @@ async def run_claude(prompt: str, cwd: str = "", timeout: int = TIMEOUT_CLAUDE, 
         pass
     return res
 
-async def run_codex(prompt: str, cwd: str = "", timeout: int = TIMEOUT_CODEX, model: str = "gpt-5.4") -> dict:
+async def run_codex(prompt: str, cwd: str = "", timeout: int = TIMEOUT_CODEX, model: str = "") -> dict:
+    from aios.config import settings
+    model = model or getattr(settings, "codex_model", "") or "gpt-5.4"
     cmd = ["codex", "exec", "--sandbox", "read-only", "-m", model, prompt]
     res = await _run(cmd, cwd=cwd, timeout=timeout)
-    # codex exec review subcommand for review
     return res
 
 async def run_codex_review(cwd: str = "") -> dict:
@@ -74,9 +86,8 @@ async def dual_review(prompt: str, cwd: str = "") -> dict:
     return {"claude": norm(a), "codex": norm(b), "ok": True}
 
 async def dual_build(prompt: str, cwd: str = "") -> dict:
-    # construção: claude builder + codex builder em paralelo, retorna ambos
     a, b = await asyncio.gather(
-        run_claude(f"Construa: {prompt[:12000]}", cwd=cwd, timeout=180, allowed_tools="Read,Write,Edit,Grep,Glob,Bash"),
+        run_claude(f"Construa: {prompt[:12000]}", cwd=cwd, timeout=180, allowed_tools="Read,Write,Edit,Grep,Glob,Bash(git :*)"),
         run_codex(f"Construa: {prompt[:12000]}", cwd=cwd, timeout=180),
         return_exceptions=True,
     )

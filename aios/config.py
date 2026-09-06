@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     evolution_server_url: str = "http://evolution:8080"
     evolution_api_key: str = ""
+    codex_model: str = "gpt-5.4"
 
     class Config:
         env_file = ".env"

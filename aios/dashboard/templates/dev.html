@@ -24,28 +24,29 @@ async function checkStatus(){
   try{const r=await fetch('/api/dev/status'); const j=await r.json(); document.getElementById('dev-status').textContent=`claude ${j.claude.version?.slice(0,12)||'?'} • codex ${j.codex.version?.slice(0,12)||'?'}`; document.getElementById('dev-status').style.borderColor='var(--green)';}catch(e){document.getElementById('dev-status').textContent='offline';}
 }
 checkStatus();
+function escapeAnsi(s){ return s.replace(/\x1b\[[0-9;]*m/g,''); }
 async function runBuild(){
   const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert('prompt vazio');
   const o=document.getElementById('build-out'); o.style.display=''; o.textContent='⏳ Claude+Codex construindo...'; document.getElementById('log').textContent='build: '+p.slice(0,80);
   const r=await fetch('/api/dev/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})}); const j=await r.json();
-  o.textContent=`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,8000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,8000)}`;
+  o.textContent=escapeAnsi(`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,8000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,8000)}`);
 }
 async function runOne(which){
   const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert('prompt vazio');
   const o=document.getElementById('build-out'); o.style.display=''; o.textContent='⏳ '+which+'...';
   const r=await fetch(`/api/dev/${which}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})}); const j=await r.json();
-  o.textContent=(j.stdout||j.result||JSON.stringify(j,null,2)).slice(0,10000);
+  o.textContent=escapeAnsi((j.stdout||j.result||JSON.stringify(j,null,2)).slice(0,10000));
 }
 async function runReview(){
   const p=document.getElementById('review-prompt').value;
   const o=document.getElementById('review-out'); o.style.display=''; o.textContent='⏳ Dual review...';
   const r=await fetch('/api/dev/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({diff:p})}); const j=await r.json();
-  o.textContent=`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,6000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,6000)}`;
+  o.textContent=escapeAnsi(`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,6000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,6000)}`);
 }
 async function runCodexReview(){
   const o=document.getElementById('review-out'); o.style.display=''; o.textContent='⏳ codex review...';
   const r=await fetch('/api/dev/review/codex',{method:'POST'}); const j=await r.json();
-  o.textContent=(j.stdout||JSON.stringify(j,null,2)).slice(0,10000);
+  o.textContent=escapeAnsi((j.stdout||JSON.stringify(j,null,2)).slice(0,10000));
 }
 </script>
 {% endblock %}
