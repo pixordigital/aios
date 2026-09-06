@@ -16,13 +16,14 @@ def _validate_cwd(cwd: str) -> str:
     try:
         p.relative_to(REPO_ROOT.resolve())
     except ValueError:
-        raise HTTPException(400, "cwd fora do repo")
+        raise ValueError(f"cwd fora do repo: {cwd}")
     return str(p)
 
 class PromptIn(BaseModel):
     prompt: str
     cwd: str = ""
     timeout: int = Field(default=120, ge=5, le=300)
+    model: str = Field(default="", description="override model codex")
 
 class ReviewIn(BaseModel):
     diff: str = ""
@@ -51,7 +52,10 @@ async def _ver(cmd: str) -> str:
 async def claude_run(body: PromptIn, user=Depends(get_current_user)):
     if not body.prompt.strip():
         raise HTTPException(400, "prompt vazio")
-    cwd = _validate_cwd(body.cwd)
+    try:
+        cwd = _validate_cwd(body.cwd)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     res = await run_claude(body.prompt, cwd=cwd, timeout=min(body.timeout, 300))
     return res
 
@@ -59,13 +63,19 @@ async def claude_run(body: PromptIn, user=Depends(get_current_user)):
 async def codex_run(body: PromptIn, user=Depends(get_current_user)):
     if not body.prompt.strip():
         raise HTTPException(400, "prompt vazio")
-    cwd = _validate_cwd(body.cwd)
-    res = await run_codex(body.prompt, cwd=cwd, timeout=min(body.timeout, 300))
+    try:
+        cwd = _validate_cwd(body.cwd)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    res = await run_codex(body.prompt, cwd=cwd, timeout=min(body.timeout, 300), model=body.model)
     return res
 
 @router.post("/review")
 async def review(body: ReviewIn, user=Depends(get_current_user)):
-    cwd = _validate_cwd(body.cwd)
+    try:
+        cwd = _validate_cwd(body.cwd)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     prompt = body.diff or body.prompt
     if not prompt.strip():
         import subprocess
@@ -87,6 +97,9 @@ async def codex_review_only(user=Depends(get_current_user)):
 async def build(body: PromptIn, user=Depends(get_current_user)):
     if not body.prompt.strip():
         raise HTTPException(400, "prompt vazio")
-    cwd = _validate_cwd(body.cwd)
+    try:
+        cwd = _validate_cwd(body.cwd)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     res = await dual_build(body.prompt, cwd=cwd)
     return res
