@@ -160,6 +160,35 @@ services:
         limits: { cpus: "0.5", memory: 768M }
         reservations: { cpus: "0.1", memory: 256M }
 
+  worker2:
+    build: .
+    command: ["python", "-m", "aios.tasks.worker"]
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-aios}
+      POSTGRES_DB: ${POSTGRES_DB:-aios}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
+      AIOS_DEBUG: "false"
+      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
+      AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
+      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:-}"
+      AIOS_LOG_FORMAT: "json"
+    volumes:
+      - app-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 768M }
+        reservations: { cpus: "0.1", memory: 256M }
+
 volumes:
   postgres-data:
   redis-data:

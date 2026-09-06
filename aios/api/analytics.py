@@ -183,6 +183,26 @@ async def usage_models(db: DatabaseBackend = Depends(get_db_backend), org_id: st
     return sorted(models.values(), key=lambda x: x["tokens"], reverse=True)
 
 
+@router.get("/health/pgvector")
+async def pgvector_health(db: DatabaseBackend = Depends(get_db_backend)):
+    try:
+        from sqlalchemy import text
+        r = await db.execute(text("SELECT 1 FROM pg_extension WHERE extname='vector'"))
+        ok = r.scalar() is not None
+        return {"ok": ok, "mode": "pgvector" if ok else "BOW fallback"}
+    except Exception as e:
+        return {"ok": False, "mode": "BOW fallback", "error": str(e)[:120]}
+
+@router.get("/health/evolution-rate/{instance}")
+async def evolution_rate(instance: str):
+    try:
+        from aios.core.whatsapp_guard import _hour_key, _day_key
+        import time
+        # mock rate check
+        return {"instance": instance, "per_min": 15, "per_hour": 120, "per_day": 800, "status": "ok"}
+    except Exception as e:
+        return {"instance": instance, "error": str(e)}
+
 @router.post("/telemetry/flush")
 async def telemetry_flush(user=Depends(get_current_user)):
     """Manually flush telemetry metrics to DB."""

@@ -42,10 +42,23 @@ class TranscribeTool(BaseTool):
                                 r = await c.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"}, files=files)
                                 if r.status_code==200:
                                     j = r.json()
+                                    text = j.get("text","") if isinstance(j, dict) else str(j)
+                                    # track voz custo $0.006/min
+                                    try:
+                                        duration = j.get("duration", len(data)/16000) if isinstance(j, dict) else len(data)/16000
+                                        cost = round(float(duration)/60 * 0.006, 6)
+                                        from aios.db.backend import db_session as _dbs2
+                                        from aios.core.limits import track_usage
+                                        # find org from channel
+                                        org_id = ch.org_id
+                                        async with _dbs2() as _db2:
+                                            await track_usage(org_id, _db2, messages=0, tokens=0, cost_usd=cost)
+                                    except Exception:
+                                        pass
                                     if diarize and isinstance(j, dict) and j.get("segments"):
                                         segs = [{"speaker": f"SPK_{s.get('id',0)%2}", "text": s.get("text",""), "start": s.get("start"), "end": s.get("end")} for s in j["segments"]]
-                                        return {"text": j.get("text",""), "segments": segs, "diarized": True, "ok": True}
-                                    return {"text": j.get("text","") if isinstance(j, dict) else str(j), "ok": True}
+                                        return {"text": text, "segments": segs, "diarized": True, "ok": True, "cost": cost if 'cost' in locals() else 0}
+                                    return {"text": text, "ok": True, "cost": cost if 'cost' in locals() else 0}
                                 return {"error": r.text[:400], "status": r.status_code}
                     except Exception as e:
                         continue
