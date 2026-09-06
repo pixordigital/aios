@@ -33,6 +33,12 @@ class ChannelManager:
         cls = CHANNEL_REGISTRY.get(connection.channel_type)
         if not cls:
             raise ValueError(f"Unknown channel type: {connection.channel_type}")
+        try:
+            from aios.core.secrets import decrypt_channel_config
+            if connection.config and any(str(v).startswith("enc:") for v in connection.config.values() if isinstance(v, str)):
+                connection.config = decrypt_channel_config(connection.config)
+        except Exception:
+            pass
         return cls(connection=connection, agent_or_team=agent_or_team, db=db)
 
     async def start(self, channel: Channel) -> None:

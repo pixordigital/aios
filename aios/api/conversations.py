@@ -72,6 +72,65 @@ async def get_conversation(
     return conv
 
 
+@router.get("/{conversation_id}/handover")
+async def get_handover(conversation_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    conv = await db.get(Conversation, conversation_id)
+    if not conv or conv.org_id != org_id:
+        raise HTTPException(404)
+    h = (conv.extra_data or {}).get("handover", {"status": "bot"})
+    pending = []
+    try:
+        from sqlalchemy import select as _sel
+
+        from aios.db.models import PendingAction
+
+        pending = (await db.execute(_sel(PendingAction).where(PendingAction.conversation_id == conversation_id, PendingAction.status == "pending"))).scalars().all()
+        pending = [{"id": p.id, "tool_name": p.tool_name, "tool_args": p.tool_args, "context_summary": p.context_summary} for p in pending]
+    except Exception:
+        pass
+    return {"handover": h, "pending": pending}
+
+
+@router.post("/{conversation_id}/handover")
+async def post_handover(conversation_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    conv = await db.get(Conversation, conversation_id)
+    if not conv or conv.org_id != org_id:
+        raise HTTPException(404)
+    action = body.get("action", "take")
+    extra = dict(conv.extra_data or {})
+    h = dict(extra.get("handover", {}))
+    if action == "take":
+        h.update({"status": "human", "human_id": user.id, "at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()})
+    else:
+        h.update({"status": "bot", "human_id": None, "at": None})
+    extra["handover"] = h
+    conv.extra_data = extra
+    await db.commit()
+    return {"handover": h}
+
+
+@router.post("/{conversation_id}/human-reply")
+async def human_reply(conversation_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    conv = await db.get(Conversation, conversation_id)
+    if not conv or conv.org_id != org_id:
+        raise HTTPException(404)
+    text = (body.get("content") or body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "content required")
+    msg = Message(conversation_id=conversation_id, role="assistant", content=text, org_id=org_id, extra_data={"human": True, "human_id": user.id})
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    # deliver via channel if exists
+    try:
+        from aios.core.dispatch import dispatch_outbound
+
+        await dispatch_outbound(conv, text)
+    except Exception:
+        pass
+    return msg
+
+
 @router.get("/{conversation_id}/messages", response_model=list[MessageOut])
 async def get_messages(
     conversation_id: str,
@@ -131,6 +190,9 @@ async def send_message(
         await db.commit()
         await db.refresh(reply_msg)
         return SendMessageResponse(user_message=msg, reply=reply_msg)
+
+    if (conv.extra_data or {}).get("handover", {}).get("status") == "human":
+        return SendMessageResponse(user_message=msg, reply=None)
 
     # route to agent or team if assigned, with retry + failover
     reply_msg: Message | None = None
@@ -211,9 +273,15 @@ async def send_message_stream(
     if not conv or conv.org_id != org_id:
         raise HTTPException(404)
 
-    msg = Message(conversation_id=conversation_id, role="user", content=body.content, org_id=org_id)
+    msg = Message(conversation_id=conversation_id, role="user", content=body.content, org_id=org_id, extra_data={"handover": (conv.extra_data or {}).get("handover")})
     db.add(msg)
     await db.commit()
+
+    if (conv.extra_data or {}).get("handover", {}).get("status") == "human":
+        async def handover_stream():
+            yield f"data: {json.dumps({'type': 'token', 'content': '👤 Atendimento humano ativo — agente pausado'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return StreamingResponse(handover_stream(), media_type="text/event-stream")
 
     allowed, reason = await check_org_limits(org_id, db)
     if not allowed:

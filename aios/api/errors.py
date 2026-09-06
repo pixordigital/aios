@@ -26,6 +26,19 @@ class ProblemResponse(BaseModel):
 
 
 _DEFAULT_TITLES = {
+    400: "Requisição inválida",
+    401: "Não autorizado",
+    403: "Acesso negado",
+    404: "Não encontrado",
+    405: "Método não permitido",
+    409: "Conflito",
+    413: "Conteúdo muito grande",
+    422: "Validação falhou",
+    429: "Muitas requisições",
+    500: "Erro interno",
+}
+
+_TITLES_EN = {
     400: "Bad request",
     401: "Unauthorized",
     403: "Forbidden",
@@ -37,6 +50,19 @@ _DEFAULT_TITLES = {
     429: "Too many requests",
     500: "Internal server error",
 }
+
+def _translate_detail(detail: str) -> str:
+    mapping = {
+        "Not authenticated": "Não autenticado",
+        "Invalid token": "Token inválido",
+        "Organization not found": "Organização não encontrada",
+        "Daily message limit reached": "Limite diário de mensagens atingido",
+        "Monthly token limit reached": "Limite mensal de tokens atingido",
+    }
+    for k, v in mapping.items():
+        if k.lower() in detail.lower():
+            detail = detail.replace(k, v)
+    return detail
 
 
 def _problem(status: int, title: str = "", detail: str = "", instance: str = "") -> dict:
@@ -64,12 +90,15 @@ def register_error_handlers(app: FastAPI):
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-        # StarletteHTTPException is the supertype — covers both fastapi.HTTPException
-        # raises and Starlette route-miss 404/405. title derives from status; the
-        # developer's message goes in detail (RFC 7807 semantics).
+        lang = request.headers.get("accept-language", "pt")
+        use_en = "en" in lang.lower() and "pt" not in lang.lower()
+        detail = exc.detail or ""
+        if not use_en:
+            detail = _translate_detail(detail)
+        title = (_TITLES_EN if use_en else _DEFAULT_TITLES).get(exc.status_code, "Erro")
         return JSONResponse(
             status_code=exc.status_code,
-            content=_problem(exc.status_code, detail=exc.detail or "", instance=str(request.url.path)),
+            content=_problem(exc.status_code, title=title, detail=detail, instance=str(request.url.path)),
         )
 
     @app.exception_handler(Exception)

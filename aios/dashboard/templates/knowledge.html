@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4"><div><h1>Base de Conhecimento</h1><p class="text-sm text-secondary">Upload → chunk → busca RAG para agentes</p></div><button class="btn btn-primary btn-sm" onclick="document.getElementById('up').showModal()">+ Ingerir arquivo</button></div>
+<dialog id="up" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:1.25rem;width:min(480px,94vw);color:var(--text)">
+  <form method="POST" action="/dashboard/knowledge/ingest" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.75rem">
+    <h2>Ingerir documento</h2>
+    <input type="file" name="file" required class="input">
+    <input type="text" name="agent_id" class="input" placeholder="Agent ID (opcional, vazio = org)">
+    <input type="text" name="tags" class="input" placeholder="tags vírgula">
+    <button class="btn btn-primary">Ingerir</button>
+  </form>
+</dialog>
+<div class="card mb-4"><h2>Buscar</h2><div style="display:flex;gap:0.5rem;margin-top:0.5rem"><input id="q" class="input" placeholder="pergunta..." style="flex:1"><button class="btn btn-primary btn-sm" onclick="search()">Buscar</button></div><div id="res" style="margin-top:0.75rem"></div></div>
+<div class="card"><h2>Memórias RAG ({{memories|length}})</h2><div style="display:flex;flex-direction:column;gap:0.375rem;margin-top:0.5rem">{% for m in memories %}<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.8125rem"><div style="font-weight:500">{{m.content[:120]}}…</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">{{m.type}} • {{m.agent_id[:8] if m.agent_id else 'org'}} • {{m.created_at.strftime('%d/%m') if m.created_at else ''}}</div></div>{% else %}<div class="text-sm text-tertiary">Nenhum documento ingerido. Envie PDF/txt.</div>{% endfor %}</div></div>
+<script>
+async function search(){
+  const q=document.getElementById('q').value.trim(); if(!q) return;
+  const r=await fetch(`/api/knowledge/search?q=${encodeURIComponent(q)}`); const j=await r.json();
+  document.getElementById('res').innerHTML = j.results?.length ? j.results.map(x=>`<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;margin-bottom:0.375rem"><div style="font-size:0.8125rem">${x.content.slice(0,300)}</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">score ${x.score?.toFixed(3)}</div></div>`).join('') : '<div class="text-sm text-tertiary">Sem resultados</div>';
+}
+</script>
+{% endblock %}

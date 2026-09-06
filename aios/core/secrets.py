@@ -33,3 +33,33 @@ def set_org_secret(org, key: str, value: str):
     enc[key] = encrypt_secret(value)
     data["_secrets_enc"] = enc
     org.extra_data = data
+
+_SENSITIVE_KEYS = {"access_token","api_key","bot_token","password","secret","signing_secret","token","apikey","apiKey"}
+
+def encrypt_channel_config(config: dict) -> dict:
+    out = {}
+    for k,v in (config or {}).items():
+        if k in _SENSITIVE_KEYS or any(s in k.lower() for s in ["token","key","secret","password"]):
+            try:
+                out[k] = "enc:" + encrypt_secret(str(v)) if v else v
+            except Exception:
+                out[k] = v
+        elif isinstance(v, dict):
+            out[k] = encrypt_channel_config(v)
+        else:
+            out[k] = v
+    return out
+
+def decrypt_channel_config(config: dict) -> dict:
+    out = {}
+    for k,v in (config or {}).items():
+        if isinstance(v, str) and v.startswith("enc:"):
+            try:
+                out[k] = decrypt_secret(v[4:])
+            except Exception:
+                out[k] = v
+        elif isinstance(v, dict):
+            out[k] = decrypt_channel_config(v)
+        else:
+            out[k] = v
+    return out

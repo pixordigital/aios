@@ -72,7 +72,65 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         if total >= max_tokens:
             return False, f"Monthly token limit reached ({max_tokens}/{plan_name} plan)"
 
+    # soft limit warnings (80/90) without blocking
+    try:
+        from aios.core.limits import get_monthly_usage as _gmu
+
+        monthly = await _gmu(org_id, db)
+        pct = monthly.get("pct_tokens", 0)
+        if 80 <= pct < 100:
+            logger.warning("Quota soft limit %s%% for org %s (plan %s)", pct, org_id, plan_name)
+            # async alert best-effort
+            try:
+                import asyncio as _aio
+
+                _aio.create_task(_send_quota_alert(org_id, pct, plan_name))
+            except Exception:
+                pass
+    except Exception:
+        pass
     return True, ""
+
+
+async def _send_quota_alert(org_id: str, pct: float, plan: str):
+    try:
+        from aios.db.backend import db_session
+        from aios.db.models import Organization
+
+        async with db_session() as db:
+            org = await db.get(Organization, org_id)
+            if not org:
+                return
+            # avoid spam: only once per day per threshold
+            extra = dict(org.extra_data or {})
+            last = extra.get("_quota_alert", {})
+            import datetime as _dt
+
+            today = _dt.date.today().isoformat()
+            if last.get("date") == today and last.get("pct") == pct:
+                return
+            extra["_quota_alert"] = {"pct": pct, "date": today}
+            org.extra_data = extra
+            await db.commit()
+            # email if SMTP configured
+            from aios.config import settings
+
+            if settings.smtp_host and org:
+                try:
+                    from aios.tools.send_email import SendEmailTool
+
+                    tool = SendEmailTool()
+                    # find owner email
+                    from sqlalchemy import select as _sel
+                    from aios.db.models import User
+
+                    owner = (await db.execute(_sel(User).where(User.org_id == org_id).order_by(User.created_at))).scalars().first()
+                    if owner and owner.email:
+                        await tool.run(to=owner.email, subject=f"AIOS uso {pct}% do limite ({plan})", body=f"Seu uso atingiu {pct}% dos tokens do plano {plan}. Projeção pode estourar. Considere upgrade em /dashboard/billing")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_calls: int = 1, cost_usd: float = 0.0):

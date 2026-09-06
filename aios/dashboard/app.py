@@ -638,6 +638,71 @@ async def conversation_list(request: Request):
     return await _render("conversations.html", request, title="Conversas", conversations=convs)
 
 
+@router.post("/conversations/{conv_id}/handover")
+async def conversation_handover(request: Request, conv_id: str, action: str = Form("take")):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        conv = await db.get(Conversation, conv_id)
+        if not conv or conv.org_id != org_id:
+            return RedirectResponse("/dashboard/conversations", status_code=303)
+        extra = dict(conv.extra_data or {})
+        h = dict(extra.get("handover", {}))
+        if action == "take":
+            h.update({"status": "human", "at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()})
+        else:
+            h.update({"status": "bot", "at": None})
+        extra["handover"] = h
+        conv.extra_data = extra
+        await db.commit()
+    return RedirectResponse(f"/dashboard/conversations/{conv_id}", status_code=303)
+
+
+@router.post("/conversations/{conv_id}/human")
+async def conversation_human_reply(request: Request, conv_id: str, content: str = Form(...)):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        conv = await db.get(Conversation, conv_id)
+        if not conv or conv.org_id != org_id:
+            return RedirectResponse("/dashboard/conversations", status_code=303)
+        msg = Message(conversation_id=conv_id, role="assistant", content=content, org_id=org_id, extra_data={"human": True})
+        db.add(msg)
+        await db.commit()
+        # deliver via channel
+        try:
+            from aios.channels.manager import manager as _mgr
+
+            ch_conn = await db.get(__import__("aios.db.models", fromlist=["ChannelConnection"]).ChannelConnection, conv.channel_connection_id) if conv.channel_connection_id else None
+            if ch_conn:
+                ch = _mgr.build(ch_conn)
+                from aios.channels.base import OutboundMessage
+
+                await ch.send(OutboundMessage(text=content, conversation_id=conv_id, extra_data={"from_number": (conv.extra_data or {}).get("from_number", "")}))
+        except Exception:
+            pass
+    return RedirectResponse(f"/dashboard/conversations/{conv_id}", status_code=303)
+
+
+@router.get("/conversations/{conv_id}/handover-status")
+async def conversation_handover_status(request: Request, conv_id: str):
+    org_id = await _org_filter(request)
+    from fastapi.responses import JSONResponse
+
+    async with db_session() as db:
+        conv = await db.get(Conversation, conv_id)
+        if not conv or conv.org_id != org_id:
+            return JSONResponse({"handover": {"status": "bot"}, "pending": []}, status_code=404)
+        h = (conv.extra_data or {}).get("handover", {"status": "bot"})
+        pending = []
+        try:
+            from aios.db.models import PendingAction
+
+            pending_q = (await db.execute(select(PendingAction).where(PendingAction.conversation_id == conv_id, PendingAction.status == "pending"))).scalars().all()
+            pending = [{"id": p.id, "tool_name": p.tool_name, "tool_args": p.tool_args, "context_summary": p.context_summary} for p in pending_q]
+        except Exception:
+            pass
+        return JSONResponse({"handover": h, "pending": pending})
+
+
 @router.get("/conversations/{conv_id}/delete")
 async def conversation_delete(request: Request, conv_id: str):
     org_id = await _org_filter(request)
@@ -746,6 +811,8 @@ async def channel_save(
     elif channel_type == "email":
         config = {"imap_server": config_email_imap, "smtp_server": config_email_smtp, "email": config_email_addr, "password": config_email_pass}
 
+    from aios.core.secrets import encrypt_channel_config
+    config = encrypt_channel_config(config)
     async with db_session() as db:
         if channel_id:
             ch = await db.get(ChannelConnection, channel_id)
@@ -1354,7 +1421,29 @@ async def lab_agent_publish(request: Request, agent_id: str):
         v = AgentVersion(agent_id=ag.id, org_id=org_id, version=max_v + 1, name=ag.name, system_prompt=ag.system_prompt, llm_config=dict(ag.llm_config or {}), tools=list(ag.tools or []), memory_config=dict(ag.memory_config or {}), governance_config=dict(ag.governance_config or {}), agent_type=ag.agent_type, change_note=note)
         db.add(v)
         await db.commit()
-        return JSONResponse({"ok": True, "version": v.version})
+        # avaliação contínua: se dataset existe, roda eval em background
+        try:
+            from aios.db.models import Dataset
+            ds = (await db.execute(select(Dataset).where(Dataset.agent_id == agent_id).limit(1))).scalars().first()
+            if ds:
+                import asyncio as _aio
+                from aios.core.rubric import rubric_manager
+
+                async def _eval_bg():
+                    try:
+                        from aios.db.models import EvalRun
+
+                        er = EvalRun(agent_id=agent_id, org_id=org_id, dataset_id=ds.id, version_id=v.id, judge_model="openai/gpt-4o-mini", avg_score=0, results=[], extra_data={"auto": True})
+                        async with db_session() as _db2:
+                            _db2.add(er)
+                            await _db2.commit()
+                    except Exception:
+                        pass
+
+                _aio.create_task(_eval_bg())
+        except Exception:
+            pass
+        return JSONResponse({"ok": True, "version": v.version, "eval_triggered": bool(ds) if 'ds' in locals() else False})
 
 
 @router.get("/lab/artifacts/{art_id}/raw")
@@ -1664,6 +1753,15 @@ async def automations_delete(request: Request, wf_id: str):
             await db.commit()
     return RedirectResponse("/dashboard/automations", status_code=303)
 
+@router.get("/automations/{wf_id}/compare")
+async def automations_compare(request: Request, wf_id: str, run1: str = "", run2: str = ""):
+    org_id = await _org_filter(request)
+    from aios.db.models import WorkflowRun
+    async with db_session() as db:
+        r1 = await db.get(WorkflowRun, run1) if run1 else None
+        r2 = await db.get(WorkflowRun, run2) if run2 else None
+        return await _render("automation_compare.html", request, title="Comparar", r1=r1, r2=r2, wf_id=wf_id)
+
 @router.get("/automations/{wf_id}/run/{run_id}")
 async def automations_run_detail(request: Request, wf_id: str, run_id: str):
     org_id = await _org_filter(request)
@@ -1703,6 +1801,42 @@ async def automations_cred_delete(request: Request, cid: str):
             await db.delete(c)
             await db.commit()
     return RedirectResponse("/dashboard/automations", status_code=303)
+
+@router.get("/knowledge", response_class=HTMLResponse)
+async def knowledge_page(request: Request):
+    org_id = await _org_filter(request)
+    from aios.db.models import Memory
+    async with db_session() as db:
+        mems = (await db.execute(select(Memory).where(Memory.org_id==org_id).order_by(Memory.created_at.desc()).limit(30))).scalars().all()
+    return await _render("knowledge.html", request, title="Base Conhecimento", memories=mems)
+
+@router.post("/knowledge/ingest")
+async def knowledge_ingest(request: Request):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    file = form.get("file")
+    agent_id = form.get("agent_id") or None
+    if not file:
+        return RedirectResponse("/dashboard/knowledge", status_code=303)
+    content = (await file.read()).decode(errors="ignore")[:20000]
+    # chunk 800 chars
+    chunks = [content[i:i+800] for i in range(0, len(content), 800)][:20]
+    from aios.db.models import Memory
+    from aios.core.memory import _embed
+    async with db_session() as db:
+        for ch in chunks:
+            try:
+                emb = _embed(ch)
+            except Exception:
+                emb = None
+            m = Memory(agent_id=agent_id or (await db.execute(select(Agent).where(Agent.org_id==org_id).limit(1))).scalars().first().id if (await db.execute(select(Agent).where(Agent.org_id==org_id).limit(1))).scalars().first() else (await db.execute(select(Agent).where(Agent.org_id==org_id))).scalars().first().id if False else None, org_id=org_id, type="long_term", content=ch, extra_data={"source": file.filename, "embedding": emb} if emb else {"source": file.filename})
+            # fallback agent_id required: use first agent or fake
+            if not m.agent_id:
+                ag = (await db.execute(select(Agent).where(Agent.org_id==org_id).limit(1))).scalars().first()
+                m.agent_id = ag.id if ag else "00000000-0000-0000-0000-000000000000"
+            db.add(m)
+        await db.commit()
+    return RedirectResponse("/dashboard/knowledge", status_code=303)
 
 # ─── Settings (API Keys per org) ───
 

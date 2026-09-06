@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<a href="/dashboard/automations/{{wf_id}}" class="btn btn-ghost btn-sm">← Voltar</a>
+<h1>Comparar execuções</h1>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
+  <div class="card"><h3>{{r1.id[:8] if r1 else '—'}} • {{r1.status if r1 else ''}}</h3><pre class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.6875rem;white-space:pre-wrap">{{r1.outputs|tojson(indent=2) if r1 and r1.outputs else ''}}</pre><pre class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.6875rem;margin-top:0.5rem">{{r1.node_status|tojson(indent=2) if r1 else ''}}</pre></div>
+  <div class="card"><h3>{{r2.id[:8] if r2 else '—'}} • {{r2.status if r2 else ''}}</h3><pre class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.6875rem;white-space:pre-wrap">{{r2.outputs|tojson(indent=2) if r2 and r2.outputs else ''}}</pre><pre class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;font-size:0.6875rem;margin-top:0.5rem">{{r2.node_status|tojson(indent=2) if r2 else ''}}</pre></div>
+</div>
+{% endblock %}
