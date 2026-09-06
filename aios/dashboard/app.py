@@ -1805,6 +1805,10 @@ async def automations_cred_delete(request: Request, cid: str):
 async def wizard_page(request: Request):
     return await _render("wizard.html", request, title="Assistente 60s")
 
+@router.get("/dev", response_class=HTMLResponse)
+async def dev_page(request: Request):
+    return await _render("dev.html", request, title="Dev Claude+Codex")
+
 @router.get("/proposal", response_class=HTMLResponse)
 async def proposal_page(request: Request):
     org_id = await _org_filter(request)

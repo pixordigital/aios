@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4"><div><h1>Dev — Claude + Codex</h1><p class="text-sm text-secondary">Construção e review dual direto na VPS (claude 2.1.260 + codex 0.153.1 + opencode 1.15.13)</p></div><span id="dev-status" class="badge">checando...</span></div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem" class="mb-4">
+  <div class="card">
+    <h2>▶ Construir</h2><p class="text-xs text-tertiary">Envia prompt para claude e codex em paralelo (workspace-write)</p>
+    <textarea id="build-prompt" class="input" rows="4" placeholder="Ex: crie endpoint POST /api/lead com validação"></textarea>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem"><button class="btn btn-primary btn-sm" onclick="runBuild()">Claude+Codex Build</button><button class="btn btn-ghost btn-sm" onclick="runOne('claude')">Só Claude</button><button class="btn btn-ghost btn-sm" onclick="runOne('codex')">Só Codex</button></div>
+    <pre id="build-out" class="font-mono" style="display:none;margin-top:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.6875rem;white-space:pre-wrap;max-height:320px;overflow:auto"></pre>
+  </div>
+  <div class="card">
+    <h2>🔍 Review Dual</h2><p class="text-xs text-tertiary">1 linha por achado L&lt;linha&gt;: severidade problema. fix.</p>
+    <textarea id="review-prompt" class="input" rows="4" placeholder="Cole diff ou deixe vazio para git diff HEAD~1"></textarea>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem"><button class="btn btn-primary btn-sm" onclick="runReview()">Dual Review</button><button class="btn btn-ghost btn-sm" onclick="runCodexReview()">Codex review</button></div>
+    <pre id="review-out" class="font-mono" style="display:none;margin-top:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.6875rem;white-space:pre-wrap;max-height:320px;overflow:auto"></pre>
+  </div>
+</div>
+
+<div class="card"><h2>Logs</h2><pre id="log" class="font-mono" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.6875rem;white-space:pre-wrap">Pronto.</pre></div>
+
+<script>
+async function checkStatus(){
+  try{const r=await fetch('/api/dev/status'); const j=await r.json(); document.getElementById('dev-status').textContent=`claude ${j.claude.version?.slice(0,12)||'?'} • codex ${j.codex.version?.slice(0,12)||'?'}`; document.getElementById('dev-status').style.borderColor='var(--green)';}catch(e){document.getElementById('dev-status').textContent='offline';}
+}
+checkStatus();
+async function runBuild(){
+  const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert('prompt vazio');
+  const o=document.getElementById('build-out'); o.style.display=''; o.textContent='⏳ Claude+Codex construindo...'; document.getElementById('log').textContent='build: '+p.slice(0,80);
+  const r=await fetch('/api/dev/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})}); const j=await r.json();
+  o.textContent=`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,8000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,8000)}`;
+}
+async function runOne(which){
+  const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert('prompt vazio');
+  const o=document.getElementById('build-out'); o.style.display=''; o.textContent='⏳ '+which+'...';
+  const r=await fetch(`/api/dev/${which}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})}); const j=await r.json();
+  o.textContent=(j.stdout||j.result||JSON.stringify(j,null,2)).slice(0,10000);
+}
+async function runReview(){
+  const p=document.getElementById('review-prompt').value;
+  const o=document.getElementById('review-out'); o.style.display=''; o.textContent='⏳ Dual review...';
+  const r=await fetch('/api/dev/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({diff:p})}); const j=await r.json();
+  o.textContent=`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,6000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,6000)}`;
+}
+async function runCodexReview(){
+  const o=document.getElementById('review-out'); o.style.display=''; o.textContent='⏳ codex review...';
+  const r=await fetch('/api/dev/review/codex',{method:'POST'}); const j=await r.json();
+  o.textContent=(j.stdout||JSON.stringify(j,null,2)).slice(0,10000);
+}
+</script>
+{% endblock %}
