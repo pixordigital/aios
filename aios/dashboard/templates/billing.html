@@ -39,11 +39,11 @@
         <div style="text-align:right"><div style="font-size:1.25rem;font-weight:700;color:var(--green)">R$ {{ "%.0f"|format(economia) }}</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">economia bruta/mês</div></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;margin-top:0.75rem">
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Custo AIOS</div><div style="font-weight:600">${{"%.2f"|format(monthly.total_cost)}}</div></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Custo AIOS</div><div style="font-weight:600">R$ {{"%.2f"|format(monthly.total_cost*5.5)}}</div></div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Economia líquida</div><div style="font-weight:700;color:var(--green)">R$ {{ "%.0f"|format(roi*5.5) }}</div><div style="font-size:0.6rem;color:var(--text-tertiary)">*R$×5.5 câmbio ref</div></div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">ROI</div><div style="font-weight:700">{{ "%.0f"|format((roi*5.5)/((monthly.total_cost*5.5) if monthly.total_cost>0 else 0.01)*100) if monthly.total_cost>0 else "∞" }}x</div></div>
     </div>
-    <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.5rem">Cálculo: {{monthly.total_messages}} msgs × 3min × R$25/h = R$ {{ "%.0f"|format(economia) }} — custo AIOS ${{ "%.2f"|format(monthly.total_cost) }}. Com 3 atendentes (R$9k/mês) você já economiza 70%.</div>
+    <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.5rem">Cálculo: {{monthly.total_messages}} msgs × 3min × R$25/h = R$ {{ "%.0f"|format(economia) }} — custo AIOS R$ {{"%.2f"|format(monthly.total_cost*5.5)}}. Com 3 atendentes (R$9k/mês) você já economiza 70%.</div>
 </div>
 
 <div class="card mb-4" style="border-left:3px solid var(--amber)">
@@ -66,9 +66,9 @@
     </div>
     <div class="stat-card">
         <p class="stat-label">Custo no mês (estimado)</p>
-        <p class="stat-value" style="color:{{status_color}}">${{"%.2f"|format(monthly.total_cost)}}</p>
-        <div style="font-size:0.6875rem;color:var(--text-tertiary)">Média ${{"%.2f"|format(monthly.avg_daily_cost)}} /dia</div>
-        <div style="font-size:0.6875rem;color:var(--text-tertiary)">Projeção até fatura: <strong>${{"%.2f"|format(monthly.forecast_cost)}}</strong></div>
+        <p class="stat-value" style="color:{{status_color}}">R$ {{"%.2f"|format(monthly.total_cost*5.5)}}</p>
+        <div style="font-size:0.6875rem;color:var(--text-tertiary)">Média R$ {{"%.2f"|format(monthly.avg_daily_cost*5.5)}} /dia</div>
+        <div style="font-size:0.6875rem;color:var(--text-tertiary)">Projeção até fatura: <strong>R$ {{"%.2f"|format(monthly.forecast_cost*5.5)}}</strong></div>
         <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem">Próximo pagamento em <strong>{{monthly.remaining_days}} dias</strong> ({{monthly.next_billing}})</div>
     </div>
     <div class="stat-card">
@@ -76,7 +76,7 @@
         <p class="stat-value">{{monthly.total_messages}}</p>
         <div style="font-size:0.6875rem;color:var(--text-tertiary)">Hoje: {{daily_msgs}} / {{plan_limits.max_messages_per_day}} (limite diário)</div>
         <div style="font-size:0.6875rem;color:var(--text-tertiary)">Chamadas LLM: {{monthly.total_calls}}</div>
-        <div style="font-size:0.6875rem;color:var(--text-tertiary)">Hoje custo: ${{"%.4f"|format(monthly.cost_today)}}</div>
+        <div style="font-size:0.6875rem;color:var(--text-tertiary)">Hoje custo: R$ {{"%.2f"|format(monthly.cost_today*5.5)}}</div>
     </div>
     <div class="stat-card">
         <p class="stat-label">Recursos plano</p>
@@ -94,14 +94,14 @@
         {% set max_c = monthly.daily_series | map(attribute='cost') | max if monthly.daily_series else 1 %}
         {% for d in monthly.daily_series[-30:] %}
         <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">
-            <div title="{{d.date}}: ${{d.cost}} / {{d.tokens}} tok" style="width:100%;background:{{status_color if d.cost > max_c*0.7 else 'var(--accent)'}};height:{{ (d.cost / max_c * 90) | int if max_c else 4 }}px;min-height:4px;border-radius:2px"></div>
+            <div title="{{d.date}}: R$ {{"%.2f"|format(d.cost*5.5)}} / {{d.tokens}} tok" style="width:100%;background:{{status_color if d.cost > max_c*0.7 else 'var(--accent)'}};height:{{ (d.cost / max_c * 90) | int if max_c else 4 }}px;min-height:4px;border-radius:2px"></div>
             <span style="font-size:0.5rem;color:var(--text-tertiary)">{{d.date[8:10]}}</span>
         </div>
         {% else %}<div style="color:var(--text-tertiary);font-size:0.8125rem">Sem dados ainda — comece a usar agentes</div>{% endfor %}
     </div>
     <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap">
         {% for d in monthly.daily_series[-7:] %}
-        <span class="badge" style="font-size:0.625rem">{{d.date[5:]}}: ${{d.cost}} • {{d.tokens}}t</span>
+        <span class="badge" style="font-size:0.625rem">{{d.date[5:]}}: R$ {{"%.2f"|format(d.cost*5.5)}} • {{d.tokens}}t</span>
         {% endfor %}
     </div>
 </div>
@@ -112,7 +112,7 @@
         {% for a in agent_breakdown[:8] %}
         <div style="display:flex;gap:0.5rem;align-items:center;padding:0.375rem 0;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-bottom:0.375rem;padding:0.5rem">
             <div style="flex:1"><div style="font-weight:500;font-size:0.8125rem">{{a.name}}</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">{{a.tokens}} tokens • {{a.messages}} msgs</div></div>
-            <div style="text-align:right"><div style="font-weight:600;font-size:0.8125rem">${{a.cost}}</div><div style="font-size:0.625rem;color:var(--text-tertiary)">custo</div></div>
+            <div style="text-align:right"><div style="font-weight:600;font-size:0.8125rem">R$ {{"%.2f"|format(a.cost*5.5)}}</div><div style="font-size:0.625rem;color:var(--text-tertiary)">custo</div></div>
         </div>
         {% else %}<div class="text-sm text-tertiary">Sem métricas por agente ainda</div>{% endfor %}
     </div>
@@ -121,10 +121,10 @@
         {% for m in model_breakdown[:8] %}
         <div style="display:flex;gap:0.5rem;align-items:center;padding:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-bottom:0.375rem">
             <div style="flex:1"><div style="font-family:monospace;font-size:0.75rem">{{m.model}}</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">{{m.tokens}} tokens • {{m.messages}} msgs</div></div>
-            <div style="text-align:right"><div style="font-weight:600">${{m.cost}}</div></div>
+            <div style="text-align:right"><div style="font-weight:600">R$ {{"%.2f"|format(m.cost*5.5)}}</div></div>
         </div>
         {% else %}<div class="text-sm text-tertiary">Sem dados por modelo</div>{% endfor %}
-        <details style="margin-top:0.5rem"><summary style="font-size:0.75rem;color:var(--text-tertiary);cursor:pointer">Como custo é calculado?</summary><div style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.375rem">Custo = tokens × preço por 1M (input+output). Ex: gpt-4o $2.50/$10.00, gpt-4o-mini $0.15/$0.60, claude-sonnet $3/$15. Atualizado em <span class="font-mono">aios/core/tracing.py</span>. Fatura Stripe no ciclo mensal.</div></details>
+        <details style="margin-top:0.5rem"><summary style="font-size:0.75rem;color:var(--text-tertiary);cursor:pointer">Como custo é calculado?</summary><div style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.375rem">Custo = tokens × preço por 1M. Ex: gpt-4o R$13,75/R$55,00, gpt-4o-mini R$0,82/R$3,30, claude-sonnet R$16,50/R$82,50 (câmbio 5,5). Atualizado em <span class="font-mono">aios/core/tracing.py</span>. Fatura Stripe no ciclo mensal.</div></details>
     </div>
 </div>
 
@@ -135,7 +135,7 @@
             <div style="font-size:0.6875rem;color:var(--text-tertiary)">Ciclo atual</div><div style="font-weight:600">{{monthly.period}}</div><div style="font-size:0.75rem;color:var(--text-secondary)">{{monthly.day_of_month}}/{{monthly.days_in_month}} dias decorridos</div>
         </div>
         <div style="background:var(--accent-subtle);border:1px solid var(--accent-border);border-radius:6px;padding:0.75rem">
-            <div style="font-size:0.6875rem;color:var(--text-tertiary)">Próxima fatura</div><div style="font-weight:700;color:var(--accent)">{{monthly.next_billing}}</div><div style="font-size:0.75rem">em {{monthly.remaining_days}} dias — estimado <strong>${{"%.2f"|format(monthly.forecast_cost)}}</strong></div>
+            <div style="font-size:0.6875rem;color:var(--text-tertiary)">Próxima fatura</div><div style="font-weight:700;color:var(--accent)">{{monthly.next_billing}}</div><div style="font-size:0.75rem">em {{monthly.remaining_days}} dias — estimado <strong>R$ {{"%.2f"|format(monthly.forecast_cost*5.5)}}</strong></div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem">
             <div style="font-size:0.6875rem;color:var(--text-tertiary)">O que está incluso</div><div style="font-size:0.8125rem">Plano {{plans.get(current_plan, {}).get('name', current_plan)}} já pago. Uso dentro do limite não gera extra. Excedente = upgrade ou pay-per-token (enterprise).</div>
@@ -154,7 +154,7 @@
         <div class="card" style="{% if name == current_plan %}border-color:var(--accent-border);background:var(--accent-subtle){% endif %}">
             <h3 style="font-size:1rem">{{ info.name }}</h3>
             <div class="text-sm text-secondary mb-2">{{ info.max_messages_per_day }} msg/dia · {{ "{:,}".format(info.max_tokens_per_month).replace(",",".") }} tokens/mês · {{ info.max_agents }} agentes</div>
-            <div style="font-size:0.75rem;color:var(--text-tertiary);margin-bottom:0.5rem">Custo estimado se lotar limite: ~${{ "%.0f"|format(info.max_tokens_per_month * 0.00015) }} (mini) / ${{ "%.0f"|format(info.max_tokens_per_month * 0.005) }} (4o)</div>
+            <div style="font-size:0.75rem;color:var(--text-tertiary);margin-bottom:0.5rem">Custo estimado se lotar limite: ~R$ {{"%.0f"|format(info.max_tokens_per_month * 0.00015 * 5.5)}} (mini) / R$ {{"%.0f"|format(info.max_tokens_per_month * 0.005 * 5.5)}} (4o)</div>
             {% if name == current_plan and subscription_id %}
             <button class="btn btn-ghost btn-sm w-full" onclick="manageSubscription()">Gerenciar assinatura</button>
             {% elif name != 'free' %}

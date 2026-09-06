@@ -40,7 +40,7 @@
     </div>
     <div class="stat-card">
         <p class="stat-label">Custo est./req</p>
-        <p class="stat-value" style="font-size:1.25rem">${{ "%.2f"|format(stats.total_cost) }}</p>
+        <p class="stat-value" style="font-size:1.25rem">R$ {{"%.2f"|format(stats.total_cost*5.5)}}</p>
         <span class="text-xs text-tertiary">Em todos os agentes</span>
     </div>
     <div class="stat-card">
@@ -53,8 +53,8 @@
 {% if usage_monthly %}
 <div class="card mb-4" style="border-left:3px solid {{ 'var(--red)' if usage_monthly.status=='critical' else 'var(--amber)' if usage_monthly.status in ['warning','attention'] else 'var(--accent)' }}">
     <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem">
-        <div><h2 style="font-size:0.9375rem">Uso no mês • ${{"%.2f"|format(usage_monthly.total_cost)}} <span style="font-weight:400;color:var(--text-tertiary)">/ {{usage_monthly.pct_tokens}}% do limite</span></h2>
-        <div style="font-size:0.75rem;color:var(--text-secondary)">{{usage_monthly.total_tokens}} tokens • previsão ${{"%.2f"|format(usage_monthly.forecast_cost)}} até {{usage_monthly.next_billing}} ({{usage_monthly.remaining_days}} dias)</div></div>
+        <div><h2 style="font-size:0.9375rem">Uso no mês • R$ {{"%.2f"|format(usage_monthly.total_cost*5.5)}} <span style="font-weight:400;color:var(--text-tertiary)">/ {{usage_monthly.pct_tokens}}% do limite</span></h2>
+        <div style="font-size:0.75rem;color:var(--text-secondary)">{{usage_monthly.total_tokens}} tokens • previsão R$ {{"%.2f"|format(usage_monthly.forecast_cost*5.5)}} até {{usage_monthly.next_billing}} ({{usage_monthly.remaining_days}} dias)</div></div>
         <a href="/dashboard/billing" class="btn btn-ghost btn-sm">Detalhar →</a>
     </div>
     <div style="height:6px;background:var(--bg);border-radius:99px;margin-top:0.5rem;overflow:hidden"><div style="height:100%;width:{{ [usage_monthly.pct_tokens,100]|min }}%;background:{{ 'var(--red)' if usage_monthly.status=='critical' else 'var(--amber)' if usage_monthly.status=='warning' else 'var(--accent)' }}"></div></div>

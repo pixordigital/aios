@@ -43,7 +43,7 @@ class TranscribeTool(BaseTool):
                                 if r.status_code==200:
                                     j = r.json()
                                     text = j.get("text","") if isinstance(j, dict) else str(j)
-                                    # track voz custo $0.006/min
+                                    # track voz custo R$0,033/min (US$0,006×5,5)
                                     try:
                                         duration = j.get("duration", len(data)/16000) if isinstance(j, dict) else len(data)/16000
                                         cost = round(float(duration)/60 * 0.006, 6)
