@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div><h1>CRM IA — Monitoramento Agentes</h1><p class="text-sm text-secondary">Pipeline operado 100% por agentes • você monitora e aprova (HITL) • upsell R$97</p></div>
+  <div style="display:flex;gap:0.5rem">
+    <button class="btn btn-ghost btn-sm" onclick="location.href='/dashboard/crm?sync=hubspot'">↻ Sync HubSpot</button>
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-deal').showModal()">+ Deal</button>
+  </div>
+</div>
+{% if not crm_enabled %}
+<div class="card mb-4" style="border-left:4px solid var(--amber);background:var(--amber-subtle)">
+  <h2>🔒 CRM IA é upsell privado</h2><p class="text-sm text-secondary">Seu plano não inclui. Ative por R$97/mês fixo e veja seus robôs trabalhando. Monitoramas já tem acesso total.</p>
+  <form method="POST" action="/dashboard/crm/enable" style="margin-top:0.5rem"><button class="btn btn-primary btn-sm">Ativar CRM IA — R$97/mês</button></form>
+</div>
+{% else %}
+<div class="grid-4 mb-4">
+  <div class="stat-card"><p class="stat-label">Total deals</p><p class="stat-value">{{stats.total}}</p><span class="text-xs text-tertiary">R$ {{ "%.0f"|format(stats.total_value) }} pipeline</span></div>
+  <div class="stat-card"><p class="stat-label">Custo IA</p><p class="stat-value">R$ {{ "%.2f"|format(stats.total_cost_brl) }}</p><span class="text-xs text-tertiary">{{stats.by_stage.mql}} mql • {{stats.by_stage.sql}} sql</span></div>
+  <div class="stat-card"><p class="stat-label">Taxa</p><p class="stat-value">{{ stats.by_stage.closed_won }}/{{stats.total}}</p><span class="text-xs text-tertiary">closed won</span></div>
+  <div class="stat-card"><p class="stat-label">HITL pendentes</p><p class="stat-value">{{pending|length}}</p><a href="#pending" class="stat-link">Ver aprovações</a></div>
+</div>
+<div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap">
+  <input id="crm-q" class="input" placeholder="Buscar lead..." style="flex:1;min-width:180px" value="{{q or ''}}" onkeydown="if(event.key==='Enter') location.href='/dashboard/crm?q='+this.value">
+  <select id="crm-agent" class="input" style="width:180px" onchange="location.href='/dashboard/crm?agent_id='+this.value"><option value="">Todos agentes</option>{% for a in agents %}<option value="{{a.id}}" {% if agent_id==a.id %}selected{% endif %}>{{a.name}}</option>{% endfor %}</select>
+</div>
+<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.5rem" class="mb-4">
+  {% for stage in ["prospection","mql","sql","opportunity","closed_won","closed_lost"] %}
+  <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:0.5rem;min-height:320px">
+    <div style="font-weight:600;font-size:0.75rem;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:0.5rem">{{stage}} <span class="badge" style="font-size:0.625rem">{{stats.by_stage[stage] or 0}}</span></div>
+    <div style="display:flex;flex-direction:column;gap:0.375rem">
+    {% for d in deals if d.stage==stage %}
+      <div style="background:var(--bg);border:1px solid var(--border);border-left:3px solid {% if d.agent_id %}var(--accent){% else %}var(--amber){% endif %};border-radius:6px;padding:0.5rem">
+        <div style="font-weight:600;font-size:0.8125rem">{{d.lead_name or d.lead_email[:15]}}</div>
+        <div style="font-size:0.6875rem;color:var(--text-tertiary)">{{d.lead_email}} • {{d.lead_phone}}</div>
+        <div style="font-size:0.6875rem">R$ {{ "%.0f"|format(d.value) }} • score {{d.score}} • <span class="font-mono">{{d.agent.name if d.agent else '—'}}</span></div>
+        <div style="font-size:0.6rem;color:var(--text-tertiary)">custo R$ {{ "%.2f"|format(d.cost_usd*5.5) }}</div>
+        <div style="display:flex;gap:0.25rem;margin-top:0.375rem;flex-wrap:wrap">
+          <form method="POST" action="/dashboard/crm/{{d.id}}/move" style="display:inline"><input type="hidden" name="stage" value="{{ {'prospection':'mql','mql':'sql','sql':'opportunity','opportunity':'closed_won'}[stage] if stage in ['prospection','mql','sql','opportunity'] else stage }}"><button class="btn btn-ghost btn-sm" style="font-size:0.625rem">→ Avançar</button></form>
+          <form method="POST" action="/dashboard/crm/{{d.id}}/delete" style="display:inline"><button class="btn btn-ghost btn-sm" style="font-size:0.625rem;color:var(--red)">×</button></form>
+        </div>
+      </div>
+    {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<div id="pending" class="card"><h2>HITL — Aprovações pendentes</h2>{% for p in pending %}<div style="background:var(--bg);border:1px solid var(--amber);border-radius:6px;padding:0.5rem;margin-bottom:0.375rem;display:flex;gap:0.5rem;align-items:center"><div style="flex:1"><b>{{p.tool_name}}</b> <span class="font-mono" style="font-size:0.75rem">{{p.tool_args}}</span><div style="font-size:0.75rem;color:var(--text-tertiary)">{{p.context_summary}}</div></div><a href="/dashboard/crm/approve/{{p.id}}" class="btn btn-primary btn-sm">Aprovar</a><a href="/dashboard/crm/reject/{{p.id}}" class="btn btn-ghost btn-sm">Rejeitar</a></div>{% else %}<div class="text-sm text-tertiary">Nenhuma pendência — agentes operando sozinhos</div>{% endfor %}</div>
+{% endif %}
+
+<dialog id="new-deal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:1.25rem;width:min(480px,94vw);color:var(--text)">
+  <form method="POST" action="/dashboard/crm/create" style="display:flex;flex-direction:column;gap:0.5rem">
+    <h2>Novo deal (IA vai operar)</h2>
+    <input name="lead_name" required class="input" placeholder="Nome lead">
+    <input name="lead_email" class="input" placeholder="email">
+    <input name="lead_phone" class="input" placeholder="551199...">
+    <input name="value" type="number" class="input" placeholder="valor R$">
+    <select name="agent_id" class="input"><option value="">— agente responsável —</option>{% for a in agents %}<option value="{{a.id}}">{{a.name}}</option>{% endfor %}</select>
+    <button class="btn btn-primary">Criar</button>
+  </form>
+</dialog>
+{% endblock %}

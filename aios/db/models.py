@@ -479,3 +479,24 @@ class WorkflowExecutionLog(Base, TimestampMixin):
     level: Mapped[str] = mapped_column(String(20), default="info")
     message: Mapped[str] = mapped_column(Text, default="")
     data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class CrmDeal(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "crm_deals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    lead_name: Mapped[str] = mapped_column(String(255), default="")
+    lead_email: Mapped[str] = mapped_column(String(255), default="", index=True)
+    lead_phone: Mapped[str] = mapped_column(String(50), default="")
+    stage: Mapped[str] = mapped_column(String(30), default="prospection", index=True)
+    value: Mapped[float] = mapped_column(default=0.0)
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    score: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[float] = mapped_column(default=0.0)
+    source: Mapped[str] = mapped_column(String(50), default="whatsapp")
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
+    pipeline: Mapped[str] = mapped_column(String(50), default="default")
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    agent = relationship("Agent")
+    team = relationship("Team")

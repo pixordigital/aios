@@ -1872,6 +1872,109 @@ async def wizard_create(request: Request, phone: str = Form(...), vertical: str 
         await db.commit()
     return RedirectResponse(f"/dashboard/evolution", status_code=303)
 
+@router.get("/crm", response_class=HTMLResponse)
+async def crm_page(request: Request, q: str = "", agent_id: str = ""):
+    org_id = await _org_filter(request)
+    from aios.db.models import CrmDeal, Organization, Agent as _Ag, PendingAction
+    async with db_session() as db:
+        org = await db.get(Organization, org_id)
+        crm_enabled = False
+        if org:
+            d = org.extra_data or {}
+            crm_enabled = d.get("crm_enabled") or d.get("plan") in ("unlimited","enterprise") or (d.get("trial") and d.get("plan")=="pro")
+            # monitoramas superadmin tem sempre
+            from aios.api.deps import get_dashboard_user
+            try:
+                u = await get_dashboard_user(request)
+                if u and u.role=="superadmin":
+                    crm_enabled = True
+            except Exception:
+                pass
+        deals = []
+        stats = {"total":0,"by_stage":{s:0 for s in ["prospection","mql","sql","opportunity","closed_won","closed_lost"]},"total_value":0,"total_cost":0,"total_cost_brl":0}
+        pending = []
+        agents = (await db.execute(select(_Ag).where(_Ag.org_id==org_id).order_by(_Ag.name))).scalars().all()
+        if crm_enabled:
+            query = select(CrmDeal).where(CrmDeal.org_id==org_id)
+            if agent_id:
+                query = query.where(CrmDeal.agent_id==agent_id)
+            if q:
+                query = query.where((CrmDeal.lead_name.ilike(f"%{q}%")) | (CrmDeal.lead_email.ilike(f"%{q}%")))
+            deals = (await db.execute(query.order_by(CrmDeal.updated_at.desc()).limit(100))).scalars().all()
+            for d in deals:
+                stats["by_stage"][d.stage] = stats["by_stage"].get(d.stage,0)+1
+                stats["total_value"] += d.value or 0
+                stats["total_cost"] += d.cost_usd or 0
+            stats["total"] = len(deals)
+            stats["total_cost_brl"] = round(stats["total_cost"]*5.5,2)
+            pending = (await db.execute(select(PendingAction).where(PendingAction.status=="pending").order_by(PendingAction.created_at.desc()).limit(20))).scalars().all()
+            # enrich agent
+            for d in deals:
+                if d.agent_id:
+                    d.agent = next((a for a in agents if a.id==d.agent_id), None)
+        return await _render("crm.html", request, title="CRM IA", crm_enabled=crm_enabled, deals=deals, stats=stats, pending=pending, agents=agents, q=q, agent_id=agent_id)
+
+@router.post("/crm/enable")
+async def crm_enable(request: Request):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import Organization
+        org = await db.get(Organization, org_id)
+        if org:
+            data = dict(org.extra_data or {})
+            data["crm_enabled"] = True
+            org.extra_data = data
+            await db.commit()
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
+@router.post("/crm/create")
+async def crm_create(request: Request, lead_name: str = Form(...), lead_email: str = Form(""), lead_phone: str = Form(""), value: float = Form(0), agent_id: str = Form("")):
+    org_id = await _org_filter(request)
+    from aios.db.models import CrmDeal
+    async with db_session() as db:
+        d = CrmDeal(org_id=org_id, lead_name=lead_name, lead_email=lead_email, lead_phone=lead_phone, value=value, stage="prospection", agent_id=agent_id or None, extra_data={})
+        db.add(d)
+        await db.commit()
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
+@router.post("/crm/{deal_id}/move")
+async def crm_move(request: Request, deal_id: str, stage: str = Form(...)):
+    org_id = await _org_filter(request)
+    from aios.db.models import CrmDeal
+    async with db_session() as db:
+        d = await db.get(CrmDeal, deal_id)
+        if d and d.org_id==org_id and stage in ["prospection","mql","sql","opportunity","closed_won","closed_lost"]:
+            d.stage = stage
+            await db.commit()
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
+@router.post("/crm/{deal_id}/delete")
+async def crm_delete(request: Request, deal_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import CrmDeal
+    async with db_session() as db:
+        d = await db.get(CrmDeal, deal_id)
+        if d and d.org_id==org_id:
+            await db.delete(d)
+            await db.commit()
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
+@router.get("/crm/approve/{pid}")
+async def crm_approve(request: Request, pid: str):
+    from aios.core.approval import approval_manager
+    from aios.api.deps import get_dashboard_user
+    u = await get_dashboard_user(request)
+    approval_manager.approve(pid, decided_by=u.id if u else "dashboard")
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
+@router.get("/crm/reject/{pid}")
+async def crm_reject(request: Request, pid: str):
+    from aios.core.approval import approval_manager
+    from aios.api.deps import get_dashboard_user
+    u = await get_dashboard_user(request)
+    approval_manager.reject(pid, decided_by=u.id if u else "dashboard")
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
 @router.get("/flows", response_class=HTMLResponse)
 async def flows_page(request: Request, wf: str = ""):
     return await _render("flow_editor.html", request, title="Flow Editor", wf_id=wf)
