@@ -43,10 +43,13 @@ wait_for_postgres
 wait_for_redis
 
 echo "[entrypoint] alembic upgrade head..."
-if ! alembic upgrade head; then
-  echo "[entrypoint] alembic failed, retrying once after 5s..."
-  sleep 5
-  alembic upgrade head || echo "[entrypoint] alembic still failed, starting app anyway (DB may already be migrated)"
+if ! alembic upgrade head 2>&1 | tee /tmp/alembic.log; then
+  echo "[entrypoint] alembic head failed, trying heads..."
+  if ! alembic upgrade heads 2>&1 | tee -a /tmp/alembic.log; then
+    echo "[entrypoint] alembic failed, retrying once after 5s..."
+    sleep 5
+    alembic upgrade heads || echo "[entrypoint] alembic still failed, starting app anyway (DB may already be migrated)"
+  fi
 fi
 
 exec "$@"
