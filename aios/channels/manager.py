@@ -9,6 +9,7 @@ from aios.channels.telegram import TelegramChannel
 from aios.channels.discord import DiscordChannel
 from aios.channels.email_ import EmailChannel
 from aios.channels.evolution import EvolutionChannel
+from aios.channels.voice import VoiceChannel
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ CHANNEL_REGISTRY = {
     "discord": DiscordChannel,
     "email": EmailChannel,
     "evolution": EvolutionChannel,
+    "voice": VoiceChannel,
 }
 
 

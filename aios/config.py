@@ -61,6 +61,27 @@ class Settings(BaseSettings):
     evolution_server_url: str = "http://evolution:8080"
     evolution_api_key: str = ""
     codex_model: str = "gpt-5.4"
+    voice_provider: str = "selfhosted"  # "elevenlabs" | "vapi" | "retell" | "selfhosted"
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = ""
+    vapi_api_key: str = ""
+    vapi_assistant_id: str = ""
+    vapi_phone_number_id: str = ""
+    retell_api_key: str = ""
+    retell_agent_id: str = ""
+    voice_tts_url: str = "http://voice-tts:8000"  # openedai-speech (Coolify)
+    voice_stt_url: str = "http://voice-stt:9000"  # whisper-asr-webservice (Coolify)
+    voice_bridge_url: str = ""  # SIP dial bridge (Twilio/LiveKit/Asterisk gateway)
+    voice_from_number: str = ""
+    voice_webhook_secret: str = ""  # inbound bridge auth (?secret= / x-voice-secret)
+    livekit_url: str = ""  # wss://... (self-hosted livekit:8080 via compose)
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    livekit_tts_ws_url: str = "ws://voice-tts-stream:8001/tts/ws"  # livekit-streaming-tts server
+    livekit_tts_engine: str = "xtts"  # xtts (primário) | kokoro (fallback)
+    livekit_tts_voice: str = "ptbr"
+    kokoro_url: str = "http://voice-tts-kokoro:8880"  # Kokoro-FastAPI fallback
+    ollama_model: str = "qwen3:8b"
 
 
 
@@ -101,7 +122,7 @@ PLANS = {
         "max_messages_per_day": 5000,
         "max_tokens_per_month": 50_000_000,
         "max_cost_brl": 800,
-        "channels": ["web", "whatsapp", "email", "slack", "telegram", "discord"],
+        "channels": ["web", "whatsapp", "email", "slack", "telegram", "discord", "voice"],
     },
     "enterprise": {
         "name": "Enterprise",

@@ -18,7 +18,7 @@
                 <div>
                     <label>Tipo</label>
                     <select name="channel_type" class="input" onchange="showChannelCreds(this.value)">
-                        {% set types = ['web', 'whatsapp', 'evolution', 'slack', 'telegram', 'discord', 'email'] %}
+                        {% set types = ['web', 'whatsapp', 'evolution', 'slack', 'telegram', 'discord', 'email', 'voice'] %}
                         {% for t in types %}
                         <option value="{{ t }}" {% if channel and channel.channel_type == t %}selected{% endif %}>{{ channel_type_label(t) }}</option>
                         {% endfor %}
@@ -77,6 +77,39 @@
                     <div><label>E-mail</label><input type="email" name="config_email_addr" value="{{ channel.config.get('email', '') if channel and channel.config else '' }}" class="input" placeholder="bot@example.com"></div>
                     <div><label>Senha</label><input type="password" name="config_email_pass" class="input" placeholder="Senha de aplicativo"></div>
                 </div>
+            </div>
+            <div id="creds-voice" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div><label>Provedor</label>
+                    <select name="config_voice_provider" class="input">
+                        <option value="selfhosted" {% if channel and channel.config and channel.config.get('provider', 'selfhosted') == 'selfhosted' %}selected{% endif %}>Self-hosted (Coolify: voice-tts + voice-stt, $0/min)</option>
+                        <option value="elevenlabs" {% if channel and channel.config and channel.config.get('provider') == 'elevenlabs' %}selected{% endif %}>ElevenLabs (melhor voz)</option>
+                        <option value="vapi" {% if channel and channel.config and channel.config.get('provider') == 'vapi' %}selected{% endif %}>Vapi (controle total, ~$0.15–0.31/min)</option>
+                        <option value="retell" {% if channel and channel.config and channel.config.get('provider') == 'retell' %}selected{% endif %}>Retell (barato/rápido, ~$0.07/min)</option>
+                        <option value="livekit" {% if channel and channel.config and channel.config.get('provider') == 'livekit' %}selected{% endif %}>LiveKit streaming (self-hosted realtime, XTTS+kokoro)</option>
+                    </select>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem">
+                    <div><label>Vapi API key</label><input type="text" name="config_voice_vapi_key" value="{{ channel.config.get('vapi_api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="sk-..."></div>
+                    <div><label>Vapi assistant ID</label><input type="text" name="config_voice_vapi_asst" value="{{ channel.config.get('vapi_assistant_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="asst_..."></div>
+                    <div><label>Vapi phone ID</label><input type="text" name="config_voice_vapi_phone" value="{{ channel.config.get('vapi_phone_number_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="pn_..."></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+                    <div><label>Retell API key</label><input type="text" name="config_voice_retell_key" value="{{ channel.config.get('retell_api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="key_..."></div>
+                    <div><label>Retell agent ID</label><input type="text" name="config_voice_retell_agent" value="{{ channel.config.get('retell_agent_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="agent_..."></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+                    <div><label>ElevenLabs API key</label><input type="text" name="config_voice_eleven_key" value="{{ channel.config.get('elevenlabs_api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="sk_..."></div>
+                    <div><label>Voice ID</label><input type="text" name="config_voice_id" value="{{ channel.config.get('elevenlabs_voice_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="pN..."></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+                    <div><label>TTS URL (self-hosted)</label><input type="text" name="config_voice_tts" value="{{ channel.config.get('tts_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://voice-tts:8000"></div>
+                    <div><label>STT URL (self-hosted)</label><input type="text" name="config_voice_stt" value="{{ channel.config.get('stt_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://voice-stt:9000"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+                    <div><label>Bridge SIP (discagem)</label><input type="text" name="config_voice_bridge" value="{{ channel.config.get('bridge_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://sip-bridge:8080 (opcional)"></div>
+                    <div><label>Número origem</label><input type="text" name="config_voice_from" value="{{ channel.config.get('from_number', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="+5511999999999"></div>
+                </div>
+                <div style="font-size:0.6875rem;color:var(--text-tertiary)">Sem bridge, chamadas ficam <b>queued</b> com TTS pronto. Webhook inbound: <span class="font-mono">/api/voice/webhook?secret=...</span></div>
             </div>
             <div id="creds-evolution" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div><label>URL do servidor</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else 'http://evolution:8080' }}" class="input input-mono" placeholder="http://evolution:8080 (integrado)"></div>

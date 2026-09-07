@@ -96,7 +96,7 @@ class AgentCreate(BaseModel):
                 raise ImportError
         except Exception:
             # fallback list when registry not yet populated
-            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox","crm","lead_scoring","dynamic"}
+            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","voice_call","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox","crm","lead_scoring","dynamic"}
         invalid = [t for t in v if t not in allowed]
         if invalid:
             raise ValueError(f"tools inválidas: {invalid}")
@@ -137,7 +137,7 @@ class AgentUpdate(BaseModel):
             if not allowed:
                 raise ImportError
         except Exception:
-            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox"}
+            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","voice_call","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox"}
         invalid = [t for t in v if t not in allowed]
         if invalid:
             raise ValueError(f"tools inválidas: {invalid}")

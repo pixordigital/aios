@@ -65,6 +65,22 @@ services:
       AIOS_STRIPE_WEBHOOK_SECRET: ${AIOS_STRIPE_WEBHOOK_SECRET:-}
       AIOS_SMTP_HOST: ${AIOS_SMTP_HOST:-}
       AIOS_SMTP_PASSWORD: ${AIOS_SMTP_PASSWORD:-}
+      AIOS_VOICE_PROVIDER: ${AIOS_VOICE_PROVIDER:-selfhosted}
+      AIOS_ELEVENLABS_API_KEY: ${AIOS_ELEVENLABS_API_KEY:-}
+      AIOS_ELEVENLABS_VOICE_ID: ${AIOS_ELEVENLABS_VOICE_ID:-}
+      AIOS_VAPI_API_KEY: ${AIOS_VAPI_API_KEY:-}
+      AIOS_VAPI_ASSISTANT_ID: ${AIOS_VAPI_ASSISTANT_ID:-}
+      AIOS_VAPI_PHONE_NUMBER_ID: ${AIOS_VAPI_PHONE_NUMBER_ID:-}
+      AIOS_RETELL_API_KEY: ${AIOS_RETELL_API_KEY:-}
+      AIOS_RETELL_AGENT_ID: ${AIOS_RETELL_AGENT_ID:-}
+      AIOS_VOICE_TTS_URL: ${AIOS_VOICE_TTS_URL:-http://voice-tts:8000}
+      AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-http://voice-stt:9000}
+      AIOS_VOICE_BRIDGE_URL: ${AIOS_VOICE_BRIDGE_URL:-}
+      AIOS_VOICE_FROM_NUMBER: ${AIOS_VOICE_FROM_NUMBER:-}
+      AIOS_VOICE_WEBHOOK_SECRET: ${AIOS_VOICE_WEBHOOK_SECRET:-}
+      AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-ws://livekit:7880}
+      AIOS_LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}
+      AIOS_LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-}
       AIOS_LOG_FORMAT: "json"
       AIOS_HTTPS_ONLY: "true"
       AIOS_DASHBOARD_ENABLED: "true"
@@ -124,6 +140,138 @@ services:
       start_period: 30s
       retries: 5
     restart: unless-stopped
+
+  voice-tts:
+    image: ghcr.io/matatonic/openedai-speech:latest
+    environment:
+      TTS_HOME: /data
+    volumes:
+      - voice-tts-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/docs')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2G }
+        reservations: { cpus: "0.5", memory: 512M }
+
+  voice-stt:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    environment:
+      ASR_MODEL: small
+      ASR_ENGINE: faster_whisper
+    volumes:
+      - voice-stt-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:9000/docs')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2G }
+        reservations: { cpus: "0.5", memory: 512M }
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: ["--config", "/etc/livekit.yaml"]
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    environment:
+      LIVEKIT_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}
+    volumes:
+      - ./deploy/voice-stream/livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:7880/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 15s
+      retries: 5
+    restart: unless-stopped
+
+  voice-tts-stream:
+    build: ./deploy/voice-stream
+    command: ["sh", "/app/entrypoint-tts.sh"]
+    environment:
+      VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-xtts}
+      HF_HOME: /data/hf
+    volumes:
+      - voice-stream-data:/data
+      - ./deploy/voice-stream/speakers:/speakers:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/v1/voices || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "4", memory: 6G }
+        reservations: { cpus: "1", memory: 2G }
+
+  voice-tts-kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    environment:
+      USE_GPU: "false"
+    volumes:
+      - voice-kokoro-data:/app/api/src/models
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8880/docs || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2G }
+        reservations: { cpus: "0.5", memory: 512M }
+
+  ollama:
+    image: ollama/ollama:latest
+    command: ["sh", "-c", "ollama serve & sleep 5; ollama pull ${OLLAMA_MODEL:-qwen3:8b}; wait"]
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "4", memory: 8G }
+        reservations: { cpus: "1", memory: 2G }
+
+  voice-agent:
+    build: ./deploy/voice-stream
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}
+      AIOS_URL: http://app:8777
+      AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
+      OLLAMA_URL: http://ollama:11434/v1
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
+      TTS_WS_URL: ws://voice-tts-stream:8001/tts/ws
+      VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-xtts}
+      VOICE_TTS_VOICE: ${VOICE_TTS_VOICE:-ptbr}
+      KOKORO_URL: http://voice-tts-kokoro:8880/v1
+      PIPER_URL: http://voice-tts:8000/v1
+      STT_URL: http://voice-stt:9000/v1
+    depends_on:
+      livekit:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 3G }
+        reservations: { cpus: "0.5", memory: 1G }
 
   worker:
     build: .
@@ -195,3 +343,8 @@ volumes:
   app-data:
   evolution-data:
   evolution-store:
+  voice-tts-data:
+  voice-stt-data:
+  voice-stream-data:
+  voice-kokoro-data:
+  ollama-data:

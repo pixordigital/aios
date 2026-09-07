@@ -165,6 +165,7 @@ def _channel_type_label(value: str) -> str:
         "telegram": "Telegram",
         "discord": "Discord",
         "email": "E-mail",
+        "voice": "Voz",
     }
     return LABELS.get(value, value)
 
@@ -867,6 +868,7 @@ CHANNEL_CONFIG_FIELDS = {
     "telegram": ["config_telegram_token"],
     "discord": ["config_discord_token"],
     "email": ["config_email_imap", "config_email_smtp", "config_email_addr", "config_email_pass"],
+    "voice": ["config_voice_provider", "config_voice_eleven_key", "config_voice_id", "config_voice_vapi_key", "config_voice_vapi_asst", "config_voice_vapi_phone", "config_voice_retell_key", "config_voice_retell_agent", "config_voice_tts", "config_voice_stt", "config_voice_bridge", "config_voice_from"],
 }
 
 
@@ -885,6 +887,12 @@ async def channel_save(
     config_telegram_token: str = Form(""), config_discord_token: str = Form(""),
     config_email_imap: str = Form(""), config_email_smtp: str = Form(""),
     config_email_addr: str = Form(""), config_email_pass: str = Form(""),
+    config_voice_provider: str = Form("selfhosted"),
+    config_voice_eleven_key: str = Form(""), config_voice_id: str = Form(""),
+    config_voice_vapi_key: str = Form(""), config_voice_vapi_asst: str = Form(""), config_voice_vapi_phone: str = Form(""),
+    config_voice_retell_key: str = Form(""), config_voice_retell_agent: str = Form(""),
+    config_voice_tts: str = Form(""), config_voice_stt: str = Form(""),
+    config_voice_bridge: str = Form(""), config_voice_from: str = Form(""),
 ):
     config = {"web": {"platform": "WebSocket"}}.get(channel_type, {})
     if channel_type == "whatsapp":
@@ -911,6 +919,21 @@ async def channel_save(
         config = {"server_url": config_evo_server, "api_key": config_evo_key, "instance": config_evo_instance}
     elif channel_type == "email":
         config = {"imap_server": config_email_imap, "smtp_server": config_email_smtp, "email": config_email_addr, "password": config_email_pass}
+    elif channel_type == "voice":
+        config = {
+            "provider": config_voice_provider or "selfhosted",
+            "elevenlabs_api_key": config_voice_eleven_key,
+            "elevenlabs_voice_id": config_voice_id,
+            "vapi_api_key": config_voice_vapi_key,
+            "vapi_assistant_id": config_voice_vapi_asst,
+            "vapi_phone_number_id": config_voice_vapi_phone,
+            "retell_api_key": config_voice_retell_key,
+            "retell_agent_id": config_voice_retell_agent,
+            "tts_url": config_voice_tts,
+            "stt_url": config_voice_stt,
+            "bridge_url": config_voice_bridge,
+            "from_number": config_voice_from,
+        }
 
     from aios.core.secrets import encrypt_channel_config
     config = encrypt_channel_config(config)
@@ -2093,6 +2116,47 @@ async def wizard_create(request: Request, phone: str = Form(...), vertical: str 
         await db.commit()
     return RedirectResponse(f"/dashboard/evolution", status_code=303)
 
+@router.get("/lojista", response_class=HTMLResponse)
+async def lojista_page(request: Request):
+    from aios.templates.solutions import SOLUTIONS
+    return await _render("lojista.html", request, title="Começar em 1 minuto", solutions=SOLUTIONS)
+
+@router.post("/lojista/create")
+async def lojista_create(request: Request, phone: str = Form(...), solution: str = Form(...), business: str = Form(...)):
+    org_id = await _org_filter(request)
+    from aios.templates import apply_template
+    from aios.templates.solutions import get_solution
+    from aios.db.models import Agent, ChannelConnection
+    from aios.core.secrets import encrypt_channel_config
+    from aios.config import settings
+    import re as _re, uuid as _uuid
+    try:
+        sol = get_solution(solution)
+    except ValueError:
+        from aios.templates.solutions import SOLUTIONS
+        return await _render("lojista.html", request, title="Começar em 1 minuto", solutions=SOLUTIONS, error="Escolha: vender, atender ou recuperar")
+    if not _re.match(r"^\d{10,15}$", phone):
+        from aios.templates.solutions import SOLUTIONS
+        return await _render("lojista.html", request, title="Começar em 1 minuto", solutions=SOLUTIONS, error="WhatsApp inválido: use 5511999999999")
+    business = business.strip()[:500] or "negócio local"
+    tpl = apply_template(sol["agent_type"])
+    prompt = f"Negócio: {business}.\n\n{sol['addon']}\n\n{tpl.get('system_prompt','')}"
+    tools = [t for t in sol["tools"]]
+    async with db_session() as db:
+        ag = Agent(org_id=org_id, name=f"{sol['agent_name']} — {business[:30]}", agent_type=sol["agent_type"], system_prompt=prompt, llm_config=tpl.get("llm_config",{}), tools=tools, memory_config=tpl.get("memory_config",{}))
+        db.add(ag)
+        await db.flush()
+        from aios.core.evolution_api import evo_create_instance
+        inst_name = f"lojista{_uuid.uuid4().hex[:6]}"
+        try:
+            await evo_create_instance(inst_name)
+        except Exception:
+            pass
+        ch = ChannelConnection(org_id=org_id, label=f"WhatsApp {phone}", channel_type="evolution", config=encrypt_channel_config({"server_url": settings.evolution_server_url, "api_key": settings.evolution_api_key, "instance": inst_name}), agent_id=ag.id, is_active=True)
+        db.add(ch)
+        await db.commit()
+    return RedirectResponse(f"/dashboard/evolution", status_code=303)
+
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page(request: Request, q: str = "", agent_id: str = ""):
     org_id = await _org_filter(request)
@@ -2133,7 +2197,11 @@ async def crm_page(request: Request, q: str = "", agent_id: str = ""):
             for d in deals:
                 if d.agent_id:
                     d.agent = next((a for a in agents if a.id==d.agent_id), None)
-        return await _render("crm.html", request, title="CRM IA", crm_enabled=crm_enabled, deals=deals, stats=stats, pending=pending, agents=agents, q=q, agent_id=agent_id)
+            from aios.core.signals import rank_queue
+            queue = [{"id": r["deal"].id, "name": r["deal"].lead_name or r["deal"].lead_email, "phone": r["deal"].lead_phone, "stage": r["deal"].stage, "timing": r["timing"], "reasons": r["reasons"]} for r in rank_queue(deals, 10)]
+        else:
+            queue = []
+        return await _render("crm.html", request, title="CRM IA", crm_enabled=crm_enabled, deals=deals, stats=stats, pending=pending, agents=agents, q=q, agent_id=agent_id, queue=queue)
 
 @router.post("/crm/enable")
 async def crm_enable(request: Request):

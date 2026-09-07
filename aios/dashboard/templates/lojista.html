@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+  <div><h1>Começar em 1 minuto</h1><p class="text-sm text-secondary mt-1">1 número → 1 objetivo → 1 frase sobre teu negócio. Pronto.</p></div>
+  <div style="display:flex;gap:0.5rem;margin:1rem 0">
+    <span class="badge" id="s1">1 Número</span><span class="badge" id="s2">2 Objetivo</span><span class="badge" id="s3">3 Negócio</span>
+  </div>
+</div>
+{% if error %}<div class="card mb-4" style="border-left:4px solid var(--red)">❌ {{ error }}</div>{% endif %}
+<form method="POST" action="/dashboard/lojista/create" id="loj-form">
+  <div class="card mb-4" data-step="1">
+    <h2>1. Teu WhatsApp</h2>
+    <input name="phone" class="input input-mono" required placeholder="5511999999999" pattern="\d{10,15}" title="Só dígitos, ex. 5511999999999" style="max-width:280px">
+    <div><button type="button" class="btn btn-primary mt-2" onclick="nextStep(2)">Próximo</button></div>
+  </div>
+  <div class="card mb-4" data-step="2" style="display:none">
+    <h2>2. O que tu quer?</h2>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-top:0.75rem">
+      {% for key, s in solutions.items() %}
+      <label style="border:2px solid var(--border);border-radius:10px;padding:1rem;cursor:pointer;display:block" id="sol-{{ key }}">
+        <input type="radio" name="solution" value="{{ key }}" required style="margin-bottom:0.5rem" onchange="pickSol('{{ key }}')">
+        <div style="font-weight:700;font-size:0.9375rem">{{ s.title }}</div>
+        <div class="text-sm text-secondary" style="margin-top:0.25rem">{{ s.desc }}</div>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="flex-between mt-2"><button type="button" class="btn btn-ghost" onclick="nextStep(1)">Voltar</button><button type="button" class="btn btn-primary" onclick="nextStep(3)">Próximo</button></div>
+  </div>
+  <div class="card mb-4" data-step="3" style="display:none">
+    <h2>3. O que tu vende? (1 frase)</h2>
+    <input name="business" class="input" required maxlength="500" placeholder="Ex.: pizzaria no centro, entrega em 40min" style="margin-top:0.5rem">
+    <div class="flex-between mt-2"><button type="button" class="btn btn-ghost" onclick="nextStep(2)">Voltar</button><button type="submit" class="btn btn-primary" style="padding:0.5rem 1.5rem">Criar meu atendente</button></div>
+  </div>
+</form>
+<script>
+function nextStep(n){ document.querySelectorAll('[data-step]').forEach(function(el){ el.style.display = parseInt(el.dataset.step)===n ? 'block':'none'; }); }
+function pickSol(k){ document.querySelectorAll('[id^=sol-]').forEach(function(el){ el.style.borderColor='var(--border)'; }); document.getElementById('sol-'+k).style.borderColor='var(--accent)'; }
+nextStep(1);
+document.getElementById('loj-form').addEventListener('submit', function(e){ var p=document.querySelector('[name=phone]').value||''; if(!/^\d{10,15}$/.test(p)){ e.preventDefault(); alert('WhatsApp inválido: só dígitos, ex. 5511999999999'); } });
+</script>
+{% endblock %}

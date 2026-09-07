@@ -107,6 +107,20 @@ async def stats(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Dep
         total_cost += r.cost_usd or 0
     return {"total": len(rows), "by_stage": by_stage, "total_value": total_value, "total_cost": round(total_cost,4), "total_cost_brl": round(total_cost*5.5,2)}
 
+@router.get("/queue")
+async def queue(limit: int = Query(20, le=100), db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    """Fila do dia — deals abertos ordenados por timing (origem+recência+tentativas)."""
+    from aios.db.models import Organization
+    from aios.core.signals import rank_queue, OPEN_STAGES
+    org = await db.get(Organization, org_id)
+    if not _crm_enabled(org):
+        raise HTTPException(402, "CRM IA upsell")
+    rows = (await db.execute(select(CrmDeal).where(CrmDeal.org_id==org_id, CrmDeal.stage.in_(OPEN_STAGES)).limit(200))).scalars().all()
+    return [
+        {"id": r["deal"].id, "lead_name": r["deal"].lead_name, "lead_phone": r["deal"].lead_phone, "stage": r["deal"].stage, "timing": r["timing"], "reasons": r["reasons"], "hours_since_touch": r["hours_since_touch"], "attempts": r["attempts"]}
+        for r in rank_queue(rows, limit)
+    ]
+
 @router.post("/enable")
 async def enable_crm(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     from aios.db.models import Organization

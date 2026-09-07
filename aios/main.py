@@ -369,11 +369,18 @@ _DASHBOARD_MUTATING_GET_PREFIXES = (
     "/dashboard/teams/",    # delete
     "/dashboard/conversations/",  # delete
     "/dashboard/channels/",  # toggle/delete
+    "/dashboard/crm/",  # approve/reject
     "/dashboard/members/",  # invite revoke / remove
     "/dashboard/admin/orgs/",  # suspend/unsuspend/remove
     "/dashboard/admin/fleet/",  # remove
     "/dashboard/switch-org/",  # impersonate
 )
+# Último segmento das ações mutantes. Páginas leitura no mesmo prefixo
+# (edit/new/warmup/detalhe) ficam fora — refresh/bookmark não quebra.
+_DASHBOARD_MUTATING_GET_ACTIONS = frozenset({
+    "clone", "deploy", "delete", "toggle", "approve", "reject",
+    "revoke", "remove", "suspend", "unsuspend",
+})
 
 
 @app.middleware("http")
@@ -408,6 +415,10 @@ async def dashboard_csrf(request: Request, call_next):
         request.method == "GET"
         and path.rstrip("/") != "/dashboard"
         and any(path.startswith(p) for p in _DASHBOARD_MUTATING_GET_PREFIXES)
+        and (
+            path.rstrip("/").split("/")[-1] in _DASHBOARD_MUTATING_GET_ACTIONS
+            or path.startswith("/dashboard/switch-org/")
+        )
     )
     if mutates:
         referer = request.headers.get("referer", "")
