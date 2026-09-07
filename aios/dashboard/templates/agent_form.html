@@ -175,6 +175,13 @@
             </div>
         </div>
 
+        {% if agent and agent.governance_config %}
+        <div class="card">
+            <details><summary style="cursor:pointer;font-size:0.8125rem;font-weight:600">Governança (somente leitura)</summary>
+            <pre style="font-size:0.7rem;white-space:pre-wrap;word-break:break-all;margin-top:0.5rem;color:var(--text-secondary)">{{ agent.governance_config | tojson(indent=2) }}</pre>
+            </details>
+        </div>
+        {% endif %}
         <!-- Sidebar: Insights -->
         <div class="flex-col gap-3">
             <div class="card">
@@ -253,6 +260,16 @@
         if(_monacoEditor){ var v=_monacoEditor.getValue().trim().replace(/\n{3,}/g,'\n\n'); _monacoEditor.setValue(v); }
     }
     document.addEventListener('keydown', function(e){ if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); document.querySelector('form').requestSubmit(); }});
+    (function(){
+        var f=document.querySelector('form');
+        if(!f) return;
+        f.addEventListener('submit', function(e){
+            var v=(_monacoEditor? _monacoEditor.getValue(): document.getElementById('prompt-input').value)||'';
+            if(!v.trim() || v.trim().length<20){ e.preventDefault(); alert('Prompt muito curto (min 20 caracteres).'); return false; }
+            if(v.length>100000){ e.preventDefault(); alert('Prompt excede 100k.'); return false; }
+            if(v.toLowerCase().indexOf('portugu')<0) { if(!confirm('Prompt sem "português" — confirmar?')){ e.preventDefault(); return false; } }
+        });
+    })();
 
     var PRICING = {
         'openai/gpt-4o': {i:2.50,o:10.00},'openai/gpt-4o-mini':{i:0.15,o:0.60},'openai/gpt-4.1':{i:2.50,o:10.00},
@@ -268,6 +285,7 @@
         'deepseek/deepseek-v4-pro':{i:1.00,o:4.00},'deepseek/deepseek-v5':{i:0.75,o:3.00},
         'x-ai/grok-4':{i:2.00,o:10.00},'x-ai/grok-4-mini':{i:0.50,o:2.00},
     };
+    fetch('/dashboard/api/models').then(function(r){return r.json()}).then(function(list){ list.forEach(function(m){ if(m.model && m.input!=null) PRICING[m.model]={i:m.input,o:m.output}; }); }).catch(function(){});
     function updateCost(model){
         var price=PRICING[model]||{i:0,o:0};
         var tokens=parseInt(document.getElementById('max-tokens').value)||4096;

@@ -83,22 +83,15 @@
 </dialog>
 
 <script>
-    var PROMPTS = {
-        'sdr': 'Você é um agente de IA SDR (Representante de Desenvolvimento de Vendas). Prospecte, qualifique leads usando BANT e agende reuniões. Seja persistente, mas respeitoso.',
-        'closer': 'Você é um agente de IA Closer. Feche negócios revisando o contexto do lead, apresentando soluções personalizadas, lidando com objeções e enviando propostas.',
-        'support': 'Você é um agente de IA de Suporte ao Cliente. Resolva problemas rapidamente e com empatia. Reconheça, esclareça, resolva ou escalone. Nunca culpe o cliente.',
-        'data_analyst': 'Você é um agente de IA Analista de Dados. Consulte bancos de dados, gere relatórios e crie visualizações. Explique o que os dados significam, não apenas o que mostram.',
-        'data_scientist': 'Você é um agente de IA Cientista de Dados. Construa modelos, execute análises e forneça recomendações baseadas em dados. Explique a metodologia.',
-        'orchestrator': 'Você é um agente de IA Orquestrador. Encaminhe solicitações ao membro certo da equipe, coordene fluxos de trabalho multiagente e sintetize respostas.',
-        'manager': 'Você é um agente de IA Gerente. Supervisione o desempenho da equipe, lide com escalonamentos e garanta a qualidade. Revise respostas e oriente agentes.',
-        'custom': 'Você é um agente de IA. Ajude os usuários com seus pedidos usando as ferramentas disponíveis.',
-    };
+    var _TPL = {{ agent_templates | tojson }};
+    var PROMPTS = {};
+    var _MODEL_MAP = {};
+    var _TOOL_MAP = {};
+    (function(){ for(var k in _TPL){ PROMPTS[k]=_TPL[k].system_prompt||''; _MODEL_MAP[k]=(_TPL[k].llm_config||{}).model||'openai/gpt-4o'; _TOOL_MAP[k]=_TPL[k].tools||[]; } PROMPTS['custom']='Você é um agente de IA. Ajude os usuários com seus pedidos usando as ferramentas disponíveis.'; _MODEL_MAP['custom']='openai/gpt-4o-mini'; _TOOL_MAP['custom']=[]; })();
     function fillAgentPrompt(sel) {
-        var models = {'orchestrator':'openai/gpt-4o','manager':'openai/gpt-4o','sdr':'openai/gpt-4o','closer':'openai/gpt-4o','support':'openai/gpt-4o-mini','data_analyst':'openai/gpt-4o','data_scientist':'openai/gpt-4o','custom':'openai/gpt-4o-mini'};
-        document.getElementById('qa-model').value = models[sel.value] || 'openai/gpt-4o';
+        document.getElementById('qa-model').value = _MODEL_MAP[sel.value] || 'openai/gpt-4o';
         document.getElementById('qa-system-prompt').value = PROMPTS[sel.value] || PROMPTS['custom'];
-        var toolMap = {'sdr':['web_search','send_email'],'closer':['send_email'],'data_analyst':['calculator'],'data_scientist':['calculator']};
-        var tools = toolMap[sel.value] || [];
+        var tools = _TOOL_MAP[sel.value] || [];
         document.querySelectorAll('.qa-tool-cb').forEach(function(cb){ cb.checked = tools.indexOf(cb.value) >= 0; });
     }
     function collectAgentTools() {

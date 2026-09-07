@@ -1,8 +1,9 @@
 """Pydantic schemas with input validation."""
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 # --- Auth ---
@@ -71,24 +72,91 @@ _GOVERNANCE_DEFAULT = {
 }
 
 
+AgentType = Literal["custom", "orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist"]
+
+
 class AgentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    agent_type: str = Field(default="custom", max_length=50)
+    agent_type: AgentType = Field(default="custom")
     system_prompt: str = Field(default="", max_length=100000)
     llm_config: dict = Field(default_factory=lambda: dict(_AGENT_LLM_CONFIG_DEFAULT))
     tools: list[str] = Field(default_factory=list, max_length=50)
     memory_config: dict = Field(default_factory=lambda: dict(_AGENT_MEMORY_DEFAULT))
     governance_config: dict = Field(default_factory=lambda: dict(_GOVERNANCE_DEFAULT))
 
+    @field_validator("tools")
+    @classmethod
+    def _validate_tools(cls, v: list[str]) -> list[str]:
+        if not v:
+            return v
+        try:
+            from aios.tools.registry import TOOL_REGISTRY
+            allowed = set(TOOL_REGISTRY.keys())
+            if not allowed:
+                raise ImportError
+        except Exception:
+            # fallback list when registry not yet populated
+            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox","crm","lead_scoring","dynamic"}
+        invalid = [t for t in v if t not in allowed]
+        if invalid:
+            raise ValueError(f"tools inválidas: {invalid}")
+        return v
+
+    @field_validator("llm_config")
+    @classmethod
+    def _validate_llm(cls, v: dict) -> dict:
+        if not isinstance(v, dict):
+            raise ValueError("llm_config deve ser dict")
+        t = v.get("temperature")
+        if t is not None and not (isinstance(t, (int, float)) and 0 <= float(t) <= 2):
+            raise ValueError("temperature deve ser 0..2")
+        mt = v.get("max_tokens")
+        if mt is not None and not (isinstance(mt, int) and 256 <= mt <= 16384):
+            raise ValueError("max_tokens deve ser 256..16384")
+        return v
+
 
 class AgentUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
+    agent_type: AgentType | None = None
     system_prompt: str | None = Field(default=None, max_length=100000)
     llm_config: dict | None = None
     tools: list[str] | None = Field(default=None, max_length=50)
     memory_config: dict | None = None
     governance_config: dict | None = None
     status: str | None = Field(default=None, max_length=20)
+
+    @field_validator("tools")
+    @classmethod
+    def _validate_tools(cls, v: list[str] | None) -> list[str] | None:
+        if v is None or not v:
+            return v
+        try:
+            from aios.tools.registry import TOOL_REGISTRY
+            allowed = set(TOOL_REGISTRY.keys())
+            if not allowed:
+                raise ImportError
+        except Exception:
+            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox"}
+        invalid = [t for t in v if t not in allowed]
+        if invalid:
+            raise ValueError(f"tools inválidas: {invalid}")
+        return v
+
+    @field_validator("llm_config")
+    @classmethod
+    def _validate_llm(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError("llm_config deve ser dict")
+        t = v.get("temperature")
+        if t is not None and not (isinstance(t, (int, float)) and 0 <= float(t) <= 2):
+            raise ValueError("temperature deve ser 0..2")
+        mt = v.get("max_tokens")
+        if mt is not None and not (isinstance(mt, int) and 256 <= mt <= 16384):
+            raise ValueError("max_tokens deve ser 256..16384")
+        return v
 
 
 class AgentOut(BaseModel):

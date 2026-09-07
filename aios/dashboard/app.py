@@ -7,8 +7,11 @@ Currently all CSS/JS is inline or CDN-loaded — no local static files.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -18,7 +21,7 @@ from sqlalchemy.orm import selectinload
 
 from aios.db.backend import db_session
 from aios.db.models import Agent, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
-from aios.templates import apply_template
+from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
 from aios.api.auth import _validate_password
 
@@ -194,6 +197,8 @@ async def _render(name: str, request: Request, **kw) -> str:
         async with db_session() as db:
             orgs = (await db.execute(select(Organization).order_by(Organization.name))).scalars().all()
     active_org_id = getattr(state, "org_id", None) if state else None
+    if "agent_templates" not in kw:
+        kw["agent_templates"] = TEMPLATES
     return t.render({
         "request": request,
         "user_email": getattr(state, "user_email", None) if state else None,
@@ -432,6 +437,10 @@ async def agent_clone(request: Request, aid: str):
             memory_config=dict(src.memory_config) if src.memory_config else {},
         )
         db.add(agent)
+        await db.flush()
+        from aios.db.models import AgentVersion as _AV2
+        from sqlalchemy import func as _f2, select as _s2
+        db.add(_AV2(agent_id=agent.id, org_id=agent.org_id, version=1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="clone"))
         await db.commit()
     return RedirectResponse("/dashboard/agents", status_code=303)
 
@@ -451,8 +460,23 @@ async def agent_save(
     long_term_enabled: bool = Form(False),
     episodic_enabled: bool = Form(False),
 ):
+    if agent_type not in AGENT_TYPES:
+        return HTMLResponse(f"<h2>Tipo inválido: {agent_type}</h2><a href='/dashboard/agents'>Voltar</a>", status_code=422)
+    if not (0 <= temperature <= 2):
+        return HTMLResponse("<h2>temperature 0..2</h2>", status_code=422)
+    if not (256 <= max_tokens <= 16384):
+        return HTMLResponse("<h2>max_tokens 256..16384</h2>", status_code=422)
     async with db_session() as db:
         tools_list = [t.strip() for t in tools.replace(",", " ").split() if t.strip()]
+        if tools_list:
+            try:
+                from aios.tools.registry import TOOL_REGISTRY as _REG
+                _allowed = set(_REG.keys()) or {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","lead_score","sql_query","python_sandbox"}
+            except Exception:
+                _allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","lead_score","sql_query","python_sandbox"}
+            _bad = [t for t in tools_list if t not in _allowed]
+            if _bad:
+                return HTMLResponse(f"<h2>tools inválidas: {_bad}</h2>", status_code=422)
         llm_config = {"model": model, "temperature": temperature, "max_tokens": max_tokens}
         memory_config = {
             "short_term": {"max_messages": short_term_buffer},
@@ -469,15 +493,26 @@ async def agent_save(
                 agent.name = name; agent.agent_type = agent_type
                 agent.system_prompt = system_prompt; agent.llm_config = llm_config
                 agent.tools = tools_list; agent.memory_config = memory_config
+                await db.flush()
+                # pós-edit snapshot (P0-3)
+                db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=max_v+2, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="post-edit"))
         else:
-            tpl = apply_template(agent_type) if agent_type != "custom" and not system_prompt else None
+            # per-field template fallback (desacoplado de system_prompt)
+            tpl = apply_template(agent_type) if agent_type != "custom" else None
+            final_prompt = system_prompt.strip() if system_prompt.strip() else (tpl.get("system_prompt", "") if tpl else "")
+            # llm: if form left at defaults, use template
+            _is_default_llm = (model == "openai/gpt-4o" and temperature == 0.7 and max_tokens == 4096)
+            final_llm = llm_config if not tpl or not _is_default_llm else tpl.get("llm_config", llm_config)
+            final_tools = tools_list if tools_list else (tpl.get("tools", []) if tpl else [])
+            _is_default_mem = (short_term_buffer == 50 and not long_term_enabled and not episodic_enabled)
+            final_mem = memory_config if not tpl or not _is_default_mem else tpl.get("memory_config", memory_config)
             agent = Agent(
-                org_id=await _resolve_org_id(request),
+                org_id=org_id,
                 name=name, agent_type=agent_type,
-                system_prompt=system_prompt or (tpl.get("system_prompt", "") if tpl else ""),
-                llm_config=llm_config if system_prompt else (tpl.get("llm_config", llm_config) if tpl else llm_config),
-                tools=tools_list if tools else (tpl.get("tools", []) if tpl else []),
-                memory_config=memory_config if system_prompt else (tpl.get("memory_config", memory_config) if tpl else memory_config),
+                system_prompt=final_prompt,
+                llm_config=final_llm,
+                tools=final_tools,
+                memory_config=final_mem,
             )
             db.add(agent)
             await db.flush()
@@ -494,9 +529,58 @@ async def agent_deploy(request: Request, aid: str):
     async with db_session() as db:
         agent = await db.get(Agent, aid)
         if agent and agent.org_id == org_id:
+            if agent.status != "active":
+                from aios.config import PLANS
+                from aios.db.models import Organization as _Org
+                _org = await db.get(_Org, org_id)
+                _plan = ((_org.extra_data or {}).get("plan", "free") if _org else "free")
+                if _plan not in ("unlimited",):
+                    _limits = PLANS.get(_plan, PLANS["free"])
+                    _cnt = (await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active"))).scalars().all()
+                    if len(_cnt) >= _limits.get("max_agents", 2):
+                        return HTMLResponse(f"<h2>quota max_agents {_limits['max_agents']} para {_plan}</h2>", status_code=403)
             agent.status = "active" if agent.status != "active" else "draft"
             await db.commit()
     return RedirectResponse("/dashboard/agents", status_code=303)
+
+
+@router.post("/agents/{aid}/test")
+async def agent_test(request: Request, aid: str, message: str = Form("Olá, teste rápido")):
+    """Dry-run 1 caso antes de ativar — reusa sandbox proxy."""
+    from fastapi.responses import JSONResponse
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        agent = await db.get(Agent, aid)
+        if not agent or agent.org_id != org_id:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        from aios.core.agent import AgentRuntime
+        import uuid
+        cid = f"test_{uuid.uuid4().hex[:8]}"
+        runtime = AgentRuntime(agent, None)
+        try:
+            out = await runtime.run(cid, message, db)
+            return JSONResponse({"ok": True, "output": out[:2000]})
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)[:500]}, status_code=200)
+
+
+@router.get("/api/models")
+async def api_models():
+    """Fonte única de modelos — reusa MODEL_PRICING."""
+    from fastapi.responses import JSONResponse
+    models = []
+    for m, (inp, out) in MODEL_PRICING.items():
+        models.append({"model": m, "input": inp, "output": out, "cost_estimate": _cost_estimate(m)})
+    # add ollama/opencode extras not in pricing
+    for m in ["ollama/llama3","ollama/mistral","opencode/deepseek-v4"]:
+        if m not in MODEL_PRICING:
+            models.append({"model": m, "input": 0, "output": 0, "cost_estimate": 0})
+    return JSONResponse(models)
+
+
+@router.get("/agents/wizard", response_class=HTMLResponse)
+async def agent_wizard(request: Request):
+    return await _render("wizard.html", request, title="Assistente — Novo Agente", agent_types=AGENT_TYPES)
 
 
 @router.get("/agents/{aid}/delete")
@@ -573,21 +657,38 @@ async def team_save(
     manager_agent_id: str = Form(""),
     agent_ids: list[str] = Form(default=[]),
 ):
+    org_id = await _resolve_org_id(request)
     async with db_session() as db:
-        # validate: if agents exist, orchestrator is required
-        agent_count = (await db.execute(select(func.count(Agent.id)))).scalar() or 0
+        agent_count = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
         if agent_count > 0 and not orchestrator_agent_id:
             return RedirectResponse("/dashboard/teams/new?error=orchestrator-required", status_code=303)
+        # validate orchestrator/manager belong to org and in list
+        if orchestrator_agent_id:
+            _o = await db.get(Agent, orchestrator_agent_id)
+            if not _o or _o.org_id != org_id:
+                return HTMLResponse("<h2>Orquestrador inválido</h2>", status_code=422)
+        if manager_agent_id:
+            _m = await db.get(Agent, manager_agent_id)
+            if not _m or _m.org_id != org_id:
+                return HTMLResponse("<h2>Manager inválido</h2>", status_code=422)
 
         all_ids = list(agent_ids)
         if orchestrator_agent_id and orchestrator_agent_id not in all_ids:
             all_ids.append(orchestrator_agent_id)
         if manager_agent_id and manager_agent_id not in all_ids:
             all_ids.append(manager_agent_id)
+        # tool conflict check
+        if all_ids:
+            _agents = (await db.execute(select(Agent).where(Agent.id.in_(all_ids), Agent.org_id == org_id))).scalars().all()
+            if len(_agents) != len(set(all_ids)):
+                return HTMLResponse("<h2>Agente inválido ou de outra org</h2>", status_code=422)
+            _conf = _tool_conflicts([a.tools or [] for a in _agents])
+            if _conf:
+                return HTMLResponse(f"<h2>Conflito de tools: {'; '.join(_conf)}</h2>", status_code=422)
 
         if team_id:
             team = await db.get(Team, team_id)
-            if team and team.org_id == await _resolve_org_id(request):
+            if team and team.org_id == org_id:
                 team.name = name; team.routing_strategy = routing_strategy
                 team.orchestrator_agent_id = orchestrator_agent_id or None
                 team.manager_agent_id = manager_agent_id or None
@@ -597,7 +698,7 @@ async def team_save(
                     await db.execute(team_agents.insert().values(team_id=team.id, agent_id=aid, priority=priority))
         else:
             team = Team(
-                org_id=await _resolve_org_id(request),
+                org_id=org_id,
                 name=name, routing_strategy=routing_strategy,
                 orchestrator_agent_id=orchestrator_agent_id or None,
                 manager_agent_id=manager_agent_id or None,

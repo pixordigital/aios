@@ -19,16 +19,23 @@ async def create_agent(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    # apply template defaults then overlay any explicit overrides
+    # per-field template fallback (ponytail: minimal, no nested get truthy bug)
+    from aios.schemas import _AGENT_LLM_CONFIG_DEFAULT, _AGENT_MEMORY_DEFAULT
     tpl = apply_template(body.agent_type) if body.agent_type != "custom" else None
+    final_prompt = body.system_prompt.strip() if body.system_prompt and body.system_prompt.strip() else (tpl.get("system_prompt", "") if tpl else body.system_prompt)
+    is_default_llm = body.llm_config == _AGENT_LLM_CONFIG_DEFAULT
+    final_llm = body.llm_config if not tpl or not is_default_llm else tpl.get("llm_config", body.llm_config)
+    final_tools = body.tools if body.tools else (tpl.get("tools", []) if tpl else [])
+    is_default_mem = body.memory_config == _AGENT_MEMORY_DEFAULT
+    final_mem = body.memory_config if not tpl or not is_default_mem else tpl.get("memory_config", body.memory_config)
     agent = Agent(
         org_id=org_id,
         name=body.name,
         agent_type=body.agent_type,
-        system_prompt=body.system_prompt or (tpl.get("system_prompt", "") if tpl else ""),
-        llm_config=(tpl.get("llm_config", body.llm_config) if tpl and not body.llm_config.get("model") == "openai/gpt-4o" else body.llm_config),
-        tools=body.tools or (tpl.get("tools", []) if tpl else []),
-        memory_config=body.memory_config if body.memory_config.get("short_term") else (tpl.get("memory_config", body.memory_config) if tpl else body.memory_config),
+        system_prompt=final_prompt,
+        llm_config=final_llm,
+        tools=final_tools,
+        memory_config=final_mem,
     )
     db.add(agent)
     await db.commit()

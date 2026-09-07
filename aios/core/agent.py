@@ -33,6 +33,26 @@ from aios.db.models import Message
 
 logger = logging.getLogger(__name__)
 
+# ponytail: prefix → context window; upgrade when model catalog grows
+_CTX_MAP = {
+    "openai/gpt-4o": 128_000,
+    "openai/gpt-4": 128_000,
+    "openai/o3": 200_000,
+    "openai/o1": 200_000,
+    "anthropic": 200_000,
+    "anthropic-direct": 200_000,
+    "google/gemini": 1_000_000,
+    "opencode/": 128_000,
+    "ollama/": 32_768,
+}
+
+
+def _ctx_window(model: str) -> int:
+    for prefix, window in _CTX_MAP.items():
+        if model.startswith(prefix):
+            return window
+    return 32_000
+
 
 class AgentRuntime:
     """One agent loop per deployed agent.
@@ -425,7 +445,9 @@ class AgentRuntime:
     async def _build_context(
         self, conversation_id: str, user_message: str, db: DatabaseBackend | None = None
     ) -> list[dict]:
-        max_ctx = self.agent.llm_config.get("max_tokens", 4096)
+        model = self.agent.llm_config.get("model", "openai/gpt-4o")
+        ctx_window = _ctx_window(model)
+        max_output = self.agent.llm_config.get("max_tokens", 4096)
         ctx = [{"role": "system", "content": self.agent.system_prompt}]
 
         recent = await self.memory.get_recent(conversation_id, limit=20, db=db)
@@ -449,7 +471,7 @@ class AgentRuntime:
 
         # compress oldest messages to fit token budget
         ctx = await context_manager.compress_and_fit(
-            ctx, max_tokens=max_ctx, reserve_tokens=max_ctx // 2,
+            ctx, max_tokens=ctx_window, reserve_tokens=max_output,
             llm_provider=self.llm,
         )
 

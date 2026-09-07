@@ -40,6 +40,7 @@
                 </td>
                 <td style="text-align:right"><div class="flex-center" style="justify-content:flex-end;gap:0.25rem">
                     <a href="/dashboard/agents/{{ a.id }}/edit" class="btn btn-ghost btn-sm">Editar</a>
+                    <button onclick="testAgent('{{ a.id }}', this)" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" title="Dry-run">Testar</button>
                     <a href="/dashboard/agents/{{ a.id }}/deploy" class="btn btn-sm {% if a.status == 'active' %}btn-ghost{% else %}btn-primary{% endif %}" style="padding:0.25rem 0.5rem;font-size:0.7rem">{{ 'Desativar' if a.status == 'active' else 'Implantar' }}</a>
                     <a href="/dashboard/agents/{{ a.id }}/clone" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" title="Duplicar">Duplicar</a>
                     <a href="/dashboard/agents/{{ a.id }}/delete" class="btn btn-danger btn-sm">Excluir</a>
@@ -62,4 +63,16 @@
         </tbody>
     </table>
 </div>
+<script>
+async function testAgent(id, btn){
+  var orig=btn.textContent; btn.textContent='…'; btn.disabled=true;
+  try{
+    var fd=new FormData(); fd.append('message','Olá, teste rápido');
+    var r=await fetch('/dashboard/agents/'+id+'/test',{method:'POST', body: fd});
+    var j=await r.json();
+    alert(j.ok ? ('OK: '+(j.output||'').slice(0,300)) : ('Erro: '+(j.error||'falha')));
+  }catch(e){ alert('Erro: '+e.message)}
+  btn.textContent=orig; btn.disabled=false;
+}
+</script>
 {% endblock %}
