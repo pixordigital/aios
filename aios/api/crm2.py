@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from aios.db.backend import get_db_backend, DatabaseBackend
+from aios.schemas import PageResponse
 from aios.db.models import CrmDeal, Agent, Team
 from aios.core.secrets import encrypt_secret
 from .deps import get_current_user, get_org_id
@@ -17,7 +18,7 @@ def _crm_enabled(org):
     if data.get("trial") and data.get("plan")=="pro": return True
     return False
 
-@router.get("/deals")
+@router.get("/deals", response_model=PageResponse)
 async def list_deals(stage: str = "", agent_id: str = "", q: str = "", limit: int = Query(50, le=200), offset: int = 0, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     from aios.db.models import Organization
     org = await db.get(Organization, org_id)
@@ -30,9 +31,13 @@ async def list_deals(stage: str = "", agent_id: str = "", q: str = "", limit: in
         query = query.where(CrmDeal.agent_id==agent_id)
     if q:
         query = query.where((CrmDeal.lead_name.ilike(f"%{q}%")) | (CrmDeal.lead_email.ilike(f"%{q}%")))
-    query = query.order_by(CrmDeal.updated_at.desc()).limit(limit).offset(offset)
-    rows = (await db.execute(query)).scalars().all()
-    return rows
+    items = (await db.execute(query.order_by(CrmDeal.updated_at.desc()).limit(limit + 1).offset(offset))).scalars().all()
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = str(offset + limit) if has_more else None
+    total = (await db.execute(select(__import__('sqlalchemy').func.count(CrmDeal.id)).where(CrmDeal.org_id == org_id))).scalar()
+    return PageResponse(items=items, next_cursor=next_cursor, has_more=has_more, total=total)
 
 @router.post("/deals")
 async def create_deal(body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):

@@ -13,9 +13,9 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
-    op.add_column("workflow_runs", sa.Column("tokens", sa.Integer, nullable=False, server_default="0"))
-    op.add_column("workflow_runs", sa.Column("cost_usd", sa.Float, nullable=False, server_default="0"))
+    # workflow_runs table with tokens/cost_usd already created in 9051a2b3c4d9
+    pass
 
 def downgrade() -> None:
-    op.drop_column("workflow_runs", "cost_usd")
-    op.drop_column("workflow_runs", "tokens")
+    # no-op: workflow_runs created in earlier revision
+    pass

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Workflow, WorkflowNode, WorkflowRun, Agent, Conversation
-from aios.schemas import BaseModel
+from aios.schemas import BaseModel, PageResponse
 from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -88,21 +88,28 @@ async def create_workflow(
     return wf
 
 
-@router.get("", response_model=list[WorkflowOut])
+@router.get("", response_model=PageResponse[WorkflowOut])
 async def list_workflows(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    res = await db.execute(
+    items = (await db.execute(
         select(Workflow)
         .where(Workflow.org_id == org_id)
         .order_by(Workflow.created_at.desc())
-        .limit(limit)
+        .limit(limit + 1)
         .offset(offset)
-    )
-    return res.scalars().all()
+    )).scalars().all()
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = str(offset + limit) if has_more else None
+    total = (await db.execute(
+        select(__import__('sqlalchemy').func.count(Workflow.id)).where(Workflow.org_id == org_id)
+    )).scalar()
+    return PageResponse(items=items, next_cursor=next_cursor, has_more=has_more, total=total)
 
 
 @router.get("/{wf_id}")

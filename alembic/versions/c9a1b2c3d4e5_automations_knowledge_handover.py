@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "c9a1b2c3d4e5"
-down_revision: Union[str, None] = "9051a2b3c4d8"
+down_revision: Union[str, None] = "9051a2b3c4d9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

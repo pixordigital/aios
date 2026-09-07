@@ -13,6 +13,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    from alembic import op
+    from sqlalchemy import inspect
+
+    conn = op.get_bind()
+    is_sqlite = conn.dialect.name == "sqlite"
+
     # --- Agent governance config ---
     op.add_column("agents", sa.Column("governance_config", sa.JSON, nullable=False, server_default="'{}'::json"))
 
@@ -23,37 +29,75 @@ def upgrade() -> None:
     # --- Tenant hardening: org_id on messages, memories, agent_instances ---
     # These tables need org_id for direct tenant isolation (previously only accessible via parent join).
 
-    # For messages: backfill org_id from conversations, then make non-nullable
-    op.add_column("messages", sa.Column("org_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=True))
-    op.execute("""
-        UPDATE messages SET org_id = (
-            SELECT conversations.org_id FROM conversations
-            WHERE conversations.id = messages.conversation_id
-        )
-    """)
-    op.alter_column("messages", "org_id", nullable=False)
+    # For SQLite: add column without FK (batch mode handles this), then create index
+    # For Postgres: add column with FK directly
+    if is_sqlite:
+        # SQLite batch mode: add column without FK
+        with op.batch_alter_table("messages") as batch_op:
+            batch_op.add_column(sa.Column("org_id", sa.String(36), nullable=True))
+        op.execute("""
+            UPDATE messages SET org_id = (
+                SELECT conversations.org_id FROM conversations
+                WHERE conversations.id = messages.conversation_id
+            )
+        """)
+        with op.batch_alter_table("messages") as batch_op:
+            batch_op.alter_column("org_id", nullable=False)
+    else:
+        op.add_column("messages", sa.Column("org_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=True))
+        op.execute("""
+            UPDATE messages SET org_id = (
+                SELECT conversations.org_id FROM conversations
+                WHERE conversations.id = messages.conversation_id
+            )
+        """)
+        op.alter_column("messages", "org_id", nullable=False)
     op.create_index("ix_messages_org_id", "messages", ["org_id"], unique=False)
 
     # For memories: backfill org_id from agents, then make non-nullable
-    op.add_column("memories", sa.Column("org_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=True))
-    op.execute("""
-        UPDATE memories SET org_id = (
-            SELECT agents.org_id FROM agents
-            WHERE agents.id = memories.agent_id
-        )
-    """)
-    op.alter_column("memories", "org_id", nullable=False)
+    if is_sqlite:
+        with op.batch_alter_table("memories") as batch_op:
+            batch_op.add_column(sa.Column("org_id", sa.String(36), nullable=True))
+        op.execute("""
+            UPDATE memories SET org_id = (
+                SELECT agents.org_id FROM agents
+                WHERE agents.id = memories.agent_id
+            )
+        """)
+        with op.batch_alter_table("memories") as batch_op:
+            batch_op.alter_column("org_id", nullable=False)
+    else:
+        op.add_column("memories", sa.Column("org_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=True))
+        op.execute("""
+            UPDATE memories SET org_id = (
+                SELECT agents.org_id FROM agents
+                WHERE agents.id = memories.agent_id
+            )
+        """)
+        op.alter_column("memories", "org_id", nullable=False)
     op.create_index("ix_memories_org_id", "memories", ["org_id"], unique=False)
 
     # For agent_instances: backfill org_id from agents, then make non-nullable
-    op.add_column("agent_instances", sa.Column("org_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=True))
-    op.execute("""
-        UPDATE agent_instances SET org_id = (
-            SELECT agents.org_id FROM agents
-            WHERE agents.id = agent_instances.agent_id
-        )
-    """)
-    op.alter_column("agent_instances", "org_id", nullable=False)
+    if is_sqlite:
+        with op.batch_alter_table("agent_instances") as batch_op:
+            batch_op.add_column(sa.Column("org_id", sa.String(36), nullable=True))
+        op.execute("""
+            UPDATE agent_instances SET org_id = (
+                SELECT agents.org_id FROM agents
+                WHERE agents.id = agent_instances.agent_id
+            )
+        """)
+        with op.batch_alter_table("agent_instances") as batch_op:
+            batch_op.alter_column("org_id", nullable=False)
+    else:
+        op.add_column("agent_instances", sa.Column("org_id", sa.String(36), sa.ForeignKey("organizations.id"), nullable=True))
+        op.execute("""
+            UPDATE agent_instances SET org_id = (
+                SELECT agents.org_id FROM agents
+                WHERE agents.id = agent_instances.agent_id
+            )
+        """)
+        op.alter_column("agent_instances", "org_id", nullable=False)
     op.create_index("ix_agent_instances_org_id", "agent_instances", ["org_id"], unique=False)
 
     # --- OAuth accounts table ---

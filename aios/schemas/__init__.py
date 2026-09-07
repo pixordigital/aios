@@ -1,9 +1,18 @@
 """Pydantic schemas with input validation."""
 
 from datetime import datetime
-from typing import Literal
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+T = TypeVar("T")
+
+
+class PageResponse(BaseModel, Generic[T]):
+    items: list[T]
+    next_cursor: str | None = None
+    has_more: bool = False
+    total: int | None = None
 
 
 # --- Auth ---

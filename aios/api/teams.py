@@ -4,7 +4,7 @@ from sqlalchemy import select
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, Team
-from aios.schemas import TeamAssignRequest, TeamCreate, TeamOut
+from aios.schemas import TeamAssignRequest, TeamCreate, TeamOut, PageResponse
 from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -41,17 +41,24 @@ async def create_team(
     return team
 
 
-@router.get("", response_model=list[TeamOut])
+@router.get("", response_model=PageResponse[TeamOut])
 async def list_teams(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    result = await db.execute(
-        select(Team).where(Team.org_id == org_id).order_by(Team.created_at.desc()).limit(limit).offset(offset)
-    )
-    return result.scalars().all()
+    items = (await db.execute(
+        select(Team).where(Team.org_id == org_id).order_by(Team.created_at.desc()).limit(limit + 1).offset(offset)
+    )).scalars().all()
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = str(offset + limit) if has_more else None
+    total = (await db.execute(
+        select(__import__('sqlalchemy').func.count(Team.id)).where(Team.org_id == org_id)
+    )).scalar()
+    return PageResponse(items=items, next_cursor=next_cursor, has_more=has_more, total=total)
 
 
 @router.get("/{team_id}", response_model=TeamOut)

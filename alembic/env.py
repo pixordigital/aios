@@ -29,7 +29,12 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection):
-    context.configure(connection=connection, target_metadata=target_metadata)
+    is_sqlite = connection.dialect.name == "sqlite"
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        render_as_batch=is_sqlite,  # batch mode for SQLite ALTER TABLE support
+    )
     with context.begin_transaction():
         context.run_migrations()
 

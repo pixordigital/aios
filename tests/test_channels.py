@@ -32,8 +32,9 @@ class TestChannels:
         response = await auth_client.get("/api/channels")
         assert response.status_code == 200
         data = response.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
+        assert "items" in data
+        assert isinstance(data["items"], list)
+        assert len(data["items"]) >= 1
 
     async def test_get_channel(self, auth_client: AsyncClient):
         """Test getting a single channel."""

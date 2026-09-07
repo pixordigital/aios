@@ -10,7 +10,7 @@ from aios.core.limits import check_org_limits, track_usage
 from aios.core.orchestrator import TeamOrchestrator
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, Conversation, Message, Team
-from aios.schemas import ConversationCreate, ConversationOut, MessageOut, MessageSend, SendMessageResponse
+from aios.schemas import ConversationCreate, ConversationOut, MessageOut, MessageSend, SendMessageResponse, PageResponse
 from .deps import get_current_user, get_org_id
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ async def create_conversation(
     return conv
 
 
-@router.get("", response_model=list[ConversationOut])
+@router.get("", response_model=PageResponse[ConversationOut])
 async def list_conversations(
     channel: str | None = None,
     agent_id: str | None = None,
@@ -55,9 +55,15 @@ async def list_conversations(
         query = query.where(Conversation.agent_id == agent_id)
     if team_id:
         query = query.where(Conversation.team_id == team_id)
-    query = query.order_by(Conversation.created_at.desc()).limit(limit).offset(offset)
-    result = await db.execute(query)
-    return result.scalars().all()
+    items = (await db.execute(query.order_by(Conversation.created_at.desc()).limit(limit + 1).offset(offset))).scalars().all()
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+    next_cursor = str(offset + limit) if has_more else None
+    total = (await db.execute(
+        select(__import__('sqlalchemy').func.count(Conversation.id)).where(Conversation.org_id == org_id)
+    )).scalar()
+    return PageResponse(items=items, next_cursor=next_cursor, has_more=has_more, total=total)
 
 
 @router.get("/{conversation_id}", response_model=ConversationOut)
