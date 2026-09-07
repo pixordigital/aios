@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     whatsapp_app_secret: str = ""  # Meta app secret for webhook signature verification
     whatsapp_verify_token: str = ""  # Meta webhook subscribe verification token
     zernio_webhook_secret: str = ""  # Zernio webhook signature secret (X-Zernio-Signature)
+    voice_webhook_secret: str = ""  # Voice webhook HMAC secret
+    discord_webhook_secret: str = ""  # Discord webhook HMAC secret
+    slack_signing_secret: str = ""  # Slack signing secret for signature verification
+    sendgrid_webhook_secret: str = ""  # SendGrid inbound parse webhook secret
+    mailgun_webhook_secret: str = ""  # Mailgun webhook secret
+    ses_webhook_secret: str = ""  # SES/SNS webhook secret
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

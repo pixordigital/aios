@@ -243,6 +243,14 @@ from aios.api.evolution_webhook import router as evo_router  # noqa: E402
 app.include_router(evo_router)
 from aios.api.zernio_webhook import router as zernio_router  # noqa: E402
 app.include_router(zernio_router)
+from aios.api.voice_webhook import router as voice_router  # noqa: E402
+app.include_router(voice_router)
+from aios.api.discord_webhook import router as discord_router  # noqa: E402
+app.include_router(discord_router)
+from aios.api.slack_webhook import router as slack_router  # noqa: E402
+app.include_router(slack_router)
+from aios.api.email_webhook import router as email_router  # noqa: E402
+app.include_router(email_router)
 
 # Prometheus metrics instrumentation
 Instrumentator().instrument(app).expose(app)
