@@ -247,7 +247,9 @@ services:
   #   restart: unless-stopped
   #
   # voice-tts-stream:
-  #   build: ./deploy/voice-stream
+  #   build:
+  #     context: ./deploy/voice-stream
+  #     dockerfile: Dockerfile.tts
   #   command: ["sh", "/app/entrypoint-tts.sh"]
   #   environment:
   #     VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-xtts}
