@@ -144,44 +144,10 @@ services:
       resources:
         limits: { cpus: "1", memory: 1G }
 
-  # ─── Voz self-hosted (leve: cabe em VPS 4CPU/8GB) ───
-  voice-tts:
-    image: ghcr.io/matatonic/openedai-speech:latest
-    environment:
-      TTS_HOME: /data
-    volumes:
-      - voice-tts-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/docs')\" || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
-      retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "1", memory: 1G }
-        reservations: { cpus: "0.25", memory: 256M }
-
-  voice-stt:
-    image: onerahmet/openai-whisper-asr-webservice:latest
-    environment:
-      ASR_MODEL: small
-      ASR_ENGINE: faster_whisper
-    volumes:
-      - voice-stt-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:9000/docs')\" || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 120s
-      retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "1", memory: 2G }
-        reservations: { cpus: "0.5", memory: 512M }
-
+  # ─── Voz (leve: LiveKit + agent; TTS/STT via cloud ou Batch local) ───
+  # voice-tts (openedai-speech, ~2GB) e voice-stt (whisper, ~4GB) NÃO cabem
+  # neste host (disco 84%+). Reative com VPS 100GB+. Enquanto isso:
+  # TTS = ElevenLabs/Vapi/Retell por canal; STT = OpenAI whisper API.
   livekit:
     image: livekit/livekit-server:latest
     command: ["--config", "/etc/livekit.yaml"]
@@ -263,8 +229,8 @@ volumes:
   postgres-data:
   redis-data:
   app-data:
-  voice-tts-data:
-  voice-stt-data:
+  # voice-tts-data:
+  # voice-stt-data:
   # voice-stream-data:
   # voice-kokoro-data:
   # ollama-data:
