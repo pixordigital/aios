@@ -150,15 +150,11 @@ services:
   # TTS = ElevenLabs/Vapi/Retell por canal; STT = OpenAI whisper API.
   livekit:
     image: livekit/livekit-server:latest
-    command: ["--config", "/etc/livekit.yaml"]
+    command: ["--bind", "0.0.0.0", "--keys", "${AIOS_LIVEKIT_API_KEY:-devkey}: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}"]
     ports:
       - "7880:7880"
       - "7881:7881"
       - "7882:7882/udp"
-    environment:
-      LIVEKIT_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}
-    volumes:
-      - ./deploy/voice-stream/livekit.yaml:/etc/livekit.yaml:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:7880/ || exit 1"]
       interval: 15s
