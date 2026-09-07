@@ -232,6 +232,17 @@ class AgentRuntime:
             yield {"type": STREAM_ERROR, "error": f"Agent {self.agent.name} is stopped due to repeated failures"}
             return
 
+        # P0-15 guardrail: bloqueia LLM se check_org_limits negar (custo/tokens/msgs)
+        if db is not None:
+            try:
+                from aios.core.limits import check_org_limits as _chk
+                _allowed, _reason = await _chk(self.agent.org_id, db)
+                if not _allowed:
+                    yield {"type": STREAM_ERROR, "error": _reason}
+                    return
+            except Exception:
+                pass
+
         scheduler.start(self.agent.id)
         hooks.fire(HookPoint.AGENT_START, HookContext(
             agent_id=self.agent.id,

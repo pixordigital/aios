@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>WhatsApp Warmup & Opt-in Checklist</h1><p class="text-sm text-secondary mt-1">Guia para evitar blocks no primeiro disparo em massa</p></div>
+    <a href="/dashboard/channels" class="btn btn-ghost btn-sm">← Canais</a>
+</div>
+
+<div class="card">
+    <div class="empty-state" style="padding:1.5rem">
+        <div class="empty-state-icon" style="background:var(--amber-subtle);color:var(--amber)">
+            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <h3>Checklist de Warmup WhatsApp</h3>
+        <p class="text-secondary">Complete cada etapa antes de disparar campanhas. WhatsApp bloqueia números que não seguem o processo.</p>
+    </div>
+</div>
+
+<div class="grid-2" style="margin-top:1rem">
+    <div class="card">
+        <h3 style="margin:0 0 0.75rem">📋 Pré-requisitos Obrigatórios</h3>
+        <div class="checklist">
+            <label class="item">
+                <input type="checkbox" id="w1">
+                <div><b>Conta Business verificada</b><span>Meta Business Manager → WhatsApp Business Account → Verificação de negócio (badge verde)</span></div>
+                <span class="prio p0">Obrigatório</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w2">
+                <div><b>Número de telefone dedicado</b><span>Não use número pessoal. Linha exclusiva para WhatsApp Business API</span></div>
+                <span class="prio p0">Obrigatório</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w3">
+                <div><b>Display name aprovado</b><span>Nome da empresa conforme registro legal. Meta aprova em 24-48h</span></div>
+                <span class="prio p0">Obrigatório</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w4">
+                <div><b>Templates aprovados</b><span>Mínimo 1 template de "utility" ou "marketing" aprovado. Use variáveis {{1}}, {{2}}</span></div>
+                <span class="prio p0">Obrigatório</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w5">
+                <div><b>Webhook configurado e respondendo 200</b><span>URL HTTPS válida, certificado válido, responde <200ms. Teste no Meta Developers</span></div>
+                <span class="prio p0">Obrigatório</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin:0 0 0.75rem">🔥 Warmup Progressivo (7-14 dias)</h3>
+        <div class="checklist">
+            <label class="item">
+                <input type="checkbox" id="w6">
+                <div><b>Dias 1-2: 10-20 msg/dia</b><span>Respostas manuais a clientes que iniciam conversa. Zero templates</span></div>
+                <span class="prio p0">Fase 1</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w7">
+                <div><b>Dias 3-5: 50-100 msg/dia</b><span>Inclui templates de "utility" (confirmação, status). Resposta <5min</span></div>
+                <span class="prio p0">Fase 2</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w8">
+                <div><b>Dias 6-10: 200-500 msg/dia</b><span>Templates de "marketing" permitidos. Taxa de leitura >70%</span></div>
+                <span class="prio p1">Fase 3</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w9">
+                <div><b>Dias 11-14: 1000+ msg/dia</b><span>Volume total. Monitorar quality rating diariamente no Meta Business</span></div>
+                <span class="prio p1">Fase 4</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w10">
+                <div><b>Quality Rating "High" (verde)</b><span>Ver em Meta Business Manager → WhatsApp → Phone number → Quality. Se "Medium" ou "Low", PARE e investigue</span></div>
+                <span class="prio p0">Gate</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin:0 0 0.75rem">✅ Opt-in & Conformidade</h3>
+        <div class="checklist">
+            <label class="item">
+                <input type="checkbox" id="w11">
+                <div><b>Opt-in explícito coletado</b><span>Checkbox "Aceito receber msgs WhatsApp" no cadastro/site. Guardar timestamp + IP</span></div>
+                <span class="prio p0">Legal</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w12">
+                <div><b>Link de opt-out em toda msg marketing</b><span>Template deve ter botão "Não quero receber" ou texto "Responda SAIR"</span></div>
+                <span class="prio p0">Legal</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w13">
+                <div><b>Processamento opt-out < 24h</b><span>Automação que marca contact como opted_out e para disparos</span></div>
+                <span class="prio p0">Legal</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w14">
+                <div><b>Política de privacidade linkada</b><span>Footer do template ou primeira msg: "Política: seudominio.com/privacidade"</span></div>
+                <span class="prio p1">Legal</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w15">
+                <div><b>LGPD/GDPR compliance</b><span>Dados do contato (nome, telefone) só para fim declarado. Retenção mínima</span></div>
+                <span class="prio p1">Legal</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3 style="margin:0 0 0.75rem">🛡 Configuração Técnica no AIOS</h3>
+        <div class="checklist">
+            <label class="item">
+                <input type="checkbox" id="w16">
+                <div><b>Canal WhatsApp ativo no AIOS</b><span>/dashboard/channels → Novo → WhatsApp (Meta) → access_token + phone_id</span></div>
+                <span class="prio p0">Config</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w17">
+                <div><b>Template padrão configurado</b><span>No canal: template_name + template_language (pt_BR). Fallback fora da janela 24h</span></div>
+                <span class="prio p0">Config</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w18">
+                <div><b>Agente/Time atribuído ao canal</b><span>agent_id ou team_id preenchido no ChannelConnection</span></div>
+                <span class="prio p0">Config</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w19">
+                <div><b>DLQ monitorado</b><span>/dashboard/admin/dlq — alerta se >5 entradas/hora</span></div>
+                <span class="prio p1">Config</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w20">
+                <div><b>Transcrição de áudio testada</b><span>Envie áudio de teste → verifique /conversations/{id} → transcrito + diarizado</span></div>
+                <span class="prio p1">Config</span>
+            </label>
+            <label class="item">
+                <input type="checkbox" id="w21">
+                <div><b>Limite 10MB mídia respeitado</b><span>Webhook rejeita >10MB com log. Teste enviando vídeo grande</span></div>
+                <span class="prio p1">Config</span>
+            </label>
+        </div>
+    </div>
+</div>
+
+<div class="card" style="margin-top:1rem">
+    <h3 style="margin:0 0 0.75rem">📊 Métricas de Saúde (monitorar diariamente)</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem">
+        <div class="card" style="padding:1rem"><div class="text-xs text-tertiary">Quality Rating</div><div style="font-size:1.5rem;font-weight:700;color:var(--green)">High ✓</div><div class="text-xs text-tertiary">Meta Business → Phone number</div></div>
+        <div class="card" style="padding:1rem"><div class="text-xs text-tertiary">Taxa de Leitura</div><div style="font-size:1.5rem;font-weight:700;color:var(--accent)">> 70%</div><div class="text-xs text-tertiary">Mensagens lidas / entregues</div></div>
+        <div class="card" style="padding:1rem"><div class="text-xs text-tertiary">Taxa de Block</div><div style="font-size:1.5rem;font-weight:700;color:var(--green)">< 1%</div><div class="text-xs text-tertiary">Bloqueios / enviados</div></div>
+        <div class="card" style="padding:1rem"><div class="text-xs text-tertiary">Tempo Resposta</div><div style="font-size:1.5rem;font-weight:700;color:var(--amber)">< 5 min</div><div class="text-xs text-tertiary">P95 primeira resposta humana</div></div>
+        <div class="card" style="padding:1rem"><div class="text-xs text-tertiary">DLQ Entries</div><div style="font-size:1.5rem;font-weight:700;color:var(--green)">0</div><div class="text-xs text-tertiary">/dashboard/admin/dlq</div></div>
+    </div>
+</div>
+
+<div class="card" style="margin-top:1rem">
+    <h3 style="margin:0 0 0.75rem">🚨 Sinais de Alerta — PARE Imediatamente Se:</h3>
+    <ul style="margin:0;padding-left:1.25rem;color:var(--ink2);line-height:1.8">
+        <li>Quality Rating cai para <b>Medium</b> ou <b>Low</b> (vermelho/amarelo no Meta)</li>
+        <li>Taxa de block > <b>3%</b> em 24h</li>
+        <li>Receber notificação "Account restricted" no Meta Business Manager</li>
+        <li>Webhook falhando > <b>5%</b> (ver logs + DLQ)</li>
+        <li>Templates rejeitados em massa (revisar conteúdo + variáveis)</li>
+    </ul>
+</div>
+
+<div class="flex-center gap-2 mt-4" style="flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="saveChecklist()">Salvar progresso</button>
+    <button class="btn btn-ghost" onclick="exportChecklist()">Exportar JSON</button>
+    <a href="/dashboard/channels/new?type=whatsapp" class="btn btn-primary">+ Configurar Canal WhatsApp</a>
+</div>
+
+<script>
+function saveChecklist(){
+  const data={};
+  document.querySelectorAll('.checklist input[type=checkbox]').forEach(cb=>{ data[cb.id]=cb.checked; });
+  localStorage.setItem('whatsapp_warmup_checklist', JSON.stringify(data));
+  alert('Progresso salvo no navegador ✓');
+}
+function loadChecklist(){
+  try{
+    const data=JSON.parse(localStorage.getItem('whatsapp_warmup_checklist')||'{}');
+    Object.entries(data).forEach(([k,v])=>{ const el=document.getElementById(k); if(el) el.checked=v; });
+  }catch(e){}
+}
+function exportChecklist(){
+  const data={};
+  document.querySelectorAll('.checklist input[type=checkbox]').forEach(cb=>{ data[cb.id]=cb.checked; });
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='whatsapp_warmup_checklist.json'; a.click();
+}
+loadChecklist();
+</script>
+{% endblock %}

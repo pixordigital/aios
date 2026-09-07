@@ -952,6 +952,12 @@ async def channel_delete(request: Request, cid: str):
     return RedirectResponse("/dashboard/channels", status_code=303)
 
 
+@router.get("/channels/whatsapp/warmup", response_class=HTMLResponse)
+async def whatsapp_warmup(request: Request):
+    org_id = await _org_filter(request)
+    return await _render("whatsapp_warmup.html", request, title="WhatsApp Warmup Checklist")
+
+
 # ─── Members & Invites ───
 
 @router.get("/members", response_class=HTMLResponse)
@@ -1235,6 +1241,49 @@ async def admin_fleet_remove(fid: str):
     return RedirectResponse("/dashboard/admin/fleet", status_code=303)
 
 
+# ─── Dead Letter Queue Admin ───
+
+@router.get("/admin/dlq", response_class=HTMLResponse)
+async def admin_dlq(request: Request, limit: int = 50, org_filter: str = ""):
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
+    from aios.core.dead_letter import list_dlq
+    entries = await list_dlq(limit)
+    if org_filter:
+        entries = [e for e in entries if e.get("org_id") == org_filter]
+    from aios.db.models import Organization
+    async with db_session() as db:
+        orgs = (await db.execute(select(Organization).order_by(Organization.name))).scalars().all()
+    return await _render("admin/dlq.html", request, title="Dead Letter Queue", entries=entries, orgs=orgs, org_filter=org_filter, limit=limit)
+
+
+@router.post("/admin/dlq/{entry_id}/retry")
+async def admin_dlq_retry(request: Request, entry_id: str):
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
+    from aios.core.dead_letter import retry_dlq
+    result = await retry_dlq(entry_id)
+    if not result["ok"]:
+        return HTMLResponse("Entrada não encontrada", status_code=404)
+    return RedirectResponse("/dashboard/admin/dlq", status_code=303)
+
+
+@router.post("/admin/dlq/{entry_id}/delete")
+async def admin_dlq_delete(request: Request, entry_id: str):
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
+    from aios.db.models import DeadLetter
+    async with db_session() as db:
+        entry = await db.get(DeadLetter, entry_id)
+        if entry:
+            await db.delete(entry)
+            await db.commit()
+    return RedirectResponse("/dashboard/admin/dlq", status_code=303)
+
+
 # ─── Billing page ───
 
 @router.get("/billing", response_class=HTMLResponse)
@@ -1510,10 +1559,15 @@ async def lab_agent_versions(request: Request, agent_id: str):
 async def lab_agent_publish(request: Request, agent_id: str):
     org_id = await _org_filter(request)
     from fastapi.responses import JSONResponse
-    from aios.db.models import Agent, AgentVersion
-    from sqlalchemy import func as _func
+    from aios.db.models import Agent, AgentVersion, Dataset, EvalRun
+    from sqlalchemy import func as _func, select
+    import json
+    import time
+
     form = await request.form()
     note = form.get("note") or ""
+    judge_model = form.get("judge_model") or "openai/gpt-4o-mini"
+
     async with db_session() as db:
         ag = await db.get(Agent, agent_id)
         if not ag or ag.org_id != org_id:
@@ -1522,29 +1576,94 @@ async def lab_agent_publish(request: Request, agent_id: str):
         v = AgentVersion(agent_id=ag.id, org_id=org_id, version=max_v + 1, name=ag.name, system_prompt=ag.system_prompt, llm_config=dict(ag.llm_config or {}), tools=list(ag.tools or []), memory_config=dict(ag.memory_config or {}), governance_config=dict(ag.governance_config or {}), agent_type=ag.agent_type, change_note=note)
         db.add(v)
         await db.commit()
-        # avaliação contínua: se dataset existe, roda eval em background
-        try:
-            from aios.db.models import Dataset
-            ds = (await db.execute(select(Dataset).where(Dataset.agent_id == agent_id).limit(1))).scalars().first()
-            if ds:
-                import asyncio as _aio
-                from aios.core.rubric import rubric_manager
 
-                async def _eval_bg():
+        # avaliação real: se dataset existe, roda eval com juiz gpt-4o-mini
+        ds = (await db.execute(select(Dataset).where(Dataset.agent_id == agent_id).limit(1))).scalars().first()
+        eval_triggered = False
+        eval_results = []
+        avg_score = 0.0
+
+        if ds and ds.cases:
+            eval_triggered = True
+            from aios.core.agent import AgentRuntime
+            from aios.core.providers import get_provider
+
+            runtime = AgentRuntime(ag)
+            results = []
+            cases = ds.cases[:20]  # limite 20 casos
+
+            for case in cases:
+                start = time.time()
+                inp = case.get("input", "") if isinstance(case, dict) else str(case)
+                expected = case.get("expected") if isinstance(case, dict) else None
+                try:
+                    out = await runtime.run(f"eval_{agent_id}", inp, db)
+                except Exception as e:
+                    out = f"ERROR: {e}"
+                latency = int((time.time() - start) * 1000)
+
+                score = None
+                if expected:
                     try:
-                        from aios.db.models import EvalRun
+                        judge = get_provider(judge_model)
+                        resp = await judge.chat_retry(
+                            messages=[
+                                {
+                                    "role": "system",
+                                    "content": 'Score 0-1 whether output matches expected. Return JSON {"score":0.0-1.0}',
+                                },
+                                {
+                                    "role": "user",
+                                    "content": f"Expected: {expected}\nOutput: {out[:2000]}",
+                                },
+                            ],
+                            model=judge_model,
+                            temperature=0.0,
+                            max_tokens=100,
+                        )
+                        txt = resp.get("content", "")
+                        score = float(json.loads(txt).get("score", 0)) if "{" in txt else 0.0
+                    except (ValueError, json.JSONDecodeError, KeyError):
+                        score = 1.0 if expected.lower() in out.lower() else 0.0
 
-                        er = EvalRun(agent_id=agent_id, org_id=org_id, dataset_id=ds.id, version_id=v.id, judge_model="openai/gpt-4o-mini", avg_score=0, results=[], extra_data={"auto": True})
-                        async with db_session() as _db2:
-                            _db2.add(er)
-                            await _db2.commit()
-                    except Exception:
-                        pass
+                results.append({
+                    "input": inp,
+                    "output": out[:4000],
+                    "expected": expected,
+                    "score": score,
+                    "latency_ms": latency,
+                })
 
-                _aio.create_task(_eval_bg())
+            # calcular média
+            valid_scores = [r["score"] for r in results if r["score"] is not None]
+            avg_score = round(sum(valid_scores) / max(1, len(valid_scores)), 3) if valid_scores else 0.0
+            eval_results = results
+
+        # persistir EvalRun
+        try:
+            er = EvalRun(
+                agent_id=agent_id,
+                org_id=org_id,
+                dataset_id=ds.id if ds else None,
+                version_id=v.id,
+                judge_model=judge_model,
+                avg_score=avg_score,
+                results=eval_results,
+                extra_data={"auto": True}
+            )
+            db.add(er)
+            await db.commit()
         except Exception:
             pass
-        return JSONResponse({"ok": True, "version": v.version, "eval_triggered": bool(ds) if 'ds' in locals() else False})
+
+        return JSONResponse({
+            "ok": True,
+            "version": v.version,
+            "eval_triggered": eval_triggered,
+            "eval_run_id": er.id if 'er' in locals() and er.id else None,
+            "avg_score": avg_score,
+            "case_count": len(eval_results)
+        })
 
 
 @router.get("/lab/artifacts/{art_id}/raw")

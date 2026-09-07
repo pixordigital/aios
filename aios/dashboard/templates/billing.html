@@ -70,6 +70,8 @@
         <div style="font-size:0.6875rem;color:var(--text-tertiary)">Média R$ {{"%.2f"|format(monthly.avg_daily_cost*5.5)}} /dia</div>
         <div style="font-size:0.6875rem;color:var(--text-tertiary)">Projeção até fatura: <strong>R$ {{"%.2f"|format(monthly.forecast_cost*5.5)}}</strong></div>
         <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem">Próximo pagamento em <strong>{{monthly.remaining_days}} dias</strong> ({{monthly.next_billing}})</div>
+        <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.375rem">Teto estimado plano: <strong>R$ {{plan_limits.max_cost_brl if plan_limits.max_cost_brl!=999999 else '∞'}}</strong> <span style="font-size:0.6rem">(USD×5,5)</span></div>
+        <div style="font-size:0.6rem;color:var(--text-tertiary);margin-top:0.25rem">* Valor estimado — câmbio ref. 5,5. Fatura Stripe em USD.</div>
     </div>
     <div class="stat-card">
         <p class="stat-label">Mensagens</p>

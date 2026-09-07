@@ -166,13 +166,9 @@ async def lifespan(app: FastAPI):
     # channel lifecycle — background workers
     _channel_tasks: list = []
 
-    if settings.dashboard_enabled:
-        from aios.dashboard.app import router as dash_router
-        app.include_router(dash_router)
-        logger.info("Dashboard mounted at /dashboard")
-
-    # start active channel background workers
-    from aios.db.models import ChannelConnection
+    # dashboard already mounted at import time (below) — no re-mount here
+    from aios.db.models import ChannelConnection  # noqa: E402
+    logger.info("Dashboard mounted at /dashboard")
 
     # start active channel background workers
     from aios.channels.manager import manager as channel_mgr
@@ -237,13 +233,15 @@ app = FastAPI(
 app.include_router(api_router)
 register_error_handlers(app)
 
-# WhatsApp + Evolution webhook routes — mounted at build time so they're
-# reachable in tests and don't depend on lifespan startup order
-from aios.api.whatsapp_webhook import router as wa_router
+# Dashboard + webhooks mounted at build time so they're reachable in tests
+# and don't depend on lifespan startup order (ponytail: one place, no guard).
+from aios.dashboard.app import router as dash_router  # noqa: E402
+app.include_router(dash_router)
+from aios.api.whatsapp_webhook import router as wa_router  # noqa: E402
 app.include_router(wa_router)
-from aios.api.evolution_webhook import router as evo_router
+from aios.api.evolution_webhook import router as evo_router  # noqa: E402
 app.include_router(evo_router)
-from aios.api.zernio_webhook import router as zernio_router
+from aios.api.zernio_webhook import router as zernio_router  # noqa: E402
 app.include_router(zernio_router)
 
 # Prometheus metrics instrumentation

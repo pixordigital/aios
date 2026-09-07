@@ -92,6 +92,9 @@ def _parse_message(msg: dict) -> tuple[str, dict]:
     return text, extra
 
 
+# 10MB = 10 * 1024 * 1024 bytes
+MAX_MEDIA_BYTES = 10 * 1024 * 1024
+
 @router.post("/webhook")
 async def inbound_webhook(request: Request):
     raw_body = await request.body()
@@ -135,6 +138,44 @@ async def inbound_webhook(request: Request):
                 extra.update({"from_number": from_number, "phone_id": phone_id, "message_id": msg_id})
                 if from_number in contacts:
                     extra["contact_name"] = contacts[from_number].get("profile", {}).get("name", "")
+
+                # --- Validação de tamanho de mídia (10MB) ---
+                media_id = extra.get("media_id")
+                if media_id and extra.get("whatsapp_type") in ("image", "audio", "voice", "video", "document", "sticker"):
+                    try:
+                        from aios.db.backend import db_session
+                        from aios.db.models import ChannelConnection
+                        from sqlalchemy import select
+                        from aios.channels.whatsapp import WhatsAppChannel
+
+                        async with db_session() as db:
+                            chans = (await db.execute(
+                                select(ChannelConnection).where(
+                                    ChannelConnection.channel_type == "whatsapp",
+                                    ChannelConnection.is_active == True
+                                )
+                            )).scalars().all()
+                            for ch in chans:
+                                try:
+                                    w = WhatsAppChannel(connection=ch)
+                                    # Apenas HEAD para pegar content-length sem baixar tudo
+                                    info = await w.get_media_info(media_id)
+                                    if info and info.get("size_bytes", 0) > MAX_MEDIA_BYTES:
+                                        logger.warning("Mídia %s excede 10MB (%d bytes) — rejeitando", media_id, info.get("size_bytes"))
+                                        extra["media_rejected"] = True
+                                        extra["media_size_bytes"] = info.get("size_bytes")
+                                        extra["rejection_reason"] = f"Mídia excede limite de 10MB ({info.get('size_bytes', 0) // 1024 // 1024}MB)"
+                                        # Não despacha — cai no DLQ via dispatch_inbound que falha
+                                        # Mas para não perder, logamos e continuamos sem o conteúdo
+                                        text = f"[Mídia rejeitada: {extra['rejection_reason']}]"
+                                        extra["media_id"] = None  # impede transcrição
+                                        break
+                                    extra["media_size_bytes"] = info.get("size_bytes")
+                                except Exception:
+                                    continue
+                    except Exception:
+                        pass
+                # --------------------------------------------
                 if extra.get("media_id") and extra.get("whatsapp_type") in ("audio","voice"):
                     try:
                         import asyncio as _aio

@@ -175,6 +175,28 @@ class WhatsAppChannel(Channel):
             pass
         return None
 
+    async def get_media_info(self, media_id: str) -> dict | None:
+        """Get media info (size, mime) via HEAD request without downloading."""
+        import httpx
+
+        token = self._config.get("access_token", "")
+        if not token or not media_id:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"https://graph.facebook.com/v18.0/{media_id}", headers={"Authorization": f"Bearer {token}"})
+                if resp.status_code == 200:
+                    j = resp.json()
+                    return {
+                        "url": j.get("url"),
+                        "size_bytes": j.get("file_size", 0) or j.get("size", 0),
+                        "mime_type": j.get("mime_type"),
+                        "sha256": j.get("sha256"),
+                    }
+        except Exception:
+            pass
+        return None
+
     async def download_media(self, media_id: str) -> bytes | None:
         url = await self.get_media_url(media_id)
         if not url:

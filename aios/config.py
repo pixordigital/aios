@@ -74,7 +74,7 @@ if settings.stripe_price_pro:
     STRIPE_PRICE_MAP[settings.stripe_price_pro] = "pro"
 
 # ─── Plan limits ───
-
+# max_cost_brl: teto estimado em BRL (USD×5.5) para guardrail — P0-15. Ilimitado = sem teto.
 PLANS = {
     "free": {
         "name": "Gratuito",
@@ -82,6 +82,7 @@ PLANS = {
         "max_teams": 1,
         "max_messages_per_day": 100,
         "max_tokens_per_month": 500_000,
+        "max_cost_brl": 10,
         "channels": ["web"],
     },
     "starter": {
@@ -90,6 +91,7 @@ PLANS = {
         "max_teams": 3,
         "max_messages_per_day": 500,
         "max_tokens_per_month": 5_000_000,
+        "max_cost_brl": 100,
         "channels": ["web", "whatsapp"],
     },
     "pro": {
@@ -98,6 +100,7 @@ PLANS = {
         "max_teams": 10,
         "max_messages_per_day": 5000,
         "max_tokens_per_month": 50_000_000,
+        "max_cost_brl": 800,
         "channels": ["web", "whatsapp", "email", "slack", "telegram", "discord"],
     },
     "enterprise": {
@@ -106,6 +109,7 @@ PLANS = {
         "max_teams": 100,
         "max_messages_per_day": 50000,
         "max_tokens_per_month": 500_000_000,
+        "max_cost_brl": 8000,
         "channels": "__all__",
     },
     "unlimited": {
@@ -114,6 +118,7 @@ PLANS = {
         "max_teams": 999999,
         "max_messages_per_day": 999999,
         "max_tokens_per_month": 999999999,
+        "max_cost_brl": 999999,
         "channels": "__all__",
     },
 }

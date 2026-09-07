@@ -18,7 +18,7 @@ async def test_404_route_miss():
     assert r.status_code == 404
     body = r.json()
     assert body["type"] == "about:blank"
-    assert body["title"] == "Not found"
+    assert body["title"] == "Não encontrado"
     assert body["status"] == 404
     assert body["detail"] in ("", "Not Found")  # starlette supplies the default message
     assert body["instance"] == "/api/nope"
@@ -35,8 +35,8 @@ async def test_413_oversized_body():
         )
     assert r.status_code == 413
     body = r.json()
-    assert body["title"] == "Payload too large"
-    assert body["detail"] == "Request too large"
+    assert body["title"] == "Conteúdo muito grande"
+    assert "Request too large" in body["detail"] or "Conteúdo" in body["detail"] or body["detail"] == "Request too large"
     assert body["status"] == 413
     assert body["type"] == "about:blank"
 

@@ -380,8 +380,23 @@ async function loadVersions(){
 async function publishVersion(){
   var id=document.getElementById('ver-agent').value; if(!id) return alert('Selecione agente');
   var note=prompt('Nota da versão:')||'';
-  var fd=new FormData(); fd.set('note',note);
-  var r=await fetch('/dashboard/lab/agents/'+id+'/publish',{method:'POST',body:fd}); if(r.ok) loadVersions();
+  var judge=prompt('Modelo juiz (padrão openai/gpt-4o-mini):')||'openai/gpt-4o-mini';
+  var fd=new FormData(); fd.set('note',note); fd.set('judge_model',judge);
+  var r=await fetch('/dashboard/lab/agents/'+id+'/publish',{method:'POST',body:fd});
+  if(r.ok){
+    var j=await r.json();
+    var msg = 'Versão v'+j.version+' publicada';
+    if(j.eval_triggered){
+      msg += '\n📊 Eval: '+j.case_count+' casos • Score médio: '+j.avg_score;
+      if(j.eval_run_id) msg += ' (run: '+j.eval_run_id.slice(0,8)+')';
+    } else {
+      msg += '\n⚠️ Nenhum dataset — crie um em /dashboard/lab para eval automático';
+    }
+    alert(msg);
+    loadVersions();
+  } else {
+    var e=await r.json(); alert('Falha: '+(e.detail||e.error||'erro'));
+  }
 }
 async function rollbackVersion(aid, vid){
   if(!confirm('Rollback para esta versão?')) return;

@@ -23,6 +23,7 @@ TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test.db")
 TEST_DATABASE_URL = f"sqlite+aiosqlite:///{TEST_DB_PATH}"
 settings.jwt_secret = "test-secret"
 settings.debug = True
+settings.https_only = True
 settings.database_url = TEST_DATABASE_URL
 settings.redis_url = ""
 settings.storage_backend = "local"

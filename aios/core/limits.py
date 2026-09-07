@@ -72,6 +72,15 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         if total >= max_tokens:
             return False, f"Monthly token limit reached ({max_tokens}/{plan_name} plan)"
 
+    # P0-15 guardrail custo estimado: USD*5.5 vs max_cost_brl
+    max_cost_brl = limits.get("max_cost_brl")
+    if max_cost_brl and max_cost_brl != 999999:
+        from datetime import date as _d2
+        _start_month = _d2.today().replace(day=1).isoformat()
+        _total_cost = (await db.execute(select(func.coalesce(func.sum(UsageRecord.cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= _start_month))).scalar() or 0
+        if _total_cost * 5.5 >= max_cost_brl:
+            return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${_total_cost*5.5:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
+
     # soft limit warnings (80/90) without blocking
     try:
         from aios.core.limits import get_monthly_usage as _gmu
