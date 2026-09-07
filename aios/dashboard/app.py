@@ -466,6 +466,7 @@ async def agent_save(
         return HTMLResponse("<h2>temperature 0..2</h2>", status_code=422)
     if not (256 <= max_tokens <= 16384):
         return HTMLResponse("<h2>max_tokens 256..16384</h2>", status_code=422)
+    org_id = await _resolve_org_id(request)
     async with db_session() as db:
         tools_list = [t.strip() for t in tools.replace(",", " ").split() if t.strip()]
         if tools_list:
@@ -485,7 +486,7 @@ async def agent_save(
         }
         if agent_id:
             agent = await db.get(Agent, agent_id)
-            if agent and agent.org_id == await _resolve_org_id(request):
+            if agent and agent.org_id == org_id:
                 from sqlalchemy import select as _select, func as _func
                 from aios.db.models import AgentVersion
                 max_v = (await db.execute(_select(_func.max(AgentVersion.version)).where(AgentVersion.agent_id == agent.id))).scalar() or 0
