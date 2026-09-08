@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY requirements-tts.txt .
-RUN pip install --no-cache-dir -r requirements-tts.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements-tts.txt
 
 COPY upload-voice.sh entrypoint-tts.sh ./
 RUN chmod +x upload-voice.sh entrypoint-tts.sh
