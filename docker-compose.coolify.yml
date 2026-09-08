@@ -200,6 +200,7 @@ services:
     restart: unless-stopped
 
   voice-tts-stream:
+    profiles: ["voice"]
     build:
       context: ./deploy/voice-stream
       dockerfile: Dockerfile.tts
