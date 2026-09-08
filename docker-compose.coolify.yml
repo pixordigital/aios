@@ -1,56 +1,19 @@
-# Coolify — Git deploy (standalone: app + worker + postgres + redis)
-# Set in Coolify → Service → Environment (Variables):
-#   AIOS_APP_URL, AIOS_JWT_SECRET (openssl rand -hex 32), POSTGRES_PASSWORD, REDIS_PASSWORD
-# Optional: AIOS_OPENROUTER_API_KEY, AIOS_OPENAI_API_KEY, etc. (see .env.example)
-# Health: /health/ready (Coolify healthcheck path = /health/ready)
+# AIOS — Coolify Docker Compose (Raw Compose Deployment)
+# Services defined here: app + worker + voice services
+# PostgreSQL & Redis are added via Coolify panel (not in compose)
+# Docs: COOLIFY_SETUP.md | PRODUCTION_READINESS_REPORT.md
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg15
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-aios}
-      POSTGRES_USER: ${POSTGRES_USER:-aios}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aios} -d ${POSTGRES_DB:-aios}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-changeme}", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-
   app:
     build: .
     ports:
       - "8777:8777"
     environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      POSTGRES_USER: ${POSTGRES_USER:-aios}
-      POSTGRES_DB: ${POSTGRES_DB:-aios}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       AIOS_DEBUG: "false"
-      AIOS_APP_URL: ${AIOS_APP_URL:-http://localhost:8777}
-      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
-      AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
-      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:-}"
+      AIOS_APP_URL: ${AIOS_APP_URL:-https://aios.seudominio.com}
+      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+asyncpg://aios:CHANGE_ME@postgres:5432/aios}
+      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://:CHANGE_ME@redis:6379/0}
+      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET:-CHANGE_ME_IN_PRODUCTION}
       AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
       AIOS_OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
       AIOS_OPENAI_API_KEY: ${AIOS_OPENAI_API_KEY:-}
@@ -58,39 +21,14 @@ services:
       AIOS_STORAGE_BACKEND: ${AIOS_STORAGE_BACKEND:-local}
       AIOS_S3_BUCKET: ${AIOS_S3_BUCKET:-}
       AIOS_S3_REGION: ${AIOS_S3_REGION:-}
-      AIOS_S3_ACCESS_KEY: ${AIOS_S3_ACCESS_KEY:-}
-      AIOS_S3_SECRET_KEY: ${AIOS_S3_SECRET_KEY:-}
       AIOS_S3_ENDPOINT: ${AIOS_S3_ENDPOINT:-}
-      AIOS_STRIPE_SECRET_KEY: ${AIOS_STRIPE_SECRET_KEY:-}
-      AIOS_STRIPE_WEBHOOK_SECRET: ${AIOS_STRIPE_WEBHOOK_SECRET:-}
-      AIOS_SMTP_HOST: ${AIOS_SMTP_HOST:-}
-      AIOS_SMTP_PASSWORD: ${AIOS_SMTP_PASSWORD:-}
-      AIOS_VOICE_PROVIDER: ${AIOS_VOICE_PROVIDER:-selfhosted}
-      AIOS_ELEVENLABS_API_KEY: ${AIOS_ELEVENLABS_API_KEY:-}
-      AIOS_ELEVENLABS_VOICE_ID: ${AIOS_ELEVENLABS_VOICE_ID:-}
-      AIOS_VAPI_API_KEY: ${AIOS_VAPI_API_KEY:-}
-      AIOS_VAPI_ASSISTANT_ID: ${AIOS_VAPI_ASSISTANT_ID:-}
-      AIOS_VAPI_PHONE_NUMBER_ID: ${AIOS_VAPI_PHONE_NUMBER_ID:-}
-      AIOS_RETELL_API_KEY: ${AIOS_RETELL_API_KEY:-}
-      AIOS_RETELL_AGENT_ID: ${AIOS_RETELL_AGENT_ID:-}
-      AIOS_VOICE_TTS_URL: ${AIOS_VOICE_TTS_URL:-http://voice-tts:8000}
-      AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-http://voice-stt:9000}
-      AIOS_VOICE_BRIDGE_URL: ${AIOS_VOICE_BRIDGE_URL:-}
-      AIOS_VOICE_FROM_NUMBER: ${AIOS_VOICE_FROM_NUMBER:-}
-      AIOS_VOICE_WEBHOOK_SECRET: ${AIOS_VOICE_WEBHOOK_SECRET:-}
-      AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-ws://livekit:7880}
-      AIOS_LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}
-      AIOS_LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-}
-      AIOS_LOG_FORMAT: "json"
       AIOS_HTTPS_ONLY: "true"
+      AIOS_CORS_ORIGINS: ${AIOS_CORS_ORIGINS:-}
+      AIOS_LOG_FORMAT: "json"
       AIOS_DASHBOARD_ENABLED: "true"
+      AIOS_RATE_LIMIT_PER_MINUTE: "60"
     volumes:
       - app-data:/data
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8777/health/live"]
       interval: 15s
@@ -103,6 +41,42 @@ services:
       resources:
         limits: { cpus: "1", memory: 1536M }
         reservations: { cpus: "0.25", memory: 512M }
+
+  worker:
+    build: .
+    command: ["python", "-m", "aios.tasks.worker"]
+    environment:
+      AIOS_DEBUG: "false"
+      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+asyncpg://aios:CHANGE_ME@postgres:5432/aios}
+      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://:CHANGE_ME@redis:6379/0}
+      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET:-CHANGE_ME_IN_PRODUCTION}
+      AIOS_LOG_FORMAT: "json"
+    volumes:
+      - app-data:/data
+    depends_on:
+      - app
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 768M }
+        reservations: { cpus: "0.1", memory: 256M }
+
+  worker2:
+    build: .
+    command: ["python", "-m", "aios.tasks.worker"]
+    environment:
+      AIOS_DEBUG: "false"
+      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+asyncpg://aios:CHANGE_ME@postgres:5432/aios}
+      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://:CHANGE_ME@redis:6379/0}
+      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET:-CHANGE_ME_IN_PRODUCTION}
+      AIOS_LOG_FORMAT: "json"
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 768M }
+        reservations: { cpus: "0.1", memory: 256M }
 
   evolution:
     profiles: ["voice"]
@@ -130,17 +104,12 @@ services:
       - evolution-data:/evolution/instances
       - evolution-store:/evolution/store
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
-      interval: 15s
-      timeout: 10s
-      start_period: 30s
-      retries: 5
+      - app
     restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 1024M }
+        reservations: { cpus: "0.25", memory: 256M }
 
   voice-tts:
     image: ghcr.io/matatonic/openedai-speech:latest
@@ -197,6 +166,10 @@ services:
       start_period: 15s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2G }
+        reservations: { cpus: "0.5", memory: 1G }
 
   voice-tts-stream:
     build:
@@ -271,84 +244,15 @@ services:
       PIPER_URL: http://voice-tts:8000/v1
       STT_URL: http://voice-stt:9000/v1
     depends_on:
-      livekit:
-        condition: service_healthy
+      - livekit
     restart: unless-stopped
     deploy:
       resources:
         limits: { cpus: "2", memory: 3G }
         reservations: { cpus: "0.5", memory: 1G }
 
-  worker:
-    build: .
-    command: ["python", "-m", "aios.tasks.worker"]
-    environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      POSTGRES_USER: ${POSTGRES_USER:-aios}
-      POSTGRES_DB: ${POSTGRES_DB:-aios}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
-      AIOS_DEBUG: "false"
-      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
-      AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
-      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:-}"
-      AIOS_LOG_FORMAT: "json"
-    volumes:
-      - app-data:/data
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os,redis;from urllib.parse import urlparse;u=os.environ.get('AIOS_REDIS_URL','redis://redis:6379/0');p=urlparse(u);r=redis.Redis(host=p.hostname or 'redis',port=p.port or 6379,password=p.password or os.environ.get('REDIS_PASSWORD',''));r.ping()\""]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "0.5", memory: 768M }
-        reservations: { cpus: "0.1", memory: 256M }
-
-  worker2:
-    build: .
-    command: ["python", "-m", "aios.tasks.worker"]
-    environment:
-      PGHOST: postgres
-      PGPORT: "5432"
-      POSTGRES_USER: ${POSTGRES_USER:-aios}
-      POSTGRES_DB: ${POSTGRES_DB:-aios}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
-      AIOS_DEBUG: "false"
-      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
-      AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
-      AIOS_JWT_SECRET: "${AIOS_JWT_SECRET:-}"
-      AIOS_LOG_FORMAT: "json"
-    volumes:
-      - app-data:/data
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "0.5", memory: 768M }
-        reservations: { cpus: "0.1", memory: 256M }
-
 volumes:
-  postgres-data:
-  redis-data:
   app-data:
-  evolution-data:
-  evolution-store:
   voice-tts-data:
   voice-stt-data:
   voice-stream-data:
