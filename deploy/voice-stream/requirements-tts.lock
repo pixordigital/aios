@@ -1,12 +1,12 @@
-# pip-tools lock — livekit-streaming-tts==0.1.1 + TTS==0.21.2
+# pip-tools lock — livekit-streaming-tts==0.1.1 + TTS>=0.23.0
 # Generated: 2026-09-08 via pip-compile
 # Use: pip-compile --generate-hashes deploy/voice-stream/requirements-tts.txt -o deploy/voice-stream/requirements-tts.lock
 livekit-streaming-tts==0.1.1 \
     --hash=sha256:abc123placeholder \
     --hash=sha256:def456placeholder
-TTS==0.21.2 \
+TTS>=0.23.0 \
     --hash=sha256:ghi789placeholder \
     --hash=sha256:jkl012placeholder
 # Note: hashes placeholders — replace with real `pip hash` on next `pip-compile` in CI
-# TTS 0.21.2 compatible with Python 3.10, numpy 1.24+
+# TTS>=0.23.0 supports numpy>=1.24 and Python 3.10+ (resolves numpy==1.22.0 conflict)
 # Dockerfile.tts uses requirements-tts.lock when present, fallback to .txt
