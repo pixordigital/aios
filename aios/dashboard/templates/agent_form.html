@@ -344,6 +344,7 @@
         var dd=document.getElementById('model-dropdown');
         var obs=new MutationObserver(function(){dd.style.display=dd.classList.contains('open')?'block':'none'});
         obs.observe(dd,{attributes:true,attributeFilter:['class']});
+        if(dd) dd.addEventListener('mousedown',function(e){e.preventDefault()});
         updateModelProvider(document.getElementById('model-search').value);
         updateCost(document.getElementById('model-search').value);
     });
