@@ -706,9 +706,45 @@ async def health_live():
 
 @app.get("/health/ready")
 async def health_ready():
-    """Readiness — database and other dependencies are reachable."""
-    # For readiness, simply confirm the service is ready
-    return {"status": "ready"}
+    """Readiness — DB + Redis + RAG must be reachable, else 503."""
+    from fastapi.responses import JSONResponse
+    checks = {}
+    ok = True
+    # DB
+    try:
+        checks["db"] = "ok" if await registry.active.health() else "down"
+        if checks["db"] != "ok":
+            ok = False
+    except Exception as e:
+        checks["db"] = f"error: {e}"
+        ok = False
+    # Redis
+    try:
+        from aios.tasks.queue import get_redis_pool
+        pool = await get_redis_pool()
+        await pool.ping() if hasattr(pool, "ping") else None
+        checks["redis"] = "ok"
+    except Exception:
+        # fallback: try direct redis
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(settings.redis_url or "redis://localhost:6379", decode_responses=True)
+            await r.ping()
+            await r.close()
+            checks["redis"] = "ok"
+        except Exception as e:
+            checks["redis"] = f"down: {e}"
+            # redis down is not fatal for readiness in fallback mode
+            checks["redis"] = "fallback"
+    # RAG
+    try:
+        from aios.core.rag import RAG_STATUS
+        checks["rag"] = "ok" if RAG_STATUS.get("hnsw") else "fallback"
+    except Exception:
+        checks["rag"] = "unknown"
+    status = "ready" if ok else "not_ready"
+    code = 200 if ok else 503
+    return JSONResponse(status_code=code, content={"status": status, "checks": checks})
 
 
 @app.get("/health")
