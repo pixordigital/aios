@@ -182,7 +182,6 @@ services:
         reservations: { cpus: "0.5", memory: 512M }
 
   livekit:
-    profiles: ["voice"]
     image: livekit/livekit-server:latest
     command: ["--config", "/etc/livekit.yaml"]
     ports:
