@@ -212,6 +212,8 @@ def _create_refresh_token(user_id: str) -> str:
 
 @router.post("/register", response_model=TokenResponse)
 async def register(request: Request, body: RegisterRequest, db: DatabaseBackend = Depends(get_db_backend)):
+    if not settings.registration_enabled:
+        raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
     _validate_password(body.password)
 
     existing = await db.execute(select(User).where(User.email == body.email))
@@ -499,6 +501,8 @@ async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_
     user = result.scalar_one_or_none()
 
     if not user:
+        if not settings.registration_enabled:
+            raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
         # Create new org + user
         org = Organization(name=name, slug=email.split("@")[0])
         db.add(org)

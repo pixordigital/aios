@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     kokoro_url: str = "http://voice-tts-kokoro:8880"  # Kokoro-FastAPI fallback
     ollama_model: str = "qwen3:8b"
 
+    registration_enabled: bool = False  # fechar cadastros — home buttons desabilitados
+
 
 
 settings = Settings()

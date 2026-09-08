@@ -246,6 +246,9 @@ async def login_action(request: Request, email: str = Form(...), password: str =
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, error: str = ""):
+    from aios.config import settings as _s
+    if not _s.registration_enabled:
+        return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
     return await _render("register.html", request, title="Registrar", error=error)
 
 
@@ -255,6 +258,9 @@ async def register_action(
     name: str = Form(...), email: str = Form(...),
     password: str = Form(...), org_name: str = Form(...),
 ):
+    from aios.config import settings as _s
+    if not _s.registration_enabled:
+        return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
     try:
         _validate_password(password)
     except Exception as e:
