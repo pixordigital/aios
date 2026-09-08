@@ -79,7 +79,6 @@ class Settings(BaseSettings):
     voice_stt_url: str = "http://voice-stt:9000"  # whisper-asr-webservice (Coolify)
     voice_bridge_url: str = ""  # SIP dial bridge (Twilio/LiveKit/Asterisk gateway)
     voice_from_number: str = ""
-    voice_webhook_secret: str = ""  # inbound bridge auth (?secret= / x-voice-secret)
     livekit_url: str = ""  # wss://... (self-hosted livekit:8080 via compose)
     livekit_api_key: str = ""
     livekit_api_secret: str = ""

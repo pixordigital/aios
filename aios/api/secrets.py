@@ -11,8 +11,17 @@ _ALLOWED_KEYS = {
     "openai_api_key",
     "anthropic_api_key",
     "openrouter_api_key",
+    "storage_backend",
+    "s3_bucket",
+    "s3_region",
     "s3_access_key",
     "s3_secret_key",
+    "s3_endpoint",
+    "smtp_host",
+    "smtp_port",
+    "smtp_user",
+    "smtp_password",
+    "smtp_from_email",
 }
 
 

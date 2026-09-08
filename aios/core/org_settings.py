@@ -54,11 +54,22 @@ def model_to_secret_key(model: str) -> str | None:
 def get_org_secret(org_extra: dict | None, key: str) -> str | None:
     if not org_extra or not isinstance(org_extra, dict):
         return None
-    secrets = org_extra.get(SECRETS_KEY, {})
-    if not isinstance(secrets, dict):
-        return None
-    val = secrets.get(key)
-    return val if val else None
+    # 1) plain secrets (dashboard — stored as cleartext in extra_data["secrets"])
+    plain = org_extra.get(SECRETS_KEY, {})
+    if isinstance(plain, dict) and plain.get(key):
+        val = plain.get(key)
+        if val:
+            return val
+    # 2) encrypted secrets (API /api/org/secrets — stored in _secrets_enc)
+    enc = org_extra.get("_secrets_enc", {})
+    if isinstance(enc, dict) and enc.get(key):
+        try:
+            from aios.core.secrets import decrypt_secret
+
+            return decrypt_secret(enc[key])
+        except Exception:
+            return None
+    return None
 
 
 async def get_org_secret_async(org_id: str, key: str) -> str | None:

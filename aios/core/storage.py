@@ -140,6 +140,9 @@ def backend() -> StorageBackend:
 async def ensure_storage():
     if settings.storage_backend == "local":
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    elif settings.storage_backend == "s3":
+        if not settings.s3_bucket or not settings.s3_access_key:
+            logger.warning("S3 backend selected but bucket/keys missing — check AIOS_S3_* / Supabase creds")
     logger.info("Storage backend: %s", settings.storage_backend)
 
 
