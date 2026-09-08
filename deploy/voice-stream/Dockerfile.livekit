@@ -1,0 +1,5 @@
+FROM livekit/livekit-server:latest
+
+COPY deploy/voice-stream/livekit.yaml /etc/livekit.yaml
+
+CMD ["--config", "/etc/livekit.yaml"]
