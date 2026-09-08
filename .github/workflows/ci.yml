@@ -1,39 +1,51 @@
 # AIOS CI — lint + test + build
 name: CI
 on:
-  push: { branches: [main] }
-  pull_request: { branches: [main] }
-permissions: { contents: read }
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-ruff@v2
-        with: { version: "latest" }
+        with:
+          version: "latest"
       - run: ruff check aios/
   typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.12", cache: pip }
+        with:
+          python-version: "3.12"
+          cache: pip
       - run: pip install -e . mypy
       - run: mypy aios/ --ignore-missing-imports
   gitleaks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
-        env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   test:
     runs-on: ubuntu-latest
-    strategy: { matrix: { python-version: ["3.11", "3.12"] } }
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: ${{ matrix.python-version }}, cache: pip }
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
       - run: pip install -e . pytest pytest-asyncio alembic httpx
       - run: alembic check
       - run: pytest -v --tb=short --ignore=aios/templates --ignore=aios/dashboard
