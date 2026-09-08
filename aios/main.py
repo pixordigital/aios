@@ -57,9 +57,8 @@ async def lifespan(app: FastAPI):
     try:
         from aios.core.rag import ensure_vector_extension
         await ensure_vector_extension()
-        logger.info("pgvector HNSW ready")
-    except Exception:
-        logger.debug("pgvector not available, fallback sqlite")
+    except Exception as e:
+        logger.warning("pgvector init failed: %s", e)
 
     # Sentry — only if DSN configured
     if settings.sentry_dsn:
@@ -582,6 +581,11 @@ def _validate_security_config():
         )
     if not settings.https_only and not settings.debug:
         logger.warning("HTTPS is not enforced. Set AIOS_HTTPS_ONLY=true in production.")
+    # LiveKit secret must not be default in production
+    if not settings.debug and settings.livekit_api_secret in ("", "change-me-livekit-secret", "change_me"):
+        logger.warning("LIVEKIT_API_SECRET is default/empty — voice will be insecure. Set AIOS_LIVEKIT_API_SECRET")
+    if not settings.debug and len(settings.livekit_api_secret) < 16 and settings.livekit_api_secret:
+        logger.warning("LIVEKIT_API_SECRET too short (<16) — rotate")
 
 
 async def _register_syscall_handlers():
@@ -715,6 +719,12 @@ async def health():
     except Exception:
         logger.exception("Health endpoint DB check failed")
         db_status = "error"
+    rag_status = {"vector": False, "hnsw": False, "fallback": True}
+    try:
+        from aios.core.rag import RAG_STATUS
+        rag_status = dict(RAG_STATUS)
+    except Exception:
+        pass
     return {
         "live": True,
         "ready": True,
@@ -722,6 +732,7 @@ async def health():
         "version": "0.1.0",
         "requests": REQUEST_COUNT,
         "db": db_status,
+        "rag": rag_status,
         "backend": registry.summary(),
         "scheduler": scheduler.summary(),
         "context": context_manager.stats(),

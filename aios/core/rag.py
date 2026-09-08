@@ -7,11 +7,15 @@ from aios.db.engine import async_session
 logger = logging.getLogger(__name__)
 
 
+RAG_STATUS = {"vector": False, "hnsw": False, "fallback": True}
+
 async def ensure_vector_extension():
+    global RAG_STATUS
     try:
         async with async_session() as s:
             await s.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             await s.commit()
+            RAG_STATUS["vector"] = True
             try:
                 await s.execute(
                     text(
@@ -24,10 +28,16 @@ async def ensure_vector_extension():
                     )
                 )
                 await s.commit()
-            except Exception:
-                pass
-    except Exception:
-        logger.debug("vector extension not available")
+                RAG_STATUS["hnsw"] = True
+                RAG_STATUS["fallback"] = False
+                logger.info("pgvector HNSW ready")
+            except Exception as e:
+                logger.warning("pgvector HNSW index failed, fallback sqlite: %s", e)
+                RAG_STATUS["fallback"] = True
+    except Exception as e:
+        logger.warning("vector extension not available, RAG fallback sqlite: %s", e)
+        RAG_STATUS["vector"] = False
+        RAG_STATUS["fallback"] = True
 
 
 async def hybrid_search(org_id: str, query: str, top_k: int = 5):

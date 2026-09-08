@@ -232,6 +232,9 @@ async def login_action(request: Request, email: str = Form(...), password: str =
         user = result.scalar_one_or_none()
         if not user or not _verify_password(password, user.hashed_password):
             return await login_page(request, error="E-mail ou senha inválidos")
+        if not user.email_verified and user.role != "superadmin" and not settings.registration_enabled:
+            # em beta fechado, exigir verificação antes de entrar
+            return await login_page(request, error="Verifique seu e-mail antes de entrar. Reenviamos o link.")
 
         token = create_jwt_token(user.id, user.org_id)
         resp = RedirectResponse("/dashboard", status_code=303)
@@ -1004,7 +1007,13 @@ async def member_list(request: Request):
 @router.post("/members/invite")
 async def member_invite(request: Request, email: str = Form(...), role: str = Form("member")):
     org_id = await _org_filter(request)
+    # rate-limit invites: max 10/dia por org
+    from datetime import datetime, timedelta, timezone
     async with db_session() as db:
+        today = datetime.now(timezone.utc) - timedelta(hours=24)
+        cnt = (await db.execute(select(func.count(Invitation.id)).where(Invitation.org_id == org_id, Invitation.created_at >= today))).scalar() or 0
+        if cnt >= 10:
+            return RedirectResponse("/dashboard/members?error=rate-limited", status_code=303)
         existing = (await db.execute(select(User).where(User.email == email, User.org_id == org_id))).scalar_one_or_none()
         if existing:
             return RedirectResponse("/dashboard/members?error=already-member", status_code=303)

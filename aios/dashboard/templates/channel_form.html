@@ -38,6 +38,7 @@
                     </select>
                 </div>
                 <div id="wa-meta">
+                    <div style="padding:0.375rem 0.5rem;background:var(--green-subtle);border:1px solid var(--green);border-radius:4px;font-size:0.6875rem;color:var(--green);margin-bottom:0.375rem">✅ Recomendado — WhatsApp Cloud API estável, sem risco Baileys. Templates gerenciados pela Meta.</div>
                     <div><label>Token de acesso</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
                     <div><label>ID do número de telefone</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
                     <details style="margin-top:0.5rem"><summary style="font-size:0.75rem;color:var(--text-tertiary);cursor:pointer">Templates / janela 24h (opcional)</summary>
@@ -112,9 +113,11 @@
                 <div style="font-size:0.6875rem;color:var(--text-tertiary)">Sem bridge, chamadas ficam <b>queued</b> com TTS pronto. Webhook inbound: <span class="font-mono">/api/voice/webhook?secret=...</span></div>
             </div>
             <div id="creds-evolution" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
+                <div style="padding:0.5rem;background:var(--amber-subtle);border:1px solid var(--amber);border-radius:4px;font-size:0.75rem;color:var(--amber)">⚠️ Evolution é self-hosted (Baileys) — use apenas se precisa hospedar seu próprio WA. Recomendado: <b>WhatsApp Cloud API (Meta)</b> estável. Ative com <code>--profile voice</code> no Coolify.</div>
                 <div><label>URL do servidor</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else 'http://evolution:8080' }}" class="input input-mono" placeholder="http://evolution:8080 (integrado)"></div>
                 <div><label>Chave da API</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
                 <div><label>Nome da instância</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="my-whatsapp-instance"></div>
+                <div style="font-size:0.6875rem;color:var(--text-tertiary)">Self-hosted: gerencie QR code em /dashboard/evolution. Para 1-clique Meta, use <b>WhatsApp</b> acima.</div>
             </div>
         </div>
 

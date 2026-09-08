@@ -2,8 +2,8 @@
 {% block content %}
 <div class="flex-between mb-4">
     <div>
-        <h1>{{ conv.channel | capitalize }} — conversa</h1>
-        <p class="text-sm text-secondary mt-1">{{ conv.id[:20] }}… · {{ messages|length }} mensagem{{ 's' if messages|length != 1 }} · <span id="handover-status" class="badge">{{ (conv.extra_data.get('handover',{}).get('status','bot') if conv.extra_data else 'bot') }}</span></p>
+         <h1>{{ conv.channel | capitalize }} — conversa</h1>
+        <p class="text-sm text-secondary mt-1">{{ conv.id[:20] }}… · {{ messages|length }} mensagem{{ 's' if messages|length != 1 }} · <span id="handover-status" class="badge">{{ (conv.extra_data.get('handover',{}).get('status','bot') if conv.extra_data else 'bot') }}</span> <span id="sla-badge" class="badge" style="display:none;margin-left:0.5rem"></span></p>
     </div>
     <div style="display:flex;gap:0.5rem">
         <button id="btn-take" class="btn btn-primary btn-sm" onclick="handover('take')">👤 Assumir</button>
@@ -73,13 +73,20 @@ async function loadHandover(){
     const s=j.handover?.status||'bot';
     document.getElementById('handover-status').textContent=s;
     document.getElementById('handover-status').style.borderColor=s==='human'?'var(--amber)':'var(--green)';
-    const banner=document.getElementById('handover-banner');
+     const banner=document.getElementById('handover-banner');
     const take=document.getElementById('btn-take'), rel=document.getElementById('btn-release'), humanBox=document.getElementById('human-reply-box');
+    const sla=document.getElementById('sla-badge');
+    let at=j.handover?.at ? new Date(j.handover.at) : null;
+    let elapsed = at ? Math.floor((Date.now()-at.getTime())/1000) : 0;
     if(s==='human'){
-      banner.style.display=''; banner.style.background='var(--amber-subtle)'; banner.style.border='1px solid var(--amber)'; banner.textContent='👤 Humano assumiu — bot pausado. Respostas automáticas desativadas.';
+      banner.style.display=''; banner.style.background='var(--amber-subtle)'; banner.style.border='1px solid var(--amber)';
+      let mins=Math.floor(elapsed/60), secs=elapsed%60;
+      banner.textContent=`👤 Humano assumiu há ${mins}m ${secs}s — bot pausado. SLA 5m ${elapsed>300?'⚠️ ESTOUROU':'em dia'}.`;
+      if(elapsed>300){ sla.style.display=''; sla.textContent='SLA estourado'; sla.style.background='var(--red)'; sla.style.color='#fff'; } else { sla.style.display=''; sla.textContent=`SLA ${5 - mins}m restantes`; sla.style.background='var(--amber-subtle)'; sla.style.color='var(--amber)'; }
       take.style.display='none'; rel.style.display=''; humanBox.style.display='';
+      if(Notification && Notification.permission==='granted' && !window._handoverNotified){ new Notification('Handover', {body: `Conversa ${convId.slice(0,8)} assumida por humano`}); window._handoverNotified=true; }
     } else {
-      banner.style.display='none'; take.style.display=''; rel.style.display='none'; humanBox.style.display='none';
+      banner.style.display='none'; take.style.display=''; rel.style.display='none'; humanBox.style.display='none'; sla.style.display='none'; window._handoverNotified=false;
     }
     const box=document.getElementById('pending-box'), list=document.getElementById('pending-list');
     if(j.pending && j.pending.length){
@@ -110,6 +117,7 @@ async function decide(id, act){
   await fetch(`/api/approvals/${id}/${act}`,{method:'POST'});
   loadHandover();
 }
-loadHandover(); setInterval(loadHandover,5000);
+ loadHandover(); setInterval(loadHandover,5000);
+if(Notification && Notification.permission==='default'){ Notification.requestPermission(); }
 </script>
 {% endblock %}

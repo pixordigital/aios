@@ -40,11 +40,19 @@ async def get_redis_pool() -> ArqRedis:
     return _redis_pool
 
 
-async def enqueue_job(func_name: str, *args, **kwargs):
-    """Enqueue async job via ARQ."""
+async def enqueue_job(func_name: str, *args, priority: str = "normal", **kwargs):
+    """Enqueue async job via ARQ. priority: high|normal|low -> high uses queue high if available."""
     pool = await get_redis_pool()
+    # ARQ priority via queue_name (requires separate worker poll, fallback to normal)
+    if priority == "high":
+        try:
+            await pool.enqueue_job(func_name, *args, _queue_name="high", **kwargs)
+            logger.debug("Enqueued high-prio job %s", func_name)
+            return
+        except TypeError:
+            pass  # arq version without _queue_name
     await pool.enqueue_job(func_name, *args, **kwargs)
-    logger.debug("Enqueued job %s", func_name)
+    logger.debug("Enqueued job %s prio=%s", func_name, priority)
 
 
 async def enqueue_task(task_name: str, payload: dict):

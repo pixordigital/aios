@@ -140,9 +140,11 @@ def backend() -> StorageBackend:
 async def ensure_storage():
     if settings.storage_backend == "local":
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        if not settings.debug:
+            logger.warning("S3 backend recomendado em produção — local perde mídia em restart sem volume compartilhado")
     elif settings.storage_backend == "s3":
-        if not settings.s3_bucket or not settings.s3_access_key:
-            logger.warning("S3 backend selected but bucket/keys missing — check AIOS_S3_* / Supabase creds")
+        if not settings.s3_bucket or not settings.s3_access_key or not settings.s3_secret_key:
+            raise RuntimeError("S3 backend selecionado mas AIOS_S3_BUCKET/KEY/SECRET faltando — mídia do WhatsApp falhará. Configure Supabase/R2 ou volte para local")
     logger.info("Storage backend: %s", settings.storage_backend)
 
 

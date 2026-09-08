@@ -319,7 +319,6 @@ services:
         reservations: { cpus: "0.1", memory: 256M }
 
   worker2:
-    profiles: ["workers"]
     build: .
     command: ["python", "-m", "aios.tasks.worker"]
     environment:

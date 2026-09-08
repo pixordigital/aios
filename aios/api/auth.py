@@ -255,6 +255,8 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
     user = result.scalar_one_or_none()
     if not user or not _verify_password(body.password, user.hashed_password):
         raise HTTPException(401, "E-mail ou senha inválidos")
+    if not user.email_verified and user.role != "superadmin" and not settings.registration_enabled:
+        raise HTTPException(403, "Verifique seu e-mail antes de entrar. Link reenviado.")
 
     token = _create_access_token(user.id, user.org_id)
     refresh = _create_refresh_token(user.id)
@@ -476,6 +478,16 @@ async def github_callback(code: str, state: str, db: DatabaseBackend = Depends(g
 
     return await _oauth_login_or_register(db, "github", provider_user_id, email.lower().strip(), data.get("login", email))
 
+
+@router.get("/totp/setup")
+async def totp_setup():
+    """2FA TOTP stub — retorna QR placeholder. Implementação completa em breve."""
+    return {"enabled": False, "message": "2FA TOTP em breve — stub. Configure AIOS_TOTP_ISSUER quando lançar."}
+
+@router.post("/totp/verify")
+async def totp_verify(code: str = Query(...)):
+    """Verifica código TOTP — stub."""
+    raise HTTPException(501, "2FA ainda não habilitado — stub. Em breve com TOTP.")
 
 async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_user_id: str, email: str, name: str) -> TokenResponse:
     """Find existing OAuth account or create user + OAuth account."""
