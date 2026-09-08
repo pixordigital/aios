@@ -259,10 +259,18 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
         raise HTTPException(403, "Verifique seu e-mail antes de entrar. Link reenviado.")
     if getattr(user, "totp_enabled", False) and user.totp_secret:
         if not body.totp_code:
-            raise HTTPException(401, "Código 2FA (TOTP) obrigatório")
+            raise HTTPException(401, "Código 2FA (TOTP) obrigatório — use backup code se perdeu o celular")
         import pyotp
-        if not pyotp.TOTP(user.totp_secret).verify(body.totp_code, valid_window=1):
-            raise HTTPException(401, "Código 2FA inválido")
+        totp_ok = pyotp.TOTP(user.totp_secret).verify(body.totp_code, valid_window=1)
+        if not totp_ok:
+            # tenta backup code
+            codes = getattr(user, "totp_backup_codes", None) or []
+            if body.totp_code in codes:
+                codes.remove(body.totp_code)
+                user.totp_backup_codes = codes
+                await db.commit()
+            else:
+                raise HTTPException(401, "Código 2FA inválido")
 
     token = _create_access_token(user.id, user.org_id)
     refresh = _create_refresh_token(user.id)
@@ -512,18 +520,26 @@ async def totp_setup(request: Request, db: DatabaseBackend = Depends(get_db_back
 
 @router.post("/totp/verify")
 async def totp_verify(request: Request, code: str = Query(...), db: DatabaseBackend = Depends(get_db_backend)):
-    """Ativa TOTP se código válido."""
+    """Ativa TOTP se código válido — gera 8 backup codes."""
     from aios.api.deps import get_current_user
     user = await get_current_user(request, db)
     if not user.totp_secret:
         raise HTTPException(400, "Gere o setup primeiro")
-    import pyotp
+    import pyotp, secrets
     totp = pyotp.TOTP(user.totp_secret)
     if not totp.verify(code, valid_window=1):
+        # também tenta backup code
+        if user.totp_backup_codes and code in user.totp_backup_codes:
+            user.totp_backup_codes.remove(code)
+            await db.commit()
+            return {"enabled": True, "message": "Backup code usado — gere novos se acabarem", "remaining": len(user.totp_backup_codes)}
         raise HTTPException(401, "Código TOTP inválido")
     user.totp_enabled = True
+    # gera 8 backup codes se ainda não tem
+    if not user.totp_backup_codes:
+        user.totp_backup_codes = [secrets.token_hex(4) for _ in range(8)]
     await db.commit()
-    return {"enabled": True, "message": "2FA ativado"}
+    return {"enabled": True, "message": "2FA ativado", "backup_codes": user.totp_backup_codes}
 
 @router.post("/totp/disable")
 async def totp_disable(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
@@ -531,8 +547,17 @@ async def totp_disable(request: Request, db: DatabaseBackend = Depends(get_db_ba
     user = await get_current_user(request, db)
     user.totp_secret = None
     user.totp_enabled = False
+    user.totp_backup_codes = None
     await db.commit()
     return {"enabled": False}
+
+@router.get("/totp/backup-codes")
+async def totp_backup_codes(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
+    from aios.api.deps import get_current_user
+    user = await get_current_user(request, db)
+    if not user.totp_enabled:
+        raise HTTPException(400, "2FA não ativo")
+    return {"backup_codes": user.totp_backup_codes or [], "remaining": len(user.totp_backup_codes or [])}
 
 async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_user_id: str, email: str, name: str) -> TokenResponse:
     """Find existing OAuth account or create user + OAuth account."""

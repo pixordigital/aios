@@ -237,10 +237,17 @@ async def login_action(request: Request, email: str = Form(...), password: str =
             return await login_page(request, error="Verifique seu e-mail antes de entrar. Reenviamos o link.")
         if getattr(user, "totp_enabled", False) and user.totp_secret:
             if not totp_code:
-                return await login_page(request, error="Código 2FA obrigatório — preencha o campo TOTP")
+                return await login_page(request, error="Código 2FA obrigatório — preencha TOTP ou backup code")
             import pyotp
-            if not pyotp.TOTP(user.totp_secret).verify(totp_code, valid_window=1):
-                return await login_page(request, error="Código 2FA inválido")
+            totp_ok = pyotp.TOTP(user.totp_secret).verify(totp_code, valid_window=1)
+            if not totp_ok:
+                codes = getattr(user, "totp_backup_codes", None) or []
+                if totp_code in codes:
+                    codes.remove(totp_code)
+                    user.totp_backup_codes = codes
+                    await db.commit()
+                else:
+                    return await login_page(request, error="Código 2FA inválido")
 
         token = create_jwt_token(user.id, user.org_id)
         resp = RedirectResponse("/dashboard", status_code=303)
@@ -398,16 +405,18 @@ async def analytics_page(request: Request):
 
 @router.get("/autoscale", response_class=HTMLResponse)
 async def autoscale_page(request: Request):
-    """Autoscale status por org — expõe check_autoscale."""
+    """Autoscale status por org — expõe check_autoscale + custo por workflow."""
     org_id = await _org_filter(request)
     from aios.core.autoscaling import check_autoscale
     result = await check_autoscale(org_id)
     async with db_session() as db:
-        from sqlalchemy import select, func
-        from aios.db.models import AgentMetric
+        from sqlalchemy import select
+        from aios.db.models import AgentMetric, WorkflowRun
         rows = (await db.execute(select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(AgentMetric.hour.desc()).limit(5))).scalars().all()
         history = [{"hour": r.hour, "messages": r.messages, "avg_ms": r.avg_response_ms, "errors": r.errors} for r in rows]
-    return await _render("autoscale.html", request, title="Autoscale", autoscale=result, history=history)
+        runs = (await db.execute(select(WorkflowRun).where(WorkflowRun.org_id == org_id).order_by(WorkflowRun.created_at.desc()).limit(5))).scalars().all()
+        wf_history = [{"id": r.id[:8], "status": r.status, "tokens": r.tokens, "cost": r.cost_usd, "nodes": len(r.node_status or {})} for r in runs]
+    return await _render("autoscale.html", request, title="Autoscale", autoscale=result, history=history, wf_history=wf_history)
 
 
 # ─── Agent CRUD ───
@@ -1813,9 +1822,11 @@ async def automations_create(request: Request):
             db.add(AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="webhook", name="Webhook", config={}, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True))
         elif ttype == "cron":
             cron_expr = tval or "0 9 * * *"
+            from croniter import croniter
+            if not croniter.is_valid(cron_expr):
+                return HTMLResponse(f"<h2>cron inválido: {cron_expr}</h2><a href='/dashboard/automations'>Voltar</a>", status_code=422)
             trig = AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="cron", name="Agendamento", config={}, cron_expr=cron_expr, is_active=True)
             try:
-                from croniter import croniter
                 trig.next_run_at = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
             except Exception:
                 pass
@@ -1852,9 +1863,11 @@ async def automations_from_template(request: Request, tid: str):
             db.add(AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="webhook", name=trig.get("name",""), config={}, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True))
         elif ttype == "cron":
             cron_expr = trig.get("cron","0 9 * * *")
+            from croniter import croniter
+            if not croniter.is_valid(cron_expr):
+                return HTMLResponse(f"<h2>cron inválido: {cron_expr}</h2><a href='/dashboard/automations/{wf.id}'>Voltar</a>", status_code=422)
             tr = AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="cron", name=trig.get("name",""), config={}, cron_expr=cron_expr, is_active=True)
             try:
-                from croniter import croniter
                 tr.next_run_at = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
             except Exception:
                 pass
@@ -1880,9 +1893,11 @@ async def automations_add_trigger(request: Request, wf_id: str):
             db.add(AutomationTrigger(workflow_id=wf_id, org_id=org_id, type="webhook", name=name, config={}, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True))
         elif ttype == "cron":
             cron_expr = val or "0 9 * * *"
+            from croniter import croniter
+            if not croniter.is_valid(cron_expr):
+                return HTMLResponse(f"<h2>cron inválido: {cron_expr}</h2><a href='/dashboard/automations/{wf_id}'>Voltar</a>", status_code=422)
             tr = AutomationTrigger(workflow_id=wf_id, org_id=org_id, type="cron", name=name, config={}, cron_expr=cron_expr, is_active=True)
             try:
-                from croniter import croniter
                 tr.next_run_at = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
             except Exception:
                 pass

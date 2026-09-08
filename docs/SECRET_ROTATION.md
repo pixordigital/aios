@@ -4,15 +4,22 @@ Sempre que `AIOS_JWT_SECRET`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `LIVEKIT_AP
 
 ## Coolify (produção 178.105.181.38)
 
-1. Coolify → `pixor-aios` → Environment
+1. Coolify → `pixor-aios` → Environment (JWT/LIVEKIT sem downtime)
    ```
    AIOS_JWT_SECRET=$(openssl rand -hex 32)
-   POSTGRES_PASSWORD=$(openssl rand -hex 16)
-   REDIS_PASSWORD=$(openssl rand -hex 16)
    AIOS_LIVEKIT_API_SECRET=$(openssl rand -hex 32)
    AIOS_ADMIN_MASTER_KEY=$(openssl rand -hex 32)
    ```
-2. Save → Redeploy (sem cache)
+   Save → Redeploy (sem cache) — app/worker reiniciam, JWT antigos invalidam (avisar usuários re-login)
+
+2. Postgres/Redis sem downtime (opcional, com janela):
+   ```bash
+   # no VPS, sem perder dados:
+   docker exec postgres-38908ddf psql -U postgres -c "ALTER USER aios WITH PASSWORD 'NOVO_HEX16';"
+   # atualize Coolify Environment POSTGRES_PASSWORD=NOVO_HEX16, REDIS_PASSWORD=NOVO
+   docker exec redis-38908ddf redis-cli -a oldpass CONFIG SET requirepass NOVO
+   # Save → Redeploy (postgres/redis recriam com novo pass mas volume mantém dados)
+   ```
 3. VPS: `docker exec postgres-... psql -U aios -c "SELECT version_num FROM alembic_version;"` — deve estar `c9a1b2c3d4e6`
 4. Teste `curl -s https://.../health/ready` → `ready`
 

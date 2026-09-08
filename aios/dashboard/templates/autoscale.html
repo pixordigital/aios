@@ -15,7 +15,7 @@
     {% if autoscale.scale=='up' %}<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--red)">▲ Recomendado escalar: adicione worker ou aumente max_jobs (atual 20 em aios/tasks/worker.py:146)</div>{% endif %}
 </div>
 <div class="card">
-    <h3 style="margin-bottom:0.5rem">Histórico 5h</h3>
+    <h3 style="margin-bottom:0.5rem">Histórico 5h — AgentMetrics</h3>
     {% if history %}
     <table class="table" style="width:100%;font-size:0.8125rem">
         <tr style="color:var(--text-tertiary)"><th>Hora</th><th>Msgs</th><th>Avg ms</th><th>Erros</th></tr>
@@ -24,5 +24,16 @@
         {% endfor %}
     </table>
     {% else %}<p class="text-sm text-secondary">Sem métricas ainda — envie mensagens para gerar `agent_metrics`.</p>{% endif %}
+</div>
+<div class="card" style="margin-top:0.75rem">
+    <h3 style="margin-bottom:0.5rem">Últimos WorkflowRuns — custo por execução</h3>
+    {% if wf_history %}
+    <table class="table" style="width:100%;font-size:0.8125rem">
+        <tr style="color:var(--text-tertiary)"><th>ID</th><th>Status</th><th>Tokens</th><th>Custo US$</th><th>Nós</th></tr>
+        {% for r in wf_history %}
+        <tr><td class="font-mono">{{ r.id }}</td><td><span class="badge" style="background: {% if r.status=='done' %}var(--green){% elif r.status=='failed' %}var(--red){% else %}var(--surface){% endif %}; color: {% if r.status in ['done','failed'] %}#fff{% else %}var(--text){% endif %}">{{ r.status }}</span></td><td>{{ r.tokens }}</td><td>R$ {{ "%.4f"|format(r.cost*5.5) }}</td><td>{{ r.nodes }}</td></tr>
+        {% endfor %}
+    </table>
+    {% else %}<p class="text-sm text-secondary">Sem workflow runs — crie em /dashboard/automations.</p>{% endif %}
 </div>
 {% endblock %}

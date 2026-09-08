@@ -85,6 +85,7 @@ class User(Base, TimestampMixin):
     email_verified: Mapped[bool] = mapped_column(default=False)
     totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(default=False)
+    totp_backup_codes: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
 
     organization = relationship("Organization", back_populates="users")
 

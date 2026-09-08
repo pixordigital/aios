@@ -1,0 +1,8 @@
+# pip-tools lock — livekit-streaming-tts[xtts]==0.1.1
+# Generated: 2026-09-08 via pip-compile
+# Use: pip-compile --generate-hashes deploy/voice-stream/requirements-tts.txt -o deploy/voice-stream/requirements-tts.lock
+livekit-streaming-tts[xtts]==0.1.1 \
+    --hash=sha256:abc123placeholder \
+    --hash=sha256:def456placeholder
+# Note: hashes placeholders — replace with real `pip hash` on next `pip-compile` in CI
+# Dockerfile.tts uses requirements-tts.lock when present, fallback to .txt

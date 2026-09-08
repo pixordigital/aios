@@ -47,6 +47,11 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5):
         q = _embed(query)
         q_str = "[" + ",".join(f"{x:.6f}" for x in q) + "]"
         async with async_session() as s:
+            # tune HNSW recall — ef_search higher = melhor recall para org filtrado
+            try:
+                await s.execute(text("SET LOCAL hnsw.ef_search = 100"))
+            except Exception:
+                pass
             rows = await s.execute(
                 text(
                     "SELECT id, content, 1 - (embedding <=> CAST(:q AS vector)) as score "
