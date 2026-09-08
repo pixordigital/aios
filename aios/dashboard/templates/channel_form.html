@@ -18,7 +18,7 @@
                 <div>
                     <label>Tipo</label>
                     <select name="channel_type" class="input" onchange="showChannelCreds(this.value)">
-                        {% set types = ['web', 'whatsapp', 'evolution', 'slack', 'telegram', 'discord', 'email', 'voice'] %}
+                        {% set types = ['web', 'evolution', 'slack', 'telegram', 'discord', 'email', 'voice'] %}
                         {% for t in types %}
                         <option value="{{ t }}" {% if channel and channel.channel_type == t %}selected{% endif %}>{{ channel_type_label(t) }}</option>
                         {% endfor %}
@@ -30,37 +30,6 @@
         <div class="card">
             <h2 class="mb-3">Credenciais</h2>
             <div id="creds-web" class="channel-creds" style="display:none"><p class="text-sm text-secondary">Os canais web não precisam de configuração.</p></div>
-            <div id="creds-whatsapp" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Provedor</label>
-                    <select name="config_whatsapp_provider" class="input" onchange="showWaProvider(this.value)">
-                        <option value="meta" {% if channel and channel.config and channel.config.get('provider') != 'zernio' %}selected{% endif %}>Meta (WhatsApp Cloud API)</option>
-                        <option value="zernio" {% if channel and channel.config and channel.config.get('provider') == 'zernio' %}selected{% endif %}>Zernio</option>
-                    </select>
-                </div>
-                <div id="wa-meta">
-                    <div style="padding:0.375rem 0.5rem;background:var(--green-subtle);border:1px solid var(--green);border-radius:4px;font-size:0.6875rem;color:var(--green);margin-bottom:0.375rem">✅ Recomendado — WhatsApp Cloud API estável, sem risco Baileys. Templates gerenciados pela Meta.</div>
-                    <div><label>Token de acesso</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
-                    <div><label>ID do número de telefone</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
-                    <div><label>WABA ID (para listar templates)</label><input type="text" name="config_whatsapp_waba" value="{{ channel.config.get('waba_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="1020... (opcional)"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Encontre em business.facebook.com → WhatsApp Manager → ID da conta</div></div>
-                    <div><button type="button" class="btn btn-ghost btn-sm" onclick="fetchTemplates()" style="margin-top:0.375rem">📋 Buscar templates aprovados</button><span id="tpl-status" style="font-size:0.6875rem;color:var(--text-tertiary);margin-left:0.5rem"></span><div id="tpl-list" style="margin-top:0.375rem"></div></div>
-                    <details style="margin-top:0.5rem"><summary style="font-size:0.75rem;color:var(--text-tertiary);cursor:pointer">Templates / janela 24h (opcional)</summary>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
-                            <div><label>Template padrão (fallback 24h)</label><input type="text" name="config_whatsapp_template" value="{{ channel.config.get('template_name', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="hello_world"></div>
-                            <div><label>Idioma</label><input type="text" name="config_whatsapp_lang" value="{{ channel.config.get('template_language', 'pt_BR') if channel and channel.config else 'pt_BR' }}" class="input input-mono" placeholder="pt_BR"></div>
-                        </div>
-                        <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.375rem">Usado se envio fora da janela 24h falhar (erro 131047). Deixe vazio se não tem template aprovado.</div>
-                    </details>
-                    <div style="margin-top:0.5rem;padding:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:0.6875rem;color:var(--text-secondary)">
-                        <b>Recursos prontos:</b> texto, imagem/doc/áudio/vídeo por URL ou media_id, templates, botões/list, localização, contatos, áudio voz, marcação lido automática. Webhook recebe todos tipos + status.
-                    </div>
-                </div>
-                <div id="wa-zernio" style="display:none;flex-direction:column;gap:0.75rem">
-                    <div><label>Chave da API</label><input type="text" name="config_zernio_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="zrk_..."></div>
-                    <div><label>ID da conta</label><input type="text" name="config_zernio_account" value="{{ channel.config.get('account_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="66b2e19d..."></div>
-                    <div><label>Nome do template (cold outreach)</label><input type="text" name="config_zernio_template" value="{{ channel.config.get('template_name', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="sdr_hello"></div>
-                    <div><label>Idioma do template</label><input type="text" name="config_zernio_lang" value="{{ channel.config.get('template_language', 'en_US') if channel and channel.config else 'en_US' }}" class="input input-mono" placeholder="en_US"></div>
-                </div>
-            </div>
             <div id="creds-slack" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div><label>Token do bot</label><input type="text" name="config_slack_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="xoxb-..."></div>
                 <div><label>Segredo de assinatura</label><input type="text" name="config_slack_secret" value="{{ channel.config.get('signing_secret', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="abc..."></div>
@@ -115,11 +84,37 @@
                 <div style="font-size:0.6875rem;color:var(--text-tertiary)">Sem bridge, chamadas ficam <b>queued</b> com TTS pronto. Webhook inbound: <span class="font-mono">/api/voice/webhook?secret=...</span></div>
             </div>
             <div id="creds-evolution" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div style="padding:0.5rem;background:var(--amber-subtle);border:1px solid var(--amber);border-radius:4px;font-size:0.75rem;color:var(--amber)">⚠️ Evolution é self-hosted (Baileys) — use apenas se precisa hospedar seu próprio WA. Recomendado: <b>WhatsApp Cloud API (Meta)</b> estável. Ative com <code>--profile voice</code> no Coolify.</div>
-                <div><label>URL do servidor</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else 'http://evolution:8080' }}" class="input input-mono" placeholder="http://evolution:8080 (integrado)"></div>
-                <div><label>Chave da API</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
-                <div><label>Nome da instância</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="my-whatsapp-instance"></div>
-                <div style="font-size:0.6875rem;color:var(--text-tertiary)">Self-hosted: gerencie QR code em /dashboard/evolution. Para 1-clique Meta, use <b>WhatsApp</b> acima.</div>
+                <div><label>Provedor</label>
+                    <select name="config_evo_provider" class="input" onchange="showEvoProvider(this.value)">
+                        <option value="baileys" {% if channel and channel.config and channel.config.get('provider', 'baileys') == 'baileys' %}selected{% endif %}>Baileys (WhatsApp Web — self-hosted)</option>
+                        <option value="meta" {% if channel and channel.config and channel.config.get('provider') == 'meta' %}selected{% endif %}>Meta Cloud API (WhatsApp Business oficial)</option>
+                    </select>
+                </div>
+                <div id="evo-baileys" style="display:flex;flex-direction:column;gap:0.75rem">
+                    <div style="padding:0.5rem;background:var(--amber-subtle);border:1px solid var(--amber);border-radius:4px;font-size:0.75rem;color:var(--amber)">⚠️ Baileys = WhatsApp Web (instável, risco de ban). Para produção, use <b>Meta Cloud API</b>.</div>
+                    <div><label>URL do servidor</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else 'http://evolution:8080' }}" class="input input-mono" placeholder="http://evolution:8080 (integrado)"></div>
+                    <div><label>Chave da API</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
+                    <div><label>Nome da instância</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="my-whatsapp-instance"></div>
+                    <div style="font-size:0.6875rem;color:var(--text-tertiary)">Gerencie QR code em /dashboard/evolution. Instância = isolamento multi-tenant.</div>
+                </div>
+                <div id="evo-meta" style="display:none;flex-direction:column;gap:0.75rem">
+                    <div style="padding:0.375rem 0.5rem;background:var(--green-subtle);border:1px solid var(--green);border-radius:4px;font-size:0.6875rem;color:var(--green);margin-bottom:0.375rem">✅ Recomendado — WhatsApp Cloud API oficial, estável, sem QR code. Templates gerenciados pela Meta.</div>
+                    <div><label>URL do servidor Evolution</label><input type="text" name="config_evo_server" value="{{ channel.config.get('server_url', '') if channel and channel.config else 'http://evolution:8080' }}" class="input input-mono" placeholder="http://evolution:8080"></div>
+                    <div><label>Chave da API Evolution</label><input type="text" name="config_evo_key" value="{{ channel.config.get('api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="evointegration..."></div>
+                    <div><label>Nome da instância (Evolution)</label><input type="text" name="config_evo_instance" value="{{ channel.config.get('instance', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="meta-prod-001"></div>
+                    <div style="padding:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:0.6875rem;color:var(--text-secondary)">
+                        <b>Configuração Meta (opcional — Evolution provisiona automaticamente):</b>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+                        <div><label>Meta Access Token</label><input type="text" name="config_evo_meta_token" value="{{ channel.config.get('meta_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA... (opcional)"></div>
+                        <div><label>Phone Number ID</label><input type="text" name="config_evo_meta_phone" value="{{ channel.config.get('meta_phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789 (opcional)"></div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+                        <div><label>WABA ID</label><input type="text" name="config_evo_meta_waba" value="{{ channel.config.get('meta_waba_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="1020... (opcional)"></div>
+                        <div><label>Template padrão (fallback 24h)</label><input type="text" name="config_evo_meta_template" value="{{ channel.config.get('meta_template', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="hello_world"></div>
+                    </div>
+                    <div><label>Idioma template</label><input type="text" name="config_evo_meta_lang" value="{{ channel.config.get('meta_lang', 'pt_BR') if channel and channel.config else 'pt_BR' }}" class="input input-mono" placeholder="pt_BR"></div>
+                </div>
             </div>
         </div>
 
@@ -192,27 +187,13 @@ async function testConnection() {
 </form>
 
 <script>
-    async function fetchTemplates(){
-        var waba=document.querySelector('input[name=\"config_whatsapp_waba\"]')?.value.trim();
-        var token=document.querySelector('input[name=\"config_whatsapp_token\"]')?.value.trim();
-        var st=document.getElementById('tpl-status'), list=document.getElementById('tpl-list');
-        if(!waba||!token){ st.textContent=' Informe WABA ID e token'; return; }
-        st.textContent=' ⏳ buscando...'; list.innerHTML='';
-        try{
-            var r=await fetch(`/api/whatsapp/templates?waba_id=${encodeURIComponent(waba)}&access_token=${encodeURIComponent(token)}`);
-            var j=await r.json();
-            if(!r.ok){ st.textContent=' ❌ '+ (j.detail||r.statusText); return;}
-            st.textContent=` ✅ ${j.templates.length} aprovados`;
-            list.innerHTML=j.templates.map(t=>`<div style=\"font-size:0.75rem;padding:0.25rem 0.375rem;border:1px solid var(--border);border-radius:4px;margin-bottom:0.25rem;background:var(--bg)\"><b>${t.name}</b> <span style=\"color:var(--text-tertiary)\">${t.language} · ${t.category}</span> <a href=\"#\" onclick=\"document.querySelector('input[name=config_whatsapp_template]').value='${t.name}';document.querySelector('input[name=config_whatsapp_lang]').value='${t.language}';return false;\" style=\"float:right;font-size:0.6875rem\">usar</a></div>`).join('') || '<div style=\"font-size:0.75rem;color:var(--text-tertiary)\">Nenhum aprovado</div>';
-        }catch(e){ st.textContent=' ❌ '+e.message; }
+    function showEvoProvider(v){
+        var baileys=document.getElementById('evo-baileys'), meta=document.getElementById('evo-meta');
+        if(!baileys||!meta)return;
+        if(v==='meta'){baileys.style.display='none';meta.style.display='flex';}
+        else{baileys.style.display='flex';meta.style.display='none';}
     }
-    function showWaProvider(v){
-        var meta=document.getElementById('wa-meta'), zn=document.getElementById('wa-zernio');
-        if(!meta||!zn)return;
-        if(v==='zernio'){meta.style.display='none';zn.style.display='flex';}
-        else{meta.style.display='block';zn.style.display='none';}
-    }
-    function showChannelCreds(t){document.querySelectorAll('.channel-creds').forEach(function(e){e.style.display='none'});var el=document.getElementById('creds-'+t);if(el)el.style.display='flex';if(t==='whatsapp')showWaProvider(document.querySelector('select[name="config_whatsapp_provider"]')?.value||'meta');}
+    function showChannelCreds(t){document.querySelectorAll('.channel-creds').forEach(function(e){e.style.display='none'});var el=document.getElementById('creds-'+t);if(el)el.style.display='flex';if(t==='evolution')showEvoProvider(document.querySelector('select[name="config_evo_provider"]')?.value||'baileys');}
     document.addEventListener('DOMContentLoaded',function(){showChannelCreds(document.querySelector('select[name="channel_type"]').value);});
 </script>
 {% endblock %}

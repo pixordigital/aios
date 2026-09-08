@@ -90,12 +90,12 @@ services:
       QRCODE_COLOR: "#00e5a0"
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: "postgresql"
-      DATABASE_CONNECTION_URI: "postgresql://aios:${POSTGRES_PASSWORD}@postgres:5432/evolution_db?schema=evolution_api"
+      DATABASE_CONNECTION_URI: ${EVOLUTION_DATABASE_URI:-postgresql://aios:CHANGE_ME@postgres:5432/evolution_db?schema=evolution_api}
       REDIS_ENABLED: "true"
-      REDIS_URI: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6"
+      REDIS_URI: ${EVOLUTION_REDIS_URI:-redis://:CHANGE_ME@redis:6379/6}
       REDIS_PREFIX_KEY: evolution
       CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6"
+      CACHE_REDIS_URI: ${EVOLUTION_REDIS_URI:-redis://:CHANGE_ME@redis:6379/6}
       CACHE_REDIS_PREFIX_KEY: evolution-cache
       CACHE_LOCAL_ENABLED: "true"
       S3_ENABLED: "false"
@@ -253,6 +253,8 @@ services:
 
 volumes:
   app-data:
+  evolution-data:
+  evolution-store:
   voice-tts-data:
   voice-stt-data:
   voice-stream-data:

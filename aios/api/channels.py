@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Query
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,104 @@ async def test_channel(body: dict = Body(...), user=Depends(get_current_user)):
     except Exception as e:
         logger.exception("Channel test failed")
         return {"ok": False, "message": str(e)}
+
+
+@router.post("/evolution/create-instance")
+async def create_evolution_instance(
+    body: dict = Body(...),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Create new Evolution instance (Baileys or Meta Cloud API).
+    Body: {instance_name, provider: "baileys"|"meta", channel_id}
+    """
+    instance_name = body.get("instance_name", "")
+    provider = body.get("provider", "baileys")
+    channel_id = body.get("channel_id", "")
+
+    if not instance_name:
+        return {"ok": False, "message": "instance_name required"}
+
+    # Get the Evolution channel to use for provisioning
+    if not channel_id:
+        return {"ok": False, "message": "channel_id required"}
+
+    channel = await db.get(ChannelConnection, channel_id)
+    if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+        return {"ok": False, "message": "Invalid Evolution channel"}
+
+    from aios.channels.manager import manager as channel_mgr
+    ch = channel_mgr.build(channel, db=db)
+    result = await ch.create_instance(instance_name, provider)
+
+    if result["ok"]:
+        await log_audit(db, org_id, "evolution.instance.create", "channel", user_id=user.id, resource_id=channel_id, details={"instance": instance_name, "provider": provider})
+
+    return result
+
+
+@router.post("/evolution/delete-instance")
+async def delete_evolution_instance(
+    body: dict = Body(...),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Delete Evolution instance.
+    Body: {instance_name, channel_id}
+    """
+    instance_name = body.get("instance_name", "")
+    channel_id = body.get("channel_id", "")
+
+    if not instance_name or not channel_id:
+        return {"ok": False, "message": "instance_name and channel_id required"}
+
+    channel = await db.get(ChannelConnection, channel_id)
+    if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+        return {"ok": False, "message": "Invalid Evolution channel"}
+
+    from aios.channels.manager import manager as channel_mgr
+    ch = channel_mgr.build(channel, db=db)
+    result = await ch.delete_instance(instance_name)
+
+    if result["ok"]:
+        await log_audit(db, org_id, "evolution.instance.delete", "channel", user_id=user.id, resource_id=channel_id, details={"instance": instance_name})
+
+    return result
+
+
+@router.get("/evolution/list-instances")
+async def list_evolution_instances(
+    channel_id: str = Query(...),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """List all Evolution instances for a channel."""
+    channel = await db.get(ChannelConnection, channel_id)
+    if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+        return {"ok": False, "message": "Invalid Evolution channel"}
+
+    from aios.channels.manager import manager as channel_mgr
+    ch = channel_mgr.build(channel, db=db)
+    return await ch.list_instances()
+
+
+@router.get("/evolution/qrcode")
+async def get_evolution_qrcode(
+    channel_id: str = Query(...),
+    instance_name: str = Query(...),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Get QR code for Baileys instance."""
+    channel = await db.get(ChannelConnection, channel_id)
+    if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+        return {"ok": False, "message": "Invalid Evolution channel"}
+
+    from aios.channels.manager import manager as channel_mgr
+    ch = channel_mgr.build(channel, db=db)
+    return await ch.get_instance_qrcode(instance_name)
 
 
 @router.post("/{channel_id}/stop")

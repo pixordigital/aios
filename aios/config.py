@@ -45,9 +45,7 @@ class Settings(BaseSettings):
     stripe_price_pro: str = ""
     app_url: str = "http://localhost:8777"
     admin_master_key: str = ""  # set in production — used for fleet management auth
-    whatsapp_app_secret: str = ""  # Meta app secret for webhook signature verification
-    whatsapp_verify_token: str = ""  # Meta webhook subscribe verification token
-    zernio_webhook_secret: str = ""  # Zernio webhook signature secret (X-Zernio-Signature)
+    evolution_webhook_secret: str = ""  # Evolution webhook HMAC secret
     voice_webhook_secret: str = ""  # Voice webhook HMAC secret
     discord_webhook_secret: str = ""  # Discord webhook HMAC secret
     slack_signing_secret: str = ""  # Slack signing secret for signature verification
@@ -114,6 +112,7 @@ PLANS = {
         "max_cost_brl": 10,
         "sla_minutes": 15,
         "channels": ["web"],
+        "max_evolution_instances": 0,
     },
     "starter": {
         "name": "Starter",
@@ -123,7 +122,8 @@ PLANS = {
         "max_tokens_per_month": 5_000_000,
         "max_cost_brl": 100,
         "sla_minutes": 10,
-        "channels": ["web", "whatsapp"],
+        "channels": ["web", "evolution"],
+        "max_evolution_instances": 1,
     },
     "pro": {
         "name": "Pro",
@@ -133,7 +133,8 @@ PLANS = {
         "max_tokens_per_month": 50_000_000,
         "max_cost_brl": 800,
         "sla_minutes": 5,
-        "channels": ["web", "whatsapp", "email", "slack", "telegram", "discord", "voice"],
+        "channels": ["web", "evolution", "email", "slack", "telegram", "discord", "voice"],
+        "max_evolution_instances": 3,
     },
     "enterprise": {
         "name": "Enterprise",
@@ -144,6 +145,7 @@ PLANS = {
         "max_cost_brl": 8000,
         "sla_minutes": 2,
         "channels": "__all__",
+        "max_evolution_instances": 10,
     },
     "unlimited": {
         "name": "Ilimitado",
@@ -154,6 +156,7 @@ PLANS = {
         "max_cost_brl": 999999,
         "sla_minutes": 1,
         "channels": "__all__",
+        "max_evolution_instances": 999999,
     },
 }
 

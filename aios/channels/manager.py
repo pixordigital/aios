@@ -3,7 +3,6 @@
 import logging
 from aios.channels.base import Channel
 from aios.channels.web import WebChannel
-from aios.channels.whatsapp import WhatsAppChannel
 from aios.channels.slack import SlackChannel
 from aios.channels.telegram import TelegramChannel
 from aios.channels.discord import DiscordChannel
@@ -15,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 CHANNEL_REGISTRY = {
     "web": WebChannel,
-    "whatsapp": WhatsAppChannel,
     "slack": SlackChannel,
     "telegram": TelegramChannel,
     "discord": DiscordChannel,

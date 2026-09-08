@@ -159,8 +159,7 @@ def _channel_type_label(value: str) -> str:
     """Human-readable label for a channel type DB value."""
     LABELS = {
         "web": "Web Chat",
-        "whatsapp": "WhatsApp",
-        "evolution": "Evolution",
+        "evolution": "WhatsApp (Evolution)",
         "slack": "Slack",
         "telegram": "Telegram",
         "discord": "Discord",
@@ -909,8 +908,7 @@ async def channel_edit_form(request: Request, cid: str):
 
 
 CHANNEL_CONFIG_FIELDS = {
-    "whatsapp": ["config_whatsapp_token", "config_whatsapp_phone", "config_whatsapp_waba"],
-    "evolution": ["config_evo_server", "config_evo_key", "config_evo_instance"],
+    "evolution": ["config_evo_server", "config_evo_key", "config_evo_instance", "config_evo_provider", "config_evo_meta_token", "config_evo_meta_phone", "config_evo_meta_waba", "config_evo_meta_template", "config_evo_meta_lang"],
     "slack": ["config_slack_token", "config_slack_secret"],
     "telegram": ["config_telegram_token"],
     "discord": ["config_discord_token"],
@@ -924,13 +922,10 @@ async def channel_save(
     request: Request,
     channel_id: str = Form(""), label: str = Form(...), channel_type: str = Form(...),
     agent_id: str = Form(""), team_id: str = Form(""),
-    config_whatsapp_token: str = Form(""), config_whatsapp_phone: str = Form(""),
-    config_whatsapp_waba: str = Form(""),
-    config_whatsapp_provider: str = Form("meta"),
-    config_whatsapp_template: str = Form(""), config_whatsapp_lang: str = Form("pt_BR"),
-    config_zernio_key: str = Form(""), config_zernio_account: str = Form(""),
-    config_zernio_template: str = Form(""), config_zernio_lang: str = Form("en_US"),
     config_evo_server: str = Form(""), config_evo_key: str = Form(""), config_evo_instance: str = Form(""),
+    config_evo_provider: str = Form("baileys"),
+    config_evo_meta_token: str = Form(""), config_evo_meta_phone: str = Form(""),
+    config_evo_meta_waba: str = Form(""), config_evo_meta_template: str = Form(""), config_evo_meta_lang: str = Form("pt_BR"),
     config_slack_token: str = Form(""), config_slack_secret: str = Form(""),
     config_telegram_token: str = Form(""), config_discord_token: str = Form(""),
     config_email_imap: str = Form(""), config_email_smtp: str = Form(""),
@@ -943,28 +938,29 @@ async def channel_save(
     config_voice_bridge: str = Form(""), config_voice_from: str = Form(""),
 ):
     config = {"web": {"platform": "WebSocket"}}.get(channel_type, {})
-    if channel_type == "whatsapp":
-        if config_whatsapp_provider == "zernio":
-            config = {
-                "provider": "zernio",
-                "api_key": config_zernio_key,
-                "account_id": config_zernio_account,
-                "template_name": config_zernio_template,
-                "template_language": config_zernio_lang,
-            }
-        else:
-            config = {"access_token": config_whatsapp_token, "phone_id": config_whatsapp_phone, "waba_id": config_whatsapp_waba}
-            if config_whatsapp_template:
-                config["template_name"] = config_whatsapp_template
-                config["template_language"] = config_whatsapp_lang or "pt_BR"
+    if channel_type == "evolution":
+        config = {
+            "server_url": config_evo_server,
+            "api_key": config_evo_key,
+            "instance": config_evo_instance,
+            "provider": config_evo_provider or "baileys",
+        }
+        if config_evo_provider == "meta":
+            if config_evo_meta_token:
+                config["meta_token"] = config_evo_meta_token
+            if config_evo_meta_phone:
+                config["meta_phone_id"] = config_evo_meta_phone
+            if config_evo_meta_waba:
+                config["meta_waba_id"] = config_evo_meta_waba
+            if config_evo_meta_template:
+                config["meta_template"] = config_evo_meta_template
+                config["meta_lang"] = config_evo_meta_lang or "pt_BR"
     elif channel_type == "slack":
         config = {"bot_token": config_slack_token, "signing_secret": config_slack_secret}
     elif channel_type == "telegram":
         config = {"bot_token": config_telegram_token}
     elif channel_type == "discord":
         config = {"bot_token": config_discord_token}
-    elif channel_type == "evolution":
-        config = {"server_url": config_evo_server, "api_key": config_evo_key, "instance": config_evo_instance}
     elif channel_type == "email":
         config = {"imap_server": config_email_imap, "smtp_server": config_email_smtp, "email": config_email_addr, "password": config_email_pass}
     elif channel_type == "voice":
@@ -1021,12 +1017,6 @@ async def channel_delete(request: Request, cid: str):
             await db.delete(ch)
             await db.commit()
     return RedirectResponse("/dashboard/channels", status_code=303)
-
-
-@router.get("/channels/whatsapp/warmup", response_class=HTMLResponse)
-async def whatsapp_warmup(request: Request):
-    org_id = await _org_filter(request)
-    return await _render("whatsapp_warmup.html", request, title="WhatsApp Warmup Checklist")
 
 
 # ─── Members & Invites ───

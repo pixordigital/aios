@@ -236,14 +236,8 @@ register_error_handlers(app)
 # and don't depend on lifespan startup order (ponytail: one place, no guard).
 from aios.dashboard.app import router as dash_router  # noqa: E402
 app.include_router(dash_router)
-from aios.api.whatsapp_webhook import router as wa_router  # noqa: E402
-app.include_router(wa_router)
-from aios.api.whatsapp_templates import router as wa_tpl_router  # noqa: E402
-app.include_router(wa_tpl_router)
 from aios.api.evolution_webhook import router as evo_router  # noqa: E402
 app.include_router(evo_router)
-from aios.api.zernio_webhook import router as zernio_router  # noqa: E402
-app.include_router(zernio_router)
 from aios.api.voice_webhook import router as voice_router  # noqa: E402
 app.include_router(voice_router)
 from aios.api.discord_webhook import router as discord_router  # noqa: E402
