@@ -23,7 +23,53 @@
     <label>Nome</label><input name="name" class="input" required placeholder="Meu Agente">
     <label class="mt-2">Prompt (editável)</label><textarea name="system_prompt" id="wiz-prompt" class="input" rows="8"></textarea>
     <label class="mt-2">Ferramentas (espaço/comma)</label><input name="tools" id="wiz-tools" class="input">
-    <input type="hidden" name="model" id="wiz-model" value="openai/gpt-4o"><input type="hidden" name="temperature" value="0.7"><input type="hidden" name="max_tokens" value="4096"><input type="hidden" name="short_term_buffer" value="50">
+    <label class="mt-2">Modelo</label>
+    <div class="model-search-wrap" style="position:relative">
+      <input type="text" id="wiz-model-search" name="model" autocomplete="off" value="openai/gpt-4o"
+             oninput="filterModelsWiz(this)"
+             onfocus="document.getElementById('wiz-model-dropdown').classList.add('open')"
+             onblur="setTimeout(function(){document.getElementById('wiz-model-dropdown').classList.remove('open')}, 200)"
+             class="input input-mono" placeholder="Buscar modelos…">
+      <div id="wiz-model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;margin-top:2px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
+        {% set groups = {
+            "OpenAI": [
+                "openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano",
+                "openai/o3", "openai/o3-mini", "openai/o4-mini", "openai/o4",
+                "openai/gpt-5", "openai/gpt-5-mini", "openai/o5", "openai/o5-mini",
+            ],
+            "Anthropic": [
+                "anthropic/claude-sonnet-4-20250514", "anthropic/claude-5-opus-20250714",
+                "anthropic/claude-4.5-sonnet", "anthropic/claude-3.5-sonnet", "anthropic/claude-3-haiku",
+                "anthropic/claude-opus-4-20250514", "anthropic/claude-fable-5",
+            ],
+            "Google": [
+                "google/gemini-2.5-pro", "google/gemini-2.5-flash", "google/gemini-3-pro-2026-05", "google/gemini-3-flash-2026-05",
+                "google/gemma-4-27b-it", "google/gemma-4-9b-it",
+            ],
+            "DeepSeek": [
+                "deepseek/deepseek-v4", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro",
+                "deepseek/deepseek-v5", "deepseek/deepseek-r2",
+            ],
+            "OpenCode (grátis)": [
+                "opencode/deepseek-v4", "opencode/deepseek-v4-flash",
+                "opencode/qwen-3-235b-a22b", "opencode/qwen-3-30b-a3b",
+                "opencode/llama-4-maverick", "opencode/llama-4-scout",
+                "opencode/mistral-large-3",
+            ],
+            "Ollama (local)": [
+                "ollama/llama3", "ollama/mistral", "ollama/qwen2.5",
+            ],
+        } %}
+        {% for group, models_list in groups.items() %}
+        <div style="font-size:0.6rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;padding:0.5rem 0.625rem 0.25rem;border-bottom:1px solid var(--border)">{{ group }}</div>
+        {% for m in models_list %}
+        <div class="model-option" data-model="{{ m }}" data-group="{{ group }}" onclick="selectModelWiz('{{ m }}')" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'"
+             style="padding:0.375rem 0.625rem;font-size:0.75rem;font-family:'JetBrains Mono',monospace;cursor:pointer;color:var(--text-secondary);border-bottom:1px solid var(--border);transition:background 0.06s">{{ m }}</div>
+        {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+    <input type="hidden" name="temperature" value="0.7"><input type="hidden" name="max_tokens" value="4096"><input type="hidden" name="short_term_buffer" value="50">
     <div class="flex-between mt-2"><button type="button" class="btn btn-ghost" onclick="nextStep(2)">Voltar</button><button type="button" class="btn btn-primary" onclick="nextStep(4)">Próximo</button></div>
   </div>
   <div class="card" data-step="4" style="display:none">
@@ -35,8 +81,20 @@
 <script>
 var TPL={{ agent_templates | tojson }};
 function nextStep(n){ document.querySelectorAll('[data-step]').forEach(function(el){ el.style.display = parseInt(el.dataset.step)===n ? 'block':'none'; }); document.querySelectorAll('[id^=s]').forEach(function(b,i){ b.style.borderColor = (i+1)<=n ? 'var(--accent)' : 'var(--border)'; }); }
-function applyTpl(t){ var c=TPL[t]||{}; document.getElementById('wiz-prompt').value=c.system_prompt||''; document.getElementById('wiz-tools').value=(c.tools||[]).join(', '); document.getElementById('wiz-model').value=(c.llm_config||{}).model||'openai/gpt-4o'; var intent=document.getElementById('wiz-intent').value.trim(); if(intent) document.getElementById('wiz-prompt').value = intent + "\n\n" + document.getElementById('wiz-prompt').value; }
+function applyTpl(t){ var c=TPL[t]||{}; document.getElementById('wiz-prompt').value=c.system_prompt||''; document.getElementById('wiz-tools').value=(c.tools||[]).join(', '); document.getElementById('wiz-model-search').value=(c.llm_config||{}).model||'openai/gpt-4o'; var intent=document.getElementById('wiz-intent').value.trim(); if(intent) document.getElementById('wiz-prompt').value = intent + "\n\n" + document.getElementById('wiz-prompt').value; }
 nextStep(1);
+function filterModelsWiz(i){
+  var q=i.value.toLowerCase(),dd=document.getElementById('wiz-model-dropdown');dd.classList.add('open');
+  document.querySelectorAll('#wiz-model-dropdown .model-option').forEach(function(o){o.style.display=o.getAttribute('data-model').toLowerCase().includes(q)?'block':'none'});
+  if(!q)document.querySelectorAll('#wiz-model-dropdown .model-option').forEach(function(o){o.style.display='block'});
+}
+function selectModelWiz(v){document.getElementById('wiz-model-search').value=v;document.getElementById('wiz-model-dropdown').classList.remove('open');}
 document.getElementById('wiz-form').addEventListener('submit', function(e){ var v=document.getElementById('wiz-prompt').value||''; if(!v.trim()||v.trim().length<20){ e.preventDefault(); alert('Prompt muito curto (min 20)');} });
+document.addEventListener('DOMContentLoaded',function(){
+  var dd=document.getElementById('wiz-model-dropdown');
+  var obs=new MutationObserver(function(){dd.style.display=dd.classList.contains('open')?'block':'none'});
+  obs.observe(dd,{attributes:true,attributeFilter:['class']});
+  if(dd) dd.addEventListener('mousedown',function(e){e.preventDefault()});
+});
 </script>
 {% endblock %}
