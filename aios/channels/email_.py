@@ -63,19 +63,44 @@ class EmailChannel(Channel):
 
     async def test(self) -> dict:
         import imaplib
+        import smtplib
+
         imap_server = self._config.get("imap_server", "")
+        smtp_server = self._config.get("smtp_server", "")
         email_addr = self._config.get("email", "")
         password = self._config.get("password", "")
-        if not imap_server or not email_addr:
-            return {"ok": False, "message": "Missing IMAP server or email"}
-        try:
-            mail = imaplib.IMAP4_SSL(imap_server, timeout=10)
-            mail.login(email_addr, password)
-            mail.logout()
-            return {"ok": True, "message": f"IMAP login successful ({email_addr})"}
-        except Exception as e:
-            logger.exception("Email test failed")
-            return {"ok": False, "message": str(e)}
+        smtp_port = int(self._config.get("smtp_port", 587))
+
+        results = {}
+
+        # Test IMAP
+        if imap_server and email_addr:
+            try:
+                mail = imaplib.IMAP4_SSL(imap_server, timeout=10)
+                mail.login(email_addr, password)
+                mail.logout()
+                results["imap"] = {"ok": True, "message": f"IMAP login successful ({email_addr})"}
+            except Exception as e:
+                logger.exception("IMAP test failed")
+                results["imap"] = {"ok": False, "message": str(e)}
+        else:
+            results["imap"] = {"ok": False, "message": "Missing IMAP server or email"}
+
+        # Test SMTP
+        if smtp_server and email_addr:
+            try:
+                with smtplib.SMTP(smtp_server, smtp_port, timeout=10) as server:
+                    server.starttls()
+                    server.login(email_addr, password)
+                results["smtp"] = {"ok": True, "message": f"SMTP login successful ({email_addr})"}
+            except Exception as e:
+                logger.exception("SMTP test failed")
+                results["smtp"] = {"ok": False, "message": str(e)}
+        else:
+            results["smtp"] = {"ok": False, "message": "Missing SMTP server or email"}
+
+        overall_ok = all(r.get("ok", False) for r in results.values())
+        return {"ok": overall_ok, "message": "Email channel test", "details": results}
 
     async def _poll_loop(self):
         """Poll IMAP inbox every 30s for new messages."""
