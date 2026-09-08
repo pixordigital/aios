@@ -257,6 +257,12 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
         raise HTTPException(401, "E-mail ou senha inválidos")
     if not user.email_verified and user.role != "superadmin" and not settings.registration_enabled:
         raise HTTPException(403, "Verifique seu e-mail antes de entrar. Link reenviado.")
+    if getattr(user, "totp_enabled", False) and user.totp_secret:
+        if not body.totp_code:
+            raise HTTPException(401, "Código 2FA (TOTP) obrigatório")
+        import pyotp
+        if not pyotp.TOTP(user.totp_secret).verify(body.totp_code, valid_window=1):
+            raise HTTPException(401, "Código 2FA inválido")
 
     token = _create_access_token(user.id, user.org_id)
     refresh = _create_refresh_token(user.id)
@@ -480,14 +486,53 @@ async def github_callback(code: str, state: str, db: DatabaseBackend = Depends(g
 
 
 @router.get("/totp/setup")
-async def totp_setup():
-    """2FA TOTP stub — retorna QR placeholder. Implementação completa em breve."""
-    return {"enabled": False, "message": "2FA TOTP em breve — stub. Configure AIOS_TOTP_ISSUER quando lançar."}
+async def totp_setup(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
+    """Gera secret TOTP e retorna otpauth:// URL + QR data URI. Requer auth."""
+    from aios.api.deps import get_current_user
+    user = await get_current_user(request, db)
+    import pyotp, base64, io
+    secret = pyotp.random_base32()
+    # armazenar temporariamente em totp_secret mas ainda não enabled
+    user.totp_secret = secret
+    await db.commit()
+    issuer = getattr(settings, "totp_issuer", "AIOS")
+    uri = pyotp.totp.TOTP(secret).provisioning_uri(name=user.email, issuer_name=issuer)
+    # QR como data uri (opcional, sem qrcode lib fallback)
+    qr_uri = None
+    try:
+        import qrcode
+        img = qrcode.make(uri)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        qr_uri = f"data:image/png;base64,{b64}"
+    except Exception:
+        qr_uri = uri
+    return {"secret": secret, "otpauth_url": uri, "qr_data_uri": qr_uri, "enabled": False}
 
 @router.post("/totp/verify")
-async def totp_verify(code: str = Query(...)):
-    """Verifica código TOTP — stub."""
-    raise HTTPException(501, "2FA ainda não habilitado — stub. Em breve com TOTP.")
+async def totp_verify(request: Request, code: str = Query(...), db: DatabaseBackend = Depends(get_db_backend)):
+    """Ativa TOTP se código válido."""
+    from aios.api.deps import get_current_user
+    user = await get_current_user(request, db)
+    if not user.totp_secret:
+        raise HTTPException(400, "Gere o setup primeiro")
+    import pyotp
+    totp = pyotp.TOTP(user.totp_secret)
+    if not totp.verify(code, valid_window=1):
+        raise HTTPException(401, "Código TOTP inválido")
+    user.totp_enabled = True
+    await db.commit()
+    return {"enabled": True, "message": "2FA ativado"}
+
+@router.post("/totp/disable")
+async def totp_disable(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
+    from aios.api.deps import get_current_user
+    user = await get_current_user(request, db)
+    user.totp_secret = None
+    user.totp_enabled = False
+    await db.commit()
+    return {"enabled": False}
 
 async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_user_id: str, email: str, name: str) -> TokenResponse:
     """Find existing OAuth account or create user + OAuth account."""

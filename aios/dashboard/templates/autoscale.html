@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>Autoscale</h1><p class="text-sm text-secondary">Latência e erro por hora — recomenda up/down/stable</p></div>
+    <a href="/dashboard" class="btn btn-ghost btn-sm">← Dashboard</a>
+</div>
+<div class="card mb-4">
+    <h3 style="margin-bottom:0.5rem">Status atual</h3>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap">
+        <span class="badge" style="background: {% if autoscale.scale=='up' %}var(--red){% elif autoscale.scale=='down' %}var(--green){% else %}var(--surface){% endif %}; color: {% if autoscale.scale in ['up','down'] %}#fff{% else %}var(--text){% endif %}">{{ autoscale.scale }}</span>
+        <span class="text-sm">latência média: {{ "%.0f"|format(autoscale.avg_latency) if autoscale.avg_latency else '—' }} ms</span>
+        <span class="text-sm">erro: {{ "%.1f%%"|format(autoscale.error_rate*100) if autoscale.error_rate is defined else '—' }}</span>
+        <span class="text-sm text-tertiary">{{ autoscale.reason or '' }}</span>
+    </div>
+    {% if autoscale.scale=='up' %}<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--red)">▲ Recomendado escalar: adicione worker ou aumente max_jobs (atual 20 em aios/tasks/worker.py:146)</div>{% endif %}
+</div>
+<div class="card">
+    <h3 style="margin-bottom:0.5rem">Histórico 5h</h3>
+    {% if history %}
+    <table class="table" style="width:100%;font-size:0.8125rem">
+        <tr style="color:var(--text-tertiary)"><th>Hora</th><th>Msgs</th><th>Avg ms</th><th>Erros</th></tr>
+        {% for r in history %}
+        <tr><td>{{ r.hour }}</td><td>{{ r.messages }}</td><td>{{ r.avg_ms }}</td><td style="color: {% if r.errors %}var(--red){% else %}var(--text){% endif %}">{{ r.errors }}</td></tr>
+        {% endfor %}
+    </table>
+    {% else %}<p class="text-sm text-secondary">Sem métricas ainda — envie mensagens para gerar `agent_metrics`.</p>{% endif %}
+</div>
+{% endblock %}

@@ -27,6 +27,8 @@ dependencies = [
     "aioboto3>=14.0.0",
     "cryptography>=42.0.0",
     "croniter>=2.0.0",
+    "pyotp>=2.9.0",
+    "qrcode[pil]>=8.0",
 ]
 
 [project.scripts]

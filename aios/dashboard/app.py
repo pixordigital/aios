@@ -219,7 +219,7 @@ async def login_page(request: Request, error: str = ""):
 
 
 @router.post("/login", response_class=HTMLResponse)
-async def login_action(request: Request, email: str = Form(...), password: str = Form(...)):
+async def login_action(request: Request, email: str = Form(...), password: str = Form(...), totp_code: str = Form(default="")):
     from aios.api.auth import _verify_password, _rate_limit
     from sqlalchemy import select
     client_ip = request.client.host if request.client else "unknown"
@@ -235,6 +235,12 @@ async def login_action(request: Request, email: str = Form(...), password: str =
         if not user.email_verified and user.role != "superadmin" and not settings.registration_enabled:
             # em beta fechado, exigir verificação antes de entrar
             return await login_page(request, error="Verifique seu e-mail antes de entrar. Reenviamos o link.")
+        if getattr(user, "totp_enabled", False) and user.totp_secret:
+            if not totp_code:
+                return await login_page(request, error="Código 2FA obrigatório — preencha o campo TOTP")
+            import pyotp
+            if not pyotp.TOTP(user.totp_secret).verify(totp_code, valid_window=1):
+                return await login_page(request, error="Código 2FA inválido")
 
         token = create_jwt_token(user.id, user.org_id)
         resp = RedirectResponse("/dashboard", status_code=303)
@@ -388,6 +394,20 @@ async def dashboard_home(request: Request):
 async def analytics_page(request: Request):
     """Analytics & Telemetry dashboard."""
     return await _render("analytics.html", request, title="Análises")
+
+
+@router.get("/autoscale", response_class=HTMLResponse)
+async def autoscale_page(request: Request):
+    """Autoscale status por org — expõe check_autoscale."""
+    org_id = await _org_filter(request)
+    from aios.core.autoscaling import check_autoscale
+    result = await check_autoscale(org_id)
+    async with db_session() as db:
+        from sqlalchemy import select, func
+        from aios.db.models import AgentMetric
+        rows = (await db.execute(select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(AgentMetric.hour.desc()).limit(5))).scalars().all()
+        history = [{"hour": r.hour, "messages": r.messages, "avg_ms": r.avg_response_ms, "errors": r.errors} for r in rows]
+    return await _render("autoscale.html", request, title="Autoscale", autoscale=result, history=history)
 
 
 # ─── Agent CRUD ───
@@ -801,7 +821,7 @@ async def conversation_handover_status(request: Request, conv_id: str):
     async with db_session() as db:
         conv = await db.get(Conversation, conv_id)
         if not conv or conv.org_id != org_id:
-            return JSONResponse({"handover": {"status": "bot"}, "pending": []}, status_code=404)
+            return JSONResponse({"handover": {"status": "bot"}, "pending": [], "sla_minutes": 5}, status_code=404)
         h = (conv.extra_data or {}).get("handover", {"status": "bot"})
         pending = []
         try:
@@ -811,7 +831,16 @@ async def conversation_handover_status(request: Request, conv_id: str):
             pending = [{"id": p.id, "tool_name": p.tool_name, "tool_args": p.tool_args, "context_summary": p.context_summary} for p in pending_q]
         except Exception:
             pass
-        return JSONResponse({"handover": h, "pending": pending})
+        # SLA dinâmico por plano
+        sla_minutes = 5
+        try:
+            from aios.config import PLANS
+            org = await db.get(Organization, org_id)
+            plan = (org.extra_data or {}).get("plan", "free") if org else "free"
+            sla_minutes = PLANS.get(plan, PLANS["free"]).get("sla_minutes", 5)
+        except Exception:
+            pass
+        return JSONResponse({"handover": h, "pending": pending, "sla_minutes": sla_minutes})
 
 
 @router.get("/conversations/{conv_id}/delete")
@@ -871,7 +900,7 @@ async def channel_edit_form(request: Request, cid: str):
 
 
 CHANNEL_CONFIG_FIELDS = {
-    "whatsapp": ["config_whatsapp_token", "config_whatsapp_phone"],
+    "whatsapp": ["config_whatsapp_token", "config_whatsapp_phone", "config_whatsapp_waba"],
     "evolution": ["config_evo_server", "config_evo_key", "config_evo_instance"],
     "slack": ["config_slack_token", "config_slack_secret"],
     "telegram": ["config_telegram_token"],
@@ -887,6 +916,7 @@ async def channel_save(
     channel_id: str = Form(""), label: str = Form(...), channel_type: str = Form(...),
     agent_id: str = Form(""), team_id: str = Form(""),
     config_whatsapp_token: str = Form(""), config_whatsapp_phone: str = Form(""),
+    config_whatsapp_waba: str = Form(""),
     config_whatsapp_provider: str = Form("meta"),
     config_whatsapp_template: str = Form(""), config_whatsapp_lang: str = Form("pt_BR"),
     config_zernio_key: str = Form(""), config_zernio_account: str = Form(""),
@@ -914,7 +944,7 @@ async def channel_save(
                 "template_language": config_zernio_lang,
             }
         else:
-            config = {"access_token": config_whatsapp_token, "phone_id": config_whatsapp_phone}
+            config = {"access_token": config_whatsapp_token, "phone_id": config_whatsapp_phone, "waba_id": config_whatsapp_waba}
             if config_whatsapp_template:
                 config["template_name"] = config_whatsapp_template
                 config["template_language"] = config_whatsapp_lang or "pt_BR"

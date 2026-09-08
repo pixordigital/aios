@@ -103,6 +103,7 @@ if settings.stripe_price_pro:
 
 # ─── Plan limits ───
 # max_cost_brl: teto estimado em BRL (USD×5.5) para guardrail — P0-15. Ilimitado = sem teto.
+# sla_minutes: tempo máximo humano assumir sem estouro
 PLANS = {
     "free": {
         "name": "Gratuito",
@@ -111,6 +112,7 @@ PLANS = {
         "max_messages_per_day": 100,
         "max_tokens_per_month": 500_000,
         "max_cost_brl": 10,
+        "sla_minutes": 15,
         "channels": ["web"],
     },
     "starter": {
@@ -120,6 +122,7 @@ PLANS = {
         "max_messages_per_day": 500,
         "max_tokens_per_month": 5_000_000,
         "max_cost_brl": 100,
+        "sla_minutes": 10,
         "channels": ["web", "whatsapp"],
     },
     "pro": {
@@ -129,6 +132,7 @@ PLANS = {
         "max_messages_per_day": 5000,
         "max_tokens_per_month": 50_000_000,
         "max_cost_brl": 800,
+        "sla_minutes": 5,
         "channels": ["web", "whatsapp", "email", "slack", "telegram", "discord", "voice"],
     },
     "enterprise": {
@@ -138,6 +142,7 @@ PLANS = {
         "max_messages_per_day": 50000,
         "max_tokens_per_month": 500_000_000,
         "max_cost_brl": 8000,
+        "sla_minutes": 2,
         "channels": "__all__",
     },
     "unlimited": {
@@ -147,6 +152,7 @@ PLANS = {
         "max_messages_per_day": 999999,
         "max_tokens_per_month": 999999999,
         "max_cost_brl": 999999,
+        "sla_minutes": 1,
         "channels": "__all__",
     },
 }

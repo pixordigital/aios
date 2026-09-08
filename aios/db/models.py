@@ -83,6 +83,8 @@ class User(Base, TimestampMixin):
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"))
     role: Mapped[str] = mapped_column(String(50), default="admin")
     email_verified: Mapped[bool] = mapped_column(default=False)
+    totp_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(default=False)
 
     organization = relationship("Organization", back_populates="users")
 

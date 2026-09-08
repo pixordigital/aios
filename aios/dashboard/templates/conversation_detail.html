@@ -76,13 +76,14 @@ async function loadHandover(){
      const banner=document.getElementById('handover-banner');
     const take=document.getElementById('btn-take'), rel=document.getElementById('btn-release'), humanBox=document.getElementById('human-reply-box');
     const sla=document.getElementById('sla-badge');
+    let slaMin=j.sla_minutes||5; let slaSec=slaMin*60;
     let at=j.handover?.at ? new Date(j.handover.at) : null;
     let elapsed = at ? Math.floor((Date.now()-at.getTime())/1000) : 0;
     if(s==='human'){
       banner.style.display=''; banner.style.background='var(--amber-subtle)'; banner.style.border='1px solid var(--amber)';
       let mins=Math.floor(elapsed/60), secs=elapsed%60;
-      banner.textContent=`👤 Humano assumiu há ${mins}m ${secs}s — bot pausado. SLA 5m ${elapsed>300?'⚠️ ESTOUROU':'em dia'}.`;
-      if(elapsed>300){ sla.style.display=''; sla.textContent='SLA estourado'; sla.style.background='var(--red)'; sla.style.color='#fff'; } else { sla.style.display=''; sla.textContent=`SLA ${5 - mins}m restantes`; sla.style.background='var(--amber-subtle)'; sla.style.color='var(--amber)'; }
+      banner.textContent=`👤 Humano assumiu há ${mins}m ${secs}s — bot pausado. SLA ${slaMin}m ${elapsed>slaSec?'⚠️ ESTOUROU':'em dia'}.`;
+      if(elapsed>slaSec){ sla.style.display=''; sla.textContent='SLA estourado'; sla.style.background='var(--red)'; sla.style.color='#fff'; } else { sla.style.display=''; sla.textContent=`SLA ${slaMin - mins}m restantes`; sla.style.background='var(--amber-subtle)'; sla.style.color='var(--amber)'; }
       take.style.display='none'; rel.style.display=''; humanBox.style.display='';
       if(Notification && Notification.permission==='granted' && !window._handoverNotified){ new Notification('Handover', {body: `Conversa ${convId.slice(0,8)} assumida por humano`}); window._handoverNotified=true; }
     } else {

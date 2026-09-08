@@ -64,6 +64,11 @@
             <label>Senha</label>
             <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••">
 
+            <details style="margin-bottom:1rem"><summary style="font-size:0.75rem;color:var(--text-secondary);cursor:pointer">Tem 2FA? (opcional)</summary>
+                <label style="margin-top:0.5rem">Código TOTP</label>
+                <input type="text" name="totp_code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456" style="margin-bottom:0">
+            </details>
+
             <button type="submit" class="btn">Entrar</button>
         </form>
 

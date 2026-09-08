@@ -41,6 +41,8 @@
                     <div style="padding:0.375rem 0.5rem;background:var(--green-subtle);border:1px solid var(--green);border-radius:4px;font-size:0.6875rem;color:var(--green);margin-bottom:0.375rem">✅ Recomendado — WhatsApp Cloud API estável, sem risco Baileys. Templates gerenciados pela Meta.</div>
                     <div><label>Token de acesso</label><input type="text" name="config_whatsapp_token" value="{{ channel.config.get('access_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="EAA..."></div>
                     <div><label>ID do número de telefone</label><input type="text" name="config_whatsapp_phone" value="{{ channel.config.get('phone_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
+                    <div><label>WABA ID (para listar templates)</label><input type="text" name="config_whatsapp_waba" value="{{ channel.config.get('waba_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="1020... (opcional)"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Encontre em business.facebook.com → WhatsApp Manager → ID da conta</div></div>
+                    <div><button type="button" class="btn btn-ghost btn-sm" onclick="fetchTemplates()" style="margin-top:0.375rem">📋 Buscar templates aprovados</button><span id="tpl-status" style="font-size:0.6875rem;color:var(--text-tertiary);margin-left:0.5rem"></span><div id="tpl-list" style="margin-top:0.375rem"></div></div>
                     <details style="margin-top:0.5rem"><summary style="font-size:0.75rem;color:var(--text-tertiary);cursor:pointer">Templates / janela 24h (opcional)</summary>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem">
                             <div><label>Template padrão (fallback 24h)</label><input type="text" name="config_whatsapp_template" value="{{ channel.config.get('template_name', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="hello_world"></div>
@@ -190,6 +192,20 @@ async function testConnection() {
 </form>
 
 <script>
+    async function fetchTemplates(){
+        var waba=document.querySelector('input[name=\"config_whatsapp_waba\"]')?.value.trim();
+        var token=document.querySelector('input[name=\"config_whatsapp_token\"]')?.value.trim();
+        var st=document.getElementById('tpl-status'), list=document.getElementById('tpl-list');
+        if(!waba||!token){ st.textContent=' Informe WABA ID e token'; return; }
+        st.textContent=' ⏳ buscando...'; list.innerHTML='';
+        try{
+            var r=await fetch(`/api/whatsapp/templates?waba_id=${encodeURIComponent(waba)}&access_token=${encodeURIComponent(token)}`);
+            var j=await r.json();
+            if(!r.ok){ st.textContent=' ❌ '+ (j.detail||r.statusText); return;}
+            st.textContent=` ✅ ${j.templates.length} aprovados`;
+            list.innerHTML=j.templates.map(t=>`<div style=\"font-size:0.75rem;padding:0.25rem 0.375rem;border:1px solid var(--border);border-radius:4px;margin-bottom:0.25rem;background:var(--bg)\"><b>${t.name}</b> <span style=\"color:var(--text-tertiary)\">${t.language} · ${t.category}</span> <a href=\"#\" onclick=\"document.querySelector('input[name=config_whatsapp_template]').value='${t.name}';document.querySelector('input[name=config_whatsapp_lang]').value='${t.language}';return false;\" style=\"float:right;font-size:0.6875rem\">usar</a></div>`).join('') || '<div style=\"font-size:0.75rem;color:var(--text-tertiary)\">Nenhum aprovado</div>';
+        }catch(e){ st.textContent=' ❌ '+e.message; }
+    }
     function showWaProvider(v){
         var meta=document.getElementById('wa-meta'), zn=document.getElementById('wa-zernio');
         if(!meta||!zn)return;
