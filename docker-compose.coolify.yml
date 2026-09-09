@@ -44,7 +44,7 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    command: ["litellm", "--config", "/app/litellm.yaml", "--port", "4000", "--num_workers", "2"]
+    command: ["--config", "/app/litellm.yaml", "--port", "4000", "--num_workers", "2"]
     volumes:
       - ./deploy/litellm.yaml:/app/litellm.yaml:ro
     environment:
