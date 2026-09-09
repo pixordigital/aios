@@ -2361,6 +2361,28 @@ async def crm_approve(request: Request, pid: str):
     approval_manager.approve(pid, decided_by=u.id if u else "dashboard")
     return RedirectResponse("/dashboard/crm", status_code=303)
 
+@router.post("/crm/approve_edit/{pid}")
+async def crm_approve_edit(request: Request, pid: str):
+    from aios.core.approval import approval_manager
+    from aios.api.deps import get_dashboard_user
+    from aios.db.backend import db_session
+    from aios.db.models import PendingAction
+    u = await get_dashboard_user(request)
+    form = await request.form()
+    async with db_session() as db:
+        pa = await db.get(PendingAction, pid)
+        if pa and pa.status == "pending":
+            # update tool_args with edited values
+            new_args = dict(pa.tool_args or {})
+            if form.get("stage"):
+                new_args["stage"] = form.get("stage")
+            if form.get("notes") is not None:
+                new_args["notes"] = form.get("notes")
+            pa.tool_args = new_args
+            await db.commit()
+    approval_manager.approve(pid, decided_by=u.id if u else "dashboard")
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
 @router.get("/crm/reject/{pid}")
 async def crm_reject(request: Request, pid: str):
     from aios.core.approval import approval_manager

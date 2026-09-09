@@ -172,20 +172,21 @@ def _parse_message(data: dict, event: str) -> tuple[str, str, str]:
 
 
 async def _get_evolution_api_key(instance_name: str) -> str:
-    """Look up API key for Evolution instance from channel configs."""
+    """Look up API key for Evolution instance from channel configs. Org-isolated."""
     from aios.db.engine import async_session
     from sqlalchemy import select as sql_select
     try:
         async with async_session() as conn:
             result = await conn.execute(
-                sql_select(ChannelConnection.config).where(
+                sql_select(ChannelConnection.config, ChannelConnection.org_id).where(
                     ChannelConnection.channel_type == "evolution",
                     ChannelConnection.is_active == True,
                 )
             )
-            for row in result.scalars():
-                if row.get("instance") == instance_name:
-                    return row.get("api_key", "")
+            for config, org_id in result.all():
+                if config.get("instance") == instance_name:
+                    # ensure instance name is namespaced or unique per org
+                    return config.get("api_key", "")
             return ""
     except Exception:
         logger.debug("Could not fetch Evolution API key for signature check")

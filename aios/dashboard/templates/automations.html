@@ -156,7 +156,7 @@
               <div><label style="font-size:0.6875rem;color:var(--text-tertiary)">Minuto</label><input type="number" id="cron-min" min="0" max="59" value="0" class="input" onchange="buildCron()"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-              <div><label style="font-size:0.6875rem;color:var(--text-tertiary)">Frequência</label><select id="cron-freq" class="input" onchange="buildCron()"><option value="daily">Diário</option><option value="hourly">De hora em hora</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option></select></div>
+              <div><label style="font-size:0.6875rem;color:var(--text-tertiary)">Frequência</label><select id="cron-freq" class="input" onchange="buildCron()"><option value="daily">Diário</option><option value="hourly">De hora em hora</option><option value="weekly">Semanal</option><option value="weekdays">Dias úteis (seg-sex)</option><option value="monthly">Mensal</option></select></div>
               <div id="cron-weekday-wrap" style="display:none"><label style="font-size:0.6875rem;color:var(--text-tertiary)">Dia semana</label><select id="cron-weekday" class="input" onchange="buildCron()"><option value="1">Segunda</option><option value="2">Terça</option><option value="3">Quarta</option><option value="4">Quinta</option><option value="5">Sexta</option><option value="6">Sábado</option><option value="0">Domingo</option></select></div>
             </div>
           </div>
@@ -189,6 +189,7 @@
         document.getElementById('cron-weekday-wrap').style.display=(freq==='weekly'?'block':'none');
         if(freq==='hourly') cron=m+' * * * *';
         else if(freq==='weekly') cron=m+' '+h+' * * '+wd;
+        else if(freq==='weekdays') cron=m+' '+h+' * * 1-5';
         else if(freq==='monthly') cron=m+' '+h+' 1 * *';
         else cron=m+' '+h+' * * *';
         document.getElementById('trigger-value').value=cron;
