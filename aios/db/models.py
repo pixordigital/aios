@@ -142,6 +142,7 @@ class Team(Base, TimestampMixin, OrgScopedMixin):
     routing_strategy: Mapped[str] = mapped_column(String(50), default="supervisor")
     orchestrator_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
     manager_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    handoff_config: Mapped[dict] = mapped_column(JSON, default=dict)  # {enabled: bool, manager_handles: list[str], auto_escalate: bool}
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     organization = relationship("Organization", back_populates="teams")

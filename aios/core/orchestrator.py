@@ -453,26 +453,96 @@ class TeamOrchestrator:
     async def _hierarchical_route_stream(
         self, conv_id: str, msg: str, db: DatabaseBackend | None = None
     ) -> AsyncGenerator[dict, None]:
-        if self.team.orchestrator_agent_id:
-            orch = next(
-                (a for a in self.agents if a.id == self.team.orchestrator_agent_id),
+        """
+        Three-tier hierarchical handoff:
+        1. Orchestrator receives task and creates plan
+        2. Orchestrator hands off to Manager
+        3. Manager hands off to appropriate agent
+        """
+        handoff_config = self.team.handoff_config or {}
+        
+        if not self.team.orchestrator_agent_id:
+            async for ev in self._supervisor_route_stream(conv_id, msg, db):
+                yield ev
+            return
+
+        orch = next(
+            (a for a in self.agents if a.id == self.team.orchestrator_agent_id),
+            None,
+        )
+        if not orch:
+            async for ev in self._supervisor_route_stream(conv_id, msg, db):
+                yield ev
+            return
+
+        # Step 1: Orchestrator creates plan
+        yield {
+            "type": STREAM_TOKEN,
+            "content": f"[Hierarchical: Orchestrator {orch.name} analyzing task]\n\n",
+        }
+        rt = AgentRuntime(orch, self._db)
+        plan = await rt.run(conv_id, f"Analyze this task and create a detailed execution plan. Identify which team member should handle each part. Task: {msg}", db)
+        
+        yield {"type": STREAM_TOKEN, "content": f"[Plan by {orch.name}]\n{plan[:500]}\n\n"}
+
+        # Step 2: Orchestrator hands off to Manager
+        if self.team.manager_agent_id:
+            manager = next(
+                (a for a in self.agents if a.id == self.team.manager_agent_id),
                 None,
             )
-            if orch:
+            if manager:
                 yield {
                     "type": STREAM_TOKEN,
-                    "content": f"[Hierarchical: orchestrator {orch.name} planning]\n\n",
+                    "content": f"[Handoff: Orchestrator {orch.name} → Manager {manager.name}]\n\n",
                 }
-                rt = AgentRuntime(orch, self._db)
-                plan = await rt.run(conv_id, f"Decompose: {msg}", db)
-                yield {"type": STREAM_TOKEN, "content": f"[Plan] {plan[:400]}\n\n"}
-                target = next(
-                    (a for a in self.agents if a.id != orch.id), self.agents[0]
-                )
-                async for ev in AgentRuntime(target, self._db).run_stream(
-                    conv_id, msg, db
-                ):
-                    yield ev
-                return
+                
+                # Manager reviews plan and decides who handles what
+                manager_prompt = f"""As Manager, review this plan and decide which team member should handle each part.
+                
+Plan from Orchestrator:
+{plan}
+
+Available team members:
+{chr(10).join(f"- {a.name} (type: {a.agent_type})" for a in self.agents if a.id != orch.id and a.id != self.team.manager_agent_id)}
+
+Respond with JSON:
+{{
+  "assignments": [
+    {{"agent_id": "...", "task": "specific task for this agent", "reason": "why this agent"}}
+  ],
+  "manager_notes": "any coordination notes"
+}}"""
+                
+                rt = AgentRuntime(manager, self._db)
+                manager_decision = await rt.run(conv_id, manager_prompt, db)
+                
+                yield {"type": STREAM_TOKEN, "content": f"[Manager {manager.name} coordinating]\n{manager_decision[:500]}\n\n"}
+                
+                try:
+                    import json
+                    decision = json.loads(manager_decision)
+                    assignments = decision.get("assignments", [])
+                    
+                    for assignment in assignments:
+                        agent_id = assignment.get("agent_id")
+                        task = assignment.get("task", "")
+                        reason = assignment.get("reason", "")
+                        
+                        agent = next((a for a in self.agents if a.id == agent_id), None)
+                        if agent and agent.id != self.team.orchestrator_agent_id and agent.id != self.team.manager_agent_id:
+                            yield {
+                                "type": STREAM_TOKEN,
+                                "content": f"[Handoff: Manager {manager.name} → {agent.name}] {reason}\n\n",
+                            }
+                            
+                            rt = AgentRuntime(agent, self._db)
+                            async for ev in agent.run_stream(conv_id, task, db):
+                                yield ev
+                    
+                    yield {"type": STREAM_TOKEN, "content": f"[Manager {manager.name}: All tasks delegated]\n\n"}
+                    return
+        
+        # Fallback: if no manager or manager handoff fails, use supervisor
         async for ev in self._supervisor_route_stream(conv_id, msg, db):
             yield ev

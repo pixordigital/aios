@@ -801,7 +801,13 @@ async def team_quick_create(request: Request, template: str = Form(...)):
             member_ids.append(orch_id)
         if mgr_id and mgr_id not in member_ids:
             member_ids.append(mgr_id)
-        team = Team(org_id=org_id, name=cfg["name"], routing_strategy=cfg["strategy"], orchestrator_agent_id=orch_id, manager_agent_id=mgr_id)
+        handoff_config = {
+            "enabled": True,
+            "manager_handles": ["coordination", "escalation", "quality_review"],
+            "auto_escalate": True,
+            "handoff_chain": "orchestrator->manager->agent"
+        }
+        team = Team(org_id=org_id, name=cfg["name"], routing_strategy="hierarchical", orchestrator_agent_id=orch_id, manager_agent_id=mgr_id, handoff_config=handoff_config)
         db.add(team); await db.flush()
         for pri, aid in enumerate(member_ids):
             await db.execute(team_agents.insert().values(team_id=team.id, agent_id=aid, priority=pri))
