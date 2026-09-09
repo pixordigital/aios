@@ -193,7 +193,11 @@
         else if(freq==='monthly') cron=m+' '+h+' 1 * *';
         else cron=m+' '+h+' * * *';
         document.getElementById('trigger-value').value=cron;
-        document.getElementById('cron-preview').textContent=cron;
+        // preview padded for readability
+        var ph=String(h).padStart(2,'0'), pm=String(m).padStart(2,'0');
+        var preview=cron.replace(m+' '+h, pm+' '+ph);
+        if(freq==='hourly') preview=pm+' * * * *';
+        document.getElementById('cron-preview').textContent=cron+' ('+ph+':'+pm+')';
       }
     </script>
   </div>
