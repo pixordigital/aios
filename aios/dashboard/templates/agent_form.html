@@ -58,7 +58,14 @@
                                onblur="setTimeout(function(){document.getElementById('model-dropdown').classList.remove('open')}, 200)"
                                class="input input-mono" placeholder="Buscar modelos…">
                         <div id="model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;margin-top:2px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
-                            {% set groups = {
+                             {% set groups = {
+                                "OpenRouter — Últimos": [
+                                    "openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "openai/gpt-5.6-luna",
+                                    "openai/gpt-5.4", "openai/gpt-5.3", "openai/gpt-5.1", "openai/gpt-5",
+                                    "anthropic/claude-fable-5-1", "anthropic/claude-mythos-5-1",
+                                    "anthropic/claude-opus-4.5", "anthropic/claude-sonnet-4.5",
+                                    "google/gemini-3.8-flash", "google/gemini-3.8-flash-cyber", "google/gemini-3-pro",
+                                ],
                                 "OpenRouter": [
                                     "openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano",
                                     "openai/o3", "openai/o3-mini", "openai/o4-mini", "openai/o4",
@@ -98,9 +105,10 @@
                                 "API direta": [
                                     "openai-direct/gpt-4o", "openai-direct/gpt-4o-mini",
                                     "anthropic-direct/claude-sonnet-4-20250514", "anthropic-direct/claude-3.5-haiku",
+                                    "anthropic-direct/claude-fable-5-1",
                                 ],
                                 "Ollama (local)": [
-                                    "ollama/llama3", "ollama/mistral", "ollama/qwen2.5",
+                                    "ollama/llama3", "ollama/mistral", "ollama/qwen2.5", "ollama/gpt-5.6-sol",
                                 ],
                             } %}
                             {% for group, models_list in groups.items() %}
