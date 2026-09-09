@@ -753,6 +753,61 @@ async def team_save(
     return RedirectResponse("/dashboard/teams", status_code=303)
 
 
+@router.post("/teams/quick-create")
+async def team_quick_create(request: Request, template: str = Form(...)):
+    org_id = await _resolve_org_id(request)
+    from aios.db.models import Agent
+    async with db_session() as db:
+        # find agents by type
+        agents = (await db.execute(select(Agent).where(Agent.org_id==org_id))).scalars().all()
+        by_type = {}
+        for a in agents:
+            by_type.setdefault(a.agent_type, []).append(a)
+        # also check Follow-up by name
+        followup = next((a for a in agents if a.name=="Follow-up"), None)
+
+        templates = {
+            "followup": {"name": "Squad Follow-up", "strategy": "supervisor", "types": ["sdr", "support", "closer"], "orchestrator_type": "support", "manager_type": "manager"},
+            "comercial": {"name": "Time Comercial", "strategy": "supervisor", "types": ["sdr", "closer", "manager"], "orchestrator_type": "closer", "manager_type": "manager"},
+            "suporte": {"name": "Time Suporte", "strategy": "round_robin", "types": ["support", "manager"], "orchestrator_type": "support", "manager_type": "manager"},
+            "dados": {"name": "Time Dados", "strategy": "supervisor", "types": ["data_analyst", "data_scientist", "manager"], "orchestrator_type": "data_scientist", "manager_type": "manager"},
+        }
+        cfg = templates.get(template, templates["followup"])
+        # pick agents
+        member_ids = []
+        for t in cfg["types"]:
+            if t == "support" and followup and template=="followup":
+                member_ids.append(followup.id)
+            elif by_type.get(t):
+                member_ids.append(by_type[t][0].id)
+        # dedupe
+        member_ids = list(dict.fromkeys(member_ids))
+        if not member_ids:
+            return RedirectResponse("/dashboard/teams/new?error=no-agents", status_code=303)
+        # find orchestrator/manager
+        orch_id = None
+        mgr_id = None
+        # orchestrator: prefer Follow-up for followup, else type
+        if template=="followup" and followup:
+            orch_id = followup.id
+        elif by_type.get(cfg["orchestrator_type"]):
+            orch_id = by_type[cfg["orchestrator_type"]][0].id
+        elif member_ids:
+            orch_id = member_ids[0]
+        if by_type.get(cfg["manager_type"]):
+            mgr_id = by_type[cfg["manager_type"]][0].id
+        # ensure orch/mgr in members
+        if orch_id and orch_id not in member_ids:
+            member_ids.append(orch_id)
+        if mgr_id and mgr_id not in member_ids:
+            member_ids.append(mgr_id)
+        team = Team(org_id=org_id, name=cfg["name"], routing_strategy=cfg["strategy"], orchestrator_agent_id=orch_id, manager_agent_id=mgr_id)
+        db.add(team); await db.flush()
+        for pri, aid in enumerate(member_ids):
+            await db.execute(team_agents.insert().values(team_id=team.id, agent_id=aid, priority=pri))
+        await db.commit()
+    return RedirectResponse("/dashboard/teams", status_code=303)
+
 @router.get("/teams/{tid}/delete")
 async def team_delete(request: Request, tid: str):
     org_id = await _org_filter(request)

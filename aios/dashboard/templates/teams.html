@@ -1,8 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex-between mb-4">
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
     <div><h1>Equipes</h1><p class="text-sm text-secondary mt-1">{{ teams|length }} equipe{{ 's' if teams|length != 1 }}</p></div>
-    <a href="/dashboard/teams/new" class="btn btn-primary">Nova equipe</a>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="followup"><button class="btn btn-ghost btn-sm" title="SDR → Follow-up → Closer (Follow-up orquestrador + Manager)">⚡ Follow-up</button></form>
+        <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="comercial"><button class="btn btn-ghost btn-sm" title="SDR → Closer → Manager (Manager + Closer orquestrador)">💼 Comercial</button></form>
+        <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="suporte"><button class="btn btn-ghost btn-sm" title="Support → Manager (Manager orquestrador)">🎧 Suporte</button></form>
+        <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="dados"><button class="btn btn-ghost btn-sm" title="Analyst → Scientist → Manager (Manager orquestrador)">📊 Dados</button></form>
+        <a href="/dashboard/teams/new" class="btn btn-primary">Nova equipe</a>
+    </div>
 </div>
 
 <div class="flex-col gap-3">
