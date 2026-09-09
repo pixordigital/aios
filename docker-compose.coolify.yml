@@ -275,22 +275,16 @@ services:
   #   command: ["sh", "-c", "ollama serve & sleep 5; ollama pull ${OLLAMA_MODEL:-qwen3:8b}; wait"]
   #   volumes:
   #     - ollama-data:/root/.ollama
-  #   restart: unless-stopped
   #
-  # voice-tts-kokoro:
+  restart: unless-stopped
+  voice-tts-kokoro:
   image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
   environment:
     USE_GPU: "false"
   volumes:
     - voice-kokoro-data:/app/api/src/models
-  restart: unless-stopped
-  #   image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-  #   environment:
-  #     USE_GPU: "false"
-  #   volumes:
-  #     - voice-kokoro-data:/app/api/src/models
-  #   restart: unless-stopped
   #
+  restart: unless-stopped
   # voice-tts-stream:
   #   build:
   #     context: ./deploy/voice-stream
@@ -302,7 +296,6 @@ services:
   #   volumes:
   #     - voice-stream-data:/data
   #     - ./deploy/voice-stream/speakers:/speakers:ro
-  #   restart: unless-stopped
 
 volumes:
   postgres-data:
