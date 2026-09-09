@@ -149,6 +149,7 @@ services:
   # neste host (disco 84%+). Reative com VPS 100GB+. Enquanto isso:
   # TTS = ElevenLabs/Vapi/Retell por canal; STT = OpenAI whisper API.
   livekit:
+    profiles: ["voice"]
     image: livekit/livekit-server:latest
     command: ["--bind", "0.0.0.0", "--keys", "${AIOS_LIVEKIT_API_KEY:-devkey}: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}"]
     ports:
@@ -167,6 +168,7 @@ services:
         limits: { cpus: "0.5", memory: 512M }
 
   voice-agent:
+    profiles: ["voice"]
     build: ./deploy/voice-stream
     environment:
       LIVEKIT_URL: ws://livekit:7880
