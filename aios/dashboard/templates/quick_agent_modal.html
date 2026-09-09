@@ -47,6 +47,10 @@
                                     "anthropic/claude-fable-5-1", "anthropic/claude-mythos-5-1",
                                     "google/gemini-3.8-flash", "google/gemini-3.8-flash-cyber",
                                 ],
+                                "Meta — Muse Spark": [
+                                    "muse/muse-spark-1.2", "muse/muse-spark-1.2-contributor-free",
+                                    "opencode/muse-spark-1.2", "opencode/muse-spark-1.2-contributor-free",
+                                ],
                                 "OpenAI": [
                                     "openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano",
                                     "openai/o3", "openai/o3-mini", "openai/o4-mini", "openai/o4",
@@ -164,6 +168,7 @@
         if(v.startsWith('openai')||v.startsWith('gpt-'))el.textContent='OpenAI';
         else if(v.startsWith('anthropic')||v.startsWith('claude'))el.textContent='Anthropic';
         else if(v.startsWith('google')||v.startsWith('gemini')||v.startsWith('gemma'))el.textContent='Google';
+        else if(v.startsWith('muse')||v.startsWith('opencode/muse'))el.textContent='Meta';
         else if(v.startsWith('meta-llama')||v.startsWith('llama'))el.textContent='Meta';
         else if(v.startsWith('mistral')||v.startsWith('codestral')||v.startsWith('mistralai'))el.textContent='Mistral';
         else if(v.startsWith('deepseek'))el.textContent='DeepSeek';
