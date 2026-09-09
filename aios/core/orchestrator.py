@@ -584,6 +584,8 @@ Respond with JSON:
                     
                     yield {"type": STREAM_TOKEN, "content": f"[Manager {manager.name}: All tasks delegated]\n\n"}
                     return
+                except Exception:
+                    pass
         
         # Fallback: if no manager or manager handoff fails, use supervisor
         async for ev in self._supervisor_route_stream(conv_id, msg, db):
