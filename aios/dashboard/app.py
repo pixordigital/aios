@@ -1979,6 +1979,57 @@ async def automations_delete_node(request: Request, wf_id: str, nid: str):
             await db.commit()
     return RedirectResponse(f"/dashboard/automations/{wf_id}", status_code=303)
 
+@router.get("/automations/{wf_id}/delete")
+async def automations_delete(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import Workflow, WorkflowNode, AutomationTrigger, WorkflowRun
+    from sqlalchemy import select
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        if wf and wf.org_id == org_id:
+            # delete related triggers, nodes, runs
+            trigs = (await db.execute(select(AutomationTrigger).where(AutomationTrigger.workflow_id==wf_id))).scalars().all()
+            for t in trigs:
+                await db.delete(t)
+            nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()
+            for n in nodes:
+                await db.delete(n)
+            runs = (await db.execute(select(WorkflowRun).where(WorkflowRun.workflow_id==wf_id))).scalars().all()
+            for r in runs:
+                await db.delete(r)
+            await db.delete(wf)
+            await db.commit()
+    return RedirectResponse("/dashboard/automations", status_code=303)
+
+@router.post("/automations/{wf_id}/duplicate")
+async def automations_duplicate(request: Request, wf_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import Workflow, WorkflowNode, AutomationTrigger
+    from sqlalchemy import select
+    import uuid
+    async with db_session() as db:
+        wf = await db.get(Workflow, wf_id)
+        if not wf or wf.org_id != org_id:
+            return RedirectResponse("/dashboard/automations", status_code=303)
+        new_wf = Workflow(org_id=org_id, name=f"{wf.name} (cópia)", description=wf.description, timeout_seconds=wf.timeout_seconds, status="active")
+        db.add(new_wf)
+        await db.flush()
+        # copy nodes
+        nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()
+        id_map = {}
+        for n in nodes:
+            new_id = str(uuid.uuid4())
+            id_map[n.id] = new_id
+            new_node = WorkflowNode(id=new_id, workflow_id=new_wf.id, label=n.label, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=n.tool_args, depends_on=[id_map.get(d, d) for d in (n.depends_on or [])], condition=n.condition, output_key=n.output_key, timeout_seconds=n.timeout_seconds, position=n.position, on_failure=n.on_failure, retry_count=n.retry_count)
+            db.add(new_node)
+        # copy triggers
+        trigs = (await db.execute(select(AutomationTrigger).where(AutomationTrigger.workflow_id==wf_id))).scalars().all()
+        for t in trigs:
+            new_trig = AutomationTrigger(workflow_id=new_wf.id, org_id=org_id, type=t.type, name=t.name, config=t.config, webhook_path=f"wh_{uuid.uuid4().hex[:16]}" if t.type=="webhook" else None, cron_expr=t.cron_expr, event_type=t.event_type, is_active=False)
+            db.add(new_trig)
+        await db.commit()
+    return RedirectResponse(f"/dashboard/automations/{new_wf.id}", status_code=303)
+
 @router.post("/automations/{wf_id}/run")
 async def automations_run(request: Request, wf_id: str):
     org_id = await _org_filter(request)
