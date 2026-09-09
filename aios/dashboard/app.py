@@ -53,6 +53,10 @@ TOOL_DESCRIPTIONS = {
     "read_file": "Ler arquivos enviados por ID do artefato",
     "current_datetime": "Obter data/hora UTC atual com fuso",
     "http_get": "Buscar URLs HTTPS",
+    "http_request": "Requisições HTTP (Evolution WhatsApp, APIs)",
+    "crm_create_deal": "Criar deal no CRM (100% IA)",
+    "crm_update_deal": "Atualizar stage do deal (HITL se >R$5k)",
+    "lead_score": "Score BANT + qualificação",
 }
 
 
