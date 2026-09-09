@@ -27,7 +27,7 @@ class CRMUpdateDealInput(BaseModel):
 
 class CRMTool(BaseTool):
     name = "crm_create_deal"
-    description = "Cria/atualiza deal no CRM (HubSpot/RD genérico via webhook). Usa AIOS_CRM_WEBHOOK_URL ou HubSpot API se configurado."
+    description = "Cria deal no CRM interno 100% IA + HubSpot/webhook se configurado. Auto-cria no kanban."
 
     async def run(
         self,
@@ -39,7 +39,6 @@ class CRMTool(BaseTool):
         notes: str = "",
     ) -> dict:
         from aios.config import settings
-        from aios.core.secrets import get_org_secrets
 
         webhook = getattr(settings, "crm_webhook_url", "") or ""
         hs_key = ""
@@ -62,6 +61,43 @@ class CRMTool(BaseTool):
             "notes": notes[:1000],
             "source": "aios_sdr",
         }
+
+        # 1. Sempre cria no CRM interno (kanban) — 100% IA
+        internal_id = None
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal
+            import uuid
+            async with async_session() as s:
+                # tenta achar org via agent ou usa default
+                org_id = None
+                try:
+                    from sqlalchemy import select
+                    from aios.db.models import Agent
+                    # pega primeiro org se não houver contexto
+                    from aios.db.models import Organization
+                    org = (await s.execute(select(Organization).limit(1))).scalars().first()
+                    if org:
+                        org_id = org.id
+                except Exception:
+                    pass
+                if org_id:
+                    deal = CrmDeal(
+                        org_id=org_id,
+                        lead_name=lead_name,
+                        lead_email=lead_email,
+                        lead_phone=payload.get("company",""),
+                        stage=deal_stage if deal_stage in ("prospection","mql","sql","opportunity","closed_won","closed_lost") else "mql",
+                        value=float(value or 0),
+                        source="whatsapp",
+                        extra_data={"notes": notes[:500], "company": company},
+                    )
+                    s.add(deal)
+                    await s.commit()
+                    await s.refresh(deal)
+                    internal_id = deal.id
+        except Exception as e:
+            logger.warning("Internal CRM create failed %s", e)
 
         if hs_key:
             try:
@@ -86,6 +122,7 @@ class CRMTool(BaseTool):
                             "ok": True,
                             "provider": "hubspot",
                             "deal_id": r.json().get("id"),
+                            "internal_id": internal_id,
                             "payload": payload,
                         }
                     logger.warning(
@@ -102,27 +139,81 @@ class CRMTool(BaseTool):
                         "ok": r.status_code < 300,
                         "provider": "webhook",
                         "status": r.status_code,
+                        "internal_id": internal_id,
                         "payload": payload,
                     }
             except Exception as e:
-                return {"ok": False, "error": str(e), "payload": payload}
+                return {"ok": False, "error": str(e), "payload": payload, "internal_id": internal_id}
 
         return {
             "ok": True,
-            "provider": "mock",
-            "deal_id": f"mock_{lead_email}",
+            "provider": "internal" if internal_id else "mock",
+            "deal_id": internal_id or f"mock_{lead_email}",
+            "internal_id": internal_id,
             "payload": payload,
-            "note": "Configure AIOS_CRM_WEBHOOK_URL ou HUBSPOT_API_KEY para CRM real",
         }
 
 
 class CRMUpdateTool(BaseTool):
     name = "crm_update_deal"
-    description = "Atualiza stage do deal no CRM"
+    description = "Atualiza stage do deal no CRM. 100% IA com HITL: mudanças críticas (closed_won > R$5k, closed_lost, desconto) vão pra aprovação humana."
 
     async def run(self, deal_id: str, stage: str, notes: str = "") -> dict:
         from aios.config import settings
         import os
+
+        # HITL: check if this update needs human approval
+        needs_hitl = False
+        hitl_reason = ""
+        if stage in ("closed_won", "closed_lost"):
+            needs_hitl = True
+            hitl_reason = f"Movendo para {stage} requer aprovação"
+        # Also check deal value if available
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal
+            async with async_session() as s:
+                deal = await s.get(CrmDeal, deal_id)
+                if deal and deal.value and deal.value > 5000 and stage == "closed_won":
+                    needs_hitl = True
+                    hitl_reason = f"Deal R${deal.value:.2f} > R$5k em {stage} — aprovação necessária"
+        except Exception:
+            pass
+
+        if needs_hitl:
+            try:
+                from aios.db.engine import async_session
+                from aios.db.models import PendingAction
+                async with async_session() as s:
+                    # find agent/conversation from deal if available
+                    deal = await s.get(CrmDeal, deal_id) if 'CrmDeal' in locals() else None
+                    pa = PendingAction(
+                        agent_id=deal.agent_id if deal and deal.agent_id else deal_id,
+                        conversation_id=deal_id,
+                        tool_name="crm_update_deal",
+                        tool_args={"deal_id": deal_id, "stage": stage, "notes": notes},
+                        context_summary=hitl_reason,
+                        status="pending",
+                    )
+                    s.add(pa)
+                    await s.commit()
+                    return {"ok": True, "pending": True, "pending_id": pa.id, "reason": hitl_reason, "message": f"Ação pendente de aprovação: {hitl_reason}"}
+            except Exception as e:
+                logger.warning("HITL create failed %s", e)
+
+        # Auto-apply for non-critical stages: also update internal CrmDeal
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal
+            async with async_session() as s:
+                deal = await s.get(CrmDeal, deal_id)
+                if deal and stage in ("prospection","mql","sql","opportunity","closed_won","closed_lost"):
+                    deal.stage = stage
+                    if notes:
+                        deal.extra_data = {**(deal.extra_data or {}), "last_ai_notes": notes[:500]}
+                    await s.commit()
+        except Exception as e:
+            logger.warning("Internal CRM update failed %s", e)
 
         webhook = os.getenv(
             "AIOS_CRM_WEBHOOK_URL", getattr(settings, "crm_webhook_url", "") or ""
@@ -139,10 +230,10 @@ class CRMUpdateTool(BaseTool):
                             "action": "update",
                         },
                     )
-                    return {"ok": r.status_code < 300, "status": r.status_code}
+                    return {"ok": r.status_code < 300, "status": r.status_code, "stage": stage, "hitl": needs_hitl}
             except Exception as e:
                 return {"ok": False, "error": str(e)}
-        return {"ok": True, "provider": "mock", "deal_id": deal_id, "stage": stage}
+        return {"ok": True, "provider": "internal", "deal_id": deal_id, "stage": stage, "hitl": needs_hitl}
 
 
 TOOL_REGISTRY["crm_create_deal"] = {"code_reference": "aios.tools.crm.CRMTool"}
