@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     convex_admin_key: str = ""
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    litellm_api_key: str = "sk-litellm"
+    litellm_base_url: str = "http://litellm:4000"
+    llm_provider: str = "openrouter"  # openrouter | litellm
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"

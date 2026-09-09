@@ -1,0 +1,99 @@
+model_list:
+  # OpenAI — flagships 2026
+  - model_name: openai/gpt-5.6-sol
+    litellm_params:
+      model: openai/gpt-5.6-sol
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: openai/gpt-5.6-terra
+    litellm_params:
+      model: openai/gpt-5.6-terra
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: openai/gpt-5.6-luna
+    litellm_params:
+      model: openai/gpt-5.6-luna
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: openai/gpt-5.4
+    litellm_params:
+      model: openai/gpt-5.4
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: openai/gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: openai/gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Anthropic — Fable 5.1 / Sonnet 4.5
+  - model_name: anthropic/claude-fable-5-1
+    litellm_params:
+      model: anthropic/claude-fable-5-1
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: anthropic/claude-mythos-5-1
+    litellm_params:
+      model: anthropic/claude-mythos-5-1
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: anthropic/claude-sonnet-4.5
+    litellm_params:
+      model: anthropic/claude-sonnet-4.5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: anthropic/claude-opus-4.5
+    litellm_params:
+      model: anthropic/claude-opus-4.5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Google — Gemini 3.8 Flash
+  - model_name: google/gemini-3.8-flash
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/GOOGLE_API_KEY
+  - model_name: google/gemini-3-pro
+    litellm_params:
+      model: gemini/gemini-3-pro
+      api_key: os.environ/GOOGLE_API_KEY
+  - model_name: google/gemini-3.8-flash-cyber
+    litellm_params:
+      model: gemini/gemini-3.8-flash-cyber
+      api_key: os.environ/GOOGLE_API_KEY
+
+  # Meta — Muse Spark (via Muse API compatível OpenAI)
+  - model_name: muse/muse-spark-1.2
+    litellm_params:
+      model: openai/muse-spark-1.2
+      api_base: https://api.muse.ai/v1
+      api_key: os.environ/MUSE_API_KEY
+  - model_name: muse/muse-spark-1.2-contributor-free
+    litellm_params:
+      model: openai/muse-spark-1.2-contributor-free
+      api_base: https://api.muse.ai/v1
+      api_key: os.environ/MUSE_API_KEY
+  - model_name: opencode/muse-spark-1.2
+    litellm_params:
+      model: openai/muse-spark-1.2
+      api_base: https://api.muse.ai/v1
+      api_key: os.environ/MUSE_API_KEY
+
+  # Open-source baratos (Together/Anyscale via LiteLLM)
+  - model_name: deepseek/deepseek-v4
+    litellm_params:
+      model: deepseek/deepseek-v4
+      api_key: os.environ/DEEPSEEK_API_KEY
+  - model_name: qwen/qwen-3-235b-a22b
+    litellm_params:
+      model: qwen/qwen-3-235b-a22b
+      api_key: os.environ/QWEN_API_KEY
+
+router_settings:
+  num_retries: 2
+  retry_strategy: exponential_backoff
+  fallbacks:
+    - openai/gpt-5.6-sol: [anthropic/claude-fable-5-1, google/gemini-3.8-flash]
+    - anthropic/claude-fable-5-1: [openai/gpt-5.6-sol]
+  context_window_fallbacks:
+    - openai/gpt-4o: [openai/gpt-4o-mini]
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  num_retries: 2
