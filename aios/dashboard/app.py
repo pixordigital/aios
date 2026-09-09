@@ -767,10 +767,10 @@ async def team_quick_create(request: Request, template: str = Form(...)):
         followup = next((a for a in agents if a.name=="Follow-up"), None)
 
         templates = {
-            "followup": {"name": "Squad Follow-up", "strategy": "supervisor", "types": ["sdr", "support", "closer"], "orchestrator_type": "support", "manager_type": "manager"},
-            "comercial": {"name": "Time Comercial", "strategy": "supervisor", "types": ["sdr", "closer", "manager"], "orchestrator_type": "closer", "manager_type": "manager"},
-            "suporte": {"name": "Time Suporte", "strategy": "round_robin", "types": ["support", "manager"], "orchestrator_type": "support", "manager_type": "manager"},
-            "dados": {"name": "Time Dados", "strategy": "supervisor", "types": ["data_analyst", "data_scientist", "manager"], "orchestrator_type": "data_scientist", "manager_type": "manager"},
+            "followup": {"name": "Squad Follow-up", "strategy": "hierarchical", "types": ["sdr", "support", "closer"], "orchestrator_type": "support", "manager_type": "manager"},
+            "comercial": {"name": "Time Comercial", "strategy": "hierarchical", "types": ["sdr", "closer", "manager"], "orchestrator_type": "closer", "manager_type": "manager"},
+            "suporte": {"name": "Time Suporte", "strategy": "hierarchical", "types": ["support", "manager"], "orchestrator_type": "support", "manager_type": "manager"},
+            "dados": {"name": "Time Dados", "strategy": "hierarchical", "types": ["data_analyst", "data_scientist", "manager"], "orchestrator_type": "data_scientist", "manager_type": "manager"},
         }
         cfg = templates.get(template, templates["followup"])
         # pick agents

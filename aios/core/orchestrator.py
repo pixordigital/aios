@@ -165,34 +165,76 @@ class TeamOrchestrator:
     async def _hierarchical_route(
         self, conv_id: str, msg: str, db: DatabaseBackend | None = None
     ) -> str:
-        if self.team.orchestrator_agent_id:
-            orch = next(
-                (a for a in self.agents if a.id == self.team.orchestrator_agent_id),
+        """
+        Three-tier hierarchical handoff (non-streaming):
+        1. Orchestrator receives task and creates plan
+        2. Orchestrator hands off to Manager
+        3. Manager hands off to appropriate agent(s)
+        """
+        if not self.team.orchestrator_agent_id:
+            return await self._supervisor_route(conv_id, msg, db)
+
+        orch = next(
+            (a for a in self.agents if a.id == self.team.orchestrator_agent_id),
+            None,
+        )
+        if not orch:
+            return await self._supervisor_route(conv_id, msg, db)
+
+        # Step 1: Orchestrator creates plan
+        rt = AgentRuntime(orch, self._db)
+        plan = await rt.run(conv_id, f"Analyze this task and create a detailed execution plan. Identify which team member should handle each part. Task: {msg}", db)
+
+        # Step 2: Orchestrator hands off to Manager
+        if self.team.manager_agent_id:
+            manager = next(
+                (a for a in self.agents if a.id == self.team.manager_agent_id),
                 None,
             )
-            if orch:
-                rt = AgentRuntime(orch, self._db)
-                plan = await rt.run(
-                    conv_id,
-                    f"Decompose task for team: {msg}\nAgents: {', '.join(a.name for a in self.agents)}",
-                    db,
-                )
-                await self.update_blackboard(conv_id, "last_plan", plan[:1000])
-                target = next(
-                    (a for a in self.agents if a.id != orch.id), self.agents[0]
-                )
-                if self.team.manager_agent_id:
-                    mgr = next(
-                        (a for a in self.agents if a.id == self.team.manager_agent_id),
-                        None,
-                    )
-                    if mgr:
-                        target = mgr
-                out = await AgentRuntime(target, self._db).run(
-                    conv_id, f"Task: {msg}\nPlan from orchestrator: {plan[:800]}", db
-                )
-                await self.update_blackboard(conv_id, "last_result", out[:1000])
-                return out
+            if manager:
+                # Manager reviews plan and decides who handles what
+                manager_prompt = f"""As Manager, review this plan and decide which team member should handle each part.
+                
+Plan from Orchestrator:
+{plan}
+
+Available team members:
+{chr(10).join(f"- {a.name} (type: {a.agent_type})" for a in self.agents if a.id != orch.id and a.id != self.team.manager_agent_id)}
+
+Respond with JSON:
+{{
+  "assignments": [
+    {{"agent_id": "...", "task": "specific task for this agent", "reason": "why this agent"}}
+  ],
+  "manager_notes": "any coordination notes"
+}}"""
+                
+                rt = AgentRuntime(manager, self._db)
+                manager_decision = await rt.run(conv_id, manager_prompt, db)
+                
+                try:
+                    import json
+                    decision = json.loads(manager_decision)
+                    assignments = decision.get("assignments", [])
+                    
+                    results = []
+                    for assignment in assignments:
+                        agent_id = assignment.get("agent_id")
+                        task = assignment.get("task", "")
+                        reason = assignment.get("reason", "")
+                        
+                        agent = next((a for a in self.agents if a.id == agent_id), None)
+                        if agent and agent.id != self.team.orchestrator_agent_id and agent.id != self.team.manager_agent_id:
+                            rt = AgentRuntime(agent, self._db)
+                            result = await rt.run(conv_id, task, db)
+                            results.append(f"[{agent.name}]: {result}")
+                    
+                    if results:
+                        return "\n\n".join(results)
+                except Exception:
+                    pass
+        
+        # Fallback: if no manager or manager handoff fails, use supervisor
         return await self._supervisor_route(conv_id, msg, db)
 
     async def _llm_route(self, msg: str, conv_id: str = "") -> dict:
