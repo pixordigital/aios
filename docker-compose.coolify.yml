@@ -1,19 +1,64 @@
-# AIOS — Coolify Docker Compose (Raw Compose Deployment)
-# Services defined here: app + worker + voice services
-# PostgreSQL & Redis are added via Coolify panel (not in compose)
-# Docs: COOLIFY_SETUP.md | PRODUCTION_READINESS_REPORT.md
+# AIOS — Coolify 1-Click (enterprise: app + worker + postgres + redis + otel)
+# Deploy: Coolify → New Resource → Docker Compose (Raw) → paste this file
+# Docs: COOLIFY_SETUP.md
 
 services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-aios}
+      POSTGRES_USER: ${POSTGRES_USER:-aios}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aios} -d ${POSTGRES_DB:-aios}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-changeme}", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  otel:
+    image: otel/opentelemetry-collector-contrib:0.128.0
+    command: ["--config=/etc/otelcol.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yml:/etc/otelcol.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    restart: unless-stopped
+
   app:
     build: .
     ports:
       - "8777:8777"
     environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-aios}
+      POSTGRES_DB: ${POSTGRES_DB:-aios}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       AIOS_DEBUG: "false"
-      AIOS_APP_URL: ${AIOS_APP_URL:-https://aios.seudominio.com}
-      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+asyncpg://aios:CHANGE_ME@postgres:5432/aios}
-      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://:CHANGE_ME@redis:6379/0}
-      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET:-CHANGE_ME_IN_PRODUCTION}
+      AIOS_APP_URL: ${AIOS_APP_URL}
+      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
+      AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
+      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
       AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
       AIOS_OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
       AIOS_OPENAI_API_KEY: ${AIOS_OPENAI_API_KEY:-}
@@ -21,14 +66,38 @@ services:
       AIOS_STORAGE_BACKEND: ${AIOS_STORAGE_BACKEND:-local}
       AIOS_S3_BUCKET: ${AIOS_S3_BUCKET:-}
       AIOS_S3_REGION: ${AIOS_S3_REGION:-}
+      AIOS_S3_ACCESS_KEY: ${AIOS_S3_ACCESS_KEY:-}
+      AIOS_S3_SECRET_KEY: ${AIOS_S3_SECRET_KEY:-}
       AIOS_S3_ENDPOINT: ${AIOS_S3_ENDPOINT:-}
-      AIOS_HTTPS_ONLY: "true"
-      AIOS_CORS_ORIGINS: ${AIOS_CORS_ORIGINS:-}
+      AIOS_STRIPE_SECRET_KEY: ${AIOS_STRIPE_SECRET_KEY:-}
+      AIOS_STRIPE_WEBHOOK_SECRET: ${AIOS_STRIPE_WEBHOOK_SECRET:-}
+      AIOS_SMTP_HOST: ${AIOS_SMTP_HOST:-}
+      AIOS_SMTP_PASSWORD: ${AIOS_SMTP_PASSWORD:-}
+      AIOS_VOICE_PROVIDER: ${AIOS_VOICE_PROVIDER:-selfhosted}
+      AIOS_ELEVENLABS_API_KEY: ${AIOS_ELEVENLABS_API_KEY:-}
+      AIOS_ELEVENLABS_VOICE_ID: ${AIOS_ELEVENLABS_VOICE_ID:-}
+      AIOS_VAPI_API_KEY: ${AIOS_VAPI_API_KEY:-}
+      AIOS_VAPI_ASSISTANT_ID: ${AIOS_VAPI_ASSISTANT_ID:-}
+      AIOS_VAPI_PHONE_NUMBER_ID: ${AIOS_VAPI_PHONE_NUMBER_ID:-}
+      AIOS_RETELL_API_KEY: ${AIOS_RETELL_API_KEY:-}
+      AIOS_RETELL_AGENT_ID: ${AIOS_RETELL_AGENT_ID:-}
+      AIOS_VOICE_TTS_URL: ${AIOS_VOICE_TTS_URL:-http://voice-tts:8000}
+      AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-http://voice-stt:9000}
+      AIOS_VOICE_BRIDGE_URL: ${AIOS_VOICE_BRIDGE_URL:-}
+      AIOS_VOICE_FROM_NUMBER: ${AIOS_VOICE_FROM_NUMBER:-}
+      AIOS_VOICE_WEBHOOK_SECRET: ${AIOS_VOICE_WEBHOOK_SECRET:-}
+      AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-ws://livekit:7880}
+      AIOS_LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}
+      AIOS_LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4317"
       AIOS_LOG_FORMAT: "json"
+      AIOS_HTTPS_ONLY: "true"
       AIOS_DASHBOARD_ENABLED: "true"
-      AIOS_RATE_LIMIT_PER_MINUTE: "60"
     volumes:
       - app-data:/data
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8777/health/live"]
       interval: 15s
@@ -40,125 +109,52 @@ services:
     deploy:
       resources:
         limits: { cpus: "1", memory: 1536M }
-        reservations: { cpus: "0.25", memory: 512M }
+        reservations: { cpus: "0.5", memory: 512M }
 
   worker:
     build: .
     command: ["python", "-m", "aios.tasks.worker"]
     environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-aios}
+      POSTGRES_DB: ${POSTGRES_DB:-aios}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       AIOS_DEBUG: "false"
-      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+asyncpg://aios:CHANGE_ME@postgres:5432/aios}
-      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://:CHANGE_ME@redis:6379/0}
-      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET:-CHANGE_ME_IN_PRODUCTION}
+      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
+      AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
+      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
       AIOS_LOG_FORMAT: "json"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4317"
     volumes:
       - app-data:/data
     depends_on:
-      - app
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "0.5", memory: 768M }
-        reservations: { cpus: "0.1", memory: 256M }
-
-  worker2:
-    build: .
-    command: ["python", "-m", "aios.tasks.worker"]
-    environment:
-      AIOS_DEBUG: "false"
-      AIOS_DATABASE_URL: ${AIOS_DATABASE_URL:-postgresql+asyncpg://aios:CHANGE_ME@postgres:5432/aios}
-      AIOS_REDIS_URL: ${AIOS_REDIS_URL:-redis://:CHANGE_ME@redis:6379/0}
-      AIOS_JWT_SECRET: ${AIOS_JWT_SECRET:-CHANGE_ME_IN_PRODUCTION}
-      AIOS_LOG_FORMAT: "json"
-    volumes:
-      - app-data:/data
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "0.5", memory: 768M }
-        reservations: { cpus: "0.1", memory: 256M }
-
-  evolution:
-    profiles: ["voice"]
-    image: evoapicloud/evolution-api:latest
-    environment:
-      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution:8080}
-      AUTHENTICATION_TYPE: apikey
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-evolution_secret_change_me}
-      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
-      QRCODE_LIMIT: "30"
-      QRCODE_COLOR: "#00e5a0"
-      DATABASE_ENABLED: "true"
-      DATABASE_PROVIDER: "postgresql"
-      DATABASE_CONNECTION_URI: ${EVOLUTION_DATABASE_URI:-postgresql://aios:CHANGE_ME@postgres:5432/evolution_db?schema=evolution_api}
-      REDIS_ENABLED: "true"
-      REDIS_URI: ${EVOLUTION_REDIS_URI:-redis://:CHANGE_ME@redis:6379/6}
-      REDIS_PREFIX_KEY: evolution
-      CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: ${EVOLUTION_REDIS_URI:-redis://:CHANGE_ME@redis:6379/6}
-      CACHE_REDIS_PREFIX_KEY: evolution-cache
-      CACHE_LOCAL_ENABLED: "true"
-      S3_ENABLED: "false"
-      LANGUAGE: pt-BR
-    volumes:
-      - evolution-data:/evolution/instances
-      - evolution-store:/evolution/store
-    depends_on:
-      - app
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "1", memory: 1024M }
-        reservations: { cpus: "0.25", memory: 256M }
-
-  voice-tts:
-    image: ghcr.io/matatonic/openedai-speech:latest
-    environment:
-      TTS_HOME: /data
-    volumes:
-      - voice-tts-data:/data
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/docs')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import os,redis;from urllib.parse import urlparse;u=os.environ.get('AIOS_REDIS_URL','redis://redis:6379/0');p=urlparse(u);r=redis.Redis(host=p.hostname or 'redis',port=p.port or 6379,password=p.password or os.environ.get('REDIS_PASSWORD',''));r.ping()\""]
       interval: 30s
       timeout: 10s
-      start_period: 60s
-      retries: 5
+      start_period: 30s
+      retries: 3
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "2", memory: 2G }
-        reservations: { cpus: "0.5", memory: 512M }
+        limits: { cpus: "1", memory: 1G }
 
-  voice-stt:
-    profiles: ["voice"]
-    image: onerahmet/openai-whisper-asr-webservice:latest
-    environment:
-      ASR_MODEL: small
-      ASR_ENGINE: faster_whisper
-    volumes:
-      - voice-stt-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:9000/docs')\" || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 120s
-      retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "2", memory: 2G }
-        reservations: { cpus: "0.5", memory: 512M }
-
+  # ─── Voz (leve: LiveKit + agent; TTS/STT via cloud ou Batch local) ───
+  # voice-tts (openedai-speech, ~2GB) e voice-stt (whisper, ~4GB) NÃO cabem
+  # neste host (disco 84%+). Reative com VPS 100GB+. Enquanto isso:
+  # TTS = ElevenLabs/Vapi/Retell por canal; STT = OpenAI whisper API.
   livekit:
-    build:
-      context: ./deploy/voice-stream
-      dockerfile: Dockerfile.livekit
+    image: livekit/livekit-server:latest
+    command: ["--bind", "0.0.0.0", "--keys", "${AIOS_LIVEKIT_API_KEY:-devkey}: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}"]
     ports:
       - "7880:7880"
       - "7881:7881"
       - "7882:7882/udp"
-    environment:
-      LIVEKIT_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:7880/ || exit 1"]
       interval: 15s
@@ -168,65 +164,9 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "2", memory: 2G }
-        reservations: { cpus: "0.5", memory: 1G }
-
-  voice-tts-stream:
-    build:
-      context: ./deploy/voice-stream
-      dockerfile: Dockerfile.tts
-    command: ["sh", "/app/entrypoint-tts.sh"]
-    environment:
-      VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-xtts}
-      HF_HOME: /data/hf
-    volumes:
-      - voice-stream-data:/data
-      - ./deploy/voice-stream/speakers:/speakers:ro
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8001/v1/voices || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 180s
-      retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "4", memory: 6G }
-        reservations: { cpus: "1", memory: 2G }
-
-  voice-tts-kokoro:
-    profiles: ["voice"]
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-    environment:
-      USE_GPU: "false"
-    volumes:
-      - voice-kokoro-data:/app/api/src/models
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8880/docs || exit 1"]
-      interval: 30s
-      timeout: 10s
-      start_period: 120s
-      retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "2", memory: 2G }
-        reservations: { cpus: "0.5", memory: 512M }
-
-  ollama:
-    profiles: ["voice"]
-    image: ollama/ollama:latest
-    command: ["sh", "-c", "ollama serve & sleep 5; ollama pull ${OLLAMA_MODEL:-qwen3:8b}; wait"]
-    volumes:
-      - ollama-data:/root/.ollama
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "4", memory: 8G }
-        reservations: { cpus: "1", memory: 2G }
+        limits: { cpus: "0.5", memory: 512M }
 
   voice-agent:
-    profiles: ["voice"]
     build: ./deploy/voice-stream
     environment:
       LIVEKIT_URL: ws://livekit:7880
@@ -244,19 +184,49 @@ services:
       PIPER_URL: http://voice-tts:8000/v1
       STT_URL: http://voice-stt:9000/v1
     depends_on:
-      - livekit
+      livekit:
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "2", memory: 3G }
-        reservations: { cpus: "0.5", memory: 1G }
+        limits: { cpus: "1", memory: 2G }
+
+  # ─── Voz pesada (DESLIGADO por padrão: exige VPS 16GB+ / GPU) ───
+  # Descomente quando tiver host parrudo. Ordem: ollama → kokoro → stream.
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   command: ["sh", "-c", "ollama serve & sleep 5; ollama pull ${OLLAMA_MODEL:-qwen3:8b}; wait"]
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #   restart: unless-stopped
+  #
+  # voice-tts-kokoro:
+  #   image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+  #   environment:
+  #     USE_GPU: "false"
+  #   volumes:
+  #     - voice-kokoro-data:/app/api/src/models
+  #   restart: unless-stopped
+  #
+  # voice-tts-stream:
+  #   build:
+  #     context: ./deploy/voice-stream
+  #     dockerfile: Dockerfile.tts
+  #   command: ["sh", "/app/entrypoint-tts.sh"]
+  #   environment:
+  #     VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-xtts}
+  #     HF_HOME: /data/hf
+  #   volumes:
+  #     - voice-stream-data:/data
+  #     - ./deploy/voice-stream/speakers:/speakers:ro
+  #   restart: unless-stopped
 
 volumes:
+  postgres-data:
+  redis-data:
   app-data:
-  evolution-data:
-  evolution-store:
-  voice-tts-data:
-  voice-stt-data:
-  voice-stream-data:
-  voice-kokoro-data:
-  ollama-data:
+  # voice-tts-data:
+  # voice-stt-data:
+  # voice-stream-data:
+  # voice-kokoro-data:
+  # ollama-data:
