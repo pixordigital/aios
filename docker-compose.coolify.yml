@@ -278,6 +278,12 @@ services:
   #   restart: unless-stopped
   #
   # voice-tts-kokoro:
+  image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+  environment:
+    USE_GPU: "false"
+  volumes:
+    - voice-kokoro-data:/app/api/src/models
+  restart: unless-stopped
   #   image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
   #   environment:
   #     USE_GPU: "false"
@@ -304,8 +310,8 @@ volumes:
   app-data:
   evolution-data:
   evolution-store:
-  # voice-tts-data:
-  # voice-stt-data:
-  # voice-stream-data:
-  # voice-kokoro-data:
-  # ollama-data:
+  voice-tts-data:
+  voice-stt-data:
+  voice-stream-data:
+  voice-kokoro-data:
+  ollama-data:
