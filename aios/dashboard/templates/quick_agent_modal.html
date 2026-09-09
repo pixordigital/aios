@@ -30,7 +30,8 @@
             </div>
             <div>
                 <label>Modelo</label>
-                <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem">
+                <style>@media(max-width:640px){.qa-model-grid{grid-template-columns:1fr!important}}</style>
+                <div class="qa-model-grid" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.5rem">
                     <div class="model-search-wrap" style="position:relative">
                         <label>Modelo</label>
                         <input type="text" id="qa-model-search" name="model" autocomplete="off"
