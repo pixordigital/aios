@@ -42,16 +42,16 @@ services:
       - "4318:4318"
     restart: unless-stopped
 
-  litellm:
+litellm:
     image: ghcr.io/berriai/litellm:main-latest
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         mkdir -p /app/config &&
-        cp /app/config_src/litellm.yaml /app/config/litellm.yaml &&
-        litellm --config /app/config/litellm.yaml --port 4000 --num_workers 2
+        cp /app/litellm_src/litellm.yaml /app/litellm.yaml &&
+        litellm --config /app/litellm.yaml --port 4000 --num_workers 2
     volumes:
-      - ./deploy/litellm.yaml:/app/config_src/litellm.yaml:ro
+      - ./deploy/litellm.yaml:/app/litellm_src.yaml:ro
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
