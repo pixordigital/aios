@@ -68,6 +68,47 @@ services:
         limits: { cpus: "0.5", memory: 512M }
         reservations: { cpus: "0.2", memory: 256M }
 
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    environment:
+      SERVER_URL: http://evolution:8080
+      AUTHENTICATION_TYPE: apikey
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-evolution_secret_change_me}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#00e5a0"
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: "postgresql://aios:${POSTGRES_PASSWORD:-changeme}@postgres:5432/evolution?schema=evolution"
+      REDIS_ENABLED: "true"
+      REDIS_URI: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6"
+      REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6"
+      CACHE_REDIS_PREFIX_KEY: evolution-cache
+      CACHE_LOCAL_ENABLED: "true"
+      S3_ENABLED: "false"
+      LANGUAGE: pt-BR
+    volumes:
+      - evolution-data:/evolution/instances
+      - evolution-store:/evolution/store
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 1024M }
+        reservations: { cpus: "0.2", memory: 256M }
+
   app:
     build: .
     ports:
@@ -89,6 +130,8 @@ services:
       AIOS_LLM_PROVIDER: ${AIOS_LLM_PROVIDER:-openrouter}
       AIOS_LITELLM_BASE_URL: ${AIOS_LITELLM_BASE_URL:-http://litellm:4000}
       AIOS_LITELLM_API_KEY: ${AIOS_LITELLM_API_KEY:-sk-litellm}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-evolution_secret_change_me}
+      EVOLUTION_SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution:8080}
       AIOS_OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
       AIOS_OPENAI_API_KEY: ${AIOS_OPENAI_API_KEY:-}
       AIOS_ANTHROPIC_API_KEY: ${AIOS_ANTHROPIC_API_KEY:-}
@@ -259,6 +302,8 @@ volumes:
   postgres-data:
   redis-data:
   app-data:
+  evolution-data:
+  evolution-store:
   # voice-tts-data:
   # voice-stt-data:
   # voice-stream-data:
