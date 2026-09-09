@@ -128,17 +128,73 @@
       {% endfor %}
     </div>
     <div style="border-top:1px solid var(--border);padding-top:1rem">
-      <form method="POST" action="/dashboard/automations/create" style="display:flex;flex-direction:column;gap:0.75rem">
+      <form method="POST" action="/dashboard/automations/create" style="display:flex;flex-direction:column;gap:0.75rem" id="new-automation-form">
         <h3 style="font-size:0.875rem">Ou começar do zero</h3>
         <input name="name" required class="input" placeholder="Nome: ex. Lead → Slack">
         <input name="description" class="input" placeholder="Descrição (opcional)">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-          <select name="trigger_type" class="input"><option value="webhook">🔗 Webhook</option><option value="cron">⏰ Agendamento</option><option value="manual">▶ Manual</option><option value="event">⚡ Evento</option></select>
-          <input name="trigger_value" class="input" placeholder="cron: 0 9 * * * ou evento: message.received">
+          <select name="trigger_type" id="trigger-type" class="input" onchange="toggleCronBuilder(this.value)"><option value="webhook">🔗 Webhook</option><option value="cron">⏰ Agendamento</option><option value="manual">▶ Manual</option><option value="event">⚡ Evento</option></select>
+          <input name="trigger_value" id="trigger-value" class="input" placeholder="cron: 0 9 * * * ou evento: message.received">
+        </div>
+        <div id="cron-builder" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.75rem;flex-direction:column;gap:0.5rem">
+          <div style="font-size:0.75rem;font-weight:600;color:var(--text)">Quando executar?</div>
+          <select id="cron-preset" class="input" onchange="updateCronFromPreset()">
+            <option value="custom">Personalizado (avançado)</option>
+            <option value="*/15 * * * *">A cada 15 minutos</option>
+            <option value="*/30 * * * *">A cada 30 minutos</option>
+            <option value="0 * * * *">A cada hora</option>
+            <option value="0 */4 * * *">A cada 4 horas</option>
+            <option value="0 9 * * *">Todo dia às 9h</option>
+            <option value="0 18 * * *">Todo dia às 18h</option>
+            <option value="0 9 * * 1">Toda segunda às 9h</option>
+            <option value="0 9 * * 1-5">Dias úteis (seg-sex) às 9h</option>
+            <option value="0 9 1 * *">Todo dia 1 às 9h (mensal)</option>
+          </select>
+          <div id="cron-custom" style="display:none;flex-direction:column;gap:0.375rem">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+              <div><label style="font-size:0.6875rem;color:var(--text-tertiary)">Hora</label><input type="number" id="cron-hour" min="0" max="23" value="9" class="input" onchange="buildCron()"></div>
+              <div><label style="font-size:0.6875rem;color:var(--text-tertiary)">Minuto</label><input type="number" id="cron-min" min="0" max="59" value="0" class="input" onchange="buildCron()"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+              <div><label style="font-size:0.6875rem;color:var(--text-tertiary)">Frequência</label><select id="cron-freq" class="input" onchange="buildCron()"><option value="daily">Diário</option><option value="hourly">De hora em hora</option><option value="weekly">Semanal</option><option value="monthly">Mensal</option></select></div>
+              <div id="cron-weekday-wrap" style="display:none"><label style="font-size:0.6875rem;color:var(--text-tertiary)">Dia semana</label><select id="cron-weekday" class="input" onchange="buildCron()"><option value="1">Segunda</option><option value="2">Terça</option><option value="3">Quarta</option><option value="4">Quinta</option><option value="5">Sexta</option><option value="6">Sábado</option><option value="0">Domingo</option></select></div>
+            </div>
+          </div>
+          <div style="font-size:0.6875rem;color:var(--text-tertiary)">Cron gerado: <span id="cron-preview" class="font-mono" style="color:var(--accent)">0 9 * * *</span></div>
         </div>
         <button class="btn btn-primary">Criar automação</button>
       </form>
     </div>
+    <script>
+      function toggleCronBuilder(type){
+        var builder=document.getElementById('cron-builder');
+        var input=document.getElementById('trigger-value');
+        if(type==='cron'){ builder.style.display='flex'; updateCronFromPreset(); }
+        else { builder.style.display='none'; input.placeholder='evento: message.received'; }
+      }
+      function updateCronFromPreset(){
+        var preset=document.getElementById('cron-preset').value;
+        var custom=document.getElementById('cron-custom');
+        var input=document.getElementById('trigger-value');
+        var preview=document.getElementById('cron-preview');
+        if(preset==='custom'){ custom.style.display='flex'; buildCron(); }
+        else { custom.style.display='none'; input.value=preset; preview.textContent=preset; }
+      }
+      function buildCron(){
+        var h=document.getElementById('cron-hour').value||9;
+        var m=document.getElementById('cron-min').value||0;
+        var freq=document.getElementById('cron-freq').value;
+        var wd=document.getElementById('cron-weekday').value;
+        var cron='';
+        document.getElementById('cron-weekday-wrap').style.display=(freq==='weekly'?'block':'none');
+        if(freq==='hourly') cron=m+' * * * *';
+        else if(freq==='weekly') cron=m+' '+h+' * * '+wd;
+        else if(freq==='monthly') cron=m+' '+h+' 1 * *';
+        else cron=m+' '+h+' * * *';
+        document.getElementById('trigger-value').value=cron;
+        document.getElementById('cron-preview').textContent=cron;
+      }
+    </script>
   </div>
 </dialog>
 
