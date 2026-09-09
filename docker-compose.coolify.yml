@@ -44,9 +44,9 @@ services:
 
 litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    entrypoint: ["/bin/sh", "-c", "cp /app/litellm_src/litellm.yaml /app/litellm.yaml && exec litellm --config /app/litellm.yaml --port 4000 --num_workers 2"]
+    command: ["litellm", "--config", "/app/litellm.yaml", "--port", "4000", "--num_workers", "2"]
     volumes:
-      - ./deploy/litellm.yaml:/app/litellm_src.yaml:ro
+      - ./deploy/litellm.yaml:/app/litellm.yaml:ro
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
