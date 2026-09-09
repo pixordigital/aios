@@ -44,12 +44,12 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
-    command: >
-      sh -c "
-        mkdir -p /app && 
-        cp /app/litellm.yaml.mount /app/litellm.yaml && 
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /app &&
+        cp /app/litellm.yaml.mount /app/litellm.yaml &&
         litellm --config /app/litellm.yaml --port 4000 --num_workers 2
-      "
     volumes:
       - ./deploy/litellm.yaml:/app/litellm.yaml.mount:ro
     environment:
