@@ -96,13 +96,32 @@
       <div>
         <label>TTS engine (modelo)</label>
         <select name="tts_model" id="tts-model" class="input">
-          <option value="kokoro" selected>kokoro — self-hosted 82M $0/min (padrão)</option>
-          <option value="tts-1">tts-1 — OpenAI $15/1M</option>
-          <option value="tts-1-hd">tts-1-hd — OpenAI HD $30/1M</option>
-          <option value="gpt-4o-mini-tts">gpt-4o-mini-tts — OpenAI $15/1M</option>
-          <option value="eleven_turbo_v2">eleven_turbo_v2 — ElevenLabs $30/1M</option>
-          <option value="eleven_multilingual_v2">eleven_multilingual_v2 — ElevenLabs multi $30/1M</option>
-          <option value="cartesia/sonic-3">cartesia/sonic-3 — Cartesia $20/1M</option>
+          <optgroup label="Self-hosted — $0/min">
+            <option value="kokoro" selected>kokoro — 82M $0/min (padrão, pt-BR pm_alex)</option>
+            <option value="kokoro-int8">kokoro-int8 — 82M INT8 $0/min (mais rápido)</option>
+            <option value="piper">piper — 1M $0/min fallback</option>
+            <option value="xtts">xtts — Coqui XTTS v2 $0/min</option>
+          </optgroup>
+          <optgroup label="OpenAI — TTS 2026">
+            <option value="tts-1">tts-1 — $15/1M</option>
+            <option value="tts-1-hd">tts-1-hd — HD $30/1M</option>
+            <option value="gpt-4o-mini-tts">gpt-4o-mini-tts — $15/1M</option>
+            <option value="gpt-4o-tts">gpt-4o-tts — $30/1M (novo)</option>
+            <option value="gpt-4o-tts-mini">gpt-4o-tts-mini — $15/1M</option>
+          </optgroup>
+          <optgroup label="ElevenLabs — 2026">
+            <option value="eleven_turbo_v2">eleven_turbo_v2 — $30/1M</option>
+            <option value="eleven_turbo_v2_5">eleven_turbo_v2_5 — $30/1M (novo)</option>
+            <option value="eleven_multilingual_v2">eleven_multilingual_v2 — multi $30/1M</option>
+            <option value="eleven_flash_v2_5">eleven_flash_v2_5 — $15/1M flash</option>
+          </optgroup>
+          <optgroup label="Outros — modernos">
+            <option value="cartesia/sonic-3">cartesia/sonic-3 — $20/1M</option>
+            <option value="cartesia/sonic-2">cartesia/sonic-2 — $15/1M</option>
+            <option value="deepgram/aura-2">deepgram/aura-2 — $15/1M</option>
+            <option value="fish/speech-1.5">fish/speech-1.5 — $10/1M</option>
+            <option value="hume/octave">hume/octave — $25/1M</option>
+          </optgroup>
         </select>
         <div class="text-xs text-tertiary" style="margin-top:0.25rem">Kokoro `http://voice-tts-kokoro:8880/v1` 72 vozes. Cloud via `AIOS_ELEVENLABS_API_KEY`.</div>
       </div>
