@@ -43,14 +43,41 @@
     <h2>2. LLM <span class="text-xs text-tertiary">— onde o agente pensa (1 clique em Coolify depois também)</span></h2>
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:0.75rem">
       <div>
-        <label>Modelo (VOICE_LLM_MODEL)</label>
+        <label>Modelo (VOICE_LLM_MODEL) — modernos 2026</label>
         <select name="model" id="voice-model" class="input" onchange="updateVoiceCost(this.value)">
-          <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini — rápido/barato $0.15/1M</option>
-          <option value="openai/gpt-4o">openai/gpt-4o — equilibrado $2.5/1M</option>
-          <option value="anthropic/claude-sonnet-4.5">anthropic/claude-sonnet-4.5 — melhor PT $3/1M</option>
-          <option value="qwen/qwen-3-235b-a22b">qwen/qwen-3-235b — custo baixo $0.5/1M</option>
-          <option value="deepseek/deepseek-v4">deepseek/deepseek-v4 — barato $0.5/1M</option>
-          <option value="ollama/qwen3:8b">ollama/qwen3:8b — local, sem custo (precisa ollama Up)</option>
+          <optgroup label="OpenAI — GPT-5.6 (2026)">
+            <option value="openai/gpt-5.6-sol" >openai/gpt-5.6-sol — flagship $5/1M</option>
+            <option value="openai/gpt-5.6-terra" >openai/gpt-5.6-terra — terra $5/1M</option>
+            <option value="openai/gpt-5.6-luna" >openai/gpt-5.6-luna — luna $5/1M</option>
+            <option value="openai/gpt-5.4" >openai/gpt-5.4 — $5/1M</option>
+            <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini — rápido/barato $0.15/1M</option>
+            <option value="openai/gpt-4o" >openai/gpt-4o — equilibrado $2.5/1M</option>
+            <option value="openai/gpt-4.1" >openai/gpt-4.1 — $2.5/1M</option>
+            <option value="openai/o4-mini" >openai/o4-mini — reasoning $1.5/1M</option>
+          </optgroup>
+          <optgroup label="Anthropic — Muse 5">
+            <option value="anthropic/claude-opus-4.5">anthropic/claude-opus-4.5 — melhor $15/1M</option>
+            <option value="anthropic/claude-sonnet-4.5">anthropic/claude-sonnet-4.5 — PT ótimo $3/1M</option>
+            <option value="anthropic/claude-fable-5-1">anthropic/claude-fable-5-1 — $1.5/1M</option>
+            <option value="anthropic/claude-mythos-5-1">anthropic/claude-mythos-5-1 — $3/1M</option>
+          </optgroup>
+          <optgroup label="Google — Gemini 3">
+            <option value="google/gemini-3.8-flash">google/gemini-3.8-flash — rápido $0.15/1M</option>
+            <option value="google/gemini-3-pro">google/gemini-3-pro — $2/1M</option>
+          </optgroup>
+          <optgroup label="Meta — Muse Spark (PT bom)">
+            <option value="muse/muse-spark-1.2">muse/muse-spark-1.2 — PT nativo</option>
+            <option value="muse/muse-spark-1.2-contributor-free">muse/muse-spark-1.2-contributor-free — free</option>
+          </optgroup>
+          <optgroup label="Custo baixo">
+            <option value="qwen/qwen-3-235b-a22b">qwen/qwen-3-235b — $0.5/1M</option>
+            <option value="deepseek/deepseek-v4">deepseek/deepseek-v4 — $0.5/1M</option>
+            <option value="deepseek/deepseek-v4-flash">deepseek/deepseek-v4-flash — $0.15/1M</option>
+          </optgroup>
+          <optgroup label="Local — sem custo">
+            <option value="ollama/qwen3:8b">ollama/qwen3:8b — local CPU</option>
+            <option value="ollama/llama3">ollama/llama3 — local</option>
+          </optgroup>
         </select>
         <div class="text-xs text-tertiary" style="margin-top:0.25rem">Salvo em <code>AIOS_VOICE_LLM_MODEL</code> + <code>VOICE_LLM_MODEL</code> `docker-compose.coolify.yml:235`. Troca em Coolify → Environment sem rebuild.</div>
       </div>
@@ -123,7 +150,7 @@ document.getElementById('voice-model').addEventListener('change',()=>updateProgr
 document.getElementById('voice-select').addEventListener('change',()=>updateProgress(4));
 document.getElementById('preview-text').addEventListener('input',()=>updateProgress(4));
 function updateVoiceCost(m){
-  const pr={ 'openai/gpt-4o-mini':0.0006,'openai/gpt-4o':0.012,'anthropic/claude-sonnet-4.5':0.018,'qwen/qwen-3-235b-a22b':0.005,'deepseek/deepseek-v4':0.005,'ollama/qwen3:8b':0 };
+  const pr={ 'openai/gpt-4o-mini':0.0006,'openai/gpt-4o':0.012,'openai/gpt-5.6-sol':0.025,'openai/gpt-5.6-terra':0.025,'openai/gpt-5.6-luna':0.025,'openai/gpt-5.4':0.025,'openai/gpt-4.1':0.012,'openai/o4-mini':0.008,'anthropic/claude-opus-4.5':0.045,'anthropic/claude-sonnet-4.5':0.018,'anthropic/claude-fable-5-1':0.008,'anthropic/claude-mythos-5-1':0.012,'google/gemini-3.8-flash':0.001,'google/gemini-3-pro':0.012,'muse/muse-spark-1.2':0.006,'muse/muse-spark-1.2-contributor-free':0,'qwen/qwen-3-235b-a22b':0.005,'deepseek/deepseek-v4':0.005,'deepseek/deepseek-v4-flash':0.001,'ollama/qwen3:8b':0,'ollama/llama3':0 };
   document.getElementById('voice-cost').textContent='$'+(pr[m]||0.0006).toFixed(4)+' / req';
 }
 async function previewVoice(){
