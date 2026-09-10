@@ -652,16 +652,17 @@ async def voice_preview(request: Request):
         try:
             async with httpx.AsyncClient(timeout=30) as c:
                 r = await c.post(kokoro, json={"model": tts_model, "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
-                if r.status_code == 200:
+                if r.status_code == 200 and r.content:
                     return Response(content=r.content, media_type=r.headers.get("content-type", "audio/mpeg"), headers={"Content-Length": str(len(r.content))})
         except Exception:
             pass
         # fallback: try localhost
         async with httpx.AsyncClient(timeout=30) as c:
             r = await c.post("http://localhost:8880/v1/audio/speech", json={"model": tts_model, "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
-            if r.status_code == 200:
+            if r.status_code == 200 and r.content:
                 return Response(content=r.content, media_type=r.headers.get("content-type", "audio/mpeg"))
-        return Response(content=b"", status_code=502)
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Kokoro TTS ainda iniciando (warmup ~60s) ou fora — aguarde 1 min e tente de novo"}, status_code=502)
     except Exception as e:
         from fastapi.responses import JSONResponse
         return JSONResponse({"error": str(e)[:200]}, status_code=500)

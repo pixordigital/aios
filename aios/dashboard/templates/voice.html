@@ -238,12 +238,17 @@ async function previewVoice(){
   const t=document.getElementById('preview-text').value||'Olá';
   const st=document.getElementById('preview-status');
   const audio=document.getElementById('preview-audio');
-  st.textContent='Gerando... '+m+' 1CPU ~5s'; audio.style.display='none';
+  st.textContent='Gerando... '+m+' 1CPU ~5s'; audio.style.display='none'; audio.removeAttribute('src'); audio.load();
+  audio.onerror=function(){ st.textContent='Áudio inválido — '+(st.textContent||''); };
   try{
-    const r=await fetch('/dashboard/voice/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice:v, text:t, tts_model:m})});
-    if(!r.ok){ st.textContent='Erro '+r.status; return; }
-    const blob=await r.blob(); const url=URL.createObjectURL(blob); audio.src=url; audio.style.display='block'; audio.play(); st.textContent='OK '+m+'/'+v+' '+(blob.size/1024).toFixed(0)+'KB';
-  }catch(e){ st.textContent='Erro: '+e; }
+    const r=await fetch('/dashboard/voice/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice:v, text:t, tts_model:m})});
+    if(r.status===401||r.status===403){ st.textContent='Sessão expirada ou bloqueada ('+r.status+') — recarregue a página e entre de novo'; return; }
+    if(r.status===502){ st.textContent='Kokoro ainda iniciando (warmup ~60s) — aguarde 1 min e tente de novo'; return; }
+    if(!r.ok){ st.textContent='Erro '+r.status+' — tente de novo'; return; }
+    const blob=await r.blob();
+    if(!blob.type.startsWith('audio')||blob.size<1000){ st.textContent='Resposta não é áudio ('+(blob.type||'vazio')+') — recarregue a página e entre de novo'; return; }
+    const url=URL.createObjectURL(blob); audio.src=url; audio.style.display='block'; audio.play().catch(function(){}); st.textContent='OK '+m+'/'+v+' '+(blob.size/1024).toFixed(0)+'KB';
+  }catch(e){ st.textContent='Erro de rede: '+e+' — verifique se está logado'; }
 }
 document.getElementById('voice-form').addEventListener('submit',()=>{ updateProgress(4); });
 updateVoiceCost('openai/gpt-4o-mini');
