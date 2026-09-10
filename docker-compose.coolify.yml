@@ -264,7 +264,7 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "0.5", memory: 1G }
+        limits: { cpus: "1", memory: 1536M }
   # voice-tts-stream:
   #   build:
   #     context: ./deploy/voice-stream

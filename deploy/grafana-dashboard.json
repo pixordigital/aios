@@ -5,6 +5,9 @@
     {"title": "Tokens / dia", "targets": [{"expr": "sum by (org) (increase(aios_cost_usd_total[24h]))"}]},
     {"title": "Mensagens / canal", "targets": [{"expr": "sum by (channel) (aios_messages_total)"}]},
     {"title": "Latência p95", "targets": [{"expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))"}]},
-    {"title": "Erros agente", "targets": [{"expr": "sum by (agent_id) (increase(agent_errors_total[1h]))"}]}
+    {"title": "Erros agente", "targets": [{"expr": "sum by (agent_id) (increase(agent_errors_total[1h]))"}]},
+    {"title": "Voz TTS latência p95 (Kokoro 1CPU ~5s)", "targets": [{"expr": "histogram_quantile(0.95, rate(voice_tts_duration_seconds_bucket[5m]))"}]},
+    {"title": "Voz turnos / interrupções", "targets": [{"expr": "sum by (voice) (increase(voice_turns_total[5m]))"}]},
+    {"title": "Kokoro warmup + health", "targets": [{"expr": "voice_tts_kokoro_health"}]}
   ]
 }
