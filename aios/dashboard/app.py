@@ -630,7 +630,10 @@ async def agent_wizard(request: Request):
 
 @router.get("/voice", response_class=HTMLResponse)
 async def voice_page(request: Request):
-    return await _render("voice.html", request, title="Voz")
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        teams = (await db.execute(select(Team).where(Team.org_id == org_id).order_by(Team.name))).scalars().all()
+    return await _render("voice.html", request, title="Voz", teams=teams)
 
 
 @router.post("/voice/preview")
@@ -665,7 +668,7 @@ async def voice_preview(request: Request):
 
 
 @router.post("/voice/create")
-async def voice_create(request: Request, name: str = Form(...), agent_type: str = Form("sdr"), model: str = Form("openai/gpt-4o-mini"), voice: str = Form("pm_alex"), tts_model: str = Form("kokoro"), extra_prompt: str = Form("")):
+async def voice_create(request: Request, name: str = Form(...), agent_type: str = Form("sdr"), model: str = Form("openai/gpt-4o-mini"), voice: str = Form("pm_alex"), tts_model: str = Form("kokoro"), extra_prompt: str = Form(""), team_id: str = Form("")):
     org_id = await _resolve_org_id(request)
     if agent_type not in ("sdr", "closer", "support"):
         agent_type = "sdr"
@@ -684,13 +687,22 @@ async def voice_create(request: Request, name: str = Form(...), agent_type: str 
     # merge with existing governance_config if any
     gov = dict(tpl.get("governance_config", {}) if tpl else {})
     gov.update(voice_cfg)
+    team_id_ok = None
     async with db_session() as db:
         agent = Agent(org_id=org_id, name=name, agent_type=agent_type, system_prompt=system_prompt, llm_config=llm_config, tools=tools, memory_config=memory_config, governance_config=gov)
         db.add(agent)
         await db.flush()
         from aios.db.models import AgentVersion
         db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="voice wizard"))
+        if team_id.strip():
+            team = await db.get(Team, team_id.strip())
+            if team and team.org_id == org_id:
+                existing = (await db.execute(select(func.count()).select_from(team_agents).where(team_agents.c.team_id == team.id))).scalar() or 0
+                await db.execute(team_agents.insert().values(team_id=team.id, agent_id=agent.id, priority=existing))
+                team_id_ok = team.id
         await db.commit()
+    if team_id_ok:
+        return RedirectResponse(f"/dashboard/teams/{team_id_ok}/edit", status_code=303)
     return RedirectResponse("/dashboard/agents", status_code=303)
 
 

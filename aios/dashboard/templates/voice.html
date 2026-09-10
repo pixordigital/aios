@@ -170,6 +170,16 @@
       <label>Instruções extras (opcional) — anexadas ao prompt do template</label>
       <textarea name="extra_prompt" class="input" rows="3" placeholder="ex.: Sempre mencione a promoção de setembro, fale devagar, chame o lead pelo nome"></textarea>
     </div>
+    <div style="margin-top:0.75rem">
+      <label>Adicionar a equipe existente (opcional)</label>
+      <select name="team_id" class="input">
+        <option value="">— Só criar, sem equipe —</option>
+        {% for t in teams %}
+        <option value="{{ t.id }}">{{ t.name }} — {{ strategy_label(t.routing_strategy) }}</option>
+        {% endfor %}
+      </select>
+      <div class="text-xs text-tertiary" style="margin-top:0.25rem">Se escolher, o agente já entra como membro e você cai na edição da equipe (compatibilidade e orquestrador).</div>
+    </div>
     <div class="text-xs text-tertiary" style="margin-top:0.5rem">Cria em <code>POST /dashboard/voice/create</code> → <code>apply_template</code> + <code>extra_data.voice={voice, llm}</code>. Depois: <code>/dashboard/teams</code> → adicionar em equipe hierárquica + <code>/dashboard/channels/new</code> voice.</div>
     <div style="margin-top:0.75rem;padding:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm)">
       <div style="font-weight:600;font-size:0.8125rem">Checklist pós-criação:</div>
