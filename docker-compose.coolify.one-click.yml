@@ -60,6 +60,11 @@ services:
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
       AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
+      AIOS_LLM_PROVIDER: ${AIOS_LLM_PROVIDER:-openrouter}
+      AIOS_LITELLM_BASE_URL: ${AIOS_LITELLM_BASE_URL:-http://litellm:4000}
+      AIOS_LITELLM_API_KEY: ${AIOS_LITELLM_API_KEY:-sk-litellm}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-evolution_secret_change_me}
+      EVOLUTION_SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution:8080}
       AIOS_OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
       AIOS_OPENAI_API_KEY: ${AIOS_OPENAI_API_KEY:-}
       AIOS_ANTHROPIC_API_KEY: ${AIOS_ANTHROPIC_API_KEY:-}
@@ -81,14 +86,14 @@ services:
       AIOS_VAPI_PHONE_NUMBER_ID: ${AIOS_VAPI_PHONE_NUMBER_ID:-}
       AIOS_RETELL_API_KEY: ${AIOS_RETELL_API_KEY:-}
       AIOS_RETELL_AGENT_ID: ${AIOS_RETELL_AGENT_ID:-}
-      AIOS_VOICE_TTS_URL: ${AIOS_VOICE_TTS_URL:-http://voice-tts:8000}
-      AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-http://voice-stt:9000}
+      AIOS_VOICE_TTS_URL: ${AIOS_VOICE_TTS_URL:-http://voice-tts-kokoro:8880/v1}
+      AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-http://voice-stt:9000/v1}
       AIOS_VOICE_BRIDGE_URL: ${AIOS_VOICE_BRIDGE_URL:-}
       AIOS_VOICE_FROM_NUMBER: ${AIOS_VOICE_FROM_NUMBER:-}
       AIOS_VOICE_WEBHOOK_SECRET: ${AIOS_VOICE_WEBHOOK_SECRET:-}
-      AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-ws://livekit:7880}
-      AIOS_LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}
-      AIOS_LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-}
+      # AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-ws://livekit:7880}  # DESABILITADO - VPS 8GB sem GPU
+      # AIOS_LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}  # DESABILITADO
+      # AIOS_LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}  # DESABILITADO
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4317"
       AIOS_LOG_FORMAT: "json"
       AIOS_HTTPS_ONLY: "true"
@@ -123,6 +128,8 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-changeme}
       AIOS_DEBUG: "false"
+      AIOS_LLM_PROVIDER: ${AIOS_LLM_PROVIDER:-openrouter}
+      AIOS_LITELLM_BASE_URL: ${AIOS_LITELLM_BASE_URL:-http://litellm:4000}
       AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-aios}"
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
@@ -144,48 +151,28 @@ services:
       resources:
         limits: { cpus: "1", memory: 1G }
 
-  # ─── Voz (leve: LiveKit + agent; TTS/STT via cloud ou Batch local) ───
+  # ─── Voz (leve: Kokoro TTS + agent; sem LiveKit - VPS 8GB) ───
   # voice-tts (openedai-speech, ~2GB) e voice-stt (whisper, ~4GB) NÃO cabem
   # neste host (disco 84%+). Reative com VPS 100GB+. Enquanto isso:
   # TTS = ElevenLabs/Vapi/Retell por canal; STT = OpenAI whisper API.
-  livekit:
-    image: livekit/livekit-server:latest
-    command: ["--bind", "0.0.0.0", "--keys", "${AIOS_LIVEKIT_API_KEY:-devkey}: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}"]
-    ports:
-      - "7880:7880"
-      - "7881:7881"
-      - "7882:7882/udp"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:7880/ || exit 1"]
-      interval: 15s
-      timeout: 10s
-      start_period: 15s
-      retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "0.5", memory: 512M }
-
+  # livekit DESABILITADO: VPS 8GB sem GPU. Usando Kokoro TTS auto-hospedado.
   voice-agent:
     build: ./deploy/voice-stream
     environment:
-      LIVEKIT_URL: ws://livekit:7880
-      LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}
-      LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}
       AIOS_URL: http://app:8777
       AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
       OLLAMA_URL: http://ollama:11434/v1
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
       OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
       TTS_WS_URL: ws://voice-tts-stream:8001/tts/ws
-      VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-xtts}
+      VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-kokoro}
       VOICE_TTS_VOICE: ${VOICE_TTS_VOICE:-ptbr}
       KOKORO_URL: http://voice-tts-kokoro:8880/v1
       PIPER_URL: http://voice-tts:8000/v1
       STT_URL: http://voice-stt:9000/v1
     depends_on:
-      livekit:
-        condition: service_healthy
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
     restart: unless-stopped
     deploy:
       resources:
@@ -199,15 +186,16 @@ services:
   #   volumes:
   #     - ollama-data:/root/.ollama
   #   restart: unless-stopped
-  #
-  # voice-tts-kokoro:
-  #   image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-  #   environment:
-  #     USE_GPU: "false"
-  #   volumes:
-  #     - voice-kokoro-data:/app/api/src/models
-  #   restart: unless-stopped
-  #
+  voice-tts-kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    environment:
+      USE_GPU: "false"
+    volumes:
+      - voice-kokoro-data:/app/api/src/models
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 1G }
   # voice-tts-stream:
   #   build:
   #     context: ./deploy/voice-stream
@@ -228,5 +216,5 @@ volumes:
   # voice-tts-data:
   # voice-stt-data:
   # voice-stream-data:
-  # voice-kokoro-data:
+  voice-kokoro-data:
   # ollama-data:
