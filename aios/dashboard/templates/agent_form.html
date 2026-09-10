@@ -141,6 +141,7 @@
                 <div id="cost-estimate" class="flex-center gap-2 mt-2" style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.5rem 0.75rem;flex-wrap:wrap">
                     <span>Custo estimado por requisição: <strong id="cost-value" style="color:var(--text);font-family:'JetBrains Mono',monospace">$0.0000</strong></span>
                     <span class="text-xs text-tertiary">(entrada + saída, proporção 1:0,5)</span>
+                    <span id="model-fit" class="badge" style="font-size:0.65rem;background:var(--accent-subtle);color:var(--accent);border-color:var(--accent-border)">Q ? | fit —</span>
                 </div>
             </div>
 
@@ -304,11 +305,69 @@
         'x-ai/grok-4':{i:2.00,o:10.00},'x-ai/grok-4-mini':{i:0.50,o:2.00},
     };
     fetch('/dashboard/api/models').then(function(r){return r.json()}).then(function(list){ list.forEach(function(m){ if(m.model && m.input!=null) PRICING[m.model]={i:m.input,o:m.output}; }); }).catch(function(){});
+    var MODEL_META={
+        'openai/gpt-4o':{q:'Q A-',fit:'voz ★★★★☆ equilibrado',c:'$2.5/$10'},
+        'openai/gpt-4o-mini':{q:'Q B+',fit:'voz SDR ★★★★★ rápido/barato',c:'$0.15/$0.6'},
+        'openai/gpt-4.1':{q:'Q A-',fit:'voz ★★★★☆',c:'$2.5/$10'},
+        'openai/gpt-4.1-mini':{q:'Q B+',fit:'voz ★★★★☆',c:'$0.4/$1.6'},
+        'openai/gpt-4.1-nano':{q:'Q B',fit:'voz SDR ★★★★☆ barato',c:'$0.1/$0.4'},
+        'openai/o3':{q:'Q A+',fit:'reasoning, lento p/ voz ★★★☆☆',c:'$5/$20'},
+        'openai/o3-mini':{q:'Q A',fit:'reasoning ★★★☆☆',c:'$1.1/$4.4'},
+        'openai/o4-mini':{q:'Q A',fit:'voz Support ★★★★☆',c:'$1.5/$6'},
+        'openai/gpt-5':{q:'Q A+',fit:'voz ★★★★☆ caro',c:'$5/$20'},
+        'openai/gpt-5-mini':{q:'Q A-',fit:'voz ★★★★☆',c:'$0.5/$2'},
+        'openai/gpt-5.6-sol':{q:'Q A+',fit:'voz Closer ★★★★☆',c:'$5/$20'},
+        'openai/gpt-5.6-terra':{q:'Q A+',fit:'voz Closer ★★★★☆',c:'$5/$20'},
+        'openai/gpt-5.6-luna':{q:'Q A+',fit:'voz Closer ★★★★☆',c:'$5/$20'},
+        'openai/gpt-5.4':{q:'Q A',fit:'voz ★★★★☆',c:'$5/$20'},
+        'anthropic/claude-sonnet-4-20250514':{q:'Q A',fit:'voz ★★★★★ PT ótimo',c:'$3/$15'},
+        'anthropic/claude-5-opus-20250714':{q:'Q A+',fit:'voz Closer ★★★★☆ caro',c:'$15/$75'},
+        'anthropic/claude-4.5-sonnet':{q:'Q A',fit:'voz ★★★★★ PT ótimo',c:'$3/$15'},
+        'anthropic/claude-3.5-sonnet':{q:'Q A-',fit:'voz ★★★★☆',c:'$3/$15'},
+        'anthropic/claude-3-haiku':{q:'Q B',fit:'voz SDR ★★★★☆ barato',c:'$0.25/$1.25'},
+        'anthropic/claude-opus-4-20250514':{q:'Q A+',fit:'voz Closer ★★★★☆ caro',c:'$15/$75'},
+        'anthropic/claude-sonnet-4.5':{q:'Q A',fit:'voz ★★★★★ PT ótimo',c:'$3/$15'},
+        'anthropic/claude-opus-4.5':{q:'Q A+',fit:'voz Closer ★★★★★ melhor PT',c:'$15/$75'},
+        'anthropic/claude-fable-5':{q:'Q A-',fit:'voz SDR ★★★★☆ rápido',c:'$1.5/$7.5'},
+        'anthropic/claude-fable-5-1':{q:'Q A-',fit:'voz SDR ★★★★☆ rápido',c:'$1.5/$7.5'},
+        'anthropic/claude-mythos-5-1':{q:'Q A',fit:'voz ★★★★☆',c:'$3/$15'},
+        'google/gemini-2.5-pro':{q:'Q A-',fit:'voz ★★★★☆',c:'$1.25/$5'},
+        'google/gemini-2.5-flash':{q:'Q B+',fit:'voz SDR ★★★★★ rápido',c:'$0.15/$0.6'},
+        'google/gemini-3.8-flash':{q:'Q B+',fit:'voz SDR ★★★★★ rápido',c:'$0.15/$0.6'},
+        'google/gemini-3-pro':{q:'Q A-',fit:'voz ★★★★☆',c:'$2/$10'},
+        'google/gemini-3.8-flash-cyber':{q:'Q B+',fit:'voz SDR ★★★★☆',c:'$0.3/$1.5'},
+        'muse/muse-spark-1.2':{q:'Q B+',fit:'voz PT ★★★★★ nativo',c:'$0.6/$2.4'},
+        'opencode/muse-spark-1.2':{q:'Q B+',fit:'voz PT ★★★★☆',c:'$0.3/$1.2'},
+        'deepseek/deepseek-v4':{q:'Q B',fit:'voz ★★★☆☆ barato',c:'$0.5/$2'},
+        'deepseek/deepseek-v4-flash':{q:'Q B-',fit:'voz SDR ★★★★☆ rápido',c:'$0.15/$0.6'},
+        'opencode/deepseek-v4':{q:'Q B',fit:'voz ★★★★☆ grátis',c:'$0'},
+        'qwen/qwen-3-235b-a22b':{q:'Q B',fit:'voz ★★★☆☆ barato',c:'$0.5/$2'},
+        'opencode/qwen-3-235b-a22b':{q:'Q B',fit:'voz ★★★★☆ grátis',c:'$0'},
+        'x-ai/grok-4':{q:'Q A-',fit:'voz ★★★☆☆',c:'$2/$10'},
+        'x-ai/grok-4-mini':{q:'Q B+',fit:'voz ★★★☆☆',c:'$0.5/$2'},
+        'ollama/llama3':{q:'Q C',fit:'voz ★★☆☆☆ local lento',c:'$0'},
+        'ollama/mistral':{q:'Q C',fit:'voz ★★☆☆☆ local',c:'$0'}
+    };
+    function annotateModels(){
+        document.querySelectorAll('.model-option').forEach(function(o){
+            var m=o.getAttribute('data-model');
+            if(o.getAttribute('data-annotated'))return;
+            var meta=MODEL_META[m];
+            if(meta){ o.textContent=m+' — '+meta.c+' | '+meta.q+' | '+meta.fit; o.setAttribute('data-annotated','1'); }
+        });
+    }
+    function updateModelFit(model){
+        var meta=MODEL_META[model];
+        var el=document.getElementById('model-fit');
+        if(!el)return;
+        el.textContent=meta?(meta.q+' | '+meta.fit+' | '+meta.c):'Q ? | fit —';
+    }
     function updateCost(model){
         var price=PRICING[model]||{i:0,o:0};
         var tokens=parseInt(document.getElementById('max-tokens').value)||4096;
         var cost=(price.i*tokens/1000+price.o*tokens/1000*0.5)/100;
         document.getElementById('cost-value').textContent='$'+cost.toFixed(4);
+        updateModelFit(model);
     }
     function updateToolDescriptions(input){
         var names=input.value.split(/[\s,]+/).filter(Boolean);
@@ -327,7 +386,7 @@
         c.style.borderColor=n>32000?'var(--red)':n>16000?'var(--amber)':'var(--border)';
         c.style.color=n>32000?'var(--red)':n>16000?'var(--amber)':'var(--text-tertiary)';
     }
-    function selectModel(v){document.getElementById('model-search').value=v;document.getElementById('model-dropdown').classList.remove('open');updateModelProvider(v);}
+    function selectModel(v){document.getElementById('model-search').value=v;document.getElementById('model-dropdown').classList.remove('open');updateModelProvider(v);updateCost(v);}
     function filterModels(i){
         var q=i.value.toLowerCase(),dd=document.getElementById('model-dropdown');dd.classList.add('open');
         document.querySelectorAll('.model-option').forEach(function(o){o.style.display=o.getAttribute('data-model').toLowerCase().includes(q)?'block':'none'});
@@ -366,6 +425,7 @@
         if(dd) dd.addEventListener('mousedown',function(e){e.preventDefault()});
         updateModelProvider(document.getElementById('model-search').value);
         updateCost(document.getElementById('model-search').value);
+        annotateModels();
     });
 
 function toggleTool(el, name) {
