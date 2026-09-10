@@ -233,6 +233,8 @@ services:
       OLLAMA_URL: http://ollama:11434/v1
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
       OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
+      VOICE_LLM_MODEL: ${VOICE_LLM_MODEL:-openai/gpt-4o-mini}
+      AIOS_VOICE_LLM_MODEL: ${AIOS_VOICE_LLM_MODEL:-openai/gpt-4o-mini}
       TTS_WS_URL: ws://voice-tts-stream:8001/tts/ws
       VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-kokoro}
       VOICE_TTS_VOICE: ${VOICE_TTS_VOICE:-ptbr}

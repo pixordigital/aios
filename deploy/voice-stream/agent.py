@@ -19,6 +19,7 @@ AIOS_URL = os.environ.get("AIOS_URL", "http://app:8777").rstrip("/")
 AIOS_KEY = os.environ.get("AIOS_ADMIN_MASTER_KEY", "")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama:11434/v1")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
+VOICE_LLM_MODEL = os.environ.get("VOICE_LLM_MODEL", os.environ.get("AIOS_VOICE_LLM_MODEL", "openai/gpt-4o-mini"))
 TTS_WS_URL = os.environ.get("TTS_WS_URL", "ws://voice-tts-stream:8001/tts/ws")
 TTS_ENGINE = os.environ.get("VOICE_TTS_ENGINE", "kokoro")
 TTS_VOICE_RAW = os.environ.get("VOICE_TTS_VOICE", "ptbr")
@@ -102,7 +103,8 @@ def build_llm():
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         logger.warning("sem ollama nem openrouter — LLM vai falhar, configure OLLAMA_URL")
-    return lk_openai.LLM(model=os.environ.get("VOICE_LLM_MODEL", "openai/gpt-4o-mini"), base_url="https://openrouter.ai/api/v1", api_key=key or "missing")
+    logger.info("voice LLM: %s (VOICE_LLM_MODEL)", VOICE_LLM_MODEL)
+    return lk_openai.LLM(model=VOICE_LLM_MODEL, base_url="https://openrouter.ai/api/v1", api_key=key or "missing")
 
 
 def build_tts():

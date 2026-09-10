@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     livekit_tts_voice: str = "ptbr"
     kokoro_url: str = "http://voice-tts-kokoro:8880"  # Kokoro-FastAPI fallback
     ollama_model: str = "qwen3:8b"
+    voice_llm_model: str = "openai/gpt-4o-mini"  # voice agent LLM: openai/gpt-4o-mini | anthropic/claude-sonnet-4.5 | qwen/qwen-3-235b | ollama/qwen3:8b
 
     registration_enabled: bool = False  # fechar cadastros — home buttons desabilitados
 
