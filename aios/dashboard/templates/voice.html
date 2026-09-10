@@ -218,15 +218,15 @@ function updateVoiceCost(m){
     'openai/gpt-5':0.0125,          // $1.25/$10.00
     'openai/gpt-5-mini':0.0025,     // $0.25/$2.00
     'openai/gpt-5-nano':0.0005,     // $0.05/$0.40
-    'openai/gpt-5.6-sol':0.025,     // $5/$20
+    'openai/gpt-5.6-sol':0.025,     // $5/$30
     'openai/gpt-5.6-terra':0.02,    // $2/$12
-    'openai/gpt-5.6-luna':0.001,    // $0.10/$0.60
+    'openai/gpt-5.6-luna':0.0016,    // $0.20/$1.20 (std), $0.10/$0.60 batch ~$0.0016/req @ 4k tok (batch), $0.20/$1.20 standard
     'openai/gpt-5.6-terra-pro':0.002, // $2/$12
     'openai/gpt-5.4':0.025,         // $5/$20
     'openai/gpt-5.5':0.03,          // $3/$20
-    'openai/gpt-5.6':0.025,
-    'openai/o4':0.05,
-    'openai/o4-mini':0.011,
+    'openai/gpt-5.6':0.025,         // $5/$30
+    'openai/o4':0.05,               // $10/$40
+    'openai/o4-mini':0.011,         // $1.10/$4.40
     'openai/gpt-4o-mini':0.0006,
     'openai/gpt-4o':0.012,
     'openai/gpt-4.1':0.008,
@@ -268,7 +268,7 @@ function updateVoiceCost(m){
     'qwen/qwen-3-235b-a22b':0.005,       // $0.5/$2
     'deepseek/deepseek-v4':0.005,        // $0.5/$2
     'deepseek/deepseek-v4-flash':0.00015, // $0.15/$0.60
-    'deepseek/deepseek-v4-pro':0.005,
+    'deepseek/deepseek-v4-pro':0.000875, // $0.875/$1.74
     'ollama/qwen3:8b':0,
     'ollama/llama3':0,
     'openai/gpt-4o-mini':0.0006,
@@ -300,7 +300,7 @@ var VOICE_FIT={
   'openai/gpt-5-mini':['Fit voz ★★★★☆ — barato + imagem ✓','Q A- | Lat 500ms'],
   'openai/gpt-5.6-sol':['Fit voz Closer ★★★★☆ — melhor reasoning, lento e caro','Q A+ | Lat 2s'],
   'openai/gpt-5.6-terra':['Fit voz Closer ★★★★☆ — reasoning, lento e caro','Q A+ | Lat 2s'],
-  'openai/gpt-5.6-luna':['Fit voz Closer ★★★★☆ — rápido/barato + imagem ✓','Q B+ | Lat 400ms'],
+  'openai/gpt-5.6-luna':['Fit voz SDR ★★★★★ — $0.20/$1.20 std, $0.10/$0.60 batch','Q B+ | Lat 400ms'],
   'openai/gpt-5.6-terra-pro':['Fit voz Closer ★★★★☆ — reasoning, lento e caro','Q A+ | Lat 2s'],
   'openai/gpt-5.4':['Fit voz ★★★★☆ — equilibrado, caro p/ voz','Q A | Lat 1.2s'],
   'openai/gpt-5.5':['Fit voz ★★★★☆ + imagem ✓','Q A | Lat 1s'],
