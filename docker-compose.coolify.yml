@@ -266,7 +266,8 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1", memory: 1536M }
+        # host real: 4 vCPU / 7.6GB RAM — 1.5 CPU acelera warmup/gen sem matar app/worker/litellm
+        limits: { cpus: "1.5", memory: 2G }
   # voice-tts-stream:
   #   build:
   #     context: ./deploy/voice-stream
