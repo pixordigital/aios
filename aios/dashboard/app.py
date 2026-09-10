@@ -626,6 +626,66 @@ async def agent_wizard(request: Request):
     return await _render("wizard.html", request, title="Assistente — Novo Agente", agent_types=AGENT_TYPES)
 
 
+# ─── Voice agents (Kokoro) — 4 passos claros ───
+
+@router.get("/voice", response_class=HTMLResponse)
+async def voice_page(request: Request):
+    return await _render("voice.html", request, title="Voz")
+
+
+@router.post("/voice/preview")
+async def voice_preview(request: Request):
+    # proxy to Kokoro TTS internal: http://voice-tts-kokoro:8880/v1/audio/speech
+    try:
+        body = await request.json()
+        text = (body.get("text") or "Olá")[:500]
+        voice = body.get("voice") or "pm_alex"
+        # map ptbr → pm_alex already in UI, but accept any
+        import httpx
+        from fastapi.responses import Response
+        kokoro = "http://voice-tts-kokoro:8880/v1/audio/speech"
+        # try internal, fallback to localhost:8880 if running outside docker
+        try:
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.post(kokoro, json={"model": "kokoro", "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
+                if r.status_code == 200:
+                    return Response(content=r.content, media_type=r.headers.get("content-type", "audio/mpeg"), headers={"Content-Length": str(len(r.content))})
+        except Exception:
+            pass
+        # fallback: try localhost
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post("http://localhost:8880/v1/audio/speech", json={"model": "kokoro", "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
+            if r.status_code == 200:
+                return Response(content=r.content, media_type=r.headers.get("content-type", "audio/mpeg"))
+        return Response(content=b"", status_code=502)
+    except Exception as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": str(e)[:200]}, status_code=500)
+
+
+@router.post("/voice/create")
+async def voice_create(request: Request, name: str = Form(...), agent_type: str = Form("sdr"), model: str = Form("openai/gpt-4o-mini"), voice: str = Form("pm_alex")):
+    org_id = await _resolve_org_id(request)
+    if agent_type not in ("sdr", "closer", "support"):
+        agent_type = "sdr"
+    # use template 10-section
+    tpl = apply_template(agent_type) if agent_type in TEMPLATES else None
+    system_prompt = tpl.get("system_prompt", "") if tpl else ""
+    llm_config = {"model": model, "temperature": 0.6 if agent_type != "support" else 0.4, "max_tokens": 4096}
+    tools = tpl.get("tools", []) if tpl else []
+    memory_config = tpl.get("memory_config", {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}})
+    # store voice choice in extra_data for voice-stream to fetch
+    extra = {"voice": {"voice_id": voice, "tts_engine": "kokoro", "kokoro_url": "http://voice-tts-kokoro:8880/v1", "llm_model": model}}
+    async with db_session() as db:
+        agent = Agent(org_id=org_id, name=name, agent_type=agent_type, system_prompt=system_prompt, llm_config=llm_config, tools=tools, memory_config=memory_config, extra_data=extra)
+        db.add(agent)
+        await db.flush()
+        from aios.db.models import AgentVersion
+        db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="voice wizard"))
+        await db.commit()
+    return RedirectResponse("/dashboard/agents", status_code=303)
+
+
 @router.get("/agents/{aid}/delete")
 async def agent_delete(request: Request, aid: str):
     org_id = await _org_filter(request)

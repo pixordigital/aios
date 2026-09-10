@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div>
+    <h1>Agentes de Voz</h1>
+    <p class="text-sm text-secondary mt-1">Crie SDR/Closer/Suporte com voz Kokoro — 4 passos claros, sem LiveKit</p>
+  </div>
+  <a href="/dashboard/agents" class="btn btn-ghost">Ver todos os agentes</a>
+</div>
+
+<!-- Progress -->
+<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem" id="voice-progress">
+  <div style="flex:1;height:6px;background:var(--border);border-radius:99px;overflow:hidden"><div id="prog-bar" style="height:100%;width:25%;background:var(--accent);transition:width 0.2s"></div></div>
+  <span class="badge" id="prog-label">1/4 Objetivo</span>
+</div>
+
+<form method="POST" action="/dashboard/voice/create" id="voice-form">
+  <!-- Step 1: Objetivo -->
+  <div class="card mb-3" data-step="1">
+    <h2>1. Objetivo <span class="text-xs text-tertiary">— o que o agente vai fazer</span></h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0.75rem;margin-top:0.75rem">
+      {% set opts = [
+        ("sdr","SDR","Qualifica BANT+GPCT, agenda Closer","BANT+GPCT+H2H","⭐ lead_score"),
+        ("closer","Closer","Negocia SPIN+Challenger+MEDDIC, fecha","MEDDIC+Challenger","💼 calculator"),
+        ("support","Suporte","Resolve com RAG, escala humano","RAG+H2H","🎧 hybrid_search")
+      ] %}
+      {% for val, label, desc, badge, tool in opts %}
+      <label style="cursor:pointer;border:1px solid var(--border);border-radius:var(--radius);padding:0.875rem;background:var(--bg);display:flex;gap:0.75rem;align-items:flex-start" onclick="selectObjective('{{val}}')">
+        <input type="radio" name="agent_type" value="{{val}}" {% if loop.first %}checked{% endif %} style="accent-color:var(--accent);margin-top:0.25rem">
+        <div>
+          <div style="font-weight:600;font-size:0.875rem">{{label}} <span class="badge" style="font-size:0.55rem">{{badge}}</span></div>
+          <div class="text-xs text-secondary" style="margin-top:0.25rem">{{desc}}</div>
+          <div class="text-xs text-tertiary" style="margin-top:0.25rem;font-family:JetBrains Mono,monospace">{{tool}}</div>
+        </div>
+      </label>
+      {% endfor %}
+    </div>
+    <div class="text-xs text-tertiary" style="margin-top:0.5rem">Templates já com 10-seções Vapi + H2H. SDR usa <code>pm_alex</code> pt-BR por padrão.</div>
+  </div>
+
+  <!-- Step 2: LLM -->
+  <div class="card mb-3" data-step="2" style="opacity:0.5">
+    <h2>2. LLM <span class="text-xs text-tertiary">— onde o agente pensa (1 clique em Coolify depois também)</span></h2>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:0.75rem">
+      <div>
+        <label>Modelo (VOICE_LLM_MODEL)</label>
+        <select name="model" id="voice-model" class="input" onchange="updateVoiceCost(this.value)">
+          <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini — rápido/barato $0.15/1M</option>
+          <option value="openai/gpt-4o">openai/gpt-4o — equilibrado $2.5/1M</option>
+          <option value="anthropic/claude-sonnet-4.5">anthropic/claude-sonnet-4.5 — melhor PT $3/1M</option>
+          <option value="qwen/qwen-3-235b-a22b">qwen/qwen-3-235b — custo baixo $0.5/1M</option>
+          <option value="deepseek/deepseek-v4">deepseek/deepseek-v4 — barato $0.5/1M</option>
+          <option value="ollama/qwen3:8b">ollama/qwen3:8b — local, sem custo (precisa ollama Up)</option>
+        </select>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Salvo em <code>AIOS_VOICE_LLM_MODEL</code> + <code>VOICE_LLM_MODEL</code> `docker-compose.coolify.yml:235`. Troca em Coolify → Environment sem rebuild.</div>
+      </div>
+      <div>
+        <label>Custo est.</label>
+        <div class="badge" id="voice-cost" style="font-family:JetBrains Mono,monospace">$0.0006 / req</div>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">4096 tokens</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 3: Voz -->
+  <div class="card mb-3" data-step="3" style="opacity:0.5">
+    <h2>3. Voz Kokoro <span class="text-xs text-tertiary">— 72 vozes, self-hosted 1CPU/1536M, sem taxa por minuto</span></h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:0.75rem">
+      <div>
+        <label>Voz pt-BR (VOICE_TTS_VOICE → pm_alex)</label>
+        <select name="voice" id="voice-select" class="input">
+          <option value="pm_alex" selected>pm_alex — masc pt-BR (padrão ptbr)</option>
+          <option value="pf_dora">pf_dora — fem pt-BR</option>
+          <option value="af_heart">af_heart — fem en (fallback)</option>
+          <option value="af_bella">af_bella — fem en A-</option>
+          <option value="am_adam">am_adam — masc en</option>
+          <option value="bf_emma">bf_emma — fem brit</option>
+        </select>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Mapa <code>ptbr→pm_alex</code> em <code>deploy/voice-stream/agent.py:VOICE_MAP</code>. TTS <code>http://voice-tts-kokoro:8880/v1</code> Custo $0/min.</div>
+      </div>
+      <div>
+        <label>Preview (testa Kokoro ao vivo)</label>
+        <div style="display:flex;gap:0.5rem">
+          <input type="text" id="preview-text" class="input" value="Olá, aqui é da AIOS, como posso ajudar?" style="flex:1">
+          <button type="button" class="btn btn-ghost" onclick="previewVoice()">▶️ Ouvir</button>
+        </div>
+        <audio id="preview-audio" controls style="width:100%;margin-top:0.5rem;display:none"></audio>
+        <div class="text-xs text-tertiary" id="preview-status" style="margin-top:0.25rem"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4: Nome + Criar -->
+  <div class="card mb-3" data-step="4" style="opacity:0.5">
+    <h2>4. Nome e criar <span class="text-xs text-tertiary">— agente já com prompt 10-seções + voz</span></h2>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:0.75rem">
+      <div>
+        <label>Nome do agente</label>
+        <input type="text" name="name" required class="input" placeholder="ex.: SDR Voz Principal" value="SDR Voz">
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button type="submit" class="btn btn-primary w-full">✓ Criar agente de voz</button>
+      </div>
+    </div>
+    <div class="text-xs text-tertiary" style="margin-top:0.5rem">Cria em <code>POST /dashboard/voice/create</code> → <code>apply_template</code> + <code>extra_data.voice={voice, llm}</code>. Depois: <code>/dashboard/teams</code> → adicionar em equipe hierárquica + <code>/dashboard/channels/new</code> voice.</div>
+    <div style="margin-top:0.75rem;padding:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm)">
+      <div style="font-weight:600;font-size:0.8125rem">Checklist pós-criação:</div>
+      <ol style="margin:0.5rem 0 0 1.25rem;font-size:0.8125rem;color:var(--text-secondary)">
+        <li>Equipe → <a href="/dashboard/teams">Criar equipe hierárquica</a> (orquestrador+manager+voz)</li>
+        <li>Canal → <a href="/dashboard/channels/new">Novo canal Voz</a> (selfhosted, Evolution bridge se telefone)</li>
+        <li>Teste → <code>scripts/voice-smoke.sh</code> ou <code>POST /v1/audio/speech</code></li>
+        <li>Grafana → <code>voice_tts_duration p95</code> <code>deploy/grafana-dashboard.json</code></li>
+      </ol>
+    </div>
+  </div>
+</form>
+
+<script>
+let cur=1;
+function selectObjective(v){ document.querySelectorAll('input[name=agent_type]').forEach(r=>r.checked=r.value===v); updateProgress(2); }
+function updateProgress(n){ cur=Math.max(cur,n); document.querySelectorAll('[data-step]').forEach(el=>{ const s=parseInt(el.dataset.step); el.style.opacity=s<=cur?1:0.5; }); document.getElementById('prog-bar').style.width=(cur*25)+'%'; document.getElementById('prog-label').textContent=cur+'/4 '+['Objetivo','LLM','Voz','Criar'][cur-1]; }
+document.getElementById('voice-model').addEventListener('change',()=>updateProgress(3));
+document.getElementById('voice-select').addEventListener('change',()=>updateProgress(4));
+document.getElementById('preview-text').addEventListener('input',()=>updateProgress(4));
+function updateVoiceCost(m){
+  const pr={ 'openai/gpt-4o-mini':0.0006,'openai/gpt-4o':0.012,'anthropic/claude-sonnet-4.5':0.018,'qwen/qwen-3-235b-a22b':0.005,'deepseek/deepseek-v4':0.005,'ollama/qwen3:8b':0 };
+  document.getElementById('voice-cost').textContent='$'+(pr[m]||0.0006).toFixed(4)+' / req';
+}
+async function previewVoice(){
+  const v=document.getElementById('voice-select').value;
+  const t=document.getElementById('preview-text').value||'Olá';
+  const st=document.getElementById('preview-status');
+  const audio=document.getElementById('preview-audio');
+  st.textContent='Gerando... 1CPU ~5s'; audio.style.display='none';
+  try{
+    const r=await fetch('/dashboard/voice/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice:v, text:t})});
+    if(!r.ok){ st.textContent='Erro '+r.status; return; }
+    const blob=await r.blob(); const url=URL.createObjectURL(blob); audio.src=url; audio.style.display='block'; audio.play(); st.textContent='OK '+v+' '+(blob.size/1024).toFixed(0)+'KB';
+  }catch(e){ st.textContent='Erro: '+e; }
+}
+document.getElementById('voice-form').addEventListener('submit',()=>{ updateProgress(4); });
+updateVoiceCost('openai/gpt-4o-mini');
+</script>
+{% endblock %}
