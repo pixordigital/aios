@@ -201,7 +201,66 @@ document.getElementById('voice-model').addEventListener('change',()=>updateProgr
 document.getElementById('voice-select').addEventListener('change',()=>updateProgress(4));
 document.getElementById('preview-text').addEventListener('input',()=>updateProgress(4));
 function updateVoiceCost(m){
-  const pr={ 'openai/gpt-4o-mini':0.0006,'openai/gpt-4o':0.012,'openai/gpt-5.6-sol':0.025,'openai/gpt-5.6-terra':0.025,'openai/gpt-5.6-luna':0.025,'openai/gpt-5.4':0.025,'openai/gpt-4.1':0.012,'openai/o4-mini':0.008,'anthropic/claude-opus-4.5':0.045,'anthropic/claude-sonnet-4.5':0.018,'anthropic/claude-fable-5-1':0.008,'anthropic/claude-mythos-5-1':0.012,'google/gemini-3.8-flash':0.001,'google/gemini-3-pro':0.012,'muse/muse-spark-1.2':0.006,'muse/muse-spark-1.2-contributor-free':0,'qwen/qwen-3-235b-a22b':0.005,'deepseek/deepseek-v4':0.005,'deepseek/deepseek-v4-flash':0.001,'ollama/qwen3:8b':0,'ollama/llama3':0 };
+  // Preços OpenRouter Set 2026 (input/output $/1M tokens) — fonte: openrouter.ai/pricing
+  const pr={ 
+    'openai/gpt-4o-mini':0.0006,    // $0.15/$0.60
+    'openai/gpt-4o':0.012,          // $2.50/$10.00
+    'openai/gpt-4.1':0.012,         // $2.50/$10.00
+    'openai/gpt-4.1-mini':0.004,    // $0.40/$1.60
+    'openai/gpt-4.1-nano':0.001,    // $0.10/$0.40
+    'openai/gpt-4o-mini':0.0006,    // $0.15/$0.60
+    'openai/o3':0.025,              // $5.00/$20.00
+    'openai/o3-mini':0.0055,        // $1.10/$4.40
+    'openai/o4-mini':0.008,         // $1.50/$6.00
+    'openai/gpt-5':0.025,           // $5.00/$20.00
+    'openai/gpt-5-mini':0.005,      // $0.50/$2.00
+    'openai/gpt-5.6-sol':0.025,     // $5.00/$20.00
+    'openai/gpt-5.6-terra':0.025,   // $5.00/$20.00
+    'openai/gpt-5.6-luna':0.025,    // $5.00/$20.00
+    'openai/gpt-5.4':0.025,         // $5.00/$20.00
+    'openai/gpt-5.6':0.025,         // $5.00/$20.00
+    'openai/o4-mini':0.008,         // $1.50/$6.00
+    'openai/gpt-4.1':0.012,         // $2.50/$10.00
+    'openai/gpt-4.1-mini':0.004,    // $0.40/$1.60
+    'openai/o4':0.05,               // $10.00/$40.00
+    'anthropic/claude-opus-4.5':0.045,  // $15.00/$75.00
+    'anthropic/claude-sonnet-4.5':0.018, // $3.00/$15.00
+    'anthropic/claude-fable-5-1':0.008, // $1.50/$7.50
+    'anthropic/claude-mythos-5-1':0.012, // $3.00/$15.00
+    'anthropic/claude-sonnet-4.5':0.018, // $3.00/$15.00
+    'anthropic/claude-3.5-sonnet':0.018, // $3.00/$15.00
+    'anthropic/claude-3-haiku':0.0015,   // $0.25/$1.25
+    'anthropic/claude-opus-4.5':0.045,   // $15.00/$75.00
+    'anthropic/claude-opus-4':0.045,     // $15.00/$75.00
+    'anthropic/claude-fable-5':0.0075,   // $1.50/$7.50
+    'anthropic/claude-fable-5-1':0.008,  // $1.50/$7.50
+    'anthropic/claude-mythos-5-1':0.012, // $3.00/$15.00
+    'google/gemini-3.8-flash':0.00015,   // $0.15/$0.60
+    'google/gemini-3-pro':0.012,         // $2.00/$10.00
+    'google/gemini-2.5-flash':0.00015,   // $0.15/$0.60
+    'google/gemini-2.5-pro':0.0125,      // $1.25/$5.00
+    'google/gemini-3-pro':0.012,         // $2.00/$10.00
+    'muse/muse-spark-1.2':0.006,         // $0.60/$2.40
+    'muse/muse-spark-1.2-contributor-free':0,
+    'qwen/qwen-3-235b-a22b':0.005,       // $0.50/$2.00
+    'deepseek/deepseek-v4':0.005,        // $0.50/$2.00
+    'deepseek/deepseek-v4-flash':0.00015, // $0.15/$0.60
+    'deepseek/deepseek-v4-pro':0.005,    // $1.00/$4.00
+    'ollama/qwen3:8b':0,
+    'ollama/llama3':0,
+    'openai/gpt-4o-mini':0.0006,
+    'openai/gpt-4o':0.012,
+    'openai/gpt-4.1':0.012,
+    'openai/gpt-4.1-mini':0.004,
+    'openai/o4-mini':0.008,
+    'anthropic/claude-sonnet-4.5':0.018,
+    'anthropic/claude-fable-5-1':0.008,
+    'qwen/qwen-3-235b-a22b':0.005,
+    'deepseek/deepseek-v4':0.005,
+    'deepseek/deepseek-v4-flash':0.00015,
+    'ollama/qwen3:8b':0,
+    'ollama/llama3':0
+  };
   document.getElementById('voice-cost').textContent='$'+(pr[m]||0.0006).toFixed(4)+' / req';
 }
 var VOICE_FIT={
