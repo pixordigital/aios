@@ -260,6 +260,15 @@
             scrollBeyondLastLine:false,
             padding:{top:10,bottom:10}
         });
+        // Sync theme when CSS variables change (e.g. dark/light mode toggle)
+        if(!window._monacoThemeSynced){
+            window._monacoThemeSynced=true;
+            new MutationObserver(function(){
+                if(document.documentElement){
+                    monaco.editor.setTheme('aios-dark');
+                }
+            }).observe(document.documentElement,{attributes:true,attributeFilter:['style']});
+        }
         _monacoEditor.onDidChangeModelContent(function(){
             var v=_monacoEditor.getValue();
             ta.value=v;
