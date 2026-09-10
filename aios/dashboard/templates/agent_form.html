@@ -238,8 +238,11 @@
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
 <script>
     var _monacoEditor=null, _monacoReady=false;
-    require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'}});
-    require(['vs/editor/editor.main'], function(){
+    function _showFallbackPrompt(){ var ta=document.getElementById('prompt-input'); if(ta){ ta.style.display='block'; ta.style.minHeight='340px'; } var c=document.getElementById('monaco-prompt'); if(c){ c.style.display='none'; } var h=document.getElementById('editor-hint'); if(h){ h.textContent='Editor simples (Monaco offline) — digite aqui'; } }
+    var _monacoOK=(typeof require!=='undefined');
+    if(!_monacoOK){ _showFallbackPrompt(); }
+    if(_monacoOK){ require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'}}); }
+    if(_monacoOK){ require(['vs/editor/editor.main'], function(){
         _monacoReady=true;
         var ta=document.getElementById('prompt-input');
         var container=document.getElementById('monaco-prompt');
@@ -271,6 +274,8 @@
         window.addEventListener('resize', function(){ _monacoEditor.layout(); });
         document.querySelector('form').addEventListener('submit', function(){ ta.value=_monacoEditor.getValue(); });
     });
+    } /* _monacoOK */
+    setTimeout(function(){ if(!_monacoReady){ _showFallbackPrompt(); } }, 8000);
     function insertSnippet(t){
         if(_monacoEditor){ var s=_monacoEditor.getSelection(); _monacoEditor.executeEdits('snippet',{edits:[{range:s, text:( _monacoEditor.getValue()?'\n\n':'')+t}]}); _monacoEditor.focus(); }
         else { var ta=document.getElementById('prompt-input'); ta.value+=(ta.value?'\n\n':'')+t; updateTokenCount(ta); }
@@ -286,7 +291,8 @@
             var v=(_monacoEditor? _monacoEditor.getValue(): document.getElementById('prompt-input').value)||'';
             if(!v.trim() || v.trim().length<20){ e.preventDefault(); alert('Prompt muito curto (min 20 caracteres).'); return false; }
             if(v.length>100000){ e.preventDefault(); alert('Prompt excede 100k.'); return false; }
-            if(v.toLowerCase().indexOf('portugu')<0) { if(!confirm('Prompt sem "português" — confirmar?')){ e.preventDefault(); return false; } }
+            var _vl=v.toLowerCase();
+            if(_vl.indexOf('portugu')<0 && _vl.indexOf('pt-br')<0 && _vl.indexOf('pt br')<0 && _vl.indexOf('ptbr')<0) { if(!confirm('Prompt sem português/PT-BR — confirmar?')){ e.preventDefault(); return false; } }
         });
     })();
 

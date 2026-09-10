@@ -166,6 +166,10 @@
         <button type="submit" class="btn btn-primary w-full">✓ Criar agente de voz</button>
       </div>
     </div>
+    <div style="margin-top:0.75rem">
+      <label>Instruções extras (opcional) — anexadas ao prompt do template</label>
+      <textarea name="extra_prompt" class="input" rows="3" placeholder="ex.: Sempre mencione a promoção de setembro, fale devagar, chame o lead pelo nome"></textarea>
+    </div>
     <div class="text-xs text-tertiary" style="margin-top:0.5rem">Cria em <code>POST /dashboard/voice/create</code> → <code>apply_template</code> + <code>extra_data.voice={voice, llm}</code>. Depois: <code>/dashboard/teams</code> → adicionar em equipe hierárquica + <code>/dashboard/channels/new</code> voice.</div>
     <div style="margin-top:0.75rem;padding:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm)">
       <div style="font-weight:600;font-size:0.8125rem">Checklist pós-criação:</div>

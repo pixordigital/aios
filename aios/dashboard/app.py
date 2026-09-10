@@ -665,13 +665,15 @@ async def voice_preview(request: Request):
 
 
 @router.post("/voice/create")
-async def voice_create(request: Request, name: str = Form(...), agent_type: str = Form("sdr"), model: str = Form("openai/gpt-4o-mini"), voice: str = Form("pm_alex"), tts_model: str = Form("kokoro")):
+async def voice_create(request: Request, name: str = Form(...), agent_type: str = Form("sdr"), model: str = Form("openai/gpt-4o-mini"), voice: str = Form("pm_alex"), tts_model: str = Form("kokoro"), extra_prompt: str = Form("")):
     org_id = await _resolve_org_id(request)
     if agent_type not in ("sdr", "closer", "support"):
         agent_type = "sdr"
     # use template 10-section
     tpl = apply_template(agent_type) if agent_type in TEMPLATES else None
     system_prompt = tpl.get("system_prompt", "") if tpl else ""
+    if extra_prompt.strip():
+        system_prompt = (system_prompt.rstrip() + "\n\n[Instruções extras do usuário]\n" + extra_prompt.strip())
     llm_config = {"model": model, "temperature": 0.6 if agent_type != "support" else 0.4, "max_tokens": 4096}
     tools = tpl.get("tools", []) if tpl else []
     memory_config = tpl.get("memory_config", {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}})
