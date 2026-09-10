@@ -91,10 +91,23 @@
 
   <!-- Step 3: Voz -->
   <div class="card mb-3" data-step="3" style="opacity:0.5">
-    <h2>3. Voz Kokoro <span class="text-xs text-tertiary">— 72 vozes, self-hosted 1CPU/1536M, sem taxa por minuto</span></h2>
+    <h2>3. Voz <span class="text-xs text-tertiary">— TTS engine + voz, 72 Kokoro self-hosted 1CPU/1536M $0/min</span></h2>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:0.75rem">
       <div>
-        <label>Voz pt-BR (VOICE_TTS_VOICE → pm_alex)</label>
+        <label>TTS engine (modelo)</label>
+        <select name="tts_model" id="tts-model" class="input">
+          <option value="kokoro" selected>kokoro — self-hosted 82M $0/min (padrão)</option>
+          <option value="tts-1">tts-1 — OpenAI $15/1M</option>
+          <option value="tts-1-hd">tts-1-hd — OpenAI HD $30/1M</option>
+          <option value="gpt-4o-mini-tts">gpt-4o-mini-tts — OpenAI $15/1M</option>
+          <option value="eleven_turbo_v2">eleven_turbo_v2 — ElevenLabs $30/1M</option>
+          <option value="eleven_multilingual_v2">eleven_multilingual_v2 — ElevenLabs multi $30/1M</option>
+          <option value="cartesia/sonic-3">cartesia/sonic-3 — Cartesia $20/1M</option>
+        </select>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Kokoro `http://voice-tts-kokoro:8880/v1` 72 vozes. Cloud via `AIOS_ELEVENLABS_API_KEY`.</div>
+      </div>
+      <div>
+        <label>Voz (VOICE_TTS_VOICE → pm_alex)</label>
         <select name="voice" id="voice-select" class="input">
           <option value="pm_alex" selected>pm_alex — masc pt-BR (padrão ptbr)</option>
           <option value="pf_dora">pf_dora — fem pt-BR</option>
@@ -102,8 +115,11 @@
           <option value="af_bella">af_bella — fem en A-</option>
           <option value="am_adam">am_adam — masc en</option>
           <option value="bf_emma">bf_emma — fem brit</option>
+          <option value="af_sarah">af_sarah — fem en</option>
+          <option value="am_onyx">am_onyx — masc en</option>
+          <option value="jf_alpha">jf_alpha — fem jp</option>
         </select>
-        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Mapa <code>ptbr→pm_alex</code> em <code>deploy/voice-stream/agent.py:VOICE_MAP</code>. TTS <code>http://voice-tts-kokoro:8880/v1</code> Custo $0/min.</div>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Mapa <code>ptbr→pm_alex</code> `deploy/voice-stream/agent.py:VOICE_MAP`.</div>
       </div>
       <div>
         <label>Preview (testa Kokoro ao vivo)</label>
@@ -155,14 +171,15 @@ function updateVoiceCost(m){
 }
 async function previewVoice(){
   const v=document.getElementById('voice-select').value;
+  const m=document.getElementById('tts-model').value;
   const t=document.getElementById('preview-text').value||'Olá';
   const st=document.getElementById('preview-status');
   const audio=document.getElementById('preview-audio');
-  st.textContent='Gerando... 1CPU ~5s'; audio.style.display='none';
+  st.textContent='Gerando... '+m+' 1CPU ~5s'; audio.style.display='none';
   try{
-    const r=await fetch('/dashboard/voice/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice:v, text:t})});
+    const r=await fetch('/dashboard/voice/preview', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice:v, text:t, tts_model:m})});
     if(!r.ok){ st.textContent='Erro '+r.status; return; }
-    const blob=await r.blob(); const url=URL.createObjectURL(blob); audio.src=url; audio.style.display='block'; audio.play(); st.textContent='OK '+v+' '+(blob.size/1024).toFixed(0)+'KB';
+    const blob=await r.blob(); const url=URL.createObjectURL(blob); audio.src=url; audio.style.display='block'; audio.play(); st.textContent='OK '+m+'/'+v+' '+(blob.size/1024).toFixed(0)+'KB';
   }catch(e){ st.textContent='Erro: '+e; }
 }
 document.getElementById('voice-form').addEventListener('submit',()=>{ updateProgress(4); });

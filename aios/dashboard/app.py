@@ -640,6 +640,7 @@ async def voice_preview(request: Request):
         body = await request.json()
         text = (body.get("text") or "Olá")[:500]
         voice = body.get("voice") or "pm_alex"
+        tts_model = body.get("tts_model") or body.get("model") or "kokoro"
         # map ptbr → pm_alex already in UI, but accept any
         import httpx
         from fastapi.responses import Response
@@ -647,14 +648,14 @@ async def voice_preview(request: Request):
         # try internal, fallback to localhost:8880 if running outside docker
         try:
             async with httpx.AsyncClient(timeout=30) as c:
-                r = await c.post(kokoro, json={"model": "kokoro", "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
+                r = await c.post(kokoro, json={"model": tts_model, "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
                 if r.status_code == 200:
                     return Response(content=r.content, media_type=r.headers.get("content-type", "audio/mpeg"), headers={"Content-Length": str(len(r.content))})
         except Exception:
             pass
         # fallback: try localhost
         async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.post("http://localhost:8880/v1/audio/speech", json={"model": "kokoro", "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
+            r = await c.post("http://localhost:8880/v1/audio/speech", json={"model": tts_model, "input": text, "voice": voice}, headers={"Content-Type": "application/json"})
             if r.status_code == 200:
                 return Response(content=r.content, media_type=r.headers.get("content-type", "audio/mpeg"))
         return Response(content=b"", status_code=502)
@@ -664,7 +665,7 @@ async def voice_preview(request: Request):
 
 
 @router.post("/voice/create")
-async def voice_create(request: Request, name: str = Form(...), agent_type: str = Form("sdr"), model: str = Form("openai/gpt-4o-mini"), voice: str = Form("pm_alex")):
+async def voice_create(request: Request, name: str = Form(...), agent_type: str = Form("sdr"), model: str = Form("openai/gpt-4o-mini"), voice: str = Form("pm_alex"), tts_model: str = Form("kokoro")):
     org_id = await _resolve_org_id(request)
     if agent_type not in ("sdr", "closer", "support"):
         agent_type = "sdr"
@@ -675,7 +676,9 @@ async def voice_create(request: Request, name: str = Form(...), agent_type: str 
     tools = tpl.get("tools", []) if tpl else []
     memory_config = tpl.get("memory_config", {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}})
     # store voice choice in extra_data for voice-stream to fetch
-    extra = {"voice": {"voice_id": voice, "tts_engine": "kokoro", "kokoro_url": "http://voice-tts-kokoro:8880/v1", "llm_model": model}}
+    # tts_model: kokoro | tts-1 | tts-1-hd | gpt-4o-mini-tts | eleven_turbo_v2 | eleven_multilingual_v2 | cartesia/sonic-3
+    tts_engine = "kokoro" if tts_model in ("kokoro","tts-1","tts-1-hd","gpt-4o-mini-tts") else ("elevenlabs" if "eleven" in tts_model else "cartesia" if "cartesia" in tts_model else "kokoro")
+    extra = {"voice": {"voice_id": voice, "tts_engine": tts_engine, "tts_model": tts_model, "kokoro_url": "http://voice-tts-kokoro:8880/v1", "llm_model": model}}
     async with db_session() as db:
         agent = Agent(org_id=org_id, name=name, agent_type=agent_type, system_prompt=system_prompt, llm_config=llm_config, tools=tools, memory_config=memory_config, extra_data=extra)
         db.add(agent)
