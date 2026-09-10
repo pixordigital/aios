@@ -201,60 +201,83 @@ document.getElementById('voice-model').addEventListener('change',()=>updateProgr
 document.getElementById('voice-select').addEventListener('change',()=>updateProgress(4));
 document.getElementById('preview-text').addEventListener('input',()=>updateProgress(4));
 function updateVoiceCost(m){
-  // Preços OpenRouter Set 2026 (input/output $/1M tokens) — fonte: openrouter.ai/pricing
+  // Preços OpenRouter Set 2026 (input/output $/1M tokens) — fontes: openai.com/pricing, anthropic.com/pricing, ai.google.dev/pricing, openrouter.ai/pricing
   const pr={ 
+    // OpenAI (oficial + OpenRouter)
     'openai/gpt-4o-mini':0.0006,    // $0.15/$0.60
-    'openai/gpt-4o':0.012,          // $2.50/$10.00
-    'openai/gpt-4.1':0.012,         // $2.50/$10.00
+    'openai/gpt-4o':0.012,          // $2.50/$10.00 (legacy)
+    'openai/gpt-4.1':0.008,         // $2.00/$8.00 (flagship)
     'openai/gpt-4.1-mini':0.004,    // $0.40/$1.60
     'openai/gpt-4.1-nano':0.001,    // $0.10/$0.40
     'openai/gpt-4o-mini':0.0006,    // $0.15/$0.60
-    'openai/o3':0.025,              // $5.00/$20.00
-    'openai/o3-mini':0.0055,        // $1.10/$4.40
-    'openai/o4-mini':0.008,         // $1.50/$6.00
-    'openai/gpt-5':0.025,           // $5.00/$20.00
-    'openai/gpt-5-mini':0.005,      // $0.50/$2.00
-    'openai/gpt-5.6-sol':0.025,     // $5.00/$20.00
-    'openai/gpt-5.6-terra':0.025,   // $5.00/$20.00
-    'openai/gpt-5.6-luna':0.025,    // $5.00/$20.00
-    'openai/gpt-5.4':0.025,         // $5.00/$20.00
-    'openai/gpt-5.6':0.025,         // $5.00/$20.00
-    'openai/o4-mini':0.008,         // $1.50/$6.00
-    'openai/gpt-4.1':0.012,         // $2.50/$10.00
-    'openai/gpt-4.1-mini':0.004,    // $0.40/$1.60
-    'openai/o4':0.05,               // $10.00/$40.00
-    'anthropic/claude-opus-4.5':0.045,  // $15.00/$75.00
-    'anthropic/claude-sonnet-4.5':0.018, // $3.00/$15.00
-    'anthropic/claude-fable-5-1':0.008, // $1.50/$7.50
-    'anthropic/claude-mythos-5-1':0.012, // $3.00/$15.00
-    'anthropic/claude-sonnet-4.5':0.018, // $3.00/$15.00
-    'anthropic/claude-3.5-sonnet':0.018, // $3.00/$15.00
-    'anthropic/claude-3-haiku':0.0015,   // $0.25/$1.25
-    'anthropic/claude-opus-4.5':0.045,   // $15.00/$75.00
-    'anthropic/claude-opus-4':0.045,     // $15.00/$75.00
-    'anthropic/claude-fable-5':0.0075,   // $1.50/$7.50
-    'anthropic/claude-fable-5-1':0.008,  // $1.50/$7.50
-    'anthropic/claude-mythos-5-1':0.012, // $3.00/$15.00
-    'google/gemini-3.8-flash':0.00015,   // $0.15/$0.60
-    'google/gemini-3-pro':0.012,         // $2.00/$10.00
-    'google/gemini-2.5-flash':0.00015,   // $0.15/$0.60
-    'google/gemini-2.5-pro':0.0125,      // $1.25/$5.00
-    'google/gemini-3-pro':0.012,         // $2.00/$10.00
-    'muse/muse-spark-1.2':0.006,         // $0.60/$2.40
+    'openai/gpt-4o':0.012,          // $2.50/$10.00 (legacy)
+    'openai/o3':0.04,               // $10/$40 (reasoning)
+    'openai/o3-mini':0.011,         // $1.10/$4.40
+    'openai/o4':0.05,               // $10/$40
+    'openai/o4-mini':0.011,         // $1.10/$4.40
+    'openai/gpt-5':0.0125,          // $1.25/$10.00
+    'openai/gpt-5-mini':0.0025,     // $0.25/$2.00
+    'openai/gpt-5-nano':0.0005,     // $0.05/$0.40
+    'openai/gpt-5.6-sol':0.025,     // $5/$20
+    'openai/gpt-5.6-terra':0.02,    // $2/$12
+    'openai/gpt-5.6-luna':0.001,    // $0.10/$0.60
+    'openai/gpt-5.6-terra-pro':0.002, // $2/$12
+    'openai/gpt-5.4':0.025,         // $5/$20
+    'openai/gpt-5.5':0.03,          // $3/$20
+    'openai/gpt-5.6':0.025,
+    'openai/o4':0.05,
+    'openai/o4-mini':0.011,
+    'openai/gpt-4o-mini':0.0006,
+    'openai/gpt-4o':0.012,
+    'openai/gpt-4.1':0.008,
+    'openai/gpt-4.1-mini':0.004,
+    'openai/o4-mini':0.011,
+    // Anthropic (oficial + OpenRouter)
+    'anthropic/claude-opus-4.5':0.025,   // $5/$25
+    'anthropic/claude-opus-4.6':0.025,   // $5/$25
+    'anthropic/claude-opus-4.7':0.025,   // $5/$25
+    'anthropic/claude-sonnet-4.5':0.018, // $3/$15
+    'anthropic/claude-sonnet-4.6':0.018, // $3/$15
+    'anthropic/claude-sonnet-5':0.012,   // $2/$10 (intro até 31/08/2026, depois $3/$15)
+    'anthropic/claude-fable-5-1':0.0075, // $1.5/$7.5
+    'anthropic/claude-fable-5':0.0075,   // $1.5/$7.5
+    'anthropic/claude-mythos-5-1':0.012, // $3/$15
+    'anthropic/claude-sonnet-4.5':0.018,
+    'anthropic/claude-3.5-sonnet':0.018,
+    'anthropic/claude-3-haiku':0.0008,   // $0.8/$1.6
+    'anthropic/claude-opus-4.5':0.025,
+    'anthropic/claude-opus-4':0.025,
+    'anthropic/claude-fable-5':0.0075,
+    'anthropic/claude-fable-5-1':0.0075,
+    'anthropic/claude-mythos-5-1':0.012,
+    'anthropic/claude-haiku-4.5':0.0005, // $1/$5
+    'anthropic/claude-3.5-sonnet':0.018,
+    // Google (oficial + OpenRouter)
+    'google/gemini-2.5-flash':0.0003,    // $0.30/$2.50
+    'google/gemini-2.5-flash-lite':0.0001, // $0.10/$0.40
+    'google/gemini-2.5-pro':0.005,       // $1.25/$10 (<=200K), $2.5/$15 (>200K)
+    'google/gemini-3.8-flash':0.0003,    // $0.30/$2.50
+    'google/gemini-3-pro':0.012,         // $2/$12
+    'google/gemini-3.8-flash':0.0003,
+    'google/gemini-3-pro':0.012,
+    'google/gemini-2.5-flash':0.0003,
+    'google/gemini-2.5-flash-lite':0.0001, // $0.10/$0.40
+    'google/gemini-2.5-pro':0.005,
+    'muse/muse-spark-1.2':0.006,         // $0.60/$2.40 (PT nativo)
     'muse/muse-spark-1.2-contributor-free':0,
-    'qwen/qwen-3-235b-a22b':0.005,       // $0.50/$2.00
-    'deepseek/deepseek-v4':0.005,        // $0.50/$2.00
+    'qwen/qwen-3-235b-a22b':0.005,       // $0.5/$2
+    'deepseek/deepseek-v4':0.005,        // $0.5/$2
     'deepseek/deepseek-v4-flash':0.00015, // $0.15/$0.60
-    'deepseek/deepseek-v4-pro':0.005,    // $1.00/$4.00
+    'deepseek/deepseek-v4-pro':0.005,
     'ollama/qwen3:8b':0,
     'ollama/llama3':0,
     'openai/gpt-4o-mini':0.0006,
     'openai/gpt-4o':0.012,
-    'openai/gpt-4.1':0.012,
+    'openai/gpt-4.1':0.008,
     'openai/gpt-4.1-mini':0.004,
-    'openai/o4-mini':0.008,
+    'openai/o4-mini':0.011,
     'anthropic/claude-sonnet-4.5':0.018,
-    'anthropic/claude-fable-5-1':0.008,
+    'anthropic/claude-fable-5-1':0.0075,
     'qwen/qwen-3-235b-a22b':0.005,
     'deepseek/deepseek-v4':0.005,
     'deepseek/deepseek-v4-flash':0.00015,
