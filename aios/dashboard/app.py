@@ -675,12 +675,15 @@ async def voice_create(request: Request, name: str = Form(...), agent_type: str 
     llm_config = {"model": model, "temperature": 0.6 if agent_type != "support" else 0.4, "max_tokens": 4096}
     tools = tpl.get("tools", []) if tpl else []
     memory_config = tpl.get("memory_config", {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}})
-    # store voice choice in extra_data for voice-stream to fetch
+    # store voice choice in governance_config for voice-stream to fetch (Agent has no extra_data)
     # tts_model: kokoro | tts-1 | tts-1-hd | gpt-4o-mini-tts | eleven_turbo_v2 | eleven_multilingual_v2 | cartesia/sonic-3
-    tts_engine = "kokoro" if tts_model in ("kokoro","tts-1","tts-1-hd","gpt-4o-mini-tts") else ("elevenlabs" if "eleven" in tts_model else "cartesia" if "cartesia" in tts_model else "kokoro")
-    extra = {"voice": {"voice_id": voice, "tts_engine": tts_engine, "tts_model": tts_model, "kokoro_url": "http://voice-tts-kokoro:8880/v1", "llm_model": model}}
+    tts_engine = "kokoro" if tts_model in ("kokoro","kokoro-int8","piper","xtts","tts-1","tts-1-hd","gpt-4o-mini-tts","gpt-4o-tts","gpt-4o-tts-mini") else ("elevenlabs" if "eleven" in tts_model else "cartesia" if "cartesia" in tts_model else "kokoro")
+    voice_cfg = {"voice": {"voice_id": voice, "tts_engine": tts_engine, "tts_model": tts_model, "kokoro_url": "http://voice-tts-kokoro:8880/v1", "llm_model": model}}
+    # merge with existing governance_config if any
+    gov = dict(tpl.get("governance_config", {}) if tpl else {})
+    gov.update(voice_cfg)
     async with db_session() as db:
-        agent = Agent(org_id=org_id, name=name, agent_type=agent_type, system_prompt=system_prompt, llm_config=llm_config, tools=tools, memory_config=memory_config, extra_data=extra)
+        agent = Agent(org_id=org_id, name=name, agent_type=agent_type, system_prompt=system_prompt, llm_config=llm_config, tools=tools, memory_config=memory_config, governance_config=gov)
         db.add(agent)
         await db.flush()
         from aios.db.models import AgentVersion
