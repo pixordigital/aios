@@ -38,6 +38,32 @@
 </div>
 
 <div class="card mb-4">
+    <h2 class="mb-2">White-label (Enterprise)</h2>
+    <div class="flex-center gap-2 flex-wrap">
+        {% if org.white_label %}
+        <span class="badge" style="border-color:var(--green);color:var(--green)">Ativado — sem branding AIOS</span>
+        <a href="/dashboard/admin/orgs/{{ org.id }}/white-label-toggle" class="btn btn-ghost btn-sm" style="color:var(--amber)">Desativar</a>
+        {% else %}
+        <span class="badge" style="border-color:var(--amber);color:var(--amber)">Desativado — com branding AIOS</span>
+        <a href="/dashboard/admin/orgs/{{ org.id }}/white-label-toggle" class="btn btn-ghost btn-sm" style="color:var(--green)">Ativar</a>
+        {% endif %}
+    </div>
+    <p class="text-xs text-tertiary mt-2">Remove "Powered by AIOS" do rodapé do dashboard. Requer plano Enterprise.</p>
+</div>
+
+<div class="card mb-4">
+    <h2 class="mb-2">Domínio Customizado (White-label)</h2>
+    <form method="POST" action="/dashboard/admin/orgs/{{ org.id }}/custom-domain" class="flex-center gap-2 flex-wrap">
+        <input type="text" name="custom_domain" class="input" placeholder="voz.seudominio.com" value="{{ org.custom_domain or '' }}" style="flex:1;min-width:200px">
+        <button type="submit" class="btn btn-primary btn-sm">Salvar</button>
+        {% if org.custom_domain %}
+        <a href="/dashboard/admin/orgs/{{ org.id }}/custom-domain?clear=1" class="btn btn-ghost btn-sm" style="color:var(--red)">Limpar</a>
+        {% endif %}
+    </form>
+    <p class="text-xs text-tertiary mt-2">Configure DNS CNAME para o domínio apontar para este host. SSL automático via Coolify.</p>
+</div>
+
+<div class="card mb-4">
     <h2 class="mb-2">Usuários ({{ users|length }})</h2>
     <div class="flex-col gap-1">
         {% for u in users %}

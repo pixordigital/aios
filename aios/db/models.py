@@ -36,6 +36,14 @@ class Organization(Base, TimestampMixin):
     slug: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    # White-label: remove "Powered by AIOS" branding, custom domain support
+    white_label: Mapped[bool] = mapped_column(default=False)
+    custom_domain: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
+    # Tamper/license tracking (Control Plane)
+    tamper_score: Mapped[int] = mapped_column(default=0)
+    license_status: Mapped[str] = mapped_column(String(20), default="active")
+    suspended_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
     users = relationship("User", back_populates="organization")
     agents = relationship("Agent", back_populates="organization")

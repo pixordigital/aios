@@ -215,6 +215,19 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
     if not settings.registration_enabled:
         raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
     _validate_password(body.password)
+    # blacklist check (email/domain)
+    try:
+        email_l = body.email.lower().strip()
+        domain = email_l.split("@")[1] if "@" in email_l else ""
+        # check control plane blacklist table (if exists)
+        from sqlalchemy import text
+        hit = await db.execute(text("SELECT 1 FROM blacklist WHERE email=:e OR domain=:d LIMIT 1"), {"e": email_l, "d": domain})
+        if hit.first():
+            raise HTTPException(403, "Cadastro bloqueado — entre em contato com suporte")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():

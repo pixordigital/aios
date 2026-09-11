@@ -61,9 +61,44 @@ class CRMTool(BaseTool):
             "notes": notes[:1000],
             "source": "aios_sdr",
         }
+        internal_id = None
+        # ── 1-click presets: Pipedrive / Zendesk / Astrea (Projuris) ──
+        # Env: PIPEDRIVE_API_KEY + PIPEDRIVE_DOMAIN, ZENDESK_SUBDOMAIN+ZENDESK_EMAIL+ZENDESK_API_KEY, ASTREA_WEBHOOK_URL
+        try:
+            pipedrive_key = os.getenv("PIPEDRIVE_API_KEY") or os.getenv("AIOS_PIPEDRIVE_API_KEY", "")
+            pipedrive_domain = os.getenv("PIPEDRIVE_DOMAIN") or os.getenv("AIOS_PIPEDRIVE_DOMAIN", "api")
+            if pipedrive_key:
+                async with httpx.AsyncClient(timeout=15) as c:
+                    r = await c.post(
+                        f"https://{pipedrive_domain}.pipedrive.com/api/v1/deals?api_token={pipedrive_key}",
+                        json={"title": f"{lead_name} - {company}", "value": value, "currency": "BRL", "status": "open", "visible_to": 3},
+                    )
+                    if r.status_code < 300:
+                        return {"ok": True, "provider": "pipedrive", "deal_id": r.json().get("data", {}).get("id"), "internal_id": internal_id, "payload": payload}
+                    logger.warning("Pipedrive create failed %s %s", r.status_code, r.text[:500])
+            zendesk_sub = os.getenv("ZENDESK_SUBDOMAIN") or os.getenv("AIOS_ZENDESK_SUBDOMAIN", "")
+            zendesk_email = os.getenv("ZENDESK_EMAIL") or os.getenv("AIOS_ZENDESK_EMAIL", "")
+            zendesk_key = os.getenv("ZENDESK_API_KEY") or os.getenv("AIOS_ZENDESK_API_KEY", "")
+            if zendesk_sub and zendesk_key and zendesk_email:
+                async with httpx.AsyncClient(timeout=15) as c:
+                    r = await c.post(
+                        f"https://{zendesk_sub}.zendesk.com/api/v2/tickets",
+                        json={"ticket": {"subject": f"Lead {lead_name} - {company}", "comment": {"body": notes[:1000]}, "requester": {"name": lead_name, "email": lead_email}, "priority": "normal"}},
+                        auth=(f"{zendesk_email}/token", zendesk_key),
+                    )
+                    if r.status_code < 300:
+                        return {"ok": True, "provider": "zendesk", "deal_id": r.json().get("ticket", {}).get("id"), "internal_id": internal_id, "payload": payload}
+                    logger.warning("Zendesk create failed %s %s", r.status_code, r.text[:500])
+            astrea_hook = os.getenv("ASTREA_WEBHOOK_URL") or os.getenv("AIOS_ASTRA_WEBHOOK_URL", "") or os.getenv("AIOS_ASTREA_WEBHOOK_URL", "")
+            if astrea_hook:
+                async with httpx.AsyncClient(timeout=15) as c:
+                    r = await c.post(astrea_hook, json={"nome": lead_name, "email": lead_email, "empresa": company, "valor": value, "observacoes": notes[:1000], "origem": "AIOS"})
+                    if r.status_code < 300:
+                        return {"ok": True, "provider": "astrea", "deal_id": f"astrea_{lead_email}", "internal_id": internal_id, "payload": payload}
+        except Exception as e:
+            logger.warning("CRM preset error %s", e)
 
         # 1. Sempre cria no CRM interno (kanban) — 100% IA
-        internal_id = None
         try:
             from aios.db.engine import async_session
             from aios.db.models import CrmDeal

@@ -1,9 +1,11 @@
-"""Lightweight observability — trace_id, LLM call tracking, metrics.
+"""Lightweight observability — trace_id, LLM call tracking, metrics, usage events.
 
-Supports structured JSON logging + optional OpenTelemetry export.
+Supports structured JSON logging + optional OpenTelemetry export + metered billing webhooks.
 """
 
 import contextvars
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -17,6 +19,10 @@ trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 TRACES: dict[str, "TraceSpan"] = {}
 METRICS: dict = {"llm_calls": 0, "llm_tokens": 0, "tool_calls": 0, "errors": 0}
+
+# ─── Usage events for metered billing ───
+# Events: voice_minutes_used, llm_tokens_used
+# Webhook: POST {event, org_id, agent_id, team_id, conversation_id, quantity, unit, metadata, timestamp}
 
 
 def new_trace_id() -> str:
@@ -80,6 +86,29 @@ def end_span(span: TraceSpan, tokens: int = 0, error: str = ""):
         _maybe_otel_export(span)
     except Exception:
         pass
+
+    # emit llm_tokens_used for metered billing
+    if tokens > 0 and span.span_type == "llm":
+        extra = span.extra or {}
+        org_id = extra.get("org_id")
+        agent_id = extra.get("agent_id")
+        team_id = extra.get("team_id")
+        conversation_id = extra.get("conversation_id")
+        if org_id:
+            try:
+                import asyncio as _aio
+                _aio.create_task(emit_usage_event(
+                    event="llm_tokens_used",
+                    org_id=org_id,
+                    quantity=float(tokens),
+                    unit="tokens",
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    conversation_id=conversation_id,
+                    metadata={"model": span.model, "input_tokens": extra.get("input_tokens"), "output_tokens": extra.get("output_tokens")},
+                ))
+            except Exception:
+                pass
 
     # persist metrics to disk periodically
     _maybe_flush_metrics()
@@ -283,3 +312,56 @@ def flush_metrics():
     """Force flush to disk."""
     _LAST_FLUSH = 0
     _maybe_flush_metrics()
+
+
+# ─── Metered billing usage webhook ───
+async def emit_usage_event(
+    event: str,
+    org_id: str,
+    quantity: float,
+    unit: str,
+    agent_id: str | None = None,
+    team_id: str | None = None,
+    conversation_id: str | None = None,
+    metadata: dict | None = None,
+):
+    """Emit usage event to configured webhook for metered billing.
+    
+    Events: voice_minutes_used, llm_tokens_used
+    Payload: {event, org_id, agent_id, team_id, conversation_id, quantity, unit, metadata, timestamp}
+    """
+    from aios.config import settings
+    
+    url = settings.usage_webhook_url
+    secret = settings.usage_webhook_secret
+    if not url:
+        return  # no webhook configured
+    
+    import httpx
+    payload = {
+        "event": event,
+        "org_id": org_id,
+        "agent_id": agent_id,
+        "team_id": team_id,
+        "conversation_id": conversation_id,
+        "quantity": quantity,
+        "unit": unit,
+        "metadata": metadata or {},
+        "timestamp": time.time(),
+    }
+    
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        sig = hmac.new(
+            secret.encode(), 
+            json.dumps(payload, separators=(",", ":")).encode(), 
+            hashlib.sha256
+        ).hexdigest()
+        headers["X-AIOS-Signature"] = sig
+    
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(url, json=payload, headers=headers)
+    except Exception:
+        logger = logging.getLogger(__name__)
+        logger.warning("Usage webhook failed for %s", event)

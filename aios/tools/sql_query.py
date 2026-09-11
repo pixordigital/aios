@@ -24,6 +24,13 @@ class SQLQueryTool(BaseTool):
             return {"error": "only SELECT allowed"}
         if re.search(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE)\b", q, re.I):
             return {"error": "write operations blocked"}
+        # deny pg_catalog / information_schema exfiltração
+        if re.search(r"\b(pg_catalog|pg_shadow|pg_authid|information_schema)\b", q, re.I):
+            return {"error": "acesso a pg_catalog/information_schema bloqueado"}
+        if re.search(r"\b(pg_)", q, re.I) and "pg_" in q.lower():
+            # cobre pg_*.* mas permite colunas com pg_ no nome? bloqueia se for FROM pg_
+            if re.search(r"FROM\s+pg_", q, re.I):
+                return {"error": "tabelas pg_* bloqueadas"}
         q = q.rstrip(";") + f" LIMIT {min(limit, 100)}"
         try:
             from aios.db.engine import async_session

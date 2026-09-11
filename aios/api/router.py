@@ -30,10 +30,12 @@ from .integrations import router as integrations_router
 from .dev import router as dev_router
 from .crm2 import router as crm_router
 from .voice import router as voice_router
+from .license import router as license_router
 
 api_router = APIRouter()
 api_router.include_router(crm_router)
 api_router.include_router(voice_router)
+api_router.include_router(license_router)
 api_router.include_router(dev_router)
 api_router.include_router(integrations_router)
 api_router.include_router(knowledge_router)

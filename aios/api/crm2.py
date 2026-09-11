@@ -73,11 +73,19 @@ async def update_deal(deal_id: str, body: dict, db: DatabaseBackend = Depends(ge
             db.add(pa)
             await db.commit()
             return {"pending_approval": True, "discount": discount, "message": "Desconto >15% requer aprovação do manager"}
+    old_stage = deal.stage
     for k in ["stage","value","score","lead_name","lead_email","lead_phone","agent_id","team_id","extra_data"]:
         if k in body:
             setattr(deal, k, body[k])
     await db.commit()
     await db.refresh(deal)
+    # Memory Layer — insight pós closed_won/lost
+    if body.get("stage") in ("closed_won", "closed_lost") and old_stage != body.get("stage"):
+        try:
+            from aios.core.insights import capture_deal_insight
+            await capture_deal_insight(org_id, deal_id, body["stage"], conversation=[])
+        except Exception:
+            pass
     return deal
 
 @router.get("/deals/{deal_id}")

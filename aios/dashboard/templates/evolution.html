@@ -29,6 +29,11 @@
 <div class="card" style="display:flex;flex-direction:column;gap:0.5rem">
   <div class="flex-between"><div style="font-weight:600" class="font-mono">{{name or '—'}}</div><span class="badge" style="border-color:{{'var(--green)' if state=='open' else 'var(--amber)'}};color:{{'var(--green)' if state=='open' else 'var(--amber)'}}">{{state or inst.status or 'desconhecido'}}</span></div>
   {% if ch %}<div style="font-size:0.6875rem;color:var(--text-tertiary)">Canal: {{ch.label}} • {{ch.config.get('server_url','')}}</div>{% else %}<div style="font-size:0.6875rem;color:var(--amber)">Sem canal AIOS — será criado ao usar template</div>{% endif %}
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.375rem;margin:0.375rem 0">
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.375rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">24h</div><div style="font-weight:600;font-size:0.8125rem">{{inst._msgs_24h|default(0)}}</div><div style="font-size:0.6rem;color:var(--text-tertiary)">msgs</div></div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.375rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Total</div><div style="font-weight:600;font-size:0.8125rem">{{inst._msgs_total|default(0)}}</div><div style="font-size:0.6rem;color:var(--text-tertiary)">msgs</div></div>
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.375rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Último</div><div style="font-weight:600;font-size:0.7rem">{{inst._last_activity|default('—')}}</div><div style="font-size:0.6rem;color:var(--text-tertiary)">atividade</div></div>
+  </div>
   <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;min-height:120px;display:flex;align-items:center;justify-content:center" id="qr-{{name}}"><span class="text-xs text-tertiary">Clique Conectar para QR</span></div>
   <div style="display:flex;gap:0.375rem;flex-wrap:wrap">
     <button class="btn btn-primary btn-sm" onclick="connectQR('{{name}}')">📷 Conectar / QR</button>

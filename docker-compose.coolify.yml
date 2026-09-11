@@ -70,6 +70,12 @@ services:
 
   evolution:
     image: evoapicloud/evolution-api:v2.3.7
+    # C10 hardening: rotate EVOLUTION_API_KEY mensal (openssl rand -hex 32) + IPAllowList via Coolify Traefik (ver labels)
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.evolution.rule=Host(`${EVOLUTION_HOST:-evolution.local}`)"
+      - "traefik.http.routers.evolution.middlewares=ipallowlist@file"
+      - "traefik.http.middlewares.ipallowlist.ipAllowList.sourceRange=${ADMIN_IP_ALLOWLIST:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}"
     environment:
       SERVER_URL: http://evolution:8080
       AUTHENTICATION_TYPE: apikey
@@ -158,6 +164,10 @@ services:
       AIOS_VOICE_BRIDGE_URL: ${AIOS_VOICE_BRIDGE_URL:-}
       AIOS_VOICE_FROM_NUMBER: ${AIOS_VOICE_FROM_NUMBER:-}
       AIOS_VOICE_WEBHOOK_SECRET: ${AIOS_VOICE_WEBHOOK_SECRET:-}
+      # Whisper STT config (used by voice-agent when profile voice-stt active)
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       # AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-ws://livekit:7880}  # DESABILITADO - VPS 8GB sem GPU
       # AIOS_LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}  # DESABILITADO
       # AIOS_LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}  # DESABILITADO
@@ -219,11 +229,12 @@ services:
       resources:
         limits: { cpus: "1", memory: 1G }
 
-  # ─── Voz (leve: Kokoro TTS + agent; sem LiveKit - VPS 8GB) ───
-  # voice-tts (openedai-speech, ~2GB) e voice-stt (whisper, ~4GB) NÃO cabem
-  # neste host (disco 84%+). Reative com VPS 100GB+. Enquanto isso:
-  # TTS = ElevenLabs/Vapi/Retell por canal; STT = OpenAI whisper API.
-  # livekit DESABILITADO: VPS 8GB sem GPU. Usando Kokoro TTS auto-hospedado.
+  # ─── Voz (leve: Kokoro TTS + agent; Whisper STT opcional) ───
+  # Perfil "voice": sobe voice-agent + voice-tts-kokoro (CPU, ~2GB RAM total)
+  # Perfil "voice-stt": adiciona voice-stt-whisper (CPU large-v3 ~4GB RAM / GPU ~2GB VRAM)
+  # TTS Kokoro: $0/min, 72 vozes, PT-BR nativo (pm_alex/pf_dora)
+  # STT Whisper: $0/min self-hosted, 99+ idiomas, timestamps palavra
+  # LiveKit DESABILITADO: VPS sem GPU. Usando Kokoro TTS auto-hospedado.
   voice-agent:
     profiles: ["voice"]
     build: ./deploy/voice-stream
@@ -240,24 +251,54 @@ services:
       VOICE_TTS_VOICE: ${VOICE_TTS_VOICE:-ptbr}
       KOKORO_URL: http://voice-tts-kokoro:8880/v1
       PIPER_URL: http://voice-tts:8000/v1
-      STT_URL: http://voice-stt:9000/v1
+      STT_URL: http://voice-stt-whisper:9000/v1
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      voice-tts-kokoro: { condition: service_started }
+      voice-stt-whisper: { condition: service_started }
     restart: unless-stopped
     deploy:
       resources:
         limits: { cpus: "1", memory: 2G }
 
-  # ─── Voz pesada (DESLIGADO por padrão: exige VPS 16GB+ / GPU) ───
-  # Descomente quando tiver host parrudo. Ordem: ollama → kokoro → stream.
+  # Whisper STT self-hosted (CPU optimized) — ative com: docker compose --profile voice-stt up -d
+  # Modelos: tiny (39M) → base (74M) → small (244M) → medium (769M) → large-v3 (1.5B)
+  # CPU: large-v3 ~4GB RAM, ~10x realtime. GPU: large-v3 ~2GB VRAM, ~50x realtime.
+  # Para VPS 8GB RAM: use model=small (244M, ~1.5GB RAM, ~5x realtime)
+  voice-stt-whisper:
+    profiles: ["voice-stt"]
+    image: ghcr.io/onyx-dot-app/whisper-api:latest
+    environment:
+      MODEL: ${WHISPER_MODEL:-small}
+      DEVICE: ${WHISPER_DEVICE:-cpu}
+      COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      BATCH_SIZE: ${WHISPER_BATCH_SIZE:-16}
+      NUM_WORKERS: ${WHISPER_NUM_WORKERS:-2}
+    ports:
+      - "9000:9000"
+    volumes:
+      - voice-stt-data:/root/.cache/whisper
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 4G }
+        reservations: { cpus: "1", memory: 2G }
+
+  # Ollama local LLM (opcional) — ative com: docker compose --profile ollama up -d
   # ollama:
+  #   profiles: ["ollama"]
   #   image: ollama/ollama:latest
   #   command: ["sh", "-c", "ollama serve & sleep 5; ollama pull ${OLLAMA_MODEL:-qwen3:8b}; wait"]
   #   volumes:
   #     - ollama-data:/root/.ollama
   #   restart: unless-stopped
+  #   deploy:
+  #     resources:
+  #       limits: { cpus: "2", memory: 8G }
+
   voice-tts-kokoro:
+    profiles: ["voice"]
     image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
     environment:
       USE_GPU: "false"

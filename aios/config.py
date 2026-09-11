@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     admin_master_key: str = ""  # set in production — used for fleet management auth
     evolution_webhook_secret: str = ""  # Evolution webhook HMAC secret
     voice_webhook_secret: str = ""  # Voice webhook HMAC secret
+    usage_webhook_url: str = ""  # Metered billing webhook (voice_minutes, llm_tokens)
+    usage_webhook_secret: str = ""  # HMAC secret for usage webhook
     discord_webhook_secret: str = ""  # Discord webhook HMAC secret
     slack_signing_secret: str = ""  # Slack signing secret for signature verification
     sendgrid_webhook_secret: str = ""  # SendGrid inbound parse webhook secret

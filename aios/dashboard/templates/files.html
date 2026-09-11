@@ -1,20 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>Arquivos</h1><p class="text-sm text-secondary mt-1">{{ artifacts|length }} arquivo{{ 's' if artifacts|length != 1 }} • <a href="/dashboard/lab" style="color:var(--accent)">Abrir no Lab IDE →</a></p></div>
-    <div style="display:flex;gap:0.5rem"><input id="file-q" class="input" placeholder="Buscar..." oninput="filterRows(this.value)" style="width:180px"><button class="btn btn-primary" onclick="document.getElementById('upload-modal').showModal()">+ Enviar</button></div>
+    <div><h1>Base de Conhecimento</h1><p class="text-sm text-secondary mt-1">{{ artifacts|length }} arquivo{{ 's' if artifacts|length != 1 }} • PDF → RAG automático para agentes • <a href="/dashboard/knowledge" style="color:var(--accent)">Ver chunks RAG →</a> • <a href="/dashboard/lab" style="color:var(--accent)">Lab IDE →</a></p></div>
+    <div style="display:flex;gap:0.5rem"><input id="file-q" class="input" placeholder="Buscar..." oninput="filterRows(this.value)" style="width:180px"><button class="btn btn-primary" onclick="document.getElementById('upload-modal').showModal()">+ Enviar PDF</button></div>
 </div>
+<div class="card mb-4" style="background:var(--accent-subtle);border-color:var(--accent-border)"><div style="font-size:0.8125rem"><strong>Como funciona:</strong> Faça upload de <strong>PDF</strong> com dados/contexto do negócio (tabela de preços, FAQ, políticas, catálogo). O arquivo é <strong>chunkado (800 chars) + embedding</strong> e vira <code>long_term memory</code> consultável via <code>hybrid_search</code> / RAG pelos agentes (SDR/Closer/Suporte/Analyst).</div><div style="display:flex;gap:0.5rem;margin-top:0.5rem"><input id="kb-q" class="input" placeholder="Testar RAG: ex: qual política de troca?" style="flex:1"><button class="btn btn-primary btn-sm" onclick="kbSearch()">Buscar RAG</button></div><div id="kb-res" style="margin-top:0.5rem"></div></div>
 
 <dialog id="upload-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.5rem;max-width:450px;width:90%">
     <form method="POST" action="/dashboard/files/upload" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:1rem">
-        <h2 style="font-size:1rem">Enviar arquivo</h2>
+        <h2 style="font-size:1rem">Enviar PDF para Knowledge Base</h2>
         <div>
-            <label>Arquivo</label>
-            <input type="file" name="file" required class="input" style="padding:0.375rem">
+            <label>Arquivo PDF / TXT / MD / CSV</label>
+            <input type="file" name="file" required class="input" accept=".pdf,.txt,.md,.csv" style="padding:0.375rem">
         </div>
         <div>
-            <label>Descrição (opcional)</label>
-            <input type="text" name="description" class="input" placeholder="Relatório do trimestre, captura de tela, etc.">
+            <label>Descrição (vira source no RAG)</label>
+            <input type="text" name="description" class="input" placeholder="Ex: Tabela de preços set/2026, FAQ clínica, catálogo">
         </div>
         <div class="flex-between" style="margin-top:0.5rem">
             <button type="button" class="btn btn-ghost" onclick="document.getElementById('upload-modal').close()">Cancelar</button>
@@ -79,6 +80,11 @@ async function previewRow(id,name){
   box.style.display=''; t.textContent=name+' — carregando...'; b.textContent='...';
   var res=await fetch('/dashboard/lab/artifacts/'+id+'/raw'); var j=await res.json();
   t.textContent=j.filename+' ('+j.size_bytes+' B)'; b.textContent=j.text||'(vazio)';
+}
+async function kbSearch(){
+  var q=document.getElementById('kb-q').value.trim(); if(!q) return;
+  var r=await fetch('/api/knowledge/search?q='+encodeURIComponent(q)); var j=await r.json();
+  document.getElementById('kb-res').innerHTML = j.results?.length ? j.results.map(x=>'<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;margin-bottom:0.375rem"><div style="font-size:0.8125rem">'+x.content.slice(0,300)+'</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">'+(x.extra_data?.source||'')+' • score '+ (x.score?.toFixed(3)||'')+'</div></div>').join('') : '<div class="text-sm text-tertiary">Sem resultados — verifique se PDF foi ingerido (aguarde 5s após upload)</div>';
 }
 </script>
 {% endblock %}

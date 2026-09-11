@@ -327,8 +327,9 @@ async def security_headers(request: Request, call_next):
             "script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data:; "
-            "connect-src 'self'; "
+            "img-src 'self' data: blob:; "
+            "media-src 'self' blob: data:; "
+            "connect-src 'self' blob:; "
             "object-src 'none'; "
             "base-uri 'self'; "
             "frame-ancestors 'none';"
@@ -345,8 +346,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key"],
 )
 # Note: uvicorn applies x-forwarded-* proxy headers by default (--proxy-headers),
 # so request.url.scheme / base_url reflect the real client origin behind a

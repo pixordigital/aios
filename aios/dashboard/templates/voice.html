@@ -43,43 +43,29 @@
     <h2>2. LLM <span class="text-xs text-tertiary">— onde o agente pensa (1 clique em Coolify depois também)</span></h2>
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:0.75rem">
       <div>
-        <label>Modelo (VOICE_LLM_MODEL) — modernos 2026</label>
+        <label>Modelo (VOICE_LLM_MODEL) — apenas voz-adequados <span class="mono" style="font-size:10px;border:1px solid var(--accent-border);color:var(--accent);padding:1px 5px;border-radius:99px">latência &lt;1s • PT-BR ok • Fit ≥★★★★☆</span></label>
         <select name="model" id="voice-model" class="input" onchange="updateVoiceCost(this.value);updateVoiceFit(this.value)">
-          <optgroup label="OpenAI — GPT-5.6 (2026)">
-            <option value="openai/gpt-5.6-sol" >openai/gpt-5.6-sol — $5/1M | Q A+ | Fit voz Closer ★★★★☆ (lento, caro, melhor reasoning)</option>
-            <option value="openai/gpt-5.6-terra" >openai/gpt-5.6-terra — $5/1M | Q A+ | Fit voz Closer ★★★★☆</option>
-            <option value="openai/gpt-5.6-luna" >openai/gpt-5.6-luna — $5/1M | Q A+ | Fit voz Closer ★★★★☆</option>
-            <option value="openai/gpt-5.4" >openai/gpt-5.4 — $5/1M | Q A | Fit voz ★★★★☆ (equilibrado)</option>
-            <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini — $0.15/1M | Q B+ | Fit voz SDR ★★★★★ (rápido, barato, PT ok)</option>
-            <option value="openai/gpt-4o" >openai/gpt-4o — $2.5/1M | Q A- | Fit voz ★★★★☆ (equilibrado)</option>
-            <option value="openai/gpt-4.1" >openai/gpt-4.1 — $2.5/1M | Q A- | Fit voz ★★★★☆</option>
-            <option value="openai/o4-mini" >openai/o4-mini — $1.5/1M | Q A | Fit voz Support ★★★★☆ (reasoning lento)</option>
+          <optgroup label="OpenAI — rápidos">
+            <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini — $0.15/1M | Q B+ | Fit voz SDR ★★★★★ (300ms, PT ok)</option>
+            <option value="openai/gpt-4o">openai/gpt-4o — $2.5/1M | Q A- | Fit voz ★★★★☆ (600ms)</option>
           </optgroup>
-          <optgroup label="Anthropic — Muse 5">
-            <option value="anthropic/claude-opus-4.5">anthropic/claude-opus-4.5 — $15/1M | Q A+ | Fit voz Closer ★★★★★ (melhor PT, caro)</option>
-            <option value="anthropic/claude-sonnet-4.5">anthropic/claude-sonnet-4.5 — $3/1M | Q A | Fit voz ★★★★★ (PT ótimo, ideal voz)</option>
-            <option value="anthropic/claude-fable-5-1">anthropic/claude-fable-5-1 — $1.5/1M | Q A- | Fit voz SDR ★★★★☆ (rápido)</option>
-            <option value="anthropic/claude-mythos-5-1">anthropic/claude-mythos-5-1 — $3/1M | Q A | Fit voz ★★★★☆</option>
+          <optgroup label="Anthropic — voz">
+            <option value="anthropic/claude-sonnet-4.5">anthropic/claude-sonnet-4.5 — $3/1M | Q A | Fit voz ★★★★★ (800ms, PT ótimo)</option>
+            <option value="anthropic/claude-fable-5-1">anthropic/claude-fable-5-1 — $1.5/1M | Q A- | Fit voz SDR ★★★★☆ (500ms)</option>
+            <option value="anthropic/claude-haiku-4.5">anthropic/claude-haiku-4.5 — $1/1M | Q B | Fit voz ★★★★☆ (400ms, barato)</option>
           </optgroup>
-          <optgroup label="Google — Gemini 3">
-            <option value="google/gemini-3.8-flash">google/gemini-3.8-flash — $0.15/1M | Q B+ | Fit voz SDR ★★★★★ (rápido)</option>
-            <option value="google/gemini-3-pro">google/gemini-3-pro — $2/1M | Q A- | Fit voz ★★★★☆</option>
+          <optgroup label="Google — Flash">
+            <option value="google/gemini-3.8-flash">google/gemini-3.8-flash — $0.15/1M | Q B+ | Fit voz SDR ★★★★★ (300ms)</option>
           </optgroup>
-          <optgroup label="Meta — Muse Spark (PT nativo)">
-            <option value="muse/muse-spark-1.2">muse/muse-spark-1.2 — $0.60/1M | Q B+ | Fit voz PT ★★★★★ (nativo)</option>
+          <optgroup label="Meta — PT nativo">
+            <option value="muse/muse-spark-1.2">muse/muse-spark-1.2 — $0.60/1M | Q B+ | Fit voz PT ★★★★★ (500ms, nativo)</option>
             <option value="muse/muse-spark-1.2-contributor-free">muse/muse-spark-1.2-contributor-free — $0 | Q B | Fit voz PT ★★★★☆ free</option>
           </optgroup>
-          <optgroup label="Custo baixo">
-            <option value="qwen/qwen-3-235b-a22b">qwen/qwen-3-235b — $0.5/1M | Q B | Fit voz ★★★☆☆ (en, barato)</option>
-            <option value="deepseek/deepseek-v4">deepseek/deepseek-v4 — $0.5/1M | Q B | Fit voz ★★★☆☆</option>
-            <option value="deepseek/deepseek-v4-flash">deepseek/deepseek-v4-flash — $0.15/1M | Q B- | Fit voz SDR ★★★★☆ (rápido)</option>
-          </optgroup>
-          <optgroup label="Local — sem custo">
-            <option value="ollama/qwen3:8b">ollama/qwen3:8b — $0 | Q C+ | Fit voz ★★☆☆☆ (lento CPU)</option>
-            <option value="ollama/llama3">ollama/llama3 — $0 | Q C | Fit voz ★★☆☆☆</option>
+          <optgroup label="Rápido e barato">
+            <option value="deepseek/deepseek-v4-flash">deepseek/deepseek-v4-flash — $0.15/1M | Q B- | Fit voz SDR ★★★★☆ (400ms)</option>
           </optgroup>
         </select>
-        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Salvo em <code>AIOS_VOICE_LLM_MODEL</code> `docker-compose.coolify.yml:235`. Troca Coolify → Environment sem rebuild. Custo `input/output` por 1M tokens, Qualidade A+→C, Fit voz = latência+PT+preço p/ tarefa.</div>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem"><strong>Apenas modelos voz-adequados.</strong> Salvo em <code>AIOS_VOICE_LLM_MODEL</code> `docker-compose.coolify.yml:235`. Troca Coolify → Environment sem rebuild. Ocultos: `gpt-5.6/o4/opus` (reasoning 1,5-2s, caro) e `ollama` (CPU 3s+) — use em `/dashboard/lab` para testes.</div>
         <div id="voice-fit" class="badge" style="margin-top:0.5rem;font-size:0.7rem;background:var(--accent-subtle);color:var(--accent);border-color:var(--accent-border)">Fit SDR ★★★★★ — rápido, barato, PT ok</div>
       </div>
       <div>
@@ -132,6 +118,7 @@
         <select name="voice" id="voice-select" class="input">
           <option value="pm_alex" selected>pm_alex — masc pt-BR (padrão ptbr)</option>
           <option value="pf_dora">pf_dora — fem pt-BR</option>
+          <option value="pm_santa">pm_santa — masc pt-BR (festivo, grave)</option>
           <option value="af_heart">af_heart — fem en (fallback)</option>
           <option value="af_bella">af_bella — fem en A-</option>
           <option value="am_adam">am_adam — masc en</option>
@@ -143,13 +130,22 @@
         <div class="text-xs text-tertiary" style="margin-top:0.25rem">Mapa <code>ptbr→pm_alex</code> `deploy/voice-stream/agent.py:VOICE_MAP`.</div>
       </div>
       <div>
+        <label>Ajustes voz — velocidade <span class="mono" id="speed-val" style="color:var(--accent)">1.0x</span></label>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input type="range" name="voice_speed" id="voice-speed" min="0.7" max="1.3" step="0.05" value="1.0" class="input" style="flex:1;padding:0" oninput="document.getElementById('speed-val').textContent=this.value+'x'; updateVoicePreviewSpeed(this.value)">
+          <span class="text-xs text-tertiary">0.7 lento — 1.3 rápido</span>
+        </div>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Kokoro `speed` 0.85 mais humano/natural, 1.1 mais ágil. Salvo em `voice.speed`.</div>
+      </div>
+      <div>
         <label>Preview (testa Kokoro ao vivo)</label>
         <div style="display:flex;gap:0.5rem">
           <input type="text" id="preview-text" class="input" value="Olá, aqui é da AIOS, como posso ajudar?" style="flex:1">
           <button type="button" class="btn btn-ghost" onclick="previewVoice()">▶️ Ouvir</button>
         </div>
-        <audio id="preview-audio" controls style="width:100%;margin-top:0.5rem;display:none"></audio>
+        <audio id="preview-audio" controls preload="auto" style="width:100%;margin-top:0.5rem;display:none"></audio>
         <div class="text-xs text-tertiary" id="preview-status" style="margin-top:0.25rem"></div>
+        <a id="preview-download" href="#" download="preview.mp3" class="text-xs" style="display:none;margin-top:0.25rem;color:var(--cyan)">⬇️ Baixar MP3 (debug)</a>
       </div>
     </div>
   </div>
@@ -266,9 +262,9 @@ function updateVoiceCost(m){
     'muse/muse-spark-1.2':0.006,         // $0.60/$2.40 (PT nativo)
     'muse/muse-spark-1.2-contributor-free':0,
     'qwen/qwen-3-235b-a22b':0.005,       // $0.5/$2
+    'deepseek/deepseek-v4-pro':0.000875, // $0.875/$1.74
     'deepseek/deepseek-v4':0.005,        // $0.5/$2
     'deepseek/deepseek-v4-flash':0.00015, // $0.15/$0.60
-    'deepseek/deepseek-v4-pro':0.000875, // $0.875/$1.74
     'ollama/qwen3:8b':0,
     'ollama/llama3':0,
     'openai/gpt-4o-mini':0.0006,
@@ -344,6 +340,7 @@ var VOICE_FIT={
   'muse/muse-spark-1.2':['Fit voz PT ★★★★★ — nativo, barato','Q B+ | Lat 500ms'],
   'muse/muse-spark-1.2-contributor-free':['Fit voz PT ★★★★☆ — free','Q B | Lat 500ms'],
   'qwen/qwen-3-235b-a22b':['Fit voz ★★★☆☆ — en, barato, PT fraco','Q B | Lat 900ms'],
+  'deepseek/deepseek-v4-pro':['Fit voz ★★★★☆ — 1M ctx, áudio/imagem ✓','Q B+ | Lat 1s'],
   'deepseek/deepseek-v4':['Fit voz ★★★☆☆ — barato, PT fraco','Q B | Lat 1s'],
   'deepseek/deepseek-v4-flash':['Fit voz SDR ★★★★☆ — rápido e barato','Q B- | Lat 400ms'],
   'deepseek/deepseek-v4-pro':['Fit voz ★★★★☆ + áudio ok, imagem ✗','Q B+ | Lat 1s'],
@@ -355,22 +352,35 @@ function updateVoiceFit(m){
   var el=document.getElementById('voice-fit'); if(el) el.textContent=f[0];
   var q=document.getElementById('voice-quality'); if(q) q.textContent=f[1];
 }
+function updateVoicePreviewSpeed(v){ /* hook pra preview usar speed atual */ }
 async function previewVoice(){
   const v=document.getElementById('voice-select').value;
   const m=document.getElementById('tts-model').value;
   const t=document.getElementById('preview-text').value||'Olá';
+  const s=parseFloat(document.getElementById('voice-speed')?.value||'1.0');
   const st=document.getElementById('preview-status');
   const audio=document.getElementById('preview-audio');
   st.textContent='Gerando... '+m+' 1CPU ~5s'; audio.style.display='none'; audio.removeAttribute('src'); audio.load();
   audio.onerror=function(){ st.textContent='Áudio inválido — '+(st.textContent||''); };
   try{
-    const r=await fetch('/dashboard/voice/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice:v, text:t, tts_model:m})});
+    const r=await fetch('/dashboard/voice/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice:v, text:t, tts_model:m, speed:s})});
     if(r.status===401||r.status===403){ st.textContent='Sessão expirada ou bloqueada ('+r.status+') — recarregue a página e entre de novo'; return; }
     if(r.status===502){ st.textContent='Kokoro ainda iniciando (warmup ~60s) — aguarde 1 min e tente de novo'; return; }
     if(!r.ok){ st.textContent='Erro '+r.status+' — tente de novo'; return; }
     const blob=await r.blob();
-    if(!blob.type.startsWith('audio')||blob.size<1000){ st.textContent='Resposta não é áudio ('+(blob.type||'vazio')+') — recarregue a página e entre de novo'; return; }
-    const url=URL.createObjectURL(blob); audio.src=url; audio.style.display='block'; audio.play().catch(function(){}); st.textContent='OK '+m+'/'+v+' '+(blob.size/1024).toFixed(0)+'KB';
+    // aceita audio/* ou octet-stream (Kokoro wav pode vir como audio/wav)
+    if((!blob.type.startsWith('audio') && blob.type!=='application/octet-stream')||blob.size<1000){
+      try{ const txt=await blob.text(); st.textContent='Resposta não é áudio ('+(blob.type||'vazio')+') '+txt.slice(0,120)+' — recarregue'; }catch(e){ st.textContent='Resposta não é áudio ('+(blob.type||'vazio')+') — recarregue'; }
+      return;
+    }
+    const url=URL.createObjectURL(blob);
+    audio.style.display='block'; audio.pause(); audio.removeAttribute('src'); audio.load();
+    const dl=document.getElementById('preview-download'); if(dl){ dl.href=url; dl.download='preview-'+v+'.wav'; dl.style.display='inline'; dl.textContent='⬇️ Baixar WAV ('+(blob.size/1024).toFixed(0)+'KB)'; }
+    audio.onloadedmetadata=function(){ st.textContent='OK '+m+'/'+v+' '+(blob.size/1024).toFixed(0)+'KB — '+audio.duration.toFixed(1)+'s — clique ▶️ no player'; console.log('loadedmetadata', audio.duration, blob.type); };
+    audio.oncanplay=function(){ console.log('canplay', audio.readyState); st.textContent+=' (pronto)'; };
+    audio.onerror=function(){ var e=audio.error; console.error('audio error', e, audio.networkState, audio.readyState); st.textContent='Áudio inválido ('+m+'/'+v+' '+blob.type+' '+(blob.size/1024).toFixed(0)+'KB code '+(e?e.code:'?')+' '+(e?e.message:'')+') — baixe WAV e teste local'; };
+    audio.src=url; audio.load();
+    setTimeout(function(){ try{URL.revokeObjectURL(url);}catch(e){} }, 120000);
   }catch(e){ st.textContent='Erro de rede: '+e+' — verifique se está logado'; }
 }
 document.getElementById('voice-form').addEventListener('submit',()=>{ updateProgress(4); });

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIOS — Sistema Operacional de Agentes de IA</title>
-    <meta name="description" content="Implante agentes de IA que trabalham em WhatsApp, e-mail, Slack e web. Multi-tenant, governado e pronto para produção.">
+    <meta name="description" content="AIOS — SDR/Closer/Suporte com TTS Kokoro $0/min + Data Analyst/Scientist (SQL + Python sandbox) — PT-BR nativo, multi-tenant, white-label. Deploy 1-click no Coolify.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -46,7 +46,7 @@
         .logo-mark { width: 28px; height: 28px; background: var(--cyan); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
         .logo-mark span { color: var(--bg); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; }
         .logo-text { font-weight: 700; font-size: 16px; letter-spacing: -0.02em; }
-        nav .links { display: flex; gap: 32px; }
+        nav .links { display: flex; gap: 24px; }
         nav .links a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
         nav .links a:hover { color: var(--text); }
         nav .cta-group { display: flex; align-items: center; gap: 16px; }
@@ -153,7 +153,10 @@
         footer ul a:hover { color: var(--text); }
         footer .bottom { max-width: 1200px; margin: 32px auto 0; padding-top: 24px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-muted); display: flex; justify-content: space-between; }
 
-        /* ── Responsive ── */
+        /* ── Voice/Data grid responsive ── */
+        .voice-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:48px; }
+        .voice-diff { display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:32px; }
+        .data-grid { display:grid;grid-template-columns:repeat(2,1fr);gap:24px;margin-bottom:32px; }
         @media (max-width: 900px) {
             .hero-inner { grid-template-columns: 1fr; }
             .terminal { display: none; }
@@ -161,10 +164,16 @@
             .channel-grid { grid-template-columns: repeat(3, 1fr); }
             .pricing-grid { grid-template-columns: 1fr; }
             footer .inner { grid-template-columns: 1fr 1fr; }
+            .voice-grid { grid-template-columns: 1fr; }
+            .voice-diff { grid-template-columns: repeat(2,1fr); }
+            .data-grid { grid-template-columns: 1fr; }
+            .channel-card[style*="grid-column:span 2"] { grid-column: span 3 !important; }
         }
         @media (max-width: 600px) {
             nav .links { display: none; }
             .channel-grid { grid-template-columns: repeat(2, 1fr); }
+            .channel-card[style*="grid-column:span 2"] { grid-column: span 2 !important; }
+            .voice-diff { grid-template-columns: 1fr; }
             .hero h1 { font-size: 32px; }
             footer .inner { grid-template-columns: 1fr; }
         }
@@ -184,10 +193,11 @@
             <span class="logo-text">AIOS</span>
         </a>
         <div class="links">
-            <a href="#features">Recursos</a>
-            <a href="#channels">Canais</a>
+            <a href="#voice">Voz</a>
+            <a href="#data">Dados</a>
+            <a href="#features">Plataforma</a>
             <a href="#pricing">Planos</a>
-            <a href="/docs">Documentação</a>
+            <a href="/docs">Docs</a>
         </div>
         <div class="cta-group">
             <span class="btn-disabled" title="Acesso temporariamente fechado">Entrar</span>
@@ -202,32 +212,33 @@
         <div class="hero-text">
             <div class="hero-badge">
                 <span class="dot"></span>
-                <span class="mono">v0.1.0 — agora disponível para todos</span>
+                <span class="mono">v0.1.0 — Voice Agents GA • Self-hosted TTS $0/min</span>
             </div>
-            <h1>Agentes de IA para<br><span class="accent">vendas e análise de dados</span></h1>
-            <p>Dois objetivos, um sistema: <strong>vendas</strong> (SDR, closer, funil, recuperação, WhatsApp commerce) e <strong>análise de dados</strong> (SQL + Python sandbox, BI conversacional, insights em tempo real). Governado, multi-tenant, pronto para produção.</p>
-            <div style="display:inline-flex;align-items:center;gap:0.5rem;background:var(--cyan-dim);border:1px solid var(--cyan);border-radius:99px;padding:0.375rem 0.75rem;font-size:0.75rem;margin-bottom:1rem"><span style="background:var(--cyan);color:#000;padding:0.125rem 0.375rem;border-radius:99px;font-weight:700">🎁 14 dias Pro grátis</span> sem cartão • sem n8n • cancele quando quiser</div>
+            <h1>Agentes de <span class="accent">Voz & Dados</span><br>que você controla 100%</h1>
+            <p><strong>Voz:</strong> SDR • Closer • Suporte — TTS Kokoro <span class="mono">$0/min</span>, 72 vozes PT-BR (<span class="mono">pm_alex</span>). <strong>Dados:</strong> Analyst • Scientist — SQL + Python sandbox, BI conversacional. LLM à escolha (OpenAI, Anthropic, DeepSeek, Muse PT, Ollama). Multi-tenant, white-label. 1-click Coolify.</p>
+            <div style="display:inline-flex;align-items:center;gap:0.5rem;background:var(--cyan-dim);border:1px solid var(--cyan);border-radius:99px;padding:0.375rem 0.75rem;font-size:0.75rem;margin-bottom:1rem"><span style="background:var(--cyan);color:#000;padding:0.125rem 0.375rem;border-radius:99px;font-weight:700">🎁 14 dias Pro grátis</span> sem cartão • self-hosted • cancele quando quiser</div>
             <div class="hero-actions">
                 <span class="btn-primary btn-disabled" title="Cadastros temporariamente fechados — entre em contato">Comece grátis 14 dias Pro →</span>
-                <a href="#features" class="btn-ghost">Veja como funciona</a>
+                <a href="#voice" class="btn-ghost">Voz</a>
+                <a href="#data" class="btn-ghost">Dados</a>
             </div>
-            <p class="hero-note">Sem cartão de crédito · Plano gratuito · Implante em 5 minutos</p>
+            <p class="hero-note">Sem cartão de crédito · Self-hosted no seu VPS · Implante em 5 min · LGPD compliant</p>
 
             <div class="status-bar">
                 <div class="status-item">
                     <span class="status-dot green"></span>
-                    <span class="status-label">Agentes online</span>
-                    <span class="status-value" id="agents-online">3</span>
+                    <span class="status-label">TTS self-hosted</span>
+                    <span class="status-value mono">$0/min</span>
                 </div>
                 <div class="status-item">
                     <span class="status-dot green"></span>
-                    <span class="status-label">Mensagens hoje</span>
-                    <span class="status-value" id="messages-today">1,247</span>
+                    <span class="status-label">Latência voz-a-voz</span>
+                    <span class="status-value mono"><1.5s</span>
                 </div>
                 <div class="status-item">
                     <span class="status-dot green"></span>
-                    <span class="status-label">Disponibilidade</span>
-                    <span class="status-value">99.9%</span>
+                    <span class="status-label">PT-BR nativo</span>
+                    <span class="status-value mono">pm_alex</span>
                 </div>
             </div>
         </div>
@@ -237,7 +248,7 @@
                 <span class="terminal-dot r"></span>
                 <span class="terminal-dot y"></span>
                 <span class="terminal-dot g"></span>
-                <span class="terminal-title">aios — implantação de agentes</span>
+                <span class="terminal-title">aios voice — create agent</span>
             </div>
             <div class="terminal-body" id="terminal-body">
                 <div class="terminal-line">
@@ -249,60 +260,254 @@
     </div>
 </section>
 
-<!-- Features -->
-<section id="features">
+<!-- Voice Agents -->
+<section id="voice" style="background: var(--surface);">
     <div class="inner">
-        <div class="section-label">01 / Capacidades</div>
-        <h2 class="section-title">Feito para produção,<br>não para protótipos</h2>
-        <p class="section-desc">Cada recurso existe porque alguém precisou dele em produção. Nada de enfeites.</p>
+        <div class="section-label">01 / Voice Agents — Multi-canal</div>
+        <h2 class="section-title">Agentes de voz <span style="color:var(--cyan)">multi-canal</span> prontos<br>não protótipos</h2>
+        <p class="section-desc">Três templates especializados, <strong>multi-canal nativo</strong>: mesmo SDR/Closer/Suporte atende <strong>WhatsApp + Web + E-mail + Slack</strong> sem perder contexto. Crie em 4 passos, preview voz ao vivo. <span style="background:var(--cyan-dim);border:1px solid var(--cyan);padding:2px 6px;border-radius:4px;font-size:12px">WhatsApp é o canal #1</span></p>
 
-        <div class="feature-grid">
-            <div class="feature-card fade-in">
-                <div class="feature-icon">⚡</div>
-                <div class="feature-title">Multi-Modelo</div>
-                <div class="feature-desc">GPT-4o, Claude, Gemini, Llama. Escolha o modelo certo para cada agente. Troque sem reimplantar.</div>
+        <div class="voice-grid">
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:32px;background:var(--bg)">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><span style="font-size:28px">🎯</span><h3 style="font-size:18px;font-weight:600">SDR</h3></div>
+                <p style="color:var(--text-dim);margin-bottom:16px">Qualifica BANT+GPCT, agenda reunião no calendário, follow-up 14 dias automático. Handoff pro Closer.</p>
+                <ul style="font-size:14px;color:var(--text-dim);list-style:none;padding:0">
+                    <li style="margin:8px 0">✓ 10-seções prompt template</li>
+                    <li style="margin:8px 0">✓ lead_score + calculator tools</li>
+                    <li style="margin:8px 0">✓ WhatsApp + Web + E-mail</li>
+                </ul>
             </div>
-            <div class="feature-card fade-in">
-                <div class="feature-icon">🔒</div>
-                <div class="feature-title">Governança</div>
-                <div class="feature-desc">Níveis de autonomia, listas de permissão/negação de ferramentas, orçamentos por agente. Controle de nível empresarial sem a complexidade.</div>
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:32px;background:var(--bg)">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><span style="font-size:28px">🤝</span><h3 style="font-size:18px;font-weight:600">Closer</h3></div>
+                <p style="color:var(--text-dim);margin-bottom:16px">Negociação SPIN+Challenger+MEDDIC, descobre budget/authority, calcula ROI, agenda fechamento com humano.</p>
+                <ul style="font-size:14px;color:var(--text-dim);list-style:none;padding:0">
+                    <li style="margin:8px 0">✓ MEDDIC + calculator tools</li>
+                    <li style="margin:8px 0">✓ objection handling framework</li>
+                    <li style="margin:8px 0">✓ WhatsApp + Web + E-mail</li>
+                </ul>
             </div>
-            <div class="feature-card fade-in">
-                <div class="feature-icon">👥</div>
-                <div class="feature-title">Multi-Tenant</div>
-                <div class="feature-desc">Cada cliente tem um espaço de trabalho isolado. Agentes, conversas, cobrança — tudo separado. Implante na infraestrutura deles.</div>
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:32px;background:var(--bg)">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><span style="font-size:28px">🎧</span><h3 style="font-size:18px;font-weight:600">Suporte</h3></div>
+                <p style="color:var(--text-dim);margin-bottom:16px">RAG sobre base de conhecimento, resolve trocas/estornos/rastreio, escala humano com contexto completo.</p>
+                <ul style="font-size:14px;color:var(--text-dim);list-style:none;padding:0">
+                    <li style="margin:8px 0">✓ hybrid_search + RAG tools</li>
+                    <li style="margin:8px 0">✓ Zendesk/Intercom webhook</li>
+                    <li style="margin:8px 0">✓ Todos canais + Voice</li>
+                </ul>
             </div>
-            <div class="feature-card fade-in">
-                <div class="feature-icon">📡</div>
-                <div class="feature-title">Orientado a Eventos</div>
-                <div class="feature-desc">Webhook → despacho → worker → agente → resposta. Processamento assíncrono com retry e fila de mensagens mortas.</div>
+        </div>
+        <!-- WhatsApp Agents highlight -->
+        <div style="background:var(--bg);border:1px solid var(--cyan);border-radius:12px;padding:24px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:24px">
+            <span style="font-size:28px">💬</span>
+            <div style="flex:1;min-width:260px">
+                <h4 style="font-size:15px;font-weight:700">WhatsApp Agents — SDR/Closer no Zap com Evolution API</h4>
+                <p style="font-size:13px;color:var(--text-dim);margin-top:4px">Cada Voice Agent é <strong>WhatsApp-first</strong>: Evolution API `v2.3.7` Cloud API oficial Meta, QR 30s, template/mídia/botões, grupos, webhook realtime. Mesmo agente atende <strong>texto e voz no mesmo número</strong> (TTS Kokoro). <span class="mono" style="font-size:11px;border:1px solid var(--border);padding:2px 6px;border-radius:4px">instances por plano: Free 0 • Starter 1 • Pro 3 • Enterprise 10+</span></p>
             </div>
-            <div class="feature-card fade-in">
-                <div class="feature-icon">📊</div>
-                <div class="feature-title">Observável</div>
-                <div class="feature-desc">Telemetria em tempo real: tempos de resposta, taxas de erro, uso de tokens, custo por agente. Saiba antes dos seus clientes.</div>
+            <a href="#channels" class="btn-primary" style="font-size:13px;white-space:nowrap">Ver WhatsApp →</a>
+        </div>
+
+        <!-- Key Differentiators -->
+        <div class="voice-diff">
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:24px;background:var(--bg);text-align:center">
+                <div style="font-size:24px;margin-bottom:8px">💰</div>
+                <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">TTS Self-Hosted</h4>
+                <p style="font-size:13px;color:var(--text-dim)">Kokoro 82M params — <strong>$0/min</strong> no seu VPS. 1 CPU / 1.5GB RAM. Sem conta ElevenLabs/Vapi/Retell.</p>
             </div>
-            <div class="feature-card fade-in">
-                <div class="feature-icon">💳</div>
-                <div class="feature-title">Cobrança Integrada</div>
-                <div class="feature-desc">Integração com Stripe, planos baseados em uso, portal do cliente. Monetize desde o primeiro dia.</div>
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:24px;background:var(--bg);text-align:center">
+                <div style="font-size:24px;margin-bottom:8px">🇧🇷</div>
+                <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">PT-BR Nativo</h4>
+                <p style="font-size:13px;color:var(--text-dim)"><strong>pm_alex</strong> (masc) + <strong>pf_dora</strong> (fem) Kokoro. Muse Spark PT nativo LLM. Gringos falham em PT — nós não.</p>
+            </div>
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:24px;background:var(--bg);text-align:center">
+                <div style="font-size:24px;margin-bottom:8px">🏢</div>
+                <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">Multi-Tenant Nativo</h4>
+                <p style="font-size:13px;color:var(--text-dim)">Org isolation total. Agências: revenda white-label. SaaS: embed no seu produto. Franquias: 200+ unidades, script único.</p>
+            </div>
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:24px;background:var(--bg);text-align:center">
+                <div style="font-size:24px;margin-bottom:8px">⚙️</div>
+                <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">LLM Livre</h4>
+                <p style="font-size:13px;color:var(--text-dim)">OpenAI, Anthropic, Google, DeepSeek, Qwen, Muse, Ollama local. Troca no <code>.env</code> sem rebuild. DeepSeek-V4-Pro 1M ctx.</p>
             </div>
         </div>
     </div>
 </section>
 
-<!-- Channels -->
+<!-- Data Agents -->
+<section id="data">
+    <div class="inner">
+        <div class="section-label">02 / Data Agents</div>
+        <h2 class="section-title">Pergunte aos seus dados<br>em português, receba gráfico</h2>
+        <p class="section-desc">Dois especialistas prontos. Conecte seu DW/Postgres/API. Eles consultam, limpam, plotam e explicam — sem SELECT * sem limit.</p>
+
+        <div class="data-grid">
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:32px;background:var(--surface)">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><span style="font-size:28px">📊</span><h3 style="font-size:18px;font-weight:600">Data Analyst</h3><span class="mono" style="font-size:11px;color:var(--text-muted);border:1px solid var(--border);padding:2px 6px;border-radius:4px">gpt-4o • temp 0.2</span></div>
+                <p style="color:var(--text-dim);margin-bottom:16px">Senior SQL vault + <code>python_sandbox</code> + viz. Entende pergunta, faz <code>sql_query</code> com <code>LIMIT 100</code>, limpa com pandas/matplotlib, salva via <code>storage_save</code> e explica em PT-BR simples.</p>
+                <ul style="font-size:14px;color:var(--text-dim);list-style:none;padding:0">
+                    <li style="margin:8px 0">✓ Tools: <code>sql_query</code> • <code>python_sandbox</code> • <code>http_request</code> • <code>calculator</code></li>
+                    <li style="margin:8px 0">✓ Fluxo: pergunta → SQL → Python → gráfico → recomendação</li>
+                    <li style="margin:8px 0">✓ Caso: "vendas por região mês X?" → tabela + gráfico + insight</li>
+                </ul>
+            </div>
+            <div class="card" style="border:1px solid var(--border);border-radius:12px;padding:32px;background:var(--surface)">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px"><span style="font-size:28px">🧬</span><h3 style="font-size:18px;font-weight:600">Data Scientist</h3><span class="mono" style="font-size:11px;color:var(--text-muted);border:1px solid var(--border);padding:2px 6px;border-radius:4px">o3-mini • temp 0.2</span></div>
+                <p style="color:var(--text-dim);margin-bottom:16px">AutoML + estatística. Define métrica+baseline, propõe modelo (regressão/classificação/clustering), roda sklearn com validação cruzada, reporta intervalo de confiança e trade-off.</p>
+                <ul style="font-size:14px;color:var(--text-dim);list-style:none;padding:0">
+                    <li style="margin:8px 0">✓ Tools: <code>python_sandbox</code> • <code>sql_query</code> • <code>http_request</code> • GridSearch</li>
+                    <li style="margin:8px 0">✓ Fluxo: métrica → modelo → execução → gráfico+tabela → risco</li>
+                    <li style="margin:8px 0">✓ Caso: "prever churn?" → modelo + confiança + impacto esperado</li>
+                </ul>
+            </div>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">
+            <span class="mono" style="font-size:12px;color:var(--text-dim);background:var(--surface);border:1px solid var(--border);padding:6px 10px;border-radius:6px">Ex: "Qual SKU mais vendeu em SP no mês passado?" → SQL → gráfico</span>
+            <span class="mono" style="font-size:12px;color:var(--text-dim);background:var(--surface);border:1px solid var(--border);padding:6px 10px;border-radius:6px">Ex: "Preveja inadimplência Q2" → AutoML → curva + risco</span>
+        </div>
+    </div>
+</section>
+
+<!-- Knowledge Base -->
+<section id="knowledge" style="background: var(--surface);">
+    <div class="inner">
+        <div class="section-label">03 / Base de Conhecimento</div>
+        <h2 class="section-title">Seus PDFs viram <span style="color:var(--cyan)">memória dos agentes</span></h2>
+        <p class="section-desc">Menu <strong>Base Conhecimento</strong> (Arquivos): cliente faz upload de <strong>PDF</strong> com dados/contexto do negócio — tabela de preços, FAQ, políticas, catálogo — e todos os agentes consultam via <code>RAG</code> (<code>hybrid_search</code>).</p>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center">
+                <div style="font-size:24px;margin-bottom:8px">📄</div>
+                <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">1. Upload PDF</h4>
+                <p style="font-size:13px;color:var(--text-dim)">Arraste <strong>PDF/TXT/MD/CSV</strong> em <code>/dashboard/files</code>. Descrição vira <code>source</code> no RAG. `pypdf` extrai texto, `chunk 800 chars` (até 30 chunks).</p>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center">
+                <div style="font-size:24px;margin-bottom:8px">🧠</div>
+                <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">2. Indexa RAG</h4>
+                <p style="font-size:13px;color:var(--text-dim)">Cada chunk vira <code>Memory long_term</code> com <code>embedding</code> + <code>artifact_id</code>. Busca <code>hybrid_search</code> (vetor + BM25) com score.</p>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center">
+                <div style="font-size:24px;margin-bottom:8px">🤖</div>
+                <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">3. Agentes consultam</h4>
+                <p style="font-size:13px;color:var(--text-dim)">SDR/Closer/Suporte/Analyst usam <code>hybrid_search</code> e <code>read_file</code> no RAG. Ex: “qual política de troca?” → resposta com fonte do PDF.</p>
+            </div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <span class="mono" style="font-size:11px;border:1px solid var(--cyan);color:var(--cyan);padding:4px 8px;border-radius:99px">PDF → RAG automático</span>
+            <span style="font-size:13px;color:var(--text-dim)">Teste no <code>/dashboard/files</code>: busque “política de troca” após upload. Agentes já usam sem config extra.</span>
+            <a href="/dashboard/files" class="btn-primary" style="font-size:13px;margin-left:auto">Abrir Base Conhecimento →</a>
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+    <div class="inner">
+        <div class="section-label">04 / Plataforma</div>
+        <h2 class="section-title">Infraestrutura que escala<br>com você</h2>
+        <p class="section-desc">Não é wrapper. É sistema operacional: multi-tenant, governado, observável, cobrança nativa. Deploy no seu VPS.</p>
+
+        <div class="feature-grid">
+            <div class="feature-card fade-in">
+                <div class="feature-icon">👥</div>
+                <div class="feature-title">Multi-Tenant Real</div>
+                <div class="feature-desc">Org isolation total (dados, agentes, canais, keys, billing). Agências revendem white-label. SaaS embed no produto. Franquias gerenciam 200+ unidades.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-title">Governança Enterprise</div>
+                <div class="feature-desc">Níveis de autonomia, allow/deny tools, orçamentos por agente/equipe, auditoria 100% (áudio + transcrição + métricas). LGPD/BAA ready.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">📡</div>
+                <div class="feature-title">Event-Driven + Webhooks</div>
+                <div class="feature-desc">Webhook → queue → worker → agente → resposta. Retry exponencial, dead-letter queue, idempotency keys. Escala horizontal.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">📊</div>
+                <div class="feature-title">Observabilidade Completa</div>
+                <div class="feature-desc">OpenTelemetry nativo (traces, metrics, logs). Grafana dashboard incluso. Custo por agente, tokens, latência, erros — tempo real.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">💳</div>
+                <div class="feature-title">Billing Integrado (Stripe)</div>
+                <div class="feature-desc">Planos fixos + metered (voice_minutes, llm_tokens). Portal cliente self-service. Webhooks usage em tempo real para revenda/embed.</div>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon">🛠</div>
+                <div class="feature-title">Ferramentas Prontas</div>
+                <div class="feature-desc">calculator, web_search, send_email, http_request, crm_create_deal, crm_update_deal, lead_score, hybrid_search, current_datetime. Extensível.</div>
+            </div>
+        </div>
+        <!-- CRM 100% IA highlight -->
+        <div style="margin-top:32px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:28px">📈</span>
+            <div style="flex:1;min-width:260px">
+                <h4 style="font-size:15px;font-weight:700">CRM 100% automatizado por agentes IA — Kanban sem planilha</h4>
+                <p style="font-size:13px;color:var(--text-dim);margin-top:4px"><code>crm_create_deal</code> cria deal no kanban + HubSpot/Pipedrive/Zendesk/Astrea 1-click. <code>crm_update_deal</code> move `prospection→mql→sql→opportunity→closed_won/lost`. <strong>HITL</strong> se desconto &gt;15% ou `closed_won &gt;R$5k` → vai pra aprovação do manager. Agente SDR já cria e move sozinho.</p>
+            </div>
+            <a href="/dashboard/crm" class="btn-ghost" style="font-size:13px;white-space:nowrap">Ver CRM →</a>
+        </div>
+    </div>
+</section>
+
+<!-- Channels — Multi-canal com WhatsApp hero -->
 <section id="channels" style="background: var(--surface);">
     <div class="inner" style="text-align: center;">
-        <div class="section-label">02 / Canais</div>
-        <h2 class="section-title" style="margin-left: auto; margin-right: auto;">Um agente,<br>em todas as superfícies</h2>
+        <div class="section-label">05 / Canais — Multi-canal</div>
+        <h2 class="section-title" style="margin-left: auto; margin-right: auto;">Um agente, <span style="color:var(--cyan)">todos os canais</span><br>WhatsApp no centro</h2>
         <p class="section-desc" style="margin-left: auto; margin-right: auto; text-align: center;">
-            Implante o mesmo agente em todos os lugares onde seus clientes já estão.
+            Mesmo agente, mesma memória, mesma governança — responde no <strong>WhatsApp, Web, E-mail, Slack, Telegram, Discord</strong>. Troca de canal sem perder contexto. WhatsApp via <strong>Evolution API (Cloud API oficial Meta)</strong>.
         </p>
+        <!-- WhatsApp hero -->
+        <div style="background:var(--bg);border:1px solid var(--cyan);border-radius:12px;padding:32px;text-align:left;margin-bottom:24px;position:relative;overflow:hidden">
+            <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;background:radial-gradient(circle,rgba(0,229,160,0.08) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+                <span style="font-size:32px">💬</span>
+                <div>
+                    <h3 style="font-size:18px;font-weight:700">WhatsApp — canal principal</h3>
+                    <p class="mono" style="font-size:12px;color:var(--text-dim)">Evolution API v2.3.7 • Cloud API oficial Meta • QR Code + API oficial</p>
+                </div>
+                <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">MAIS USADO</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:20px">
+                <div>
+                    <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">🔌 Conexão</h4>
+                    <ul style="font-size:13px;color:var(--text-dim);list-style:none;padding:0;line-height:1.8">
+                        <li>✓ Evolution API self-hosted no seu VPS</li>
+                        <li>✓ Cloud API oficial Meta (número oficial)</li>
+                        <li>✓ QR Code + pareamento em 30s</li>
+                        <li>✓ Múltiplas instances por plano*</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">💎 Recursos</h4>
+                    <ul style="font-size:13px;color:var(--text-dim);list-style:none;padding:0;line-height:1.8">
+                        <li>✓ Texto, mídia, áudio, template Meta</li>
+                        <li>✓ Botões, listas, carrossel</li>
+                        <li>✓ Grupos + broadcast (compliance)</li>
+                        <li>✓ Webhook inbound/outbound realtime</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">📈 Escala</h4>
+                    <ul style="font-size:13px;color:var(--text-dim);list-style:none;padding:0;line-height:1.8">
+                        <li>✓ Free: <strong>0</strong> • Starter: <strong>1</strong> nº</li>
+                        <li>✓ Pro: <strong>3</strong> nºs • Enterprise: <strong>10+</strong></li>
+                        <li>✓ Fila + retry + DLQ (não perde msg)</li>
+                        <li>✓ Mesmo agente em todos os nºs</li>
+                    </ul>
+                </div>
+            </div>
+            <p class="mono" style="font-size:11px;color:var(--text-muted);margin-top:16px">* Evolution API instances por plano — ver <a href="#pricing" style="color:var(--cyan)">Planos</a>. Cada instance = 1 número WhatsApp isolado (QR + API).</p>
+        </div>
         <div class="channel-grid">
-            <div class="channel-card">
+            <div class="channel-card" style="grid-column:span 2;border-color:var(--cyan);background:var(--cyan-dim)">
+                <div class="channel-icon" style="font-size:32px">🎙️</div>
+                <div class="channel-name" style="font-size:16px;font-weight:600">Voice (WhatsApp + Ligação)</div>
+                <div style="font-size:12px;color:var(--text-dim);margin-top:8px">TTS Kokoro $0/min + Whisper STT self-hosted. Mesmo agente atende texto e voz no mesmo número.</div>
+            </div>
+            <div class="channel-card" style="border-color:var(--cyan);background:var(--bg)">
                 <div class="channel-icon">💬</div>
-                <div class="channel-name">WhatsApp</div>
+                <div class="channel-name" style="font-weight:600">WhatsApp Texto</div>
+                <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Evolution API • template + mídia</div>
             </div>
             <div class="channel-card">
                 <div class="channel-icon">📧</div>
@@ -331,9 +536,9 @@
 <!-- Pricing -->
 <section id="pricing">
     <div class="inner">
-        <div class="section-label">03 / Planos</div>
-        <h2 class="section-title">Comece grátis.<br>Escale quando quiser.</h2>
-        <p class="section-desc">Sem taxas ocultas. Faça upgrade ou cancele quando quiser.</p>
+        <div class="section-label">06 / Planos</div>
+        <h2 class="section-title">Preço fixo previsível.<br>Sem surpresa no fim do mês.</h2>
+        <p class="section-desc">Diferente de Vapi/Retell ($0.05/min + LLM), aqui TTS é <strong>$0/min self-hosted</strong>. <strong>BYOK</strong>: você usa sua <code>API key</code> (OpenRouter/OpenAI) — tokens vão na sua fatura, não na nossa. Você paga só a plataforma.</p>
 
         <div class="pricing-grid">
             <div class="pricing-card">
@@ -342,9 +547,11 @@
                 <div class="pricing-price">R$0<span>/mês</span></div>
                 <ul class="pricing-features">
                     <li>2 agentes</li>
-                    <li>100 mensagens/dia</li>
-                    <li>Apenas canal web</li>
-                    <li>Suporte da comunidade</li>
+                    <li>100 msgs/dia (texto)</li>
+                    <li>Canal web apenas</li>
+                    <li>Evolution API instances: <strong>0</strong> (sem WhatsApp)</li>
+                    <li>Self-hosted no seu VPS</li>
+                    <li>Comunidade Discord</li>
                 </ul>
                 <span class="btn-ghost btn-disabled" style="text-align: center; display: block;" title="Cadastros temporariamente fechados">Começar agora</span>
             </div>
@@ -354,11 +561,13 @@
                 <div class="pricing-price">R$89<span>/mês</span></div>
                 <ul class="pricing-features">
                     <li>10 agentes</li>
-                    <li>500 mensagens/dia</li>
-                    <li>WhatsApp + Web</li>
-                    <li>Suporte por e-mail</li>
+                    <li>10k min voz/mês</li>
+                    <li>WhatsApp + Web + Voice</li>
+                    <li>1 org (single-tenant)</li>
+                    <li>Evolution API instances: <strong>1</strong> (1 número WhatsApp)</li>
+                    <li>Suporte e-mail 24h</li>
                 </ul>
-                <span class="btn-primary btn-disabled" style="text-align: center; display: block;" title="Cadastros temporariamente fechados">Iniciar teste grátis</span>
+                <span class="btn-primary btn-disabled" style="text-align: center; display: block;" title="Cadastros temporariamente fechados">Iniciar teste 14 dias</span>
             </div>
             <div class="pricing-card">
                 <div class="pricing-tier">Nível 03</div>
@@ -366,11 +575,14 @@
                 <div class="pricing-price">R$249<span>/mês</span></div>
                 <ul class="pricing-features">
                     <li>50 agentes</li>
-                    <li>5.000 mensagens/dia</li>
-                    <li>Todos os canais</li>
-                    <li>Suporte prioritário</li>
+                    <li>50k min voz/mês</li>
+                    <li>Todos canais + Voice</li>
+                    <li>Multi-tenant (até 10 orgs)</li>
+                    <li>Evolution API instances: <strong>3</strong> (até 3 números WhatsApp)</li>
+                    <li>Suporte prioritário 4h</li>
+                    <li>White-label rodapé discreto</li>
                 </ul>
-                <span class="btn-ghost btn-disabled" style="text-align: center; display: block;" title="Cadastros temporariamente fechados">Iniciar teste grátis</span>
+                <span class="btn-ghost btn-disabled" style="text-align: center; display: block;" title="Cadastros temporariamente fechados">Iniciar teste 14 dias</span>
             </div>
             <div class="pricing-card">
                 <div class="pricing-tier">Nível 04</div>
@@ -378,11 +590,43 @@
                 <div class="pricing-price">Personalizado</div>
                 <ul class="pricing-features">
                     <li>500+ agentes</li>
-                    <li>Limites personalizados</li>
-                    <li>SSO / SAML</li>
-                    <li>Suporte dedicado</li>
+                    <li>Minutos voz ilimitados</li>
+                    <li>Orgs ilimitadas + SSO/SAML</li>
+                    <li>Evolution API instances: <strong>10+</strong> (números WhatsApp ilimitados)</li>
+                    <li>White-label total (sem branding)</li>
+                    <li>Domínio custom (voz.seudominio.com)</li>
+                    <li>SLA 99.9% + BAA + CS dedicated</li>
+                    <li>Onboarding assistido + bulk API</li>
+                    <li>Metered billing webhooks</li>
                 </ul>
                 <a href="mailto:sales@aios.dev" class="btn-ghost" style="text-align: center;">Falar com vendas</a>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Install 1-click -->
+<section id="install" style="background: var(--surface);">
+    <div class="inner">
+        <div class="section-label">07 / Instalação 1-click</div>
+        <h2 class="section-title">1 comando no seu VPS,<br>ferramenta já em deploy</h2>
+        <p class="section-desc">Você hospeda na sua VPS, com sua <code>API key</code> (BYOK) — paga VPS + tokens direto pro provider. Nós só cobramos a plataforma. Coolify opcional.</p>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:20px;overflow-x:auto;margin-bottom:20px">
+            <div class="mono" style="font-size:12px;color:var(--text-muted);margin-bottom:8px">VPS puro (sem Coolify) — recomendado</div>
+            <code class="mono" style="font-size:13px;color:var(--cyan);word-break:break-all">curl -fsSL https://raw.githubusercontent.com/pixordigital/aios/main/install.sh | bash</code>
+            <div class="mono" style="font-size:12px;color:var(--text-muted);margin:12px 0 8px">Com Coolify + domínio + voz</div>
+            <code class="mono" style="font-size:13px;color:var(--cyan);word-break:break-all">curl -fsSL https://raw.githubusercontent.com/pixordigital/aios/main/install.sh | bash -s -- --with-coolify --domain aios.seudominio.com --email admin@ex.com --voice</code>
+            <div class="mono" style="font-size:11px;color:var(--text-muted);margin-top:12px">Instala Docker (se não tem) → clona /opt/aios → gera .env (POSTGRES/REDIS/JWT) → <code>docker compose --profile voice up -d</code> → health <code>/health/live</code> → cria admin. Update: <code>cd /opt/aios && git pull && docker compose up -d --build</code></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:20px">💰</div><div style="font-size:13px;font-weight:600">BYOK — você paga tokens</div><div style="font-size:12px;color:var(--text-dim);margin-top:4px">Sua key OpenRouter/OpenAI → fatura vai pra você, não pra nós. Medimos só pra limite do plano.</div>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:20px">🖥️</div><div style="font-size:13px;font-weight:600">VPS é sua</div><div style="font-size:12px;color:var(--text-dim);margin-top:4px">Hetzner/Contabo/AWS sua. `install.sh` sobe tudo em /opt/aios, Coolify opcional.</div>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center">
+                <div style="font-size:20px">🔒</div><div style="font-size:13px;font-weight:600">Seus dados, seu controle</div><div style="font-size:12px;color:var(--text-dim);margin-top:4px">Self-hosted, LGPD, sem lock-in. Export JSON anytime.</div>
             </div>
         </div>
     </div>
@@ -391,14 +635,14 @@
 <!-- CTA -->
 <section class="cta-section">
     <div class="inner">
-        <div class="section-label">04 / Comece Agora</div>
-        <h2 class="section-title" style="margin-left: auto; margin-right: auto; text-align: center;">Pronto para implantar?</h2>
+        <div class="section-label">08 / Comece Agora</div>
+        <h2 class="section-title" style="margin-left: auto; margin-right: auto; text-align: center;">Pronto para voice+data no seu VPS?</h2>
         <p class="section-desc" style="margin-left: auto; margin-right: auto; text-align: center;">
-            Junte-se às equipes que usam o AIOS para automatizar suporte, vendas e fluxos de trabalho para seus clientes.
+            1 comando, 5 minutos, BYOK. Self-hosted, $0/min TTS, multi-canal WhatsApp.
         </p>
         <div style="text-align: center;">
-            <span class="btn-primary btn-disabled" style="font-size: 16px; padding: 12px 32px; display: inline-block;" title="Cadastros temporariamente fechados — entre em contato">Comece grátis agora →</span>
-            <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">Cadastros temporariamente fechados — entre em contato</p>
+            <span class="btn-primary btn-disabled" style="font-size: 16px; padding: 12px 32px; display: inline-block;" title="Cadastros temporariamente fechados — entre em contato">Comece grátis 14 dias Pro →</span>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">Cadastros temporariamente fechados — <a href="mailto:sales@aios.dev" style="color:var(--cyan)">entre em contato</a></p>
         </div>
     </div>
 </section>
@@ -411,28 +655,33 @@
                 <div class="logo-mark"><span>A</span></div>
                 <span class="logo-text">AIOS</span>
             </a>
-            <p>Sistema Operacional de Agentes de IA. Plataforma proprietária, multi-tenant e pronta para produção.</p>
+            <p>Sistema Operacional de Agentes de Voz & Dados. Self-hosted, multi-tenant, $0/min TTS, PT-BR nativo. Open core (MIT).</p>
         </div>
         <div>
             <h4>Produto</h4>
             <ul>
-                <li><a href="#features">Recursos</a></li>
+                <li><a href="#voice">Voice Agents</a></li>
+                <li><a href="#data">Data Agents</a></li>
                 <li><a href="#pricing">Planos</a></li>
-                <li><a href="/docs">Documentação da API</a></li>
+                <li><a href="/docs">Documentação</a></li>
             </ul>
         </div>
         <div>
-            <h4>Legal</h4>
+            <h4>Recursos</h4>
+            <ul>
+                <li><a href="/docs/voice">Guia Voice Agents</a></li>
+                <li><a href="/docs/deploy">Deploy Coolify</a></li>
+                <li><a href="/docs/api">API Reference</a></li>
+                <li><a href="https://github.com/aios/aios" target="_blank">GitHub (MIT)</a></li>
+            </ul>
+        </div>
+        <div>
+            <h4>Empresa</h4>
             <ul>
                 <li><a href="/legal/terms">Termos de Serviço</a></li>
                 <li><a href="/legal/privacy">Política de Privacidade</a></li>
-            </ul>
-        </div>
-        <div>
-            <h4>Suporte</h4>
-            <ul>
-                <li><a href="mailto:support@aios.dev">support@aios.dev</a></li>
-                <li><a href="mailto:support@aios.dev">Reportar um bug</a></li>
+                <li><a href="mailto:sales@aios.dev">Enterprise / Parcerias</a></li>
+                <li><a href="mailto:support@aios.dev">Suporte</a></li>
             </ul>
         </div>
     </div>
@@ -445,17 +694,17 @@
 <script>
 // ── Animação de digitação do terminal ──
 const terminalLines = [
-    { type: 'cmd', text: 'aios agent create --name "Bot de Suporte" --model gpt-4o', delay: 0 },
-    { type: 'output', text: 'Criando agente...', delay: 800 },
-    { type: 'success', text: '✓ Agente "Bot de Suporte" criado (id: ag_7x9k2m)', delay: 1200 },
-    { type: 'cmd', text: 'aios channel connect --type whatsapp --agent ag_7x9k2m', delay: 2000 },
-    { type: 'output', text: 'Conectando canal do WhatsApp...', delay: 2800 },
-    { type: 'success', text: '✓ Canal conectado. Ouvindo em +55 (11) 99999-9999', delay: 3200 },
-    { type: 'cmd', text: 'aios deploy ag_7x9k2m --env production', delay: 4000 },
-    { type: 'output', text: 'Implantando em produção...', delay: 4800 },
-    { type: 'success', text: '✓ Implantado. Agente ativo e processando mensagens.', delay: 5200 },
-    { type: 'cmd', text: 'aios status', delay: 6000 },
-    { type: 'success', text: '  Agentes: 3 ativos  |  Mensagens: 1.247 hoje  |  Disponibilidade: 99.9%', delay: 6500 },
+    { type: 'cmd', text: 'aios voice create --type sdr --model openai/gpt-4o-mini --voice pm_alex', delay: 0 },
+    { type: 'output', text: 'Criando SDR Voice Agent...', delay: 800 },
+    { type: 'success', text: '✓ Agente "SDR Voz" criado (id: ag_v7x9k2m)', delay: 1200 },
+    { type: 'cmd', text: 'aios voice connect --agent ag_v7x9k2m --channel whatsapp --tts kokoro', delay: 2000 },
+    { type: 'output', text: 'Conectando WhatsApp + Kokoro TTS ($0/min)...', delay: 2800 },
+    { type: 'success', text: '✓ Voice ativo. Ouvindo em +55 (11) 99999-9999 | TTS: pm_alex', delay: 3200 },
+    { type: 'cmd', text: 'aios deploy ag_v7x9k2m --env production', delay: 4000 },
+    { type: 'output', text: 'Implantando no seu VPS (Coolify)...', delay: 4800 },
+    { type: 'success', text: '✓ Deploy completo. SDR qualifica leads 24/7. $0/min TTS.', delay: 5200 },
+    { type: 'cmd', text: 'aios voice status', delay: 6000 },
+    { type: 'success', text: '  Voice Agents: 3 ativos  |  Minutos hoje: 1.247  |  Latência: <1.5s  |  Custo TTS: $0', delay: 6500 },
 ];
 
 function typeTerminal() {

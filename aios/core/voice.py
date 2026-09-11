@@ -15,6 +15,7 @@ import time
 import httpx
 
 from aios.config import settings
+from aios.core.tracing import emit_usage_event
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,10 @@ async def transcribe_audio(audio: bytes, channel_config: dict | None = None, lan
 
 
 async def place_call(to: str, script: str, channel_config: dict | None = None, extra: dict | None = None) -> dict:
-    """Dispara chamada outbound. Sem bridge → queued com TTS pronto."""
+    """Dispara chamada outbound. Sem bridge → queued com TTS pronto.
+    
+    Emits voice_minutes_used event on successful dialing for metered billing.
+    """
     to = (to or "").strip()
     if not to:
         return {"ok": False, "error": "destino vazio"}
@@ -154,6 +158,18 @@ async def place_call(to: str, script: str, channel_config: dict | None = None, e
             if r.status_code in (200, 201, 202):
                 call["status"] = "dialing"
                 call["bridge_response"] = r.text[:300]
+                # Emit usage event for metered billing (estimated 1 min for dialing)
+                org_id = extra.get("conversation_id", "").split("_")[0] if extra and extra.get("conversation_id") else "unknown"
+                await emit_usage_event(
+                    event="voice_minutes_used",
+                    org_id=org_id,
+                    quantity=1.0,
+                    unit="minutes",
+                    agent_id=extra.get("agent_id") if extra else None,
+                    team_id=extra.get("team_id") if extra else None,
+                    conversation_id=extra.get("conversation_id") if extra else None,
+                    metadata={"to": to, "provider": cfg["provider"], "bridge": "generic"},
+                )
             else:
                 call["status"] = "bridge_error"
                 call["bridge_response"] = r.text[:300]
@@ -185,6 +201,18 @@ async def _vapi_call(call: dict, to: str, script: str, cfg: dict, extra: dict | 
                     call["bridge_response"] = r.json().get("id", r.text[:300])
                 except Exception:
                     call["bridge_response"] = r.text[:300]
+                # Emit usage event for metered billing (Vapi bills per minute)
+                org_id = extra.get("conversation_id", "").split("_")[0] if extra and extra.get("conversation_id") else "unknown"
+                await emit_usage_event(
+                    event="voice_minutes_used",
+                    org_id=org_id,
+                    quantity=1.0,
+                    unit="minutes",
+                    agent_id=extra.get("agent_id") if extra else None,
+                    team_id=extra.get("team_id") if extra else None,
+                    conversation_id=extra.get("conversation_id") if extra else None,
+                    metadata={"to": to, "provider": "vapi", "call_id": call.get("bridge_response")},
+                )
             else:
                 call["status"] = "bridge_error"
                 call["bridge_response"] = r.text[:300]
@@ -212,6 +240,18 @@ async def _retell_call(call: dict, to: str, script: str, cfg: dict, extra: dict 
                     call["bridge_response"] = r.json().get("call_id", r.text[:300])
                 except Exception:
                     call["bridge_response"] = r.text[:300]
+                # Emit usage event for metered billing (Retell bills per minute)
+                org_id = extra.get("conversation_id", "").split("_")[0] if extra and extra.get("conversation_id") else "unknown"
+                await emit_usage_event(
+                    event="voice_minutes_used",
+                    org_id=org_id,
+                    quantity=1.0,
+                    unit="minutes",
+                    agent_id=extra.get("agent_id") if extra else None,
+                    team_id=extra.get("team_id") if extra else None,
+                    conversation_id=extra.get("conversation_id") if extra else None,
+                    metadata={"to": to, "provider": "retell", "call_id": call.get("bridge_response")},
+                )
             else:
                 call["status"] = "bridge_error"
                 call["bridge_response"] = r.text[:300]
