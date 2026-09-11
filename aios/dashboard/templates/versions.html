@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div>
+    <h1>Histórico — {{ agent.name }}</h1>
+    <p style="color:var(--text-tertiary);font-size:0.75rem;margin:0.25rem 0 0">v{{ versions|length }} versões · rollback 1-click (prompt/voz/config)</p>
+  </div>
+  <div style="display:flex;gap:0.5rem">
+    <a href="/dashboard/agents/{{ agent.id }}/edit" class="btn btn-ghost btn-sm">← Editar agente</a>
+    <a href="/dashboard/agents" class="btn btn-ghost btn-sm">Agentes</a>
+  </div>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+  <div id="versions-list" style="padding:0.75rem 1rem">
+    {% if not versions %}
+      <p style="color:var(--text-tertiary);font-size:0.85rem">Nenhuma versão ainda.</p>
+    {% else %}
+      <div style="display:flex;flex-direction:column;gap:0.5rem">
+      {% for v in versions %}
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:0.82rem">v{{ v.version }} <span style="font-weight:400;color:var(--text-tertiary)">· {{ v.name }} · {{ v.created_at.strftime('%d/%m/%Y %H:%M') if v.created_at else '' }}</span></div>
+            <div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.2rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              {% if v.change_note %}<span style="color:var(--amber)">{{ v.change_note }}</span> · {% endif %}{{ (v.system_prompt or '')[:140].replace('\n',' ⏎ ') }}{% if (v.system_prompt or '')|length > 140 %}…{% endif %}
+              {% set voice = (v.governance_config.get('voice',{}).get('voice_id') if v.governance_config else '') %}
+              {% if voice %} · 🔊 {{ voice }}{% endif %}
+            </div>
+          </div>
+          <div style="display:flex;gap:0.35rem;flex-shrink:0">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="showDiff('{{ v.id }}', {{ v.version }})">Diff</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="doRollback('{{ v.id }}', {{ v.version }})">↩ Rollback</button>
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div id="versions-diff" style="display:none;margin-top:1rem;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--bg-elevated)">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:0.6rem 1rem;border-bottom:1px solid var(--border);background:var(--bg)">
+    <strong style="font-size:0.78rem" id="diff-title">Diff</strong>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('versions-diff').style.display='none'">Fechar</button>
+  </div>
+  <div id="diff-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-family:'JetBrains Mono',monospace;font-size:0.7rem;line-height:1.45">
+    <pre id="diff-left" style="margin:0;padding:0.75rem;white-space:pre-wrap;word-break:break-word;border-right:1px solid var(--border);background:var(--bg);overflow:auto;max-height:55vh"></pre>
+    <pre id="diff-right" style="margin:0;padding:0.75rem;white-space:pre-wrap;word-break:break-word;background:var(--bg);overflow:auto;max-height:55vh"></pre>
+  </div>
+  <div id="diff-unified" style="display:none;padding:0.75rem;max-height:55vh;overflow:auto"><pre id="diff-unified-pre" style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:'JetBrains Mono',monospace;font-size:0.7rem;line-height:1.45"></pre></div>
+</div>
+
+<script>
+var agentId = "{{ agent.id }}";
+var versionsCache = {{ versions_json|safe }};
+function esc(s){ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+function simpleLineDiff(a,b){
+  var al=(a||'').split('\n'), bl=(b||'').split('\n');
+  var max=Math.max(al.length, bl.length);
+  var left='', right='';
+  for(var i=0;i<max;i++){
+    var la=al[i], lb=bl[i];
+    if(la===lb){
+      left+='<span style="color:var(--text-tertiary)">'+esc(la===undefined?'':la)+'</span>\n';
+      right+='<span style="color:var(--text-tertiary)">'+esc(lb===undefined?'':lb)+'</span>\n';
+    } else {
+      left+='<span style="background:rgba(239,68,68,0.15);color:var(--red)">'+esc(la===undefined?'∅':la)+'</span>\n';
+      right+='<span style="background:rgba(0,229,160,0.14);color:var(--accent)">'+esc(lb===undefined?'∅':lb)+'</span>\n';
+    }
+  }
+  return [left,right];
+}
+function renderUnified(s){
+  return (s||'').split('\n').map(function(l){
+    if(l.startsWith('+++')||l.startsWith('---')||l.startsWith('@@')) return '<span style="color:var(--text-tertiary)">'+esc(l)+'</span>';
+    if(l.startsWith('+')) return '<span style="background:rgba(0,229,160,0.14);color:var(--accent)">'+esc(l)+'</span>';
+    if(l.startsWith('-')) return '<span style="background:rgba(239,68,68,0.14);color:var(--red)">'+esc(l)+'</span>';
+    return esc(l);
+  }).join('\n');
+}
+async function showDiff(versionId, verNum){
+  var panel=document.getElementById('versions-diff');
+  var title=document.getElementById('diff-title');
+  var left=document.getElementById('diff-left');
+  var right=document.getElementById('diff-right');
+  var unified=document.getElementById('diff-unified');
+  var unifiedPre=document.getElementById('diff-unified-pre');
+  panel.style.display='block'; title.textContent='Diff — v'+verNum+' vs anterior'; left.innerHTML='Carregando…'; right.innerHTML=''; unified.style.display='none'; document.getElementById('diff-body').style.display='grid';
+  try{
+    var r=await fetch('/api/agents/'+agentId+'/versions/'+versionId+'/diff', {credentials:'same-origin'});
+    if(r.ok){
+      var j=await r.json();
+      if(j.diffs && Object.keys(j.diffs).length){
+        var html='';
+        Object.keys(j.diffs).forEach(function(k){
+          html+='<div style="font-size:0.65rem;font-weight:600;color:var(--text-tertiary);margin:0.5rem 0 0.2rem">'+esc(k)+'</div><div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:0.5rem;overflow:auto">'+renderUnified(j.diffs[k])+'</div>';
+        });
+        unified.innerHTML='<div>'+html+'</div>';
+        document.getElementById('diff-body').style.display='none';
+        unified.style.display='block';
+        panel.scrollIntoView({behavior:'smooth'});
+        return;
+      }
+    }
+    var rv=await fetch('/api/agents/'+agentId+'/versions/'+versionId, {credentials:'same-origin'});
+    if(!rv.ok){ left.textContent='Erro '+rv.status; return; }
+    var curV=await rv.json();
+    var idx=versionsCache.findIndex(function(x){return x.id===versionId;});
+    var prevPrompt='';
+    if(idx>=0 && idx+1<versionsCache.length){
+      var pid=versionsCache[idx+1].id;
+      var rp=await fetch('/api/agents/'+agentId+'/versions/'+pid, {credentials:'same-origin'});
+      if(rp.ok){ var pv=await rp.json(); prevPrompt=pv.system_prompt||''; }
+    }
+    var curPrompt=curV.system_prompt||'';
+    if(!prevPrompt){ left.innerHTML='<span style="color:var(--text-tertiary)">(sem anterior)</span>'; right.innerHTML=esc(curPrompt).replace(/\n/g,'<br>'); return; }
+    var d=simpleLineDiff(prevPrompt, curPrompt);
+    left.innerHTML=d[0]; right.innerHTML=d[1];
+    title.textContent='Diff — v'+(versionsCache[idx+1]?.version||'?')+' → v'+verNum;
+  }catch(e){ left.textContent=String(e); }
+}
+async function doRollback(versionId, verNum){
+  if(!confirm('Rollback para v'+verNum+'? Copia prompt/voz/config e cria nova versão.')) return;
+  try{
+    var r=await fetch('/api/agents/'+agentId+'/versions/'+versionId+'/rollback', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:'{}'});
+    if(!r.ok){ alert('Falha '+r.status+': '+(await r.text()).slice(0,400)); return; }
+    var j=await r.json(); alert('Rollback ok → nova v'+(j.new_version||'?')); location.reload();
+  }catch(e){ alert(String(e)); }
+}
+</script>
+{% endblock %}

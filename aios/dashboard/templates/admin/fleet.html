@@ -2,8 +2,12 @@
 {% block content %}
 <div class="flex-between mb-4">
     <div><h1>Frota de Clientes</h1><p class="text-sm text-secondary mt-1">{{ instances|length }} {{ 'instância de cliente' if instances|length == 1 else 'instâncias de cliente' }}</p></div>
-    <button class="btn btn-primary" onclick="document.getElementById('install-modal').showModal()">+ Implantar cliente</button>
-    <button class="btn btn-ghost" onclick="document.getElementById('add-modal').showModal()">+ Registrar existente</button>
+    <div class="flex-center gap-2">
+        <a href="/dashboard/admin" class="btn btn-ghost btn-sm">← Organizações</a>
+        <a href="/dashboard/admin/backup" class="btn btn-ghost btn-sm">Backup & Restore</a>
+        <button class="btn btn-primary" onclick="document.getElementById('install-modal').showModal()">+ Implantar cliente</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('add-modal').showModal()">+ Registrar existente</button>
+    </div>
 </div>
 
 <dialog id="install-modal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);padding:1.5rem;max-width:520px;width:90%">

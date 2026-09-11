@@ -138,6 +138,21 @@
         <div class="text-xs text-tertiary" style="margin-top:0.25rem">Kokoro `speed` 0.85 mais humano/natural, 1.1 mais ágil. Salvo em `voice.speed`.</div>
       </div>
       <div>
+        <label style="display:flex;gap:0.5rem;align-items:center;cursor:pointer">
+          <input type="checkbox" name="voice_barge_in" id="voice-barge-in" checked value="true" style="accent-color:var(--accent)">
+          Barge-in (interromper) <span class="badge" style="font-size:0.6rem">W1 VAD</span>
+        </label>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Se falar durante TTS, interrompe (energia &gt; threshold por &gt;120ms) e reinicia STT. <code>VOICE_BARGE_IN</code></div>
+      </div>
+      <div>
+        <label>Silêncio fim de turno — <span class="mono" id="silence-val" style="color:var(--accent)">800ms</span></label>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <input type="range" name="voice_silence_ms" id="voice-silence" min="500" max="1200" step="50" value="800" class="input" style="flex:1;padding:0" oninput="document.getElementById('silence-val').textContent=this.value+'ms'">
+          <span class="text-xs text-tertiary">500 — 1200ms</span>
+        </div>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Silêncio &gt;<span id="silence-val2">800</span>ms após fala = fim de turno → envia pro LLM. <code>VOICE_SILENCE_MS</code> <code>VOICE_VAD_THRESHOLD</code>=0.02</div>
+      </div>
+      <div>
         <label>Preview (testa Kokoro ao vivo)</label>
         <div style="display:flex;gap:0.5rem">
           <input type="text" id="preview-text" class="input" value="Olá, aqui é da AIOS, como posso ajudar?" style="flex:1">

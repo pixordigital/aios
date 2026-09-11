@@ -94,6 +94,11 @@ class Settings(BaseSettings):
 
     registration_enabled: bool = False  # fechar cadastros — home buttons desabilitados
 
+    # ─── Calendar (P3) ───
+    google_calendar_credentials: str = ""  # JSON service account inline ou path (env GOOGLE_CALENDAR_CREDENTIALS / AIOS_GOOGLE_CALENDAR_CREDENTIALS)
+    google_calendar_id: str = "primary"  # calendarId (env GOOGLE_CALENDAR_ID)
+    calendar_webhook_url: str = ""  # webhook Calendly/Zapier/n8n (env CALENDAR_WEBHOOK_URL / AIOS_CALENDAR_WEBHOOK_URL)
+
 
 
 settings = Settings()

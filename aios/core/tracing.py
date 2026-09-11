@@ -249,6 +249,22 @@ def _log_span_event(event: str, span: TraceSpan) -> None:
     }
     if event == "end" and span.end:
         record["duration_ms"] = round((span.end - span.start) * 1000, 1)
+    # PII auto-redaction antes de json.dumps — extra e messages
+    try:
+        from aios.core.pii import redact_pii, redact_pii_obj  # lazy to avoid cycle
+        if span.extra:
+            # redact dict/lists recursivamente; mantém estrutura mas troca valores sensíveis por ***
+            record["extra"] = redact_pii_obj(span.extra)  # type: ignore
+            # compat: se extra já contém "messages", também redacted via obj
+            if "messages" in span.extra:
+                record["messages"] = redact_pii_obj(span.extra.get("messages"))
+        # também redact error/messages caso contenham PII solto
+        if isinstance(record.get("error"), str) and record["error"]:
+            record["error"] = redact_pii(record["error"])
+        if "messages" in record and isinstance(record["messages"], str):
+            record["messages"] = redact_pii(record["messages"])  # type: ignore
+    except Exception:
+        pass
     logging.getLogger("aios.tracing").info(json.dumps(record))
 
 
@@ -349,6 +365,19 @@ async def emit_usage_event(
         "metadata": metadata or {},
         "timestamp": time.time(),
     }
+    # PII auto-redaction antes de json.dumps — extra/messages equivalente: metadata
+    try:
+        from aios.core.pii import redact_pii_obj
+        if payload.get("metadata"):
+            payload["metadata"] = redact_pii_obj(payload["metadata"])
+        # também redact campos que podem conter mensagem bruta com PII
+        for _k in ("conversation_id", "agent_id", "team_id"):
+            if isinstance(payload.get(_k), str) and payload[_k]:
+                # ids normalmente não têm PII, mas mantém redaction seguro
+                from aios.core.pii import redact_pii as _rp
+                payload[_k] = _rp(payload[_k])  # type: ignore
+    except Exception:
+        pass
     
     headers = {"Content-Type": "application/json"}
     if secret:

@@ -2,6 +2,12 @@
 {% block content %}
 <div class="flex-between mb-4">
     <div><h1>{% if agent %}Editar{% else %}Novo{% endif %} Agente</h1></div>
+    {% if agent %}
+    <div style="display:flex;gap:0.5rem;align-items:center">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="openVersionsModal()">🕘 Histórico (versões)</button>
+        <a href="/dashboard/agents/{{ agent.id }}/versions" class="btn btn-ghost btn-sm" style="text-decoration:none">Abrir página</a>
+    </div>
+    {% endif %}
 </div>
 
 <form method="POST" action="/dashboard/agents/save">
@@ -561,4 +567,184 @@ function syncPills(input) {
 }
 document.addEventListener('DOMContentLoaded', function() { setTimeout(syncPills.bind(null, document.getElementById('tools-input')), 100); });
 </script>
+
+{% if agent %}
+<!-- S2 Versionamento + Rollback 1-click modal -->
+<div id="versions-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:200;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this) closeVersionsModal()">
+<div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;width:100%;max-width:920px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,0.5)">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1.25rem;border-bottom:1px solid var(--border);flex:0 0 auto">
+    <div><h2 style="margin:0;font-size:0.95rem">Histórico de versões</h2><p style="margin:0.15rem 0 0;color:var(--text-tertiary);font-size:0.7rem">Prompt + voz/config — rollback 1-click cria nova versão</p></div>
+    <div style="display:flex;gap:0.5rem;align-items:center">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="fetchVersions()">↻ Recarregar</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closeVersionsModal()">✕ Fechar</button>
+    </div>
+  </div>
+  <div id="versions-list" style="overflow:auto;flex:1;padding:0.75rem 1rem;min-height:120px">
+    <p style="color:var(--text-tertiary);font-size:0.8rem">Carregando…</p>
+  </div>
+  <div id="versions-diff" style="display:none;border-top:1px solid var(--border);background:var(--bg);max-height:45vh;overflow:auto;flex:0 0 auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 1rem;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:1">
+      <strong style="font-size:0.75rem" id="diff-title">Diff</strong>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closeDiff()">Fechar diff</button>
+    </div>
+    <div id="diff-body" style="display:grid;grid-template-columns:1fr 1fr;gap:0;font-family:'JetBrains Mono',monospace;font-size:0.7rem;line-height:1.45">
+      <pre id="diff-left" style="margin:0;padding:0.75rem;white-space:pre-wrap;word-break:break-word;border-right:1px solid var(--border);background:var(--bg);overflow:auto"></pre>
+      <pre id="diff-right" style="margin:0;padding:0.75rem;white-space:pre-wrap;word-break:break-word;background:var(--bg);overflow:auto"></pre>
+    </div>
+    <div id="diff-unified" style="padding:0.75rem;display:none"><pre id="diff-unified-pre" style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:'JetBrains Mono',monospace;font-size:0.7rem;line-height:1.45"></pre></div>
+  </div>
+</div>
+</div>
+<script>
+(function(){
+  var agentId = "{{ agent.id if agent else '' }}";
+  var versionsCache = [];
+  function esc(s){ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+  function fmtDate(s){ try{ return new Date(s).toLocaleString('pt-BR'); }catch(e){ return s||'-'; } }
+  window.openVersionsModal = function(){ var m=document.getElementById('versions-modal'); m.style.display='flex'; fetchVersions(); };
+  window.closeVersionsModal = function(){ document.getElementById('versions-modal').style.display='none'; };
+  window.closeDiff = function(){ document.getElementById('versions-diff').style.display='none'; };
+  window.fetchVersions = async function(){
+    var el=document.getElementById('versions-list');
+    el.innerHTML='<p style="color:var(--text-tertiary);font-size:0.8rem">Carregando…</p>';
+    closeDiff();
+    try{
+      var r=await fetch('/api/agents/'+agentId+'/versions?limit=50', {credentials:'same-origin'});
+      if(!r.ok){ el.innerHTML='<p style="color:var(--red);font-size:0.8rem">Erro '+r.status+' — '+esc(await r.text())+'</p>'; return; }
+      var data=await r.json();
+      versionsCache=data;
+      if(!data.length){ el.innerHTML='<p style="color:var(--text-tertiary);font-size:0.8rem">Nenhuma versão ainda. Salve o agente para gerar snapshots.</p>'; return; }
+      var html='<div style="display:flex;flex-direction:column;gap:0.5rem">';
+      data.forEach(function(v){
+        var preview=esc((v.system_prompt||'').slice(0,140).replace(/\n/g,' ⏎ '));
+        if((v.system_prompt||'').length>140) preview+='…';
+        // voice hint from llm_config/governance
+        var voiceHint='';
+        try{
+          var gc=v.llm_config||{}; var gov=v.governance_config||{};
+          var voice=(gov.voice&&gov.voice.voice_id)||gc.voice||'';
+          if(voice) voiceHint=' · 🔊 '+esc(String(voice));
+        }catch(e){}
+        html+='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;padding:0.6rem 0.75rem;border:1px solid var(--border);border-radius:6px;background:var(--bg)">'
+          +'<div style="flex:1;min-width:0">'
+          +'<div style="font-weight:600;font-size:0.8rem">v'+v.version+' <span style="font-weight:400;color:var(--text-tertiary)">· '+esc(v.name||'')+'</span> <span style="font-weight:400;color:var(--text-tertiary)">· '+fmtDate(v.created_at)+'</span></div>'
+          +'<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+(v.change_note? '<span style="color:var(--amber)">'+esc(v.change_note)+'</span> · ':'')+preview+voiceHint+'</div>'
+          +'</div>'
+          +'<div style="display:flex;gap:0.35rem;flex-shrink:0;align-items:center">'
+          +'<button type="button" class="btn btn-ghost btn-sm" onclick="showDiff(\''+v.id+'\','+v.version+')">Diff</button>'
+          +'<button type="button" class="btn btn-primary btn-sm" onclick="doRollback(\''+v.id+'\','+v.version+')">↩ Rollback</button>'
+          +'</div></div>';
+      });
+      html+='</div>';
+      el.innerHTML=html;
+    }catch(e){ el.innerHTML='<p style="color:var(--red);font-size:0.8rem">'+esc(String(e))+'</p>'; }
+  };
+  function simpleLineDiff(a,b){
+    var al=(a||'').split('\n'), bl=(b||'').split('\n');
+    var max=Math.max(al.length, bl.length);
+    var left='', right='';
+    for(var i=0;i<max;i++){
+      var la=al[i], lb=bl[i];
+      if(la===lb){
+        left+='<span style="color:var(--text-tertiary)">'+esc(la===undefined?'':la)+'</span>\n';
+        right+='<span style="color:var(--text-tertiary)">'+esc(lb===undefined?'':lb)+'</span>\n';
+      } else {
+        left+='<span style="background:rgba(239,68,68,0.15);color:var(--red)">'+esc(la===undefined?'∅ '+'' : la)+'</span>\n';
+        right+='<span style="background:rgba(0,229,160,0.14);color:var(--accent)">'+esc(lb===undefined?'∅ '+'' : lb)+'</span>\n';
+      }
+    }
+    return [left,right];
+  }
+  function renderUnified(diffStr){
+    var lines=(diffStr||'').split('\n');
+    return lines.map(function(l){
+      if(l.startsWith('+++')||l.startsWith('---')||l.startsWith('@@')) return '<span style="color:var(--text-tertiary)">'+esc(l)+'</span>';
+      if(l.startsWith('+')) return '<span style="background:rgba(0,229,160,0.14);color:var(--accent)">'+esc(l)+'</span>';
+      if(l.startsWith('-')) return '<span style="background:rgba(239,68,68,0.14);color:var(--red)">'+esc(l)+'</span>';
+      return esc(l);
+    }).join('\n');
+  }
+  window.showDiff = async function(versionId, verNum){
+    var panel=document.getElementById('versions-diff');
+    var title=document.getElementById('diff-title');
+    var left=document.getElementById('diff-left');
+    var right=document.getElementById('diff-right');
+    var unified=document.getElementById('diff-unified');
+    var unifiedPre=document.getElementById('diff-unified-pre');
+    panel.style.display='block';
+    title.textContent='Diff — v'+verNum+' vs anterior';
+    left.innerHTML='Carregando…'; right.innerHTML=''; unified.style.display='none';
+    try{
+      // tenta diff do backend (unified)
+      var r=await fetch('/api/agents/'+agentId+'/versions/'+versionId+'/diff', {credentials:'same-origin'});
+      if(r.ok){
+        var j=await r.json();
+        if(j.diffs && Object.keys(j.diffs).length){
+          var parts=[];
+          Object.keys(j.diffs).forEach(function(k){
+            parts.push('<div style="font-size:0.65rem;font-weight:600;color:var(--text-tertiary);margin:0.5rem 0 0.2rem">'+esc(k)+'</div><div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:0.5rem;overflow:auto">'+renderUnified(j.diffs[k])+'</div>');
+          });
+          unified.innerHTML='<div style="padding:0.25rem 0">'+parts.join('')+'</div>';
+          // hide side-by-side, show unified
+          document.getElementById('diff-body').style.display='none';
+          unified.style.display='block';
+          panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+          return;
+        }
+        if(j.diff){
+          unified.innerHTML='<pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-family:monospace;font-size:0.7rem">'+esc(j.diff)+'</pre>';
+          document.getElementById('diff-body').style.display='none';
+          unified.style.display='block';
+          return;
+        }
+      }
+      // fallback: JS side-by-side entre versão e atual (ou versão vs anterior via fetch)
+      var rv=await fetch('/api/agents/'+agentId+'/versions/'+versionId, {credentials:'same-origin'});
+      if(!rv.ok){ left.textContent='Erro '+rv.status; return; }
+      var curV=await rv.json();
+      // pega anterior da cache
+      var idx=versionsCache.findIndex(function(x){return x.id===versionId;});
+      var prevPrompt='', prevCfg='';
+      if(idx>=0 && idx+1<versionsCache.length){
+        var pid=versionsCache[idx+1].id;
+        var rp=await fetch('/api/agents/'+agentId+'/versions/'+pid, {credentials:'same-origin'});
+        if(rp.ok){ var pv=await rp.json(); prevPrompt=pv.system_prompt||''; prevCfg=JSON.stringify(pv.llm_config||{},null,2); }
+      }
+      var curPrompt=curV.system_prompt||''; var curCfg=JSON.stringify(curV.llm_config||{},null,2);
+      // se não tem anterior, compara com prompt atual do editor
+      if(!prevPrompt){
+        var editorVal='';
+        try{ editorVal=(window._monacoEditor? window._monacoEditor.getValue(): document.getElementById('prompt-input').value)||''; }catch(e){}
+        // mostra versão à esquerda, atual à direita
+        var d=simpleLineDiff(curPrompt, editorVal);
+        document.getElementById('diff-body').style.display='grid';
+        unified.style.display='none';
+        left.innerHTML=d[0]||'<span style="color:var(--text-tertiary)">(vazio)</span>';
+        right.innerHTML=d[1]||'<span style="color:var(--text-tertiary)">(vazio)</span>';
+        title.textContent='Diff — v'+verNum+' (esq) vs editor atual (dir)';
+      } else {
+        var d2=simpleLineDiff(prevPrompt, curPrompt);
+        document.getElementById('diff-body').style.display='grid';
+        unified.style.display='none';
+        left.innerHTML=d2[0]; right.innerHTML=d2[1];
+        title.textContent='Diff — v'+(versionsCache[idx+1]?.version||'?')+' → v'+verNum+' (prompt)';
+      }
+      panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+    }catch(e){
+      left.textContent=String(e); right.textContent='';
+    }
+  };
+  window.doRollback = async function(versionId, verNum){
+    if(!confirm('Rollback para v'+verNum+'? Isso copia prompt/voz/config dessa versão para o agente atual e cria nova versão.')) return;
+    try{
+      var r=await fetch('/api/agents/'+agentId+'/versions/'+versionId+'/rollback', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:'{}'});
+      if(!r.ok){ var t=await r.text(); alert('Falha rollback '+r.status+': '+t.slice(0,400)); return; }
+      var j=await r.json();
+      alert('Rollback ok: v'+verNum+' → nova v'+(j.new_version||'?')+' — recarregando');
+      location.reload();
+    }catch(e){ alert(String(e)); }
+  };
+})();
+</script>
+{% endif %}
 {% endblock %}

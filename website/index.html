@@ -17,6 +17,8 @@
             --border-hover: #2a2a2a;
             --cyan: #00e5a0;
             --cyan-dim: #00e5a020;
+            --accent: #00e5a0;
+            --accent-dim: #00e5a020;
             --purple: #a78bfa;
             --amber: #fbbf24;
             --text: #e5e5e5;
@@ -176,6 +178,44 @@
             .voice-diff { grid-template-columns: 1fr; }
             .hero h1 { font-size: 32px; }
             footer .inner { grid-template-columns: 1fr; }
+        }
+
+        /* ── Compare table + ROI calculator ── */
+        .compare-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:32px; border:1px solid var(--border); border-radius:12px; background:var(--surface); }
+        .compare-table { width:100%; border-collapse:collapse; font-size:14px; min-width:720px; }
+        .compare-table th { text-align:left; font-family:'JetBrains Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); padding:14px 16px; background:var(--surface-2); border-bottom:1px solid var(--border); white-space:nowrap; }
+        .compare-table td { padding:14px 16px; border-bottom:1px solid var(--border); color:var(--text-dim); white-space:nowrap; }
+        .compare-table tr:last-child td { border-bottom:none; }
+        .compare-table tr.aios-row { background: var(--accent-dim, var(--cyan-dim)); }
+        .compare-table tr.aios-row td { color:var(--text); font-weight:600; }
+        .compare-table tr.aios-row td:first-child { color:var(--accent); font-weight:700; }
+        .compare-table .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:99px; font-size:12px; font-weight:600; border:1px solid var(--border); }
+        .compare-table .badge-yes { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+        .compare-table .badge-no { background:transparent; color:var(--text-muted); }
+        .compare-table .highlight { color:var(--accent); font-weight:700; }
+        .roi-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:32px; display:grid; grid-template-columns:1fr 380px; gap:32px; }
+        .roi-card h3 { font-size:18px; font-weight:700; margin-bottom:4px; }
+        .roi-card .roi-subtitle { font-size:13px; color:var(--text-dim); margin-bottom:20px; }
+        .roi-inputs { display:flex; flex-direction:column; gap:18px; }
+        .roi-field label { font-size:13px; font-weight:600; color:var(--text-dim); display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .roi-field label .roi-val { color:var(--text); font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; }
+        .roi-field .roi-row { display:flex; gap:12px; align-items:center; }
+        .roi-field input[type=range] { flex:1; accent-color:var(--accent); height:4px; }
+        .roi-field input[type=number], .roi-field select { width:110px; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:8px 10px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:13px; }
+        .roi-field select { width:100%; }
+        .roi-field small { font-size:11px; color:var(--text-muted); margin-top:4px; display:block; }
+        .roi-results { background:var(--bg); border:1px solid var(--border); border-radius:12px; padding:24px; display:flex; flex-direction:column; gap:16px; position:relative; overflow:hidden; }
+        .roi-results::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:var(--accent); }
+        .roi-kpi { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }
+        .roi-kpi:last-child { border-bottom:none; }
+        .roi-kpi-label { font-size:13px; color:var(--text-dim); }
+        .roi-kpi-value { font-family:'JetBrains Mono',monospace; font-weight:700; font-size:14px; color:var(--text); }
+        .roi-kpi-value.accent { color:var(--accent); }
+        .roi-big { font-size:42px; font-weight:800; color:var(--accent); line-height:1; font-family:'JetBrains Mono',monospace; }
+        .roi-big small { font-size:14px; font-weight:600; color:var(--text-dim); margin-left:4px; }
+        .roi-badge-example { display:inline-flex; align-items:center; gap:6px; background:var(--accent-dim); border:1px solid var(--accent); color:var(--accent); padding:6px 12px; border-radius:99px; font-size:12px; font-weight:600; margin-top:8px; }
+        @media (max-width: 900px) {
+            .roi-card { grid-template-columns:1fr; }
         }
 
         /* ── Animations ── */
@@ -605,10 +645,142 @@
     </div>
 </section>
 
+<!-- Compare + ROI Calculator -->
+<section id="compare-roi">
+    <div class="inner">
+        <div class="section-label">07 / Compare e calcule seu ROI</div>
+        <h2 class="section-title">Por que <span style="color:var(--accent)">R$89 fixo</span> vence<br>cobrança por minuto?</h2>
+        <p class="section-desc">Compare: concorrentes cobram <strong>por minuto</strong> (TTS + LLM). AIOS é <strong>$0/min self-hosted</strong> + BYOK. Multi-tenant e self-hosted nativos, PT-BR de verdade.</p>
+
+        <div class="compare-wrap">
+            <table class="compare-table" aria-label="Comparativo AIOS vs concorrentes">
+                <thead>
+                    <tr>
+                        <th>Provedor</th>
+                        <th>TTS cost</th>
+                        <th>PT-BR</th>
+                        <th>Multi-tenant</th>
+                        <th>Self-hosted</th>
+                        <th>Preço</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="aios-row">
+                        <td>AIOS <span style="margin-left:6px;background:var(--accent);color:var(--bg);padding:2px 6px;border-radius:99px;font-size:10px;font-weight:700">VOCÊ ESTÁ AQUI</span></td>
+                        <td class="highlight">$0/min</td>
+                        <td><span class="badge badge-yes">● Nativo</span> <span style="font-size:11px;color:var(--text-dim)">pm_alex / pf_dora</span></td>
+                        <td><span class="badge badge-yes">✓ Sim</span></td>
+                        <td><span class="badge badge-yes">✓ Sim</span></td>
+                        <td class="highlight">R$89 fixo</td>
+                    </tr>
+                    <tr>
+                        <td>Vapi</td>
+                        <td>$0,05/min</td>
+                        <td><span class="badge badge-no">Limitado</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td>$500+/mês</td>
+                    </tr>
+                    <tr>
+                        <td>Retell</td>
+                        <td>$0,07/min</td>
+                        <td><span class="badge badge-no">Limitado</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td>$300+/mês</td>
+                    </tr>
+                    <tr>
+                        <td>Voiceflow</td>
+                        <td>$0,18/min*</td>
+                        <td><span class="badge badge-no">Limitado</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td>$50+ p/ uso</td>
+                    </tr>
+                    <tr>
+                        <td>Tallk</td>
+                        <td>$0,04/min</td>
+                        <td><span class="badge badge-no">Limitado</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td><span class="badge badge-no">✗ Não</span></td>
+                        <td>$400+/mês</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="mono" style="font-size:11px;color:var(--text-muted);margin-bottom:32px">* Voiceflow via ElevenLabs. Valores estimados p/ 10k min/mês. AIOS TTS Kokoro self-hosted $0/min no seu VPS (1 CPU / 1,5 GB RAM). BYOK: tokens LLM na sua fatura OpenRouter/OpenAI.</p>
+
+        <!-- ROI Calculator -->
+        <div class="roi-card" id="roi-calculator">
+            <div>
+                <h3>Calculadora de ROI</h3>
+                <p class="roi-subtitle">Ajuste os sliders. Cálculo 100% no navegador, sem backend.</p>
+                <div class="roi-inputs">
+                    <div class="roi-field">
+                        <label for="roi-sdrs">Nº de SDRs humanos <span class="roi-val" id="roi-sdrs-val">2</span></label>
+                        <div class="roi-row">
+                            <input type="range" id="roi-sdrs" min="1" max="20" step="1" value="2" aria-label="Número de SDRs">
+                            <input type="number" id="roi-sdrs-num" min="1" max="20" value="2" aria-label="Número de SDRs (número)">
+                        </div>
+                        <small>Quantos SDRs você substituiria/aumentaria</small>
+                    </div>
+                    <div class="roi-field">
+                        <label for="roi-salario">Salário médio por SDR <span class="roi-val" id="roi-salario-val">R$ 9.000</span></label>
+                        <div class="roi-row">
+                            <input type="range" id="roi-salario" min="2000" max="20000" step="500" value="9000" aria-label="Salário médio por SDR">
+                            <input type="number" id="roi-salario-num" min="2000" max="50000" step="500" value="9000" aria-label="Salário médio por SDR (número)">
+                        </div>
+                        <small>Inclua salário + encargos + comissão média</small>
+                    </div>
+                    <div class="roi-field">
+                        <label for="roi-minutos">Minutos de voz / mês <span class="roi-val" id="roi-minutos-val">10.000</span></label>
+                        <div class="roi-row">
+                            <input type="range" id="roi-minutos" min="1000" max="50000" step="1000" value="10000" aria-label="Minutos de voz por mês">
+                            <input type="number" id="roi-minutos-num" min="1000" max="200000" step="1000" value="10000" aria-label="Minutos de voz por mês (número)">
+                        </div>
+                        <small>Usado só p/ estimar tokens LLM BYOK (Vapi/Retell cobrariam por minuto)</small>
+                    </div>
+                    <div class="roi-field">
+                        <label for="roi-plano">Plano AIOS</label>
+                        <select id="roi-plano" aria-label="Plano AIOS">
+                            <option value="89">Starter — R$89/mês (10k min)</option>
+                            <option value="249" selected>Pro — R$249/mês (50k min)</option>
+                            <option value="999">Enterprise — R$999/mês (ilimitado)</option>
+                            <option value="0">Gratuito — R$0/mês</option>
+                        </select>
+                        <small>Preço fixo plataforma. TTS $0/min. LLM via BYOK abaixo.</small>
+                    </div>
+                    <div class="roi-field">
+                        <label for="roi-tokens">Custo LLM BYOK / mês <span class="roi-val" id="roi-tokens-val">R$ 0</span></label>
+                        <div class="roi-row">
+                            <input type="range" id="roi-tokens" min="0" max="2000" step="50" value="0" aria-label="Custo tokens LLM por mês">
+                            <input type="number" id="roi-tokens-num" min="0" max="10000" step="50" value="0" aria-label="Custo tokens LLM por mês (número)">
+                        </div>
+                        <small>Sua fatura OpenAI/OpenRouter/DeepSeek. Deixe 0 para ver ROI puro plataforma. Ex: 10k min × R$0,02 ≈ R$200</small>
+                    </div>
+                </div>
+            </div>
+            <div class="roi-results" aria-live="polite">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em">Resultado em tempo real</div>
+                <div>
+                    <div class="roi-kpi-label">ROI</div>
+                    <div class="roi-big" id="roi-roi">72×</div>
+                    <div class="roi-badge-example">R$18k SDR vs R$249 — 72× ROI</div>
+                </div>
+                <div class="roi-kpi"><span class="roi-kpi-label">Custo humano</span><span class="roi-kpi-value" id="roi-humano">R$ 18.000/mês</span></div>
+                <div class="roi-kpi"><span class="roi-kpi-label">Custo AIOS</span><span class="roi-kpi-value accent" id="roi-aios">R$ 249/mês</span></div>
+                <div class="roi-kpi"><span class="roi-kpi-label">Economia mensal</span><span class="roi-kpi-value" id="roi-economia-mes" style="color:var(--cyan)">R$ 17.751/mês</span></div>
+                <div class="roi-kpi"><span class="roi-kpi-label">Economia anual</span><span class="roi-kpi-value" id="roi-economia-ano" style="color:var(--cyan)">R$ 213.012/ano</span></div>
+                <p class="mono" style="font-size:11px;color:var(--text-muted);line-height:1.5;margin-top:4px">Fórmula: <strong style="color:var(--text-dim)">ROI = (SDRs × salário) ÷ (plano + BYOK)</strong> • Economia = humano − AIOS. Sem backend. Ex default: 2×R$9k=R$18k ÷ R$249=72×.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
 <!-- Install 1-click -->
 <section id="install" style="background: var(--surface);">
     <div class="inner">
-        <div class="section-label">07 / Instalação 1-click</div>
+        <div class="section-label">08 / Instalação 1-click</div>
         <h2 class="section-title">1 comando no seu VPS,<br>ferramenta já em deploy</h2>
         <p class="section-desc">Você hospeda na sua VPS, com sua <code>API key</code> (BYOK) — paga VPS + tokens direto pro provider. Nós só cobramos a plataforma. Coolify opcional.</p>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:20px;overflow-x:auto;margin-bottom:20px">
@@ -635,7 +807,7 @@
 <!-- CTA -->
 <section class="cta-section">
     <div class="inner">
-        <div class="section-label">08 / Comece Agora</div>
+        <div class="section-label">09 / Comece Agora</div>
         <h2 class="section-title" style="margin-left: auto; margin-right: auto; text-align: center;">Pronto para voice+data no seu VPS?</h2>
         <p class="section-desc" style="margin-left: auto; margin-right: auto; text-align: center;">
             1 comando, 5 minutos, BYOK. Self-hosted, $0/min TTS, multi-canal WhatsApp.
@@ -756,6 +928,62 @@ const observer = new IntersectionObserver((entries) => {
     entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
 }, { threshold: 0.1 });
 document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+// ── ROI Calculator (sem backend) ──
+(function(){
+    const $ = (id) => document.getElementById(id);
+    const els = {
+        sdrs: $('roi-sdrs'), sdrsNum: $('roi-sdrs-num'), sdrsVal: $('roi-sdrs-val'),
+        salario: $('roi-salario'), salarioNum: $('roi-salario-num'), salarioVal: $('roi-salario-val'),
+        minutos: $('roi-minutos'), minutosNum: $('roi-minutos-num'), minutosVal: $('roi-minutos-val'),
+        plano: $('roi-plano'),
+        tokens: $('roi-tokens'), tokensNum: $('roi-tokens-num'), tokensVal: $('roi-tokens-val'),
+        humano: $('roi-humano'), aios: $('roi-aios'), roi: $('roi-roi'), econMes: $('roi-economia-mes'), econAno: $('roi-economia-ano')
+    };
+    if(!els.sdrs || !els.salario) return;
+    function fmt(n){ return 'R$ ' + n.toLocaleString('pt-BR'); }
+    function fmtInt(n){ return n.toLocaleString('pt-BR'); }
+    function calc(){
+        const sdrs = Math.max(1, parseInt(els.sdrs.value,10) || 1);
+        const salario = Math.max(0, parseInt(els.salario.value,10) || 0);
+        const plano = parseInt(els.plano.value,10) || 0;
+        const byok = Math.max(0, parseInt(els.tokens.value,10) || 0);
+        const custoHumano = sdrs * salario;
+        const custoAios = plano + byok;
+        const roi = custoAios > 0 ? (custoHumano / custoAios) : 0;
+        const economiaMes = custoHumano - custoAios;
+        const economiaAno = economiaMes * 12;
+        els.sdrsVal.textContent = fmtInt(sdrs);
+        els.salarioVal.textContent = fmt(salario);
+        els.minutosVal.textContent = fmtInt(parseInt(els.minutos.value,10)||0);
+        els.tokensVal.textContent = fmt(byok);
+        els.humano.textContent = fmt(custoHumano) + '/mês';
+        els.aios.textContent = fmt(custoAios) + '/mês';
+        els.roi.textContent = (roi >= 100 ? Math.round(roi) : roi.toFixed(1).replace('.',',')) + '×';
+        els.econMes.textContent = fmt(economiaMes) + '/mês';
+        els.econAno.textContent = fmt(economiaAno) + '/ano';
+    }
+    function bind(range, number, other){
+        if(!range || !number) return;
+        range.addEventListener('input', () => { number.value = range.value; calc(); });
+        number.addEventListener('input', () => {
+            let v = parseInt(number.value,10);
+            if(isNaN(v)) return;
+            v = Math.min(parseInt(range.max,10), Math.max(parseInt(range.min,10), v));
+            range.value = String(v);
+            calc();
+        });
+    }
+    bind(els.sdrs, els.sdrsNum);
+    bind(els.salario, els.salarioNum);
+    bind(els.minutos, els.minutosNum);
+    bind(els.tokens, els.tokensNum);
+    els.plano.addEventListener('change', calc);
+    // minutos range also triggers calc (informativo)
+    els.minutos.addEventListener('input', calc);
+    els.minutosNum.addEventListener('input', calc);
+    calc();
+})();
 
 // ── Inicia o terminal ──
 typeTerminal();

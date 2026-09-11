@@ -252,6 +252,14 @@ services:
       KOKORO_URL: http://voice-tts-kokoro:8880/v1
       PIPER_URL: http://voice-tts:8000/v1
       STT_URL: http://voice-stt-whisper:9000/v1
+      # W1 VAD / barge-in (VAD energia RMS puro python, sem deps)
+      VOICE_VAD_ENABLED: ${VOICE_VAD_ENABLED:-true}
+      VOICE_VAD_THRESHOLD: ${VOICE_VAD_THRESHOLD:-0.02}
+      VOICE_SILENCE_MS: ${VOICE_SILENCE_MS:-800}
+      VOICE_BARGE_IN: ${VOICE_BARGE_IN:-true}
+      VOICE_BARGE_IN_MIN_MS: ${VOICE_BARGE_IN_MIN_MS:-120}
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

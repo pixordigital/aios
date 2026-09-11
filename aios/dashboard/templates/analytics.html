@@ -28,6 +28,21 @@
     </div>
 </div>
 
+<!-- Proactive Alerts Card -->
+<div class="card mb-4">
+    <div class="flex-between mb-3">
+        <h2 style="font-size:1rem;font-weight:600">Alertas Proativos</h2>
+        <label class="toggle-switch">
+            <input type="checkbox" id="proactive-alerts-toggle" onchange="toggleProactiveAlerts()">
+            <span class="toggle-slider"></span>
+        </label>
+    </div>
+    <p class="text-sm text-secondary mb-3" id="proactive-alerts-status">Carregando status...</p>
+    <div id="proactive-alerts-list" class="flex-col gap-2">
+        <p style="color:var(--text-tertiary)">Carregando alertas...</p>
+    </div>
+</div>
+
 <!-- Agent Performance Table -->
 <div class="card mb-4">
     <h2 class="mb-3" style="font-size:1rem;font-weight:600">Desempenho dos Agentes</h2>
@@ -139,9 +154,63 @@ async function refreshData() {
     }
 }
 
+// Proactive Alerts
+async function loadProactiveAlerts() {
+    try {
+        const res = await fetch('/api/analytics/proactive-alerts');
+        const data = await res.json();
+        const toggle = document.getElementById('proactive-alerts-toggle');
+        const status = document.getElementById('proactive-alerts-status');
+        const list = document.getElementById('proactive-alerts-list');
+
+        if (data.enabled) {
+            toggle.checked = true;
+            status.textContent = 'Ativo — verifica diariamente às 08:00';
+            status.style.color = 'var(--green)';
+        } else {
+            toggle.checked = false;
+            status.textContent = 'Inativo — habilite para receber alertas de queda de vendas via WhatsApp';
+            status.style.color = 'var(--text-tertiary)';
+        }
+
+        if (data.alerts && data.alerts.length > 0) {
+            list.innerHTML = data.alerts.map(a => `
+                <div style="padding:0.75rem;background:var(--bg-hover);border-radius:var(--radius-sm);border-left:3px solid var(--amber)">
+                    <div style="font-weight:500;color:var(--amber)">${a.message}</div>
+                    <div style="font-size:0.75rem;color:var(--text-tertiary);margin-top:0.25rem">
+                        ${new Date(a.date).toLocaleDateString('pt-BR')} • Queda: ${a.drop_pct}% • Ontem: ${a.yesterday_total?.toLocaleString('pt-BR', {style:'currency',currency:'BRL'})} • Média 7d: ${a.avg_7d?.toLocaleString('pt-BR', {style:'currency',currency:'BRL'})}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            list.innerHTML = '<p style="color:var(--text-tertiary)">Nenhum alerta recente</p>';
+        }
+    } catch (e) {
+        console.error('Falha ao carregar alertas proativos:', e);
+        document.getElementById('proactive-alerts-list').innerHTML = '<p style="color:var(--red)">Erro ao carregar</p>';
+    }
+}
+
+async function toggleProactiveAlerts() {
+    const toggle = document.getElementById('proactive-alerts-toggle');
+    try {
+        await fetch('/api/analytics/proactive-alerts/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: toggle.checked})
+        });
+        await loadProactiveAlerts();
+    } catch (e) {
+        console.error('Falha ao alternar alertas:', e);
+        toggle.checked = !toggle.checked; // revert on error
+    }
+}
+
 // Auto-refresh on load
 refreshData();
+loadProactiveAlerts();
 // Refresh every 30 seconds
 setInterval(refreshData, 30000);
+setInterval(loadProactiveAlerts, 60000);
 </script>
 {% endblock %}

@@ -1,34 +1,223 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex-between mb-4"><div><h1>Flow Editor — React Flow</h1><p class="text-sm text-secondary">Drag-and-drop DAG visual (n8n-like) • salvo no workflow</p></div><a href="/dashboard/automations" class="btn btn-ghost btn-sm">← Automações</a></div>
-<div style="height:560px;border:1px solid var(--border);border-radius:10px;background:var(--bg);position:relative" id="flow-root"></div>
-<div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Arraste para mover • Clique nó para editar label/tool • Conecte arrastando handle • Salva posições automaticamente em `position`</p></div>
+<div class="flex-between mb-4"><div><h1>Flow Editor</h1><p class="text-sm text-secondary">Zap + Voz + Dado — arraste da paleta, conecte handles, clique para editar</p></div><div class="flex gap-2"><input id="wf-name" class="input" style="width:200px" placeholder="nome workflow" value="{{wf_id|default('')}}"><a href="/dashboard/automations" class="btn btn-ghost btn-sm">← Automações</a><button id="btn-save" class="btn btn-primary btn-sm">Salvar</button></div></div>
+<div style="display:flex;height:560px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg)" id="flow-layout">
+  <div style="width:200px;min-width:200px;border-right:1px solid var(--border);background:var(--bg-elevated);padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:10px" id="palette">
+    <div><div class="text-xs" style="font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:.04em">ZAP</div><div style="display:flex;flex-direction:column;gap:6px">
+      <div draggable="true" data-tool="evolution" data-label="Evolution API" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--green);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">⚡ Evolution API</div>
+      <div draggable="true" data-tool="whatsapp" data-label="WhatsApp" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--green);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">💬 WhatsApp</div>
+    </div></div>
+    <div><div class="text-xs" style="font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:.04em">VOZ</div><div style="display:flex;flex-direction:column;gap:6px">
+      <div draggable="true" data-tool="voice_call" data-label="Voice Call" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🎙️ voice_call</div>
+      <div draggable="true" data-tool="transcribe" data-label="Transcribe" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">📝 transcribe</div>
+    </div></div>
+    <div><div class="text-xs" style="font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:.04em">DADO</div><div style="display:flex;flex-direction:column;gap:6px">
+      <div draggable="true" data-tool="sql_query" data-label="SQL Query" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🗄️ sql_query</div>
+      <div draggable="true" data-tool="python_sandbox" data-label="Python Sandbox" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🐍 python_sandbox</div>
+      <div draggable="true" data-tool="rag_search" data-label="RAG Search" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🔍 rag_search</div>
+      <div draggable="true" data-tool="http_request" data-label="HTTP Request" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🌐 http_request</div>
+      <div draggable="true" data-tool="calculator" data-label="Calculator" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🧮 calculator</div>
+      <div draggable="true" data-tool="crm_create_deal" data-label="CRM Create Deal" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">💼 crm_create_deal</div>
+      <div draggable="true" data-tool="crm_update_deal" data-label="CRM Update Deal" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">✏️ crm_update_deal</div>
+    </div></div>
+    <div class="text-xs text-tertiary" style="margin-top:4px">Arraste para o canvas → cria nó. Conecte arrastando handle.</div>
+  </div>
+  <div style="flex:1;position:relative;background:var(--bg)" id="flow-wrapper"><div style="height:100%" id="flow-root"></div><div id="save-status" class="text-xs" style="position:absolute;bottom:8px;right:10px;background:var(--bg-elevated);border:1px solid var(--border);padding:4px 8px;border-radius:6px;color:var(--text-secondary);display:none"></div></div>
+</div>
+<div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Paleta → arraste tool para canvas. Clique no nó para editar label/tool/params (JSON). Conecte handles para definir <code>depends_on</code>. Salvar persiste positions.</p></div>
+
+<!-- modal -->
+<div id="node-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;align-items:center;justify-content:center">
+  <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:16px;width:420px;max-width:90vw;display:flex;flex-direction:column;gap:10px">
+    <div class="flex-between"><h3 style="margin:0">Editar nó</h3><button id="m-close" class="btn btn-ghost btn-sm">✕</button></div>
+    <label>Label<input id="m-label" class="input" placeholder="ex: Enriquecer lead"></label>
+    <label>tool_name
+      <select id="m-tool" class="input">
+        <option value="">(agent)</option>
+        <option value="evolution">evolution</option>
+        <option value="whatsapp">whatsapp</option>
+        <option value="voice_call">voice_call</option>
+        <option value="transcribe">transcribe</option>
+        <option value="sql_query">sql_query</option>
+        <option value="python_sandbox">python_sandbox</option>
+        <option value="rag_search">rag_search</option>
+        <option value="http_request">http_request</option>
+        <option value="calculator">calculator</option>
+        <option value="crm_create_deal">crm_create_deal</option>
+        <option value="crm_update_deal">crm_update_deal</option>
+      </select>
+    </label>
+    <label>params (JSON)<textarea id="m-params" class="input input-mono" rows="5" placeholder='{"key":"value"}'></textarea></label>
+    <div class="flex gap-2"><button id="m-save" class="btn btn-primary btn-sm">Aplicar</button><button id="m-del" class="btn btn-danger btn-sm">Excluir nó</button></div>
+  </div>
+</div>
+
 <link href="https://cdn.jsdelivr.net/npm/reactflow@11/dist/style.css" rel="stylesheet">
 <script type="importmap">{"imports":{"react":"https://esm.sh/react@18","react-dom":"https://esm.sh/react-dom@18","reactflow":"https://esm.sh/reactflow@11"}}</script>
 <script type="module">
 import React from "react";
 import ReactDOM from "react-dom";
-import ReactFlow, {Background, Controls, MiniMap} from "reactflow";
-const wfId = new URLSearchParams(location.search).get("wf") || "{{wf_id|default('')}}";
+import ReactFlow, {Background, Controls, MiniMap, applyNodeChanges, applyEdgeChanges, addEdge} from "reactflow";
+const wfIdParam = new URLSearchParams(location.search).get("wf") || "{{wf_id|default('')}}";
+let wfId = wfIdParam;
+const wfNameInput = document.getElementById("wf-name");
+const saveBtn = document.getElementById("btn-save");
+const saveStatus = document.getElementById("save-status");
+function toast(m, ok=true){ saveStatus.textContent=m; saveStatus.style.display='block'; saveStatus.style.borderColor= ok?'var(--accent)':'var(--red)'; saveStatus.style.color= ok?'var(--accent)':'var(--red)'; setTimeout(()=>saveStatus.style.display='none',2500);}
+
 async function loadWF(){
-  if(!wfId) return {nodes:[]};
-  const r=await fetch(`/api/workflows/${wfId}`); return r.json();
+  if(!wfId) return null;
+  const r=await fetch(`/api/workflows/${wfId}`,{credentials:'include'});
+  if(!r.ok) return null;
+  return r.json();
 }
-async function savePos(id, pos){
-  // patch via node delete+add simplified: update via API not yet, store in local
-  console.log("save",id,pos);
-}
+
 function App(){
   const [nodes,setNodes]=React.useState([]);
   const [edges,setEdges]=React.useState([]);
-  React.useEffect(()=>{ (async()=>{
-    const wf=await loadWF(); const ns=(wf.nodes||[]).map((n,i)=>({id:n.id, position:{x:(n.position&&n.position.x)||(20+i*220), y:(n.position&&n.position.y)||(40 + Math.floor(i/4)*90)}, data:{label:(n.label||n.id.slice(0,6))+" • "+(n.tool_name||"agent")}, style:{background:n.agent_id?'var(--accent-subtle)':'var(--bg-elevated)', border:`1px solid ${n.agent_id?'var(--accent)':'var(--amber)'}`, borderRadius:8, padding:8, fontSize:12}}));
-    const es=(wf.nodes||[]).flatMap(n=>(n.depends_on||[]).map(d=>({id:d+"->"+n.id, source:d, target:n.id, animated:true, style:{stroke:"var(--accent)"}})));
+  const [store,setStore]=React.useState([]); // {id,label,tool_name,tool_args,position,depends_on}
+  const rfWrapperRef=React.useRef(null);
+  const [rfInstance,setRfInstance]=React.useState(null);
+  const selectedRef=React.useRef(null);
+
+  // sync store -> rf nodes/edges
+  const syncToRf = React.useCallback((list)=>{
+    const ns=list.map((n,i)=>({id:n.id, position:n.position||{x:20+i*220,y:40+Math.floor(i/4)*90}, data:{label:(n.label||n.id.slice(0,6))+" • "+(n.tool_name||"agent")}, style:{background:n.agent_id?'var(--accent-subtle)':'var(--bg-elevated)',border:`1px solid ${n.tool_name?'var(--accent)':'var(--border)'}`,borderRadius:8,padding:'8px 10px',fontSize:12,minWidth:120}}));
+    const es=list.flatMap(n=>(n.depends_on||[]).map(d=>({id:d+"->"+n.id, source:d, target:n.id, animated:true, style:{stroke:"var(--accent)"}})));
     setNodes(ns); setEdges(es);
-  })(); },[]);
-  return React.createElement(ReactFlow, {nodes, edges, onNodesChange: ()=>{}, onEdgesChange: ()=>{}, fitView:true}, React.createElement(Background), React.createElement(Controls), React.createElement(MiniMap));
+  },[]);
+
+  React.useEffect(()=>{
+    (async()=>{
+      const wf=await loadWF();
+      if(wf){
+        wfNameInput.value=wf.name||"";
+        const list=(wf.nodes||[]).map(n=>({id:n.id,label:n.label||"",tool_name:n.tool_name||"",tool_args:n.tool_args||{},position:n.position||null,depends_on:n.depends_on||[]}));
+        setStore(list); syncToRf(list);
+      }
+    })();
+  },[syncToRf]);
+
+  // keep store positions in sync when nodes dragged
+  const onNodesChange = React.useCallback((changes)=>{
+    setNodes(nds=>applyNodeChanges(changes,nds));
+    // update store positions
+    changes.forEach(c=>{
+      if(c.type==='position' && c.position){
+        setStore(prev=>prev.map(s=>s.id===c.id?{...s, position:{x:Math.round(c.position.x),y:Math.round(c.position.y)}}:s));
+      }
+      if(c.type==='remove'){
+        // handled via delete
+      }
+    });
+  },[]);
+  const onEdgesChange = React.useCallback((changes)=>setEdges(eds=>applyEdgeChanges(changes,eds)),[]);
+  const onConnect = React.useCallback((params)=>{
+    setEdges(eds=>addEdge({...params,animated:true, style:{stroke:"var(--accent)"}},eds));
+    setStore(prev=>prev.map(s=>s.id===params.target?{...s, depends_on:[...(s.depends_on||[]).filter(x=>x!==params.source), params.source]}:s));
+  },[]);
+  const onEdgesDelete = React.useCallback((edsToRemove)=>{
+    const pairs=edsToRemove.map(e=>({s:e.source,t:e.target}));
+    setStore(prev=>prev.map(s=>{
+      const rm=pairs.filter(p=>p.t===s.id).map(p=>p.s);
+      if(!rm.length) return s;
+      return {...s, depends_on:(s.depends_on||[]).filter(d=>!rm.includes(d))};
+    }));
+  },[]);
+
+  const onNodeClick = React.useCallback((_,node)=>{
+    const s=store.find(x=>x.id===node.id);
+    if(!s) return;
+    selectedRef.current=s.id;
+    document.getElementById("m-label").value=s.label||"";
+    document.getElementById("m-tool").value=s.tool_name||"";
+    document.getElementById("m-params").value=JSON.stringify(s.tool_args||{},null,2);
+    document.getElementById("node-modal").style.display='flex';
+  },[store]);
+
+  // drop from palette
+  const onDragOver = React.useCallback((e)=>{e.preventDefault(); e.dataTransfer.dropEffect='move';},[]);
+  const onDrop = React.useCallback((e)=>{
+    e.preventDefault();
+    const tool=e.dataTransfer.getData("application/reactflow") || e.dataTransfer.getData("text/plain");
+    if(!tool) return;
+    const label=e.dataTransfer.getData("label")||tool;
+    const wrapper=document.getElementById("flow-root");
+    const rect=wrapper.getBoundingClientRect();
+    let pos={x:e.clientX-rect.left-60, y:e.clientY-rect.top-20};
+    if(rfInstance && rfInstance.project) pos=rfInstance.project(pos);
+    const id="n_"+Date.now()+"_"+Math.random().toString(36).slice(2,5);
+    const item={id, label:label||tool, tool_name:tool, tool_args:{}, position:pos, depends_on:[]};
+    setStore(prev=>{const nl=[...prev,item]; syncToRf(nl); return nl;});
+  },[rfInstance,syncToRf]);
+
+  React.useEffect(()=>{
+    const root=document.getElementById("flow-root");
+    const wrapper=document.getElementById("flow-wrapper");
+    const handler=(e)=>{
+      const el=e.target.closest("[draggable]");
+      if(el && e.dataTransfer){
+        const tool=el.getAttribute("data-tool");
+        const label=el.getAttribute("data-label")||tool;
+        e.dataTransfer.setData("application/reactflow",tool);
+        e.dataTransfer.setData("label",label);
+        e.dataTransfer.effectAllowed='move';
+      }
+    };
+    document.getElementById("palette").addEventListener("dragstart",handler);
+    // modal handlers
+    const close=()=>document.getElementById("node-modal").style.display='none';
+    document.getElementById("m-close").onclick=close;
+    document.getElementById("node-modal").addEventListener("click",(e)=>{if(e.target.id==='node-modal') close();});
+    document.getElementById("m-save").onclick=()=>{
+      const id=selectedRef.current; if(!id) return;
+      let args={};
+      try{ const t=document.getElementById("m-params").value.trim(); args=t?JSON.parse(t):{}; }catch(err){ toast("JSON inválido",false); return; }
+      const label=document.getElementById("m-label").value;
+      const tool=document.getElementById("m-tool").value;
+      setStore(prev=>{
+        const nl=prev.map(s=>s.id===id?{...s,label,tool_name:tool,tool_args:args}:s);
+        syncToRf(nl); return nl;
+      });
+      close();
+    };
+    document.getElementById("m-del").onclick=()=>{
+      const id=selectedRef.current; if(!id) return;
+      setStore(prev=>{ const nl=prev.filter(s=>s.id!==id).map(s=>({...s, depends_on:(s.depends_on||[]).filter(d=>d!==id)})); syncToRf(nl); return nl; });
+      close();
+    };
+    // save button
+    saveBtn.onclick=async()=>{
+      const name=(wfNameInput.value||"").trim()||"Flow "+new Date().toISOString().slice(0,10);
+      // snapshot store
+      const snap=[...store];
+      // sync positions from rf nodes (in case drag not flushed)
+      const posMap={}; nodes.forEach(n=>posMap[n.id]=n.position);
+      const nodesPayload=snap.map(s=>({...s, position: s.position || posMap[s.id] || {x:20,y:40}}));
+      try{
+        if(!wfId){
+          const r=await fetch("/api/workflows",{method:"POST",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({name, description:"criado via flow builder"})});
+          if(!r.ok){const t=await r.text(); throw new Error(t.slice(0,300));}
+          const j=await r.json(); wfId=j.id; history.replaceState(null,"","?wf="+wfId);
+        }
+        const r2=await fetch(`/api/workflows/${wfId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},credentials:"include",body:JSON.stringify({name, nodes:nodesPayload})});
+        if(!r2.ok){const t=await r2.text(); throw new Error(t.slice(0,400));}
+        toast("Salvo ✓");
+      }catch(e){ toast("Erro: "+e.message,false); }
+    };
+    return ()=>document.getElementById("palette").removeEventListener("dragstart",handler);
+  },[store,nodes,syncToRf]);
+
+  const rfProps={nodes,edges,onNodesChange,onEdgesChange,onConnect,onNodeClick,onEdgesDelete,onInit:setRfInstance,onDragOver,onDrop,fitView:true, snapToGrid:true, snapGrid:[12,12]};
+  // placeholder if no wf
+  if(!wfId) {
+    return React.createElement("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text-tertiary)",flexDirection:"column",gap:8}},
+      React.createElement("div",null,"Sem workflow — arraste nós e clique Salvar para criar"),
+      React.createElement(ReactFlow, rfProps, React.createElement(Background),React.createElement(Controls),React.createElement(MiniMap,{style:{background:"var(--bg-elevated)"}}))
+    );
+  }
+  return React.createElement(ReactFlow, rfProps, React.createElement(Background),React.createElement(Controls),React.createElement(MiniMap,{style:{background:"var(--bg-elevated)"}}));
 }
-if(wfId) ReactDOM.createRoot(document.getElementById("flow-root")).render(React.createElement(App));
-else document.getElementById("flow-root").innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-tertiary)">Passe ?wf=ID na URL ou abra via Automação → Abrir → Editor Visual</div>';
+ReactDOM.createRoot(document.getElementById("flow-root")).render(React.createElement(App));
 </script>
 {% endblock %}

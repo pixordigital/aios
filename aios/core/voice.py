@@ -17,6 +17,12 @@ import httpx
 from aios.config import settings
 from aios.core.tracing import emit_usage_event
 
+try:
+    from aios.core.pii import redact_pii as _redact_pii
+except Exception:  # pragma: no cover
+    def _redact_pii(x):  # type: ignore
+        return x
+
 logger = logging.getLogger(__name__)
 
 
@@ -105,14 +111,24 @@ async def transcribe_audio(audio: bytes, channel_config: dict | None = None, lan
                     r = await client.post(f"{base}/asr?language={language}&output=json", files={"audio_file": ("audio.mp3", audio, "audio/mpeg")})
                 if r.status_code == 200:
                     j = r.json() if "json" in r.headers.get("content-type", "") else {"text": r.text}
-                    return {"ok": True, "text": j.get("text", "") if isinstance(j, dict) else str(j), "provider": "selfhosted"}
+                    _text = j.get("text", "") if isinstance(j, dict) else str(j)
+                    try:
+                        logger.info("stt ok provider=selfhosted text=%s", _redact_pii(_text))
+                    except Exception:
+                        pass
+                    return {"ok": True, "text": _text, "provider": "selfhosted"}
                 return {"ok": False, "error": r.text[:300], "status": r.status_code}
             if not key:
                 return {"ok": False, "error": "sem stt_url nem openai key"}
             files = {"file": ("audio.mp3", audio, "audio/mpeg"), "model": (None, "whisper-1"), "language": (None, language)}
             r = await client.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"}, files=files)
             if r.status_code == 200:
-                return {"ok": True, "text": r.json().get("text", ""), "provider": "openai"}
+                _text2 = r.json().get("text", "")
+                try:
+                    logger.info("stt ok provider=openai text=%s", _redact_pii(_text2))
+                except Exception:
+                    pass
+                return {"ok": True, "text": _text2, "provider": "openai"}
             return {"ok": False, "error": r.text[:300], "status": r.status_code}
     except Exception as e:
         logger.exception("stt failed")

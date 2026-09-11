@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div><h1>Backup & Restore</h1><p class="text-sm text-secondary mt-1">Gerenciar backups do banco de dados</p></div>
+    <a href="/dashboard/admin" class="btn btn-ghost">&larr; Voltar</a>
+</div>
+
+<div class="grid-4 mb-4">
+    <div class="stat-card">
+        <p class="stat-label">Backups Locais</p>
+        <p class="stat-value">{{ backups|selectattr('source','equalto','local')|list|length }}</p>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Backups S3</p>
+        <p class="stat-value">{{ backups|selectattr('source','equalto','s3')|list|length }}</p>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Bucket S3</p>
+        <p class="stat-value font-mono text-xs">{{ s3_bucket or 'não configurado' }}</p>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Versioning S3</p>
+        <div class="flex-center gap-2">
+            {% if s3_bucket %}
+            <span class="badge" style="border-color:{{ 'var(--green)' if s3_versioning else 'var(--amber)' }};color:{{ 'var(--green)' if s3_versioning else 'var(--amber)' }}">
+                {% if s3_versioning %}Enabled{% else %}Disabled{% endif %}
+            </span>
+            {% if not s3_versioning %}
+            <span class="text-xs text-tertiary">Habilite: <code>aws s3api put-bucket-versioning --bucket {{ s3_bucket }} --versioning-configuration Status=Enabled</code></span>
+            {% endif %}
+            {% else %}
+            <span class="badge" style="border-color:var(--border);color:var(--text-tertiary)">N/A</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="flex-between mb-2">
+        <h2>Backup Agora</h2>
+        <button id="btn-backup-now" class="btn btn-primary" onclick="triggerBackup()">Backup Agora</button>
+    </div>
+    <div id="backup-result" class="text-sm" style="display:none"></div>
+</div>
+
+<div class="card">
+    <h2 class="mb-2">Histórico de Backups (últimos 50)</h2>
+    {% if backups %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Arquivo</th>
+                    <th>Data</th>
+                    <th>Tamanho</th>
+                    <th>Origem</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in backups %}
+                <tr>
+                    <td class="font-mono text-xs">{{ b.name }}</td>
+                    <td>{{ b.mtime[:19].replace('T', ' ') }} UTC</td>
+                    <td>{{ b.size_human }}</td>
+                    <td>
+                        <span class="badge" style="border-color:{{ 'var(--green)' if b.source == 'local' else 'var(--accent)' }};color:{{ 'var(--green)' if b.source == 'local' else 'var(--accent)' }}">{{ b.source }}</span>
+                    </td>
+                    <td>
+                        <button class="btn btn-danger btn-sm" onclick="confirmRestore('{{ b.name|tojson|forceescape }}')">Restore</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="24" height="24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg></div>
+        <h3>Nenhum backup encontrado</h3>
+        <p>Execute "Backup Agora" ou configure AIOS_S3_BUCKET para sincronização automática.</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+async function triggerBackup() {
+    const btn = document.getElementById('btn-backup-now');
+    const result = document.getElementById('backup-result');
+    btn.disabled = true;
+    btn.textContent = 'Executando...';
+    result.style.display = 'none';
+    try {
+        const resp = await fetch('/dashboard/admin/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }});
+        const data = await resp.json();
+        result.style.display = 'block';
+        if (data.ok) {
+            result.innerHTML = '<span style="color:var(--green)">✓ Backup concluído</span><br><pre style="font-size:0.6875rem;max-height:200px;overflow:auto;background:var(--bg);padding:0.5rem;border-radius:var(--radius-sm);margin-top:0.5rem">' + escapeHtml(data.output || '') + '</pre>';
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            result.innerHTML = '<span style="color:var(--red)">✗ Falha: ' + escapeHtml(data.error || 'erro desconhecido') + '</span>';
+        }
+    } catch (e) {
+        result.style.display = 'block';
+        result.innerHTML = '<span style="color:var(--red)">✗ Erro de rede: ' + escapeHtml(e.message) + '</span>';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Backup Agora';
+    }
+}
+
+function confirmRestore(name) {
+    if (confirm('Confirmar restore do backup "' + name + '"?\n\n⚠️ ATENÇÃO: Isso irá SOBRESCREVER o banco de dados atual.\nEsta ação NÃO pode ser desfeita.\n\nDigite "confirmar" para prosseguir:')) {
+        const input = prompt('Digite exatamente: confirmar');
+        if (input === 'confirmar') {
+            doRestore(name);
+        } else {
+            alert('Restore cancelado - confirmação incorreta');
+        }
+    }
+}
+
+async function doRestore(name) {
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = 'Restaurando...';
+    try {
+        const form = new FormData();
+        form.append('backup_name', name);
+        form.append('confirm', 'confirm');
+        const resp = await fetch('/dashboard/admin/backup/restore', { method: 'POST', body: form });
+        const data = await resp.json();
+        if (data.ok) {
+            alert('✓ ' + data.message);
+        } else {
+            alert('✗ Falha: ' + (data.error || 'erro desconhecido'));
+        }
+    } catch (e) {
+        alert('✗ Erro de rede: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Restore';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+{% endblock %}

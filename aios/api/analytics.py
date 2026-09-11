@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Agent, AgentInstance, Conversation, Message, Organization
+from aios.db.models import Agent, AgentInstance, Conversation, Message, Organization, Memory, ChannelConnection
 from aios.schemas import BaseModel
 from aios.core.cache import cache
 from aios.core.tracing import get_trace, METRICS
@@ -209,3 +209,77 @@ async def telemetry_flush(user=Depends(get_current_user)):
     from aios.core.telemetry import telemetry
     await telemetry.flush_to_db()
     return {"status": "flushed"}
+
+
+# ─── Proactive Alerts Endpoints ───
+
+
+class ProactiveAlertsToggle(BaseModel):
+    enabled: bool
+
+
+@router.get("/proactive-alerts")
+async def get_proactive_alerts(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Get proactive alerts status and recent alerts for org."""
+    # Get org to check proactive_alerts setting
+    org = await db.get(Organization, org_id)
+    enabled = False
+    if org and isinstance(org.extra_data, dict):
+        enabled = org.extra_data.get("proactive_alerts", False)
+
+    # Check if active evolution channel exists
+    has_evo = False
+    if enabled:
+        has_evo = (
+            await db.execute(
+                select(ChannelConnection.id).where(
+                    ChannelConnection.org_id == org_id,
+                    ChannelConnection.channel_type == "evolution",
+                    ChannelConnection.is_active == True,
+                ).limit(1)
+            )
+        ).scalar_one_or_none() is not None
+
+    # Get recent alerts from Memory (type="alert")
+    alerts = []
+    if enabled:
+        rows = (
+            await db.execute(
+                select(Memory)
+                .where(Memory.org_id == org_id, Memory.type == "alert")
+                .order_by(Memory.created_at.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+        for m in rows:
+            if isinstance(m.extra_data, dict):
+                alerts.append(m.extra_data)
+
+    return {
+        "enabled": enabled and has_evo,
+        "has_evolution": has_evo,
+        "alerts": alerts,
+    }
+
+
+@router.post("/proactive-alerts/toggle")
+async def toggle_proactive_alerts(
+    payload: ProactiveAlertsToggle,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Enable/disable proactive alerts for org."""
+    org = await db.get(Organization, org_id)
+    if not org:
+        from fastapi import HTTPException
+        raise HTTPException(404, "Organization not found")
+
+    data = org.extra_data if isinstance(org.extra_data, dict) else {}
+    data["proactive_alerts"] = payload.enabled
+    org.extra_data = data
+    await db.commit()
+
+    return {"enabled": payload.enabled, "message": "Proactive alerts " + ("enabled" if payload.enabled else "disabled")}

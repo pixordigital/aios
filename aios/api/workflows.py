@@ -167,6 +167,125 @@ async def update_workflow(
     return wf
 
 
+class WorkflowPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    timeout_seconds: int | None = None
+    entry_node_id: str | None = None
+    nodes: list[dict] | None = None
+
+
+@router.patch("/{wf_id}")
+async def patch_workflow(
+    wf_id: str,
+    body: WorkflowPatch,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+    if not wf or wf.org_id != org_id:
+        raise HTTPException(404)
+    _require_role(user, ["admin", "org_admin"])
+    if body.name is not None:
+        wf.name = body.name
+    if body.description is not None:
+        wf.description = body.description
+    if body.timeout_seconds is not None:
+        wf.timeout_seconds = body.timeout_seconds
+    if body.entry_node_id is not None:
+        wf.entry_node_id = body.entry_node_id
+    if body.nodes is not None:
+        existing = {n.id: n for n in wf.nodes}
+        incoming_ids = set()
+        for nd in body.nodes:
+            nid = nd.get("id")
+            # generate if missing or temp id
+            is_temp = not nid or nid.startswith("n_") or nid not in existing
+            if is_temp and nid and nid.startswith("n_"):
+                # create with new uuid but keep mapping for depends_on later
+                pass
+            if nid and nid in existing:
+                n = existing[nid]
+                n.label = nd.get("label", n.label)
+                n.tool_name = nd.get("tool_name", n.tool_name)
+                n.tool_args = nd.get("tool_args", n.tool_args or {})
+                n.depends_on = nd.get("depends_on", n.depends_on or [])
+                n.position = nd.get("position", n.position or {})
+                n.condition = nd.get("condition", n.condition)
+                n.output_key = nd.get("output_key", n.output_key)
+                incoming_ids.add(nid)
+            else:
+                # create new node — honour provided id if looks like uuid else generate
+                import uuid as _uuid
+                new_id = nid if nid and len(nid) >= 8 and not nid.startswith("n_") else str(_uuid.uuid4())
+                # avoid collision
+                if new_id in existing or new_id in incoming_ids:
+                    new_id = str(_uuid.uuid4())
+                node = WorkflowNode(
+                    id=new_id,
+                    workflow_id=wf_id,
+                    label=nd.get("label", ""),
+                    tool_name=nd.get("tool_name"),
+                    tool_args=nd.get("tool_args", {}),
+                    depends_on=nd.get("depends_on", []),
+                    condition=nd.get("condition"),
+                    output_key=nd.get("output_key", "result"),
+                    position=nd.get("position", {}),
+                )
+                db.add(node)
+                # map temp id to real id for depends_on fixup
+                if nid and nid.startswith("n_"):
+                    nd["_real_id"] = new_id
+                incoming_ids.add(new_id)
+        # fixup depends_on that referenced temp ids
+        temp_map = {nd.get("id"): nd.get("_real_id") for nd in body.nodes if nd.get("_real_id")}
+        if temp_map:
+            for n in list(existing.values()) + [x for x in (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()]:
+                if n.depends_on:
+                    n.depends_on = [temp_map.get(d, d) for d in n.depends_on]
+        # delete nodes not in incoming (explicit sync)
+        for nid, node in list(existing.items()):
+            if nid not in incoming_ids:
+                await db.delete(node)
+        # cycle check
+        all_nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()
+        # include newly added not yet flushed? flush first
+        await db.flush()
+        all_nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()
+        vis, stack = set(), set()
+        def dfs(nid):
+            if nid in stack:
+                return True
+            if nid in vis:
+                return False
+            vis.add(nid); stack.add(nid)
+            n = next((x for x in all_nodes if x.id==nid), None)
+            if n:
+                for d in n.depends_on or []:
+                    if dfs(d):
+                        return True
+            stack.remove(nid); return False
+        for n in all_nodes:
+            if dfs(n.id):
+                await db.rollback()
+                raise HTTPException(400, detail="cycle detected")
+    await db.commit()
+    await db.refresh(wf)
+    # reload nodes
+    wf2 = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+    return {
+        "id": wf2.id,
+        "name": wf2.name,
+        "description": wf2.description,
+        "status": wf2.status,
+        "timeout_seconds": wf2.timeout_seconds,
+        "entry_node_id": wf2.entry_node_id,
+        "org_id": wf2.org_id,
+        "nodes": [{"id": n.id, "label": n.label, "tool_name": n.tool_name, "tool_args": n.tool_args, "depends_on": n.depends_on, "position": n.position} for n in wf2.nodes],
+    }
+
+
 @router.delete("/{wf_id}")
 async def delete_workflow(
     wf_id: str,
