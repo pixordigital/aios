@@ -186,6 +186,28 @@
                 </div>
             </div>
 
+            <div class="card" id="skills-card">
+                <div class="flex-between mb-2">
+                    <h2 class="mb-0">Skills — Importar da internet</h2>
+                    <span class="text-xs text-tertiary">Auto-injetadas top-5 por similaridade</span>
+                </div>
+                <p class="text-xs text-tertiary" style="margin:0 0 0.75rem">Importe skills prontas (GitHub raw, skills.sh, gist, .md/.json) — viram tool_pattern disponível sob demanda para o agente autônomo.</p>
+                {% if agent %}
+                <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem">
+                    <input id="skill-url" class="input input-mono" style="flex:1" placeholder="https://raw.githubusercontent.com/.../SKILL.md ou https://skills.sh/xxx">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="importSkillFromUrl()" id="skill-import-btn">Importar</button>
+                </div>
+                <div id="skill-import-status" class="text-xs" style="min-height:1rem"></div>
+                <div id="skills-list" class="flex-col gap-1" style="max-height:160px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:0.5rem;display:none"></div>
+                <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="loadSkills()">↻ Listar skills</button>
+                    <span class="text-xs text-tertiary" style="align-self:center">Ex: https://raw.githubusercontent.com/anthropics/skills/main/skills/web-search/SKILL.md</span>
+                </div>
+                {% else %}
+                <p class="text-sm text-secondary" style="padding:0.75rem;background:var(--bg-hover);border-radius:6px">Crie o agente primeiro — depois importe skills aqui.</p>
+                {% endif %}
+            </div>
+
             <div class="card">
                 <h2 class="mb-3">Memória</h2>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
@@ -490,6 +512,46 @@
         });
     })();
 
+    // Skills import
+    async function importSkillFromUrl(){
+        var urlEl=document.getElementById('skill-url');
+        var statusEl=document.getElementById('skill-import-status');
+        var btn=document.getElementById('skill-import-btn');
+        var url=(urlEl.value||'').trim();
+        if(!url){ statusEl.textContent='Cole uma URL'; statusEl.style.color='var(--red)'; return; }
+        var agentId="{{ agent.id if agent else '' }}";
+        if(!agentId){ statusEl.textContent='Crie o agente primeiro'; statusEl.style.color='var(--red)'; return; }
+        btn.disabled=true; btn.textContent='Importando...'; statusEl.textContent='Buscando...'; statusEl.style.color='var(--text-tertiary)';
+        try{
+            const r=await fetch('/api/skills/import-url', {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({url: url, agent_id: agentId})});
+            const j=await r.json();
+            if(j.ok){
+                statusEl.textContent='✓ Skill "'+j.name+'" importada!'; statusEl.style.color='var(--green)';
+                urlEl.value=''; showToast('Skill importada ✓'); loadSkills();
+            } else {
+                statusEl.textContent='✗ '+(j.detail||j.error||'Falha'); statusEl.style.color='var(--red)';
+            }
+        }catch(e){ statusEl.textContent='Erro: '+e.message; statusEl.style.color='var(--red)'; }
+        btn.disabled=false; btn.textContent='Importar';
+    }
+    async function loadSkills(){
+        var agentId="{{ agent.id if agent else '' }}";
+        if(!agentId) return;
+        var listEl=document.getElementById('skills-list');
+        var statusEl=document.getElementById('skill-import-status');
+        try{
+            const r=await fetch('/api/skills?agent_id='+encodeURIComponent(agentId), {credentials:'include'});
+            const j=await r.json();
+            var skills=j.skills||[];
+            if(!skills.length){ listEl.style.display='none'; statusEl.textContent='Nenhuma skill — importe uma URL acima'; return; }
+            listEl.style.display='flex';
+            listEl.innerHTML=skills.slice(0,20).map(function(s){
+                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px"><div><div style="font-weight:600;font-size:0.75rem">'+s.name+'</div><div style="font-size:0.65rem;color:var(--text-tertiary)">'+(s.description||'').slice(0,80)+'</div></div><span style="font-size:0.6rem;color:var(--text-tertiary)">'+s.skill_type+'</span></div>';
+            }).join('');
+            statusEl.textContent=skills.length+' skills';
+        }catch(e){ statusEl.textContent='Erro ao listar'; }
+    }
+    document.addEventListener('DOMContentLoaded', function(){ var aid="{{ agent.id if agent else '' }}"; if(aid) setTimeout(loadSkills, 500); });
     var PRICING = {
         'openai/gpt-4o-mini':{i:0.15,o:0.60},
         'openai/gpt-4o':{i:2.50,o:10.00},
