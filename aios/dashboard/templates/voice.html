@@ -165,6 +165,92 @@
     </div>
   </div>
 
+  <!-- Estúdio de Voz — Kokoro Mixer (não polui, colapsado) -->
+  <div class="card mb-3" style="border:1px solid var(--accent);background:var(--accent-dim)">
+    <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="document.getElementById('studio-body').style.display=document.getElementById('studio-body').style.display==='none'?'block':'none'; this.querySelector('span').textContent=document.getElementById('studio-body').style.display==='none'?'▶':'▼'">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:18px">🎛️</span>
+        <div>
+          <div style="font-weight:600;font-size:0.875rem">Estúdio de Voz — Mixer Kokoro 0.9.4</div>
+          <div class="text-xs text-tertiary">Mixe vozes PT-BR, teste pausas e clone — sem sair do AIOS</div>
+        </div>
+      </div>
+      <span style="font-size:14px">▶</span>
+    </div>
+    <div id="studio-body" style="display:none;margin-top:0.75rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+        <div>
+          <label>Voz A (70%)</label>
+          <select id="mix-voice-a" class="input">
+            <option value="pf_dora" selected>pf_dora — fem pt-BR (padrão)</option>
+            <option value="pm_alex">pm_alex — masc pt-BR</option>
+            <option value="bf_emma">bf_emma — fem brit</option>
+            <option value="af_bella">af_bella — fem en</option>
+          </select>
+          <input type="range" id="mix-weight-a" min="1" max="4" value="2" style="width:100%;margin-top:0.25rem" oninput="updateMixPreview()">
+          <span class="text-xs text-tertiary" id="mix-weight-a-val">2</span>
+        </div>
+        <div>
+          <label>Voz B (30%)</label>
+          <select id="mix-voice-b" class="input">
+            <option value="bf_emma" selected>bf_emma — fem brit</option>
+            <option value="pm_alex">pm_alex — masc pt-BR</option>
+            <option value="af_bella">af_bella — fem en</option>
+            <option value="pf_dora">pf_dora — fem pt-BR</option>
+          </select>
+          <input type="range" id="mix-weight-b" min="1" max="4" value="1" style="width:100%;margin-top:0.25rem" oninput="updateMixPreview()">
+          <span class="text-xs text-tertiary" id="mix-weight-b-val">1</span>
+        </div>
+      </div>
+      <div style="margin-top:0.75rem">
+        <label>Texto com pausas/voz <span class="text-xs text-tertiary">use <code>[pause:0.4s]</code> <code>[voice:am_michael]</code> <code>[rate:0.9]</code></span></label>
+        <textarea id="mix-text" class="input" rows="2" style="font-family:JetBrains Mono,monospace;font-size:12px" oninput="updateMixPreview()">Olá [pause:0.4s] tudo bem? [rate:0.9] Posso ajudar?</textarea>
+        <div class="text-xs mono" id="mix-preview" style="margin-top:0.25rem;color:var(--accent)">pf_dora(2)+bf_emma(1)</div>
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.75rem;flex-wrap:wrap">
+        <button type="button" class="btn btn-primary btn-sm" onclick="playMix()">▶️ Ouvir mix</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="saveMix()">💾 Salvar voicepack</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="window.open('http://'+location.hostname+':8880/web','_blank')">↗ Abrir Kokoro Web UI</button>
+        <span class="text-xs text-tertiary" id="mix-status" style="align-self:center"></span>
+      </div>
+      <audio id="mix-audio" controls style="width:100%;margin-top:0.5rem;display:none"></audio>
+    </div>
+  </div>
+  <script>
+  function updateMixPreview(){
+    const a=document.getElementById('mix-voice-a').value, wa=document.getElementById('mix-weight-a').value;
+    const b=document.getElementById('mix-voice-b').value, wb=document.getElementById('mix-weight-b').value;
+    document.getElementById('mix-weight-a-val').textContent=wa;
+    document.getElementById('mix-weight-b-val').textContent=wb;
+    document.getElementById('mix-preview').textContent=a+'('+wa+')+'+b+'('+wb+')';
+  }
+  async function playMix(){
+    const voice=document.getElementById('mix-preview').textContent;
+    const text=document.getElementById('mix-text').value;
+    const st=document.getElementById('mix-status'), audio=document.getElementById('mix-audio');
+    st.textContent='Gerando...'; st.style.color='var(--text-tertiary)';
+    try{
+      const r=await fetch('/dashboard/voice/preview', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({voice: voice, text: text, tts_model: 'kokoro', speed: 0.95})});
+      if(!r.ok){ st.textContent='Erro '+r.status; st.style.color='var(--red)'; return; }
+      const blob=await r.blob(); const url=URL.createObjectURL(blob);
+      audio.src=url; audio.style.display='block'; audio.play(); st.textContent='OK '+voice; st.style.color='var(--green)';
+    }catch(e){ st.textContent='Erro: '+e.message; st.style.color='var(--red)'; }
+  }
+  async function saveMix(){
+    const voice=document.getElementById('mix-preview').textContent;
+    const st=document.getElementById('mix-status');
+    st.textContent='Salvando...';
+    try{
+      const r=await fetch('http://'+location.hostname+':8880/v1/audio/voices/combine', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(voice)});
+      if(r.ok){ const blob=await r.blob(); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=voice.replace(/[^a-z0-9]/gi,'_')+'.pt'; a.click(); st.textContent='✓ Salvo '+a.download; st.style.color='var(--green)'; } else { st.textContent='Erro '+r.status; st.style.color='var(--red)'; }
+    }catch(e){ st.textContent='Erro: '+e.message+' — tente via /web'; st.style.color='var(--red)'; }
+  }
+  document.getElementById('mix-voice-a')?.addEventListener('change', updateMixPreview);
+  document.getElementById('mix-voice-b')?.addEventListener('change', updateMixPreview);
+  document.getElementById('mix-weight-a')?.addEventListener('input', updateMixPreview);
+  document.getElementById('mix-weight-b')?.addEventListener('input', updateMixPreview);
+  </script>
+
   <!-- Step 4: Nome + Criar -->
   <div class="card mb-3" data-step="4" style="opacity:0.5">
     <h2>4. Nome e criar <span class="text-xs text-tertiary">— agente já com prompt 10-seções + voz</span></h2>
