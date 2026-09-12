@@ -62,6 +62,12 @@ class Evaluator:
         if len(text.strip()) > 0 and len(text.strip()) < 4 and text.strip().lower() not in ["oi", "ok", "sim", "não", "ola"]:
             return {"success": False, "reason": "STT: texto muito curto, possível erro de transcrição, pedir para repetir", "confidence": 0.2}
 
+        # Caso 7: fora da janela 24h (131047) — precisa template
+        if "131047" in str(trajectory).lower() or "131047" in text or "outside 24h" in trajectory_str or "window" in trajectory_str and "template" in text:
+            return {"success": False, "reason": "Fora da janela 24h (131047) — trocar para template aios_reengajamento_1 (Utility, pt_BR) com params [nome, empresa, assunto]", "confidence": 0.2}
+        if "template" in trajectory_str and "131047" in str(trajectory):
+            return {"success": False, "reason": "Template 131047 — usar whatsapp_template com aios_reengajamento_1", "confidence": 0.2}
+
         return {"success": True, "reason": "ok", "confidence": 0.85}
 
 
