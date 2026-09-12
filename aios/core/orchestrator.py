@@ -6,6 +6,21 @@ import logging
 from typing import AsyncGenerator
 
 from aios.core.agent import AgentRuntime
+
+
+def _get_runtime(agent, db=None):
+    """Return AutonomousAgent if autonomous else AgentRuntime."""
+    try:
+        gov = getattr(agent, "governance_config", None) or {}
+        is_auto = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
+        if is_auto:
+            from aios.core.autonomous_agent import AutonomousAgent
+            return AutonomousAgent(agent, db)
+    except Exception:
+        pass
+    return AgentRuntime(agent, db)
+
+
 from aios.core.providers import (
     get_provider,
     STREAM_TOKEN,
@@ -182,7 +197,7 @@ class TeamOrchestrator:
             return await self._supervisor_route(conv_id, msg, db)
 
         # Step 1: Orchestrator creates plan
-        rt = AgentRuntime(orch, self._db)
+        rt = _get_runtime(orch, self._db)
         plan = await rt.run(conv_id, f"Analyze this task and create a detailed execution plan. Identify which team member should handle each part. Task: {msg}", db)
 
         # Step 2: Orchestrator hands off to Manager
@@ -209,7 +224,7 @@ Respond with JSON:
   "manager_notes": "any coordination notes"
 }}"""
                 
-                rt = AgentRuntime(manager, self._db)
+                rt = _get_runtime(manager, self._db)
                 manager_decision = await rt.run(conv_id, manager_prompt, db)
                 
                 try:
@@ -225,7 +240,7 @@ Respond with JSON:
                         
                         agent = next((a for a in self.agents if a.id == agent_id), None)
                         if agent and agent.id != self.team.orchestrator_agent_id and agent.id != self.team.manager_agent_id:
-                            rt = AgentRuntime(agent, self._db)
+                            rt = _get_runtime(agent, self._db)
                             result = await rt.run(conv_id, task, db)
                             results.append(f"[{agent.name}]: {result}")
                     
@@ -313,7 +328,7 @@ Respond with JSON:
         try:
             routed = await self._llm_route(msg, conv_id)
             idx = min(max(0, routed["agent_index"]), len(agents) - 1)
-            agent = AgentRuntime(agents[idx], self._db)
+            agent = _get_runtime(agents[idx], self._db)
             out = await agent.run(conv_id, routed.get("handoff_message", msg), db)
             await self.update_blackboard(conv_id, f"last_{agents[idx].name}", out[:1000])
             try:
@@ -395,7 +410,7 @@ Respond with JSON:
 
         async def _run_one(a):
             async with sem:
-                return await AgentRuntime(a, self._db).run(conv_id, msg, db)
+                return await _get_runtime(a, self._db).run(conv_id, msg, db)
 
         results = await asyncio.gather(
             *(_run_one(a) for a in self.agents), return_exceptions=True
@@ -437,7 +452,7 @@ Respond with JSON:
             yield {"type": STREAM_DONE}
             return
         results = await asyncio.gather(
-            *(AgentRuntime(a, self._db).run(conv_id, msg, db) for a in self.agents),
+            *(_get_runtime(a, self._db).run(conv_id, msg, db) for a in self.agents),
             return_exceptions=True,
         )
         valid = [r for r in results if isinstance(r, str)]
@@ -461,7 +476,7 @@ Respond with JSON:
                     best_score = dot
                     best = a
             if best:
-                return await AgentRuntime(best, self._db).run(conv_id, msg, db)
+                return await _get_runtime(best, self._db).run(conv_id, msg, db)
         except Exception:
             pass
         return await self._supervisor_route(conv_id, msg, db)
@@ -522,7 +537,7 @@ Respond with JSON:
             "type": STREAM_TOKEN,
             "content": f"[Hierarchical: Orchestrator {orch.name} analyzing task]\n\n",
         }
-        rt = AgentRuntime(orch, self._db)
+        rt = _get_runtime(orch, self._db)
         plan = await rt.run(conv_id, f"Analyze this task and create a detailed execution plan. Identify which team member should handle each part. Task: {msg}", db)
         
         yield {"type": STREAM_TOKEN, "content": f"[Plan by {orch.name}]\n{plan[:500]}\n\n"}
@@ -556,7 +571,7 @@ Respond with JSON:
   "manager_notes": "any coordination notes"
 }}"""
                 
-                rt = AgentRuntime(manager, self._db)
+                rt = _get_runtime(manager, self._db)
                 manager_decision = await rt.run(conv_id, manager_prompt, db)
                 
                 yield {"type": STREAM_TOKEN, "content": f"[Manager {manager.name} coordinating]\n{manager_decision[:500]}\n\n"}
@@ -578,7 +593,7 @@ Respond with JSON:
                                 "content": f"[Handoff: Manager {manager.name} → {agent.name}] {reason}\n\n",
                             }
                             
-                            rt = AgentRuntime(agent, self._db)
+                            rt = _get_runtime(agent, self._db)
                             async for ev in agent.run_stream(conv_id, task, db):
                                 yield ev
                     
