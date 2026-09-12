@@ -62,6 +62,16 @@
     <div class="card" style="border-left:3px solid var(--accent)">
       <h3>📅 Google Calendar — Agendamento Real</h3>
       <p class="text-xs text-tertiary" style="margin:0.25rem 0 0.75rem">Conecte para SDR agendar consulta/visita direto no Calendar (Roberto/Mariana). Sem isso, agente só usa <code>calculator</code>.</p>
+      {% if request.query_params.get('calendar_connected') %}<div class="card" style="background:var(--green-subtle);border-color:var(--green);color:var(--green);padding:0.5rem 0.75rem;margin-bottom:0.75rem;font-size:0.8125rem">✓ Google Calendar conectado com sucesso!</div>{% endif %}
+      <div style="display:flex;gap:0.75rem;align-items:center;padding:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:0.75rem">
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:0.875rem">Conectar com Google OAuth</div>
+          <div class="text-xs text-tertiary">{% if secrets.google_calendar_email %}✓ Conectado como {{ secrets.google_calendar_email }} (expira {{ secrets.google_calendar_token_expiry or '' }}){% else %}Clique para autorizar acesso ao Calendar — 1 clique, sem JSON{% endif %}</div>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="connectGoogleCalendar()">{% if secrets.google_calendar_email %}Reconectar{% else %}Conectar Google{% endif %}</button>
+        {% if secrets.google_calendar_email %}<button type="button" class="btn btn-ghost btn-sm" onclick="disconnectCalendar()">Desconectar</button>{% endif %}
+      </div>
+      <div style="text-align:center;color:var(--text-tertiary);font-size:0.7rem;margin:0.5rem 0">— ou use service account (avançado) —</div>
       <div class="grid-2">
         <div style="grid-column:1 / -1"><label>Google Calendar Credentials (JSON service account) <span class="text-tertiary">{{ '✓ configurado' if secrets.google_calendar_credentials else '— vazio' }}</span></label><textarea class="input input-mono" name="google_calendar_credentials" rows="3" placeholder='{"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----..."}'>{{ secrets.google_calendar_credentials or '' }}</textarea><p class="text-xs text-tertiary" style="margin-top:0.25rem">Cole JSON do service account OU defina <code>AIOS_GOOGLE_CALENDAR_CREDENTIALS</code> no .env. <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color:var(--accent)">Criar service account →</a></p></div>
         <div><label>Calendar ID</label><input class="input" name="google_calendar_id" value="{{ secrets.google_calendar_id or '' }}" placeholder="primary ou email@group.calendar.google.com"><p class="text-xs text-tertiary">Default: primary</p></div>
@@ -94,6 +104,23 @@
   </form>
 </div>
 <script>
+async function connectGoogleCalendar(){
+  const btn=event.target; btn.textContent='Conectando...'; btn.disabled=true;
+  try{
+    const r=await fetch('/api/auth/google/calendar/login', {credentials:'include'});
+    const j=await r.json();
+    if(j.authorization_url){ window.location.href=j.authorization_url; }
+    else { alert(j.error||'Falha ao iniciar OAuth'); btn.textContent='Conectar Google'; btn.disabled=false; }
+  }catch(e){ alert('Erro: '+e.message); btn.textContent='Conectar Google'; btn.disabled=false; }
+}
+async function disconnectCalendar(){
+  if(!confirm('Desconectar Google Calendar?')) return;
+  try{
+    const r=await fetch('/api/auth/google/calendar/disconnect', {method:'POST', credentials:'include'});
+    const j=await r.json();
+    if(j.ok) location.reload(); else alert(j.error||'Falha');
+  }catch(e){ alert('Erro: '+e.message); }
+}
 async function testCalendar(){
   const el=document.getElementById('test-calendar');
   el.textContent='testando...'; el.style.color='var(--text-tertiary)';

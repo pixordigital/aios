@@ -29,6 +29,11 @@ ALLOWED_KEYS = {
     "google_calendar_credentials",
     "google_calendar_id",
     "calendar_webhook_url",
+    "google_calendar_access_token",
+    "google_calendar_refresh_token",
+    "google_calendar_token_expiry",
+    "google_calendar_email",
+    "google_calendar_connected_at",
 }
 
 PROVIDER_KEY_MAP = {

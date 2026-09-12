@@ -591,6 +591,100 @@ async def google_callback(code: str, state: str, db: DatabaseBackend = Depends(g
     return await _oauth_login_or_register(db, "google", provider_user_id, email, name)
 
 
+@router.get("/google/calendar/login")
+async def google_calendar_login(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
+    """Redirect to Google OAuth for Calendar (per-org). Requires auth."""
+    from aios.api.deps import get_current_user
+    try:
+        user = await get_current_user(request, db)
+    except Exception:
+        raise HTTPException(401, "Autentique-se primeiro")
+    if not settings.google_client_id:
+        raise HTTPException(400, "Google OAuth não configurado — defina GOOGLE_CLIENT_ID/SECRET")
+    state = secrets.token_urlsafe(32)
+    # store org context
+    _oauth_states[state] = {"provider": "google_calendar", "org_id": user.org_id, "user_id": user.id}
+    scope = "openid email profile https://www.googleapis.com/auth/calendar"
+    params = f"?client_id={settings.google_client_id}&redirect_uri={settings.app_url}/api/auth/google/calendar/callback&response_type=code&scope={scope}&state={state}&access_type=offline&prompt=consent"
+    return {"authorization_url": "https://accounts.google.com/o/oauth2/v2/auth" + params}
+
+
+@router.get("/google/calendar/callback")
+async def google_calendar_callback(code: str, state: str, db: DatabaseBackend = Depends(get_db_backend)):
+    """Handle Google Calendar OAuth callback — stores refresh token in org secrets."""
+    stored = _oauth_states.pop(state, None)
+    if not stored or stored["provider"] != "google_calendar":
+        raise HTTPException(400, "Parâmetro de estado inválido ou expirado")
+    org_id = stored["org_id"]
+    import httpx
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "code": code,
+                "redirect_uri": f"{settings.app_url}/api/auth/google/calendar/callback",
+                "grant_type": "authorization_code",
+            },
+            headers={"Accept": "application/json"},
+        )
+        data = resp.json()
+        access_token = data.get("access_token")
+        refresh_token = data.get("refresh_token")
+        expires_in = data.get("expires_in", 3600)
+        if not access_token:
+            raise HTTPException(400, f"Falha ao obter tokens do Google: {data}")
+        # get user email to show who connected
+        try:
+            uinfo = await client.get("https://www.googleapis.com/oauth2/v2/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+            email = uinfo.json().get("email", "")
+        except Exception:
+            email = ""
+    # store in org
+    from aios.db.models import Organization
+    org = await db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(404, "Organização não encontrada")
+    extra = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
+    secrets = dict(extra.get("secrets", {})) if isinstance(extra.get("secrets"), dict) else {}
+    secrets["google_calendar_access_token"] = access_token
+    if refresh_token:
+        secrets["google_calendar_refresh_token"] = refresh_token
+    secrets["google_calendar_token_expiry"] = str(int(__import__("time").time()) + int(expires_in))
+    if email:
+        secrets["google_calendar_email"] = email
+    secrets["google_calendar_connected_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    extra["secrets"] = secrets
+    org.extra_data = extra
+    await db.commit()
+    # redirect to settings with success
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"{settings.app_url}/dashboard/settings?calendar_connected=1", status_code=303)
+
+
+@router.post("/google/calendar/disconnect")
+async def google_calendar_disconnect(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
+    """Disconnect Google Calendar — clears stored tokens."""
+    from aios.api.deps import get_current_user
+    try:
+        user = await get_current_user(request, db)
+    except Exception:
+        raise HTTPException(401, "Autentique-se primeiro")
+    from aios.db.models import Organization
+    org = await db.get(Organization, user.org_id)
+    if not org:
+        raise HTTPException(404, "Organização não encontrada")
+    extra = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
+    secrets = dict(extra.get("secrets", {})) if isinstance(extra.get("secrets"), dict) else {}
+    for k in ["google_calendar_access_token", "google_calendar_refresh_token", "google_calendar_token_expiry", "google_calendar_email", "google_calendar_connected_at"]:
+        secrets.pop(k, None)
+    extra["secrets"] = secrets
+    org.extra_data = extra
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/github/login")
 async def github_login():
     """Redirect to GitHub OAuth."""
