@@ -14,6 +14,15 @@
 <div id="handover-banner" style="display:none;padding:0.5rem 0.75rem;border-radius:6px;margin-bottom:0.75rem;font-size:0.8125rem"></div>
 <div id="pending-box" class="card" style="display:none;margin-bottom:0.75rem"><h3 style="font-size:0.8125rem;margin-bottom:0.5rem">⏳ Aprovações pendentes</h3><div id="pending-list"></div></div>
 
+<div id="autonomous-timeline" class="card" style="display:none;margin-bottom:0.75rem;border-left:3px solid var(--accent)">
+    <div class="flex-between" style="margin-bottom:0.5rem">
+        <h3 style="font-size:0.8125rem;margin:0">🤖 Autônomo — Trials & Reflexões</h3>
+        <span class="badge" style="background:var(--accent-subtle);color:var(--accent);border-color:var(--accent)">100% + HITL</span>
+    </div>
+    <div id="autonomous-content" style="font-size:0.75rem;color:var(--text-secondary)">Carregando...</div>
+    <div id="autonomous-skills" style="margin-top:0.5rem;display:none"><div style="font-size:0.7rem;font-weight:600;color:var(--text-tertiary);margin-bottom:0.25rem">Skills aprendidas:</div><div id="skills-list" class="flex-col gap-1"></div></div>
+</div>
+
 {# DLQ reprocess section #}
 <div id="dlq-box" class="card" style="display:none;margin-bottom:0.75rem;padding:0.75rem">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
@@ -67,6 +76,27 @@ async function sendHuman(){
   await fetch(`/dashboard/conversations/${convId}/human`,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`content=${encodeURIComponent(t)}`});
   location.reload();
 }
+async function loadAutonomous(){
+  try{
+    const r=await fetch(`/api/conversations/${convId}/autonomous-trace`);
+    if(!r.ok) return;
+    const j=await r.json();
+    const card=document.getElementById('autonomous-timeline');
+    const content=document.getElementById('autonomous-content');
+    const skillsEl=document.getElementById('autonomous-skills');
+    const skillsList=document.getElementById('skills-list');
+    if(!j.trials || !j.trials.length){
+      card.style.display='none';
+      return;
+    }
+    card.style.display='';
+    content.innerHTML=j.trials.map((t,i)=>`<div style="display:flex;gap:0.5rem;align-items:flex-start;padding:0.5rem;background:${t.success?'var(--green-subtle)':'var(--red-subtle)'};border:1px solid ${t.success?'var(--green)':'var(--red)'};border-radius:4px;margin-bottom:0.375rem"><div style="width:24px;height:24px;border-radius:99px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.7rem;font-weight:600;background:${t.success?'var(--green)':'var(--red)'};color:#fff">${i+1}</div><div style="flex:1"><div style="font-weight:600;font-size:0.75rem">${t.success?'✓ Sucesso':'✗ Falha'} — ${t.reason||''}</div><div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.15rem">${(t.response||'').slice(0,120)}</div>${t.reflection?`<div style="font-size:0.65rem;color:var(--amber);margin-top:0.25rem;background:var(--bg);padding:0.25rem 0.375rem;border-radius:3px">💡 Reflexão: ${t.reflection.slice(0,150)}</div>`:''}</div><span style="font-size:0.6rem;color:var(--text-tertiary)">${t.confidence?Math.round(t.confidence*100)+'%':''}</span></div>`).join('');
+    if(j.skills && j.skills.length){
+      skillsEl.style.display='';
+      skillsList.innerHTML=j.skills.slice(0,3).map(s=>`<div style="font-size:0.65rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.375rem"><b>${s.name}</b> — ${s.description.slice(0,80)}</div>`).join('');
+    }
+  }catch(e){}
+}
 async function loadHandover(){
   try{
     const r=await fetch(`/dashboard/conversations/${convId}/handover-status`);
@@ -114,7 +144,7 @@ async function loadDLQ(){
     }
   }catch(e){}
 }
-loadHandover(); loadDLQ(); setInterval(loadHandover,5000); setInterval(loadDLQ,10000);
+loadHandover(); loadDLQ(); loadAutonomous(); setInterval(loadHandover,5000); setInterval(loadDLQ,10000); setInterval(loadAutonomous,5000);
 function filterTranscript(q){
   var qq=q.toLowerCase().trim();
   document.querySelectorAll('[data-msg-content]').forEach(function(el){

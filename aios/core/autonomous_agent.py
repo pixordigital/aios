@@ -131,9 +131,24 @@ class AutonomousAgent:
                 # Restore
                 self.agent.system_prompt = original_prompt
 
-                # Captura trajectory (simplificado: resposta + tools)
-                # For now, we use the runtime's last context; in full impl, hook into scheduler
-                trajectory.append({"trial": trial, "response": response[:500]})
+                # Captura trajectory
+                trajectory.append({"trial": trial, "response": response[:500], "success": False, "reason": ""})
+                # Salva trace no conversation para timeline
+                if db and conversation_id:
+                    try:
+                        from aios.db.backend import db_session as _db_sess
+                        from aios.db.models import Conversation as _Conv
+                        async with _db_sess() as _db:
+                            _conv = await _db.get(_Conv, conversation_id)
+                            if _conv:
+                                _extra = dict(_conv.extra_data or {})
+                                _trace = list(_extra.get("autonomous_trace", []))
+                                _trace.append({"trial": trial, "response": response[:300], "success": False, "reason": "pending", "reflection": reflections[-1] if reflections else ""})
+                                _extra["autonomous_trace"] = _trace[-5:]
+                                _conv.extra_data = _extra
+                                await _db.commit()
+                    except Exception:
+                        pass
 
                 # HITL check: valor > threshold
                 if self.hitl_enabled and self._needs_hitl(response, user_message):
@@ -143,6 +158,28 @@ class AutonomousAgent:
                 # Avalia
                 evaluation = self.evaluator.evaluate(trajectory, response, last_tool_calls)
                 logger.info("Autonomous trial %d/%d: success=%s reason=%s", trial, self.max_trials, evaluation["success"], evaluation["reason"])
+                # Atualiza último trial com resultado da avaliação
+                if trajectory:
+                    trajectory[-1]["success"] = evaluation["success"]
+                    trajectory[-1]["reason"] = evaluation["reason"]
+                    trajectory[-1]["confidence"] = evaluation.get("confidence", 0)
+                    # Atualiza trace no DB
+                    if db and conversation_id:
+                        try:
+                            from aios.db.backend import db_session as _db_sess2
+                            from aios.db.models import Conversation as _Conv2
+                            async with _db_sess2() as _db2:
+                                _conv2 = await _db2.get(_Conv2, conversation_id)
+                                if _conv2:
+                                    _extra2 = dict(_conv2.extra_data or {})
+                                    _trace2 = list(_extra2.get("autonomous_trace", []))
+                                    if _trace2:
+                                        _trace2[-1].update({"success": evaluation["success"], "reason": evaluation["reason"], "confidence": evaluation.get("confidence", 0)})
+                                        _extra2["autonomous_trace"] = _trace2[-5:]
+                                        _conv2.extra_data = _extra2
+                                        await _db2.commit()
+                        except Exception:
+                            pass
 
                 if evaluation["success"]:
                     # Extrai skill se sucesso após retry (aprendizado)

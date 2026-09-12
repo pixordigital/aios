@@ -146,6 +146,36 @@ async def post_handover(conversation_id: str, body: dict, db: DatabaseBackend = 
     return {"handover": h}
 
 
+@router.get("/{conversation_id}/autonomous-trace")
+async def get_autonomous_trace(conversation_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    conv = await db.get(Conversation, conversation_id)
+    if not conv or conv.org_id != org_id:
+        raise HTTPException(404)
+    trace = (conv.extra_data or {}).get("autonomous_trace", [])
+    # also fetch recent skills for this conversation's agent/team
+    skills = []
+    try:
+        from aios.db.models import Skill
+        from sqlalchemy import select as _sel2
+        # try to get agent_id from conv
+        agent_id = conv.agent_id
+        if agent_id:
+            result = await db.execute(_sel2(Skill).where(Skill.agent_id == agent_id).order_by(Skill.created_at.desc()).limit(3))
+            skills = [{"name": s.name, "description": s.description, "skill_type": s.skill_type} for s in result.scalars().all()]
+        elif conv.team_id:
+            from aios.db.models import Team
+            from sqlalchemy.orm import selectinload
+            team = await db.get(Team, conv.team_id, options=[selectinload(Team.agents)])
+            if team and team.agents:
+                for ag in team.agents[:1]:
+                    result = await db.execute(_sel2(Skill).where(Skill.agent_id == ag.id).order_by(Skill.created_at.desc()).limit(3))
+                    skills = [{"name": s.name, "description": s.description, "skill_type": s.skill_type} for s in result.scalars().all()]
+                    break
+    except Exception:
+        pass
+    return {"trials": trace, "skills": skills}
+
+
 @router.post("/{conversation_id}/human-reply")
 async def human_reply(conversation_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     conv = await db.get(Conversation, conversation_id)
