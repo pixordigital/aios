@@ -52,6 +52,16 @@ class Evaluator:
         if "tá caro" in str(trajectory).lower() and "agendar" not in text and "reunião" not in text and "calcular" not in text:
             return {"success": False, "reason": "Objeção não contornada: sem oferecer próxima ação (agendamento/ROI)", "confidence": 0.3}
 
+        # Caso 6: STT low confidence (voz) — "tacaro", texto muito curto, sem espaços
+        # Heurística para Whisper/Kokoro STT errors
+        trajectory_str = str(trajectory).lower()
+        user_text = str(trajectory[-1].get("response", "") if trajectory else "") + " " + text
+        # Detecta STT errors comuns
+        if any(err in user_text for err in ["tacaro", "ta caro", "to caro"]) and "tá caro" not in user_text:
+            return {"success": False, "reason": "STT: possível erro de transcrição (tacaro vs tá caro), pedir para repetir", "confidence": 0.2}
+        if len(text.strip()) > 0 and len(text.strip()) < 4 and text.strip().lower() not in ["oi", "ok", "sim", "não", "ola"]:
+            return {"success": False, "reason": "STT: texto muito curto, possível erro de transcrição, pedir para repetir", "confidence": 0.2}
+
         return {"success": True, "reason": "ok", "confidence": 0.85}
 
 

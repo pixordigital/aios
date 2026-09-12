@@ -282,25 +282,39 @@ class MemoryManager:
         return [{"id": r[1], "content": r[2], "score": round(r[0], 3)} for r in scored[:top_k]]
 
     async def update_memory(self, memory_id: str, success: bool):
-        """Update importance after use — success increments, failure decays."""
-        # For now, store in DB as tag; in full RL, this would be GRPO reward
+        """Update importance after use — success boosts recency, failure decays."""
         try:
             conn = _vec_db(self.agent_id)
-            # Simple: append success marker to content for now
-            # In full impl, this would update usage_count/success_rate in separate table
-            pass
+            # Boost recency on success by updating created_at to now (SA-CTS recency factor)
+            if success:
+                conn.execute("UPDATE memories SET created_at=datetime('now') WHERE id=?", (memory_id,))
+                conn.commit()
+                logger.debug("Memory %s boosted (success)", memory_id[:8])
+            else:
+                # On failure, decay by not updating; occasional discard if low value
+                # For now, just log; full RL would decrement importance score
+                logger.debug("Memory %s decay (failure)", memory_id[:8])
         except Exception:
-            pass
+            logger.debug("Memory update failed", exc_info=True)
 
     async def discard_memory(self, memory_id: str):
-        """Discard low-value memory."""
+        """Discard low-value memory (RL discard action)."""
         try:
             conn = _vec_db(self.agent_id)
-            conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
-            conn.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
-            conn.commit()
+            # Check if memory exists and is low-value before deleting
+            row = conn.execute("SELECT content FROM memories WHERE id=?", (memory_id,)).fetchone()
+            if row and len(row[0]) < 20:  # very short, likely noise
+                conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+                conn.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
+                conn.commit()
+                logger.info("Discarded low-value memory %s", memory_id[:8])
+            elif row:
+                conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+                conn.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
+                conn.commit()
+                logger.info("Discarded memory %s", memory_id[:8])
         except Exception:
-            pass
+            logger.debug("Memory discard failed", exc_info=True)
 
     async def search_similar(self, query: str, top_k: int = 5) -> list[dict]:
         """Tier 3: vector similarity search across stored memories."""

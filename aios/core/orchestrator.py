@@ -330,6 +330,30 @@ Respond with JSON:
             idx = min(max(0, routed["agent_index"]), len(agents) - 1)
             agent = _get_runtime(agents[idx], self._db)
             out = await agent.run(conv_id, routed.get("handoff_message", msg), db)
+            # Reflection: if routed agent failed (not HITL), try next best
+            if out and ("Não consegui" in out or "Falha após 3 tentativas" in out) and len(agents) > 1:
+                # Try next best via semantic
+                try:
+                    from aios.core.memory import _embed
+                    q = _embed(msg)
+                    # Sort remaining agents by similarity to msg
+                    remaining = [a for i, a in enumerate(agents) if i != idx]
+                    scored = []
+                    for a in remaining:
+                        e = _embed((a.system_prompt or "")[:500])
+                        dot = sum(x*y for x,y in zip(q, e))
+                        scored.append((dot, a))
+                    scored.sort(key=lambda x: -x[0])
+                    if scored:
+                        next_agent = _get_runtime(scored[0][1], self._db)
+                        # Reflection for orchestrator
+                        refl = f"Roteamento para {agents[idx].name} falhou ({out[:100]}). Tentando {scored[0][1].name}."
+                        await self.update_blackboard(conv_id, "orchestrator_reflection", refl)
+                        out2 = await next_agent.run(conv_id, msg, db)
+                        if out2 and "Não consegui" not in out2:
+                            out = out2 + f"\n\n[Reflexão orquestrador: {refl}]"
+                except Exception:
+                    pass
             await self.update_blackboard(conv_id, f"last_{agents[idx].name}", out[:1000])
             try:
                 from aios.core.telemetry import telemetry

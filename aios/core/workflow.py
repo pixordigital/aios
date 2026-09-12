@@ -55,6 +55,52 @@ class WorkflowResult:
         return not bool(self.errors)
 
 
+class WorkflowPlanner:
+    """LLM Planner — decompose goal into subtasks (HITL: Planner pattern)."""
+    async def plan(self, goal: str, available_tools: list[str] = None) -> list[dict]:
+        try:
+            from aios.core.providers import get_provider
+            llm = get_provider("openai/gpt-4o-mini")
+            tools_str = ", ".join(available_tools or ["calculator", "web_search", "sql_query"])
+            resp = await llm.chat_retry(
+                messages=[
+                    {"role": "system", "content": f"Você é Planner. Quebre o objetivo em 2-4 subtarefas sequenciais. Ferramentas disponíveis: {tools_str}. Responda JSON com tasks."},
+                    {"role": "user", "content": goal},
+                ],
+                model="openai/gpt-4o-mini",
+                temperature=0.5,
+                max_tokens=500,
+            )
+            import json
+            data = json.loads(resp.get("content", "{}"))
+            return data.get("tasks", [])[:4]
+        except Exception:
+            return [{"id": "t1", "tool": "calculator", "desc": goal}]
+
+# ESAA: Event Sourcing for Autonomous Agents — append-only log
+async def _esaa_append(team_id: str, event: dict):
+    """Append event to team's activity log (ESAA)."""
+    try:
+        from aios.db.engine import async_session
+        from aios.db.models import Team as TeamModel
+        import time, json
+        async with async_session() as sess:
+            team = await sess.get(TeamModel, team_id)
+            if team:
+                data = dict(team.extra_data or {})
+                log = list(data.get("_activity_log", []))
+                event["ts"] = time.time()
+                log.append(event)
+                # Keep last 100 events
+                data["_activity_log"] = log[-100:]
+                # Also maintain blackboard as materialized view
+                data["_blackboard"] = {e["key"]: e["value"] for e in log if e.get("type") == "blackboard" and e.get("key")}
+                team.extra_data = data
+                await sess.commit()
+    except Exception:
+        pass
+
+
 _ORG_SEMAPHORES: dict[str, asyncio.Semaphore] = {}
 
 
