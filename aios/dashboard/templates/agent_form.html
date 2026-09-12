@@ -402,14 +402,7 @@
         var key=AGENT_TYPE_TO_TEMPLATE[agentType]||'custom-structured';
         var ta=window._lightTA||document.getElementById('prompt-input');
         if(!ta) return;
-        var cur=(ta.value||'').trim();
-        var isPlaceholder=ta.dataset&&ta.dataset.isPlaceholder==='1';
-        var isEmpty=!cur || isPlaceholder || cur===PLACEHOLDER_PROMPT.trim();
-        var isDefaultTemplate=Object.values(PROMPT_TEMPLATES).some(function(v){ return cur===v.trim(); });
-        // só auto-carrega se vazio, placeholder ou template padrão anterior
-        if(!isEmpty && !isDefaultTemplate){
-            if(!confirm('Trocar tipo vai substituir prompt atual por template de \''+agentType+'\'. Continuar?')) return;
-        }
+        console.log('[AIOS] autoLoadTemplate', agentType, '->', key);
         applyPromptTemplate(key);
     }
     function applyPromptTemplate(key){
