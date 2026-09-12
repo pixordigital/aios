@@ -173,10 +173,31 @@ async def _process_inbound_once(
                             break
                     except Exception:
                         logger.exception("Team failover: agent %s failed", agent.id)
-        else:  # Agent
-            from aios.core.agent import AgentRuntime
-            runtime = AgentRuntime(agent_or_team)
-            reply_text = await runtime.run(conv.id, text)
+        else:  # Agent — 100% autônomo com HITL
+            gov = (getattr(agent_or_team, "governance_config", None) or {})
+            is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
+            if is_autonomous:
+                from aios.core.autonomous_agent import AutonomousAgent
+                auto = AutonomousAgent(agent_or_team)
+                reply_text = await auto.run(conv.id, text, db)
+                # Se HITL, reply_text já contém ⏸️ [HITL] — não tenta team failover
+                if reply_text and "⏸️ [HITL]" in reply_text:
+                    # Salva como pending e notifica canal mas não deliver como resposta normal
+                    db.add(Message(
+                        conversation_id=conv.id,
+                        org_id=conn.org_id,
+                        role="assistant",
+                        content=reply_text,
+                        agent_id=agent_or_team.id,
+                    ))
+                    await db.commit()
+                    # Ainda deliver para que humano veja no canal que precisa aprovar
+                    await deliver_message(ctx, channel_connection_id, conv.id, reply_text, json.dumps(extra))
+                    return
+            else:
+                from aios.core.agent import AgentRuntime
+                runtime = AgentRuntime(agent_or_team)
+                reply_text = await runtime.run(conv.id, text)
 
         if reply_text:
             # save reply
@@ -210,14 +231,21 @@ async def agent_run(ctx, payload: dict):
     try:
         from aios.db.backend import db_session
         from aios.db.models import Agent as AgentModel
-        from aios.core.agent import AgentRuntime
         from aios.db.engine import async_session as _sess
         async with _sess() as sess:
             agent = await sess.get(AgentModel, agent_id)
             if not agent:
                 return {"error": "agent not found"}
-            rt = AgentRuntime(agent)
-            out = await rt.run(conv_id, text)
+            gov = (agent.governance_config or {})
+            is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
+            if is_autonomous:
+                from aios.core.autonomous_agent import AutonomousAgent
+                auto = AutonomousAgent(agent)
+                out = await auto.run(conv_id, text, sess)
+            else:
+                from aios.core.agent import AgentRuntime
+                rt = AgentRuntime(agent)
+                out = await rt.run(conv_id, text)
             return {"ok": True, "output": out[:2000]}
     except Exception as exc:
         if attempt < 3:

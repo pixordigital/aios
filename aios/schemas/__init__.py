@@ -74,7 +74,11 @@ _AGENT_MEMORY_DEFAULT = {
 
 
 _GOVERNANCE_DEFAULT = {
-    "autonomy": "draft",  # autonomous | draft | ask
+    "autonomy": "autonomous",  # autonomous | draft | ask — 100% autônomo com HITL
+    "autonomous": True,  # flag 100% autônomo (ReAct+Reflexion 3 trials)
+    "max_trials": 3,  # Reflexion trials
+    "hitl_enabled": True,
+    "hitl_value_threshold": 5000,
     "max_tokens_per_run": 500_000,
     "allowed_tools": "__all__",  # "__all__" or list of tool names
     "denied_tools": [],
