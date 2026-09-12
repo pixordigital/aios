@@ -522,6 +522,9 @@ async def agent_save(
     short_term_buffer: int = Form(50),
     long_term_enabled: bool = Form(False),
     episodic_enabled: bool = Form(False),
+    autonomous: str = Form(None),
+    max_trials: int = Form(3),
+    hitl_threshold: int = Form(5000),
 ):
     if agent_type not in AGENT_TYPES:
         return HTMLResponse(f"<h2>Tipo inválido: {agent_type}</h2><a href='/dashboard/agents'>Voltar</a>", status_code=422)
@@ -547,6 +550,19 @@ async def agent_save(
             "long_term": {"enabled": long_term_enabled, "top_k": 5},
             "episodic": {"enabled": episodic_enabled, "summarize_after": 10},
         }
+        # autonomous governance
+        is_autonomous = autonomous is not None and autonomous in ("1", "on", "true", "True")
+        governance_config = {
+            "autonomous": is_autonomous,
+            "autonomy": "autonomous" if is_autonomous else "draft",
+            "max_trials": max(1, min(5, int(max_trials or 3))),
+            "hitl_enabled": True,
+            "hitl_value_threshold": max(0, int(hitl_threshold or 5000)),
+            "max_tokens_per_run": 500_000,
+            "allowed_tools": "__all__",
+            "denied_tools": [],
+            "max_iterations": 10,
+        }
         if agent_id:
             agent = await db.get(Agent, agent_id)
             if agent and agent.org_id == org_id:
@@ -557,6 +573,7 @@ async def agent_save(
                 agent.name = name; agent.agent_type = agent_type
                 agent.system_prompt = system_prompt; agent.llm_config = llm_config
                 agent.tools = tools_list; agent.memory_config = memory_config
+                agent.governance_config = governance_config
                 await db.flush()
                 # pós-edit snapshot (P0-3)
                 db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=max_v+2, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="post-edit"))
@@ -577,6 +594,7 @@ async def agent_save(
                 llm_config=final_llm,
                 tools=final_tools,
                 memory_config=final_mem,
+                governance_config=governance_config,
             )
             db.add(agent)
             await db.flush()

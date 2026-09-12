@@ -59,6 +59,30 @@
                 </div>
             </div>
 
+            <div class="card" style="flex:0 0 auto;border-left:3px solid var(--accent)">
+                <div class="flex-between mb-3">
+                    <h2 style="margin:0">🤖 Autônomo <span class="badge" style="background:var(--accent-subtle);color:var(--accent);border-color:var(--accent)">100% + HITL</span></h2>
+                    <label class="flex-center" style="gap:0.5rem;cursor:pointer">
+                        <input type="checkbox" name="autonomous" id="autonomous-toggle" value="1" {% if agent is none or agent.governance_config.get('autonomous', True) %}checked{% endif %} style="accent-color:var(--accent);width:1.1rem;height:1.1rem" onchange="toggleAutonomous(this.checked)">
+                        <span style="font-size:0.8125rem;font-weight:600">Ativo</span>
+                    </label>
+                </div>
+                <div id="autonomous-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                    <div>
+                        <label>Max trials (Reflexion) <span class="text-xs text-tertiary">1-5</span></label>
+                        <input type="number" name="max_trials" id="max-trials" min="1" max="5" value="{{ agent.governance_config.get('max_trials', 3) if agent and agent.governance_config else 3 }}" class="input">
+                        <p class="text-xs text-tertiary" style="margin:0.25rem 0 0">Tentativas com reflexão antes de HITL</p>
+                    </div>
+                    <div>
+                        <label>HITL threshold (R$) <span class="text-xs text-tertiary">valor que pede humano</span></label>
+                        <input type="number" name="hitl_threshold" id="hitl-threshold" min="0" step="100" value="{{ agent.governance_config.get('hitl_value_threshold', 5000) if agent and agent.governance_config else 5000 }}" class="input">
+                        <p class="text-xs text-tertiary" style="margin:0.25rem 0 0">>R$ dispara HITL (ex: 5000)</p>
+                    </div>
+                </div>
+                <p class="text-xs text-secondary" style="margin:0.5rem 0 0;background:var(--bg-hover);padding:0.5rem;border-radius:4px">Loop: <code>Thought → Action → Observation → Evaluator → Reflection</code> até 3 trials. HITL se <code>>R$</code>, <code>delete</code> ou <code>confidence&lt;0.4</code>.</p>
+                <script>function toggleAutonomous(v){ document.getElementById('autonomous-fields').style.opacity=v?1:0.4; document.getElementById('autonomous-fields').style.pointerEvents=v?'auto':'none'; }</script>
+            </div>
+
             <div class="card" style="flex:0 0 auto">
                 <h2 class="mb-3">Model</h2>
                 <style>@media(max-width:640px){.model-grid{grid-template-columns:1fr!important}.model-grid .model-search-wrap{grid-column:1}}#model-dropdown.open{display:block!important}</style>
