@@ -88,6 +88,18 @@
     </div>
 </div>
 
+<!-- P1: Agendamento Real destaque (Roberto/Mariana) -->
+<div class="card mb-4" style="border-left:3px solid var(--accent);background:var(--accent-subtle)">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.75rem">
+        <div>
+            <h2 style="font-size:0.9375rem">📅 Agendamento Real — Google Calendar</h2>
+            <p class="text-sm text-secondary" style="margin:0.25rem 0 0">Feche o loop: SDR agenda consulta/visita direto no Calendar. Sem isso é só <code>calculator</code>.</p>
+            <p class="text-xs text-tertiary" style="margin:0.25rem 0 0">Configure em <code>AIOS_GOOGLE_CALENDAR_CREDENTIALS</code> e <code>AIOS_GOOGLE_CALENDAR_ID</code> ou via <a href="/dashboard/settings" style="color:var(--accent)">Configurações → Calendar</a></p>
+        </div>
+        <a href="/dashboard/settings" class="btn btn-primary btn-sm">Conectar Calendar →</a>
+    </div>
+</div>
+
 <!-- Team Overview -->
 {% for team in teams %}
 {% set members = team.agents if team.agents else [] %}

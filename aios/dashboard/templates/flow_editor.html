@@ -26,6 +26,36 @@
 </div>
 <div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Paleta → arraste tool para canvas. Clique no nó para editar label/tool/params (JSON). Conecte handles para definir <code>depends_on</code>. Salvar persiste positions.</p></div>
 
+<!-- P0-2: Tour 30s -->
+<div id="flow-tour">
+  <div id="flow-tour-card">
+    <div class="tour-step active" data-step="1">
+      <div style="font-size:2rem;text-align:center">🎯</div>
+      <h3 style="text-align:center;margin:0.5rem 0">Passo 1: Arraste da paleta</h3>
+      <p class="text-sm text-secondary" style="text-align:center">Segure e arraste qualquer tool (ex: <code>sql_query</code>) da paleta à esquerda para o canvas.</p>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;margin:0.75rem 0;text-align:center;font-size:1.2rem">👈 Arraste → 📋</div>
+    </div>
+    <div class="tour-step" data-step="2">
+      <div style="font-size:2rem;text-align:center">🔗</div>
+      <h3 style="text-align:center;margin:0.5rem 0">Passo 2: Conecte handles</h3>
+      <p class="text-sm text-secondary" style="text-align:center">Arraste do <span style="display:inline-block;width:14px;height:14px;background:var(--accent);border-radius:50%;box-shadow:0 0 6px var(--accent);vertical-align:middle"></span> handle de um nó para o handle de outro. Isso cria <code>depends_on</code>.</p>
+      <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;margin:0.75rem 0;text-align:center"><code>nó A</code> —●→ <code>nó B</code> (B depende de A)</div>
+    </div>
+    <div class="tour-step" data-step="3">
+      <div style="font-size:2rem;text-align:center">💾</div>
+      <h3 style="text-align:center;margin:0.5rem 0">Passo 3: Salve</h3>
+      <p class="text-sm text-secondary" style="text-align:center">Clique <b>Salvar</b> no topo. O workflow fica pronto para usar em automações.</p>
+      <div style="background:var(--accent-subtle);border:1px solid var(--accent-border);border-radius:6px;padding:0.5rem;margin:0.75rem 0;text-align:center">Nomeie → <b>Salvar</b> → Pronto ✓</div>
+    </div>
+    <div class="tour-progress"><div class="tour-dot active" data-dot="1"></div><div class="tour-dot" data-dot="2"></div><div class="tour-dot" data-dot="3"></div></div>
+    <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:0.5rem">
+      <button class="btn btn-ghost btn-sm" onclick="flowTourPrev()" id="tour-prev" style="visibility:hidden">← Voltar</button>
+      <button class="btn btn-ghost btn-sm" onclick="flowTourSkip()">Pular</button>
+      <button class="btn btn-primary btn-sm" onclick="flowTourNext()" id="tour-next">Próximo →</button>
+    </div>
+  </div>
+</div>
+
 <!-- modal -->
 <div id="node-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;align-items:center;justify-content:center">
   <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:16px;width:420px;max-width:90vw;display:flex;flex-direction:column;gap:10px">
@@ -52,6 +82,22 @@
   </div>
 </div>
 
+<style>
+/* P0-2: handles 14px + glow */
+.react-flow__handle{width:14px!important;height:14px!important;background:var(--accent)!important;border:2px solid var(--bg)!important;box-shadow:0 0 8px var(--accent), 0 0 0 2px var(--accent-border);transition:transform 0.15s, box-shadow 0.15s}
+.react-flow__handle:hover{transform:scale(1.3);box-shadow:0 0 12px var(--accent), 0 0 0 3px var(--accent-border)}
+.react-flow__handle-connecting{background:var(--amber)!important;box-shadow:0 0 10px var(--amber)!important}
+.react-flow__handle-valid{background:var(--green)!important;box-shadow:0 0 10px var(--green)!important}
+/* tour overlay */
+#flow-tour{position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:300;display:none;align-items:center;justify-content:center}
+#flow-tour.active{display:flex}
+#flow-tour-card{background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;padding:1.25rem;max-width:420px;width:90vw;box-shadow:0 16px 48px rgba(0,0,0,0.5)}
+#flow-tour .tour-step{display:none}
+#flow-tour .tour-step.active{display:block}
+#flow-tour .tour-progress{display:flex;gap:6px;margin:0.75rem 0}
+#flow-tour .tour-dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:background 0.2s}
+#flow-tour .tour-dot.active{background:var(--accent)}
+</style>
 <link href="https://cdn.jsdelivr.net/npm/reactflow@11/dist/style.css" rel="stylesheet">
 <script type="importmap">{"imports":{"react":"https://esm.sh/react@18","react-dom":"https://esm.sh/react-dom@18","reactflow":"https://esm.sh/reactflow@11"}}</script>
 <script type="module">
@@ -219,5 +265,41 @@ function App(){
   return React.createElement(ReactFlow, rfProps, React.createElement(Background),React.createElement(Controls),React.createElement(MiniMap,{style:{background:"var(--bg-elevated)"}}));
 }
 ReactDOM.createRoot(document.getElementById("flow-root")).render(React.createElement(App));
+// P0-2 Tour logic
+let tourStep=1;
+function showTourStep(n){
+  document.querySelectorAll('#flow-tour .tour-step').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('#flow-tour .tour-dot').forEach(el=>el.classList.remove('active'));
+  document.querySelector(`#flow-tour .tour-step[data-step="${n}"]`)?.classList.add('active');
+  document.querySelector(`#flow-tour .tour-dot[data-dot="${n}"]`)?.classList.add('active');
+  document.getElementById('tour-prev').style.visibility=n===1?'hidden':'visible';
+  document.getElementById('tour-next').textContent=n===3?'Concluir ✓':'Próximo →';
+}
+window.flowTourNext=function(){
+  if(tourStep<3){ tourStep++; showTourStep(tourStep); }else{ flowTourSkip(); }
+};
+window.flowTourPrev=function(){ if(tourStep>1){ tourStep--; showTourStep(tourStep); }};
+window.flowTourSkip=function(){
+  document.getElementById('flow-tour').classList.remove('active');
+  localStorage.setItem('flowTourSeen','1');
+};
+window.flowTourShow=function(){
+  tourStep=1; showTourStep(1);
+  document.getElementById('flow-tour').classList.add('active');
+};
+// show on first visit
+setTimeout(()=>{
+  if(!localStorage.getItem('flowTourSeen')){
+    window.flowTourShow();
+  }
+}, 600);
+// also add help button to re-show
+const helpBtn=document.createElement('button');
+helpBtn.className='btn btn-ghost btn-sm';
+helpBtn.textContent='? Tour';
+helpBtn.title='Mostrar tour novamente';
+helpBtn.onclick=window.flowTourShow;
+helpBtn.style.marginLeft='0.5rem';
+document.querySelector('.flex-between.mb-4 .flex.gap-2')?.appendChild(helpBtn);
 </script>
 {% endblock %}
