@@ -68,7 +68,7 @@
           <div style="font-weight:600;font-size:0.875rem">Conectar com Google OAuth</div>
           <div class="text-xs text-tertiary">{% if secrets.google_calendar_email %}✓ Conectado como {{ secrets.google_calendar_email }} (expira {{ secrets.google_calendar_token_expiry or '' }}){% else %}Clique para autorizar acesso ao Calendar — 1 clique, sem JSON{% endif %}</div>
         </div>
-        <button type="button" class="btn btn-primary btn-sm" onclick="connectGoogleCalendar()">{% if secrets.google_calendar_email %}Reconectar{% else %}Conectar Google{% endif %}</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="connectGoogleCalendar(event)">{% if secrets.google_calendar_email %}Reconectar{% else %}Conectar Google{% endif %}</button>
         {% if secrets.google_calendar_email %}<button type="button" class="btn btn-ghost btn-sm" onclick="disconnectCalendar()">Desconectar</button>{% endif %}
       </div>
       <div style="text-align:center;color:var(--text-tertiary);font-size:0.7rem;margin:0.5rem 0">— ou use service account (avançado) —</div>
@@ -104,14 +104,14 @@
   </form>
 </div>
 <script>
-async function connectGoogleCalendar(){
-  const btn=event.target; btn.textContent='Conectando...'; btn.disabled=true;
+async function connectGoogleCalendar(e){
+  const btn=e ? (e.currentTarget||e.target) : event.target; const origText=btn.textContent; btn.textContent='Conectando...'; btn.disabled=true;
   try{
     const r=await fetch('/api/auth/google/calendar/login', {credentials:'include'});
     const j=await r.json();
     if(j.authorization_url){ window.location.href=j.authorization_url; }
     else {
-      const msg=j.error||j.detail||j.message||'Falha ao iniciar OAuth';
+      const msg=j.error||j.detail||j.title||j.message||'Falha ao iniciar OAuth';
       // Se não configurado, mostra instruções
       if(msg.includes('não configurado')){
         alert(msg + '\n\nConfigure no Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nE no Google Cloud Console adicione redirect URI:\n' + window.location.origin + '/api/auth/google/calendar/callback');
@@ -120,9 +120,9 @@ async function connectGoogleCalendar(){
       } else {
         alert(msg);
       }
-      btn.textContent='Conectar Google'; btn.disabled=false;
+      btn.textContent=origText; btn.disabled=false;
     }
-  }catch(e){ alert('Erro: '+e.message); btn.textContent='Conectar Google'; btn.disabled=false; }
+  }catch(e){ alert('Erro: '+e.message); btn.textContent=origText; btn.disabled=false; }
 }
 async function disconnectCalendar(){
   if(!confirm('Desconectar Google Calendar?')) return;
