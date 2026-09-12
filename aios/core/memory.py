@@ -30,12 +30,13 @@ _EMBED_DIM = 384  # matches all-MiniLM-L6-v2 if installed
 
 
 def _vec_db(agent_id: str) -> sqlite3.Connection:
-    """Lazy-init per-agent vector store with FTS5."""
+    """Lazy-init per-agent vector store with FTS5 + RL stats."""
     if agent_id not in _VEC_DB:
         db_path = Path(settings.app_data_dir) / "vectors" / f"{agent_id}.db"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(db_path))
         conn.execute("CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, embedding BLOB, content TEXT, created_at TEXT)")
+        conn.execute("CREATE TABLE IF NOT EXISTS memory_stats (id TEXT PRIMARY KEY, usage_count INTEGER DEFAULT 0, success_count INTEGER DEFAULT 0, last_used TEXT)")
         # FTS5 for full-text search alongside vector search
         try:
             conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(id, content, content=memories, content_rowid=rowid)")
@@ -282,39 +283,47 @@ class MemoryManager:
         return [{"id": r[1], "content": r[2], "score": round(r[0], 3)} for r in scored[:top_k]]
 
     async def update_memory(self, memory_id: str, success: bool):
-        """Update importance after use — success boosts recency, failure decays."""
+        """RL GRPO: success increments usage/success, failure decays (Agentic Memory)."""
         try:
             conn = _vec_db(self.agent_id)
-            # Boost recency on success by updating created_at to now (SA-CTS recency factor)
+            # Ensure stats row exists
+            conn.execute("INSERT OR IGNORE INTO memory_stats (id, usage_count, success_count, last_used) VALUES (?, 0, 0, datetime('now'))", (memory_id,))
             if success:
+                conn.execute("UPDATE memory_stats SET usage_count=usage_count+1, success_count=success_count+1, last_used=datetime('now') WHERE id=?", (memory_id,))
                 conn.execute("UPDATE memories SET created_at=datetime('now') WHERE id=?", (memory_id,))
-                conn.commit()
-                logger.debug("Memory %s boosted (success)", memory_id[:8])
+                logger.debug("Memory %s RL +1 success", memory_id[:8])
             else:
-                # On failure, decay by not updating; occasional discard if low value
-                # For now, just log; full RL would decrement importance score
-                logger.debug("Memory %s decay (failure)", memory_id[:8])
+                conn.execute("UPDATE memory_stats SET usage_count=usage_count+1, last_used=datetime('now') WHERE id=?", (memory_id,))
+                # Decay success_rate implicitly via success_count/usage_count
+                logger.debug("Memory %s RL +1 usage (failure)", memory_id[:8])
+            conn.commit()
         except Exception:
-            logger.debug("Memory update failed", exc_info=True)
+            logger.debug("Memory RL update failed", exc_info=True)
 
     async def discard_memory(self, memory_id: str):
-        """Discard low-value memory (RL discard action)."""
+        """RL discard: delete if success_rate <0.3 after 10 uses."""
         try:
             conn = _vec_db(self.agent_id)
-            # Check if memory exists and is low-value before deleting
-            row = conn.execute("SELECT content FROM memories WHERE id=?", (memory_id,)).fetchone()
-            if row and len(row[0]) < 20:  # very short, likely noise
+            row = conn.execute("SELECT usage_count, success_count FROM memory_stats WHERE id=?", (memory_id,)).fetchone()
+            if row:
+                usage, success = row
+                if usage >= 10 and (success / usage) < 0.3:
+                    conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+                    conn.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
+                    conn.execute("DELETE FROM memory_stats WHERE id=?", (memory_id,))
+                    conn.commit()
+                    logger.info("RL discarded low-value memory %s (success %.2f)", memory_id[:8], success/usage if usage else 0)
+                    return
+            # Fallback: very short content
+            row2 = conn.execute("SELECT content FROM memories WHERE id=?", (memory_id,)).fetchone()
+            if row2 and len(row2[0]) < 20:
                 conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
                 conn.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
+                conn.execute("DELETE FROM memory_stats WHERE id=?", (memory_id,))
                 conn.commit()
                 logger.info("Discarded low-value memory %s", memory_id[:8])
-            elif row:
-                conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
-                conn.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
-                conn.commit()
-                logger.info("Discarded memory %s", memory_id[:8])
         except Exception:
-            logger.debug("Memory discard failed", exc_info=True)
+            logger.debug("Memory RL discard failed", exc_info=True)
 
     async def search_similar(self, query: str, top_k: int = 5) -> list[dict]:
         """Tier 3: vector similarity search across stored memories."""
