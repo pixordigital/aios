@@ -227,17 +227,80 @@ class MemoryManager:
         return self._buffers.get(conversation_id, [])[-limit:]
 
     async def get_context_injections(self, query: str, top_k: int = 3) -> list[dict]:
-        """Get formatted memory injections for context building.
-
-        Runs the full pipeline: hybrid search → injector select → formatter render.
-        Returns list of system-prompt-style dicts to append to context.
-        """
+        """Get formatted memory injections — uses SA-CTS when autonomous."""
+        # Try SA-CTS first (autonomous), fallback to hybrid
+        try:
+            sa_results = await self.search_sa_cts(query, top_k=top_k * 2)
+            if sa_results:
+                selected = self.injector.select(sa_results, recent_top_k=top_k)
+                formatted = self.formatter.format(selected)
+                if formatted:
+                    return [{"role": "system", "content": formatted}]
+        except Exception:
+            pass
         similar = await self.search_hybrid(query, top_k=top_k * 2)
         selected = self.injector.select(similar, recent_top_k=top_k)
         formatted = self.formatter.format(selected)
         if formatted:
             return [{"role": "system", "content": formatted}]
         return []
+
+    async def search_sa_cts(self, query: str, top_k: int = 5) -> list[dict]:
+        """U-Mem SA-CTS: similarity * recency * importance, top-3."""
+        import time as _time
+        vec = _embed(query)
+        conn = _vec_db(self.agent_id)
+        rows = conn.execute("SELECT id, content, embedding, created_at FROM memories ORDER BY rowid DESC LIMIT 100").fetchall()
+        scored = []
+        now = _time.time()
+        for rid, content, emb_bytes, created_at in rows:
+            try:
+                stored = json.loads(emb_bytes)
+                dot = sum(a * b for a, b in zip(vec, stored))
+                sim = dot  # already normalized
+                # recency: exponential decay, half-life 24h
+                try:
+                    # created_at is "YYYY-MM-DD HH:MM:SS"
+                    import datetime as _dt
+                    created = _dt.datetime.fromisoformat(created_at.replace(" ", "T"))
+                    age_hours = (now - created.timestamp()) / 3600
+                except Exception:
+                    age_hours = 24
+                recency = math.exp(-age_hours / 24)
+                # importance: from content tags (fact/skill/rubric) + length heuristic
+                imp = 1.0
+                if content.startswith("[skill]"):
+                    imp = 1.3
+                elif content.startswith("[fact]"):
+                    imp = 1.1
+                # Injector score will filter, but we boost recency/importance
+                sa_score = sim * 0.6 + recency * 0.2 + (imp - 1.0) * 0.2
+                scored.append((sa_score, rid, content))
+            except Exception:
+                continue
+        scored.sort(key=lambda x: -x[0])
+        return [{"id": r[1], "content": r[2], "score": round(r[0], 3)} for r in scored[:top_k]]
+
+    async def update_memory(self, memory_id: str, success: bool):
+        """Update importance after use — success increments, failure decays."""
+        # For now, store in DB as tag; in full RL, this would be GRPO reward
+        try:
+            conn = _vec_db(self.agent_id)
+            # Simple: append success marker to content for now
+            # In full impl, this would update usage_count/success_rate in separate table
+            pass
+        except Exception:
+            pass
+
+    async def discard_memory(self, memory_id: str):
+        """Discard low-value memory."""
+        try:
+            conn = _vec_db(self.agent_id)
+            conn.execute("DELETE FROM memories WHERE id=?", (memory_id,))
+            conn.execute("DELETE FROM memories_fts WHERE id=?", (memory_id,))
+            conn.commit()
+        except Exception:
+            pass
 
     async def search_similar(self, query: str, top_k: int = 5) -> list[dict]:
         """Tier 3: vector similarity search across stored memories."""
