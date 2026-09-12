@@ -512,3 +512,25 @@ class CrmDeal(Base, TimestampMixin, OrgScopedMixin):
 
     agent = relationship("Agent")
     team = relationship("Team")
+
+
+class VoiceRecording(Base, TimestampMixin, OrgScopedMixin):
+    """Voice call recording with transcript for search and compliance."""
+    __tablename__ = "voice_recordings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    call_sid: Mapped[str] = mapped_column(String(255), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
+    channel_connection_id: Mapped[str | None] = mapped_column(ForeignKey("channel_connections.id"), nullable=True, index=True)
+    from_number: Mapped[str] = mapped_column(String(50))
+    to_number: Mapped[str] = mapped_column(String(50))
+    direction: Mapped[str] = mapped_column(String(20))  # inbound|outbound
+    duration_seconds: Mapped[int] = mapped_column(default=0)
+    recording_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    recording_storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|completed|failed
+    transcript_language: Mapped[str] = mapped_column(String(10), default="pt")
+    cost_usd: Mapped[float] = mapped_column(default=0.0)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    conversation = relationship("Conversation")

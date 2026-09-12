@@ -8,6 +8,7 @@ from fastapi import Depends, Header, HTTPException
 from fastapi import Request as FastAPIRequest
 from sqlalchemy import select
 
+from aios.api.auth import _verify_jwt_token, _create_jwt_token
 from aios.config import settings
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import User
@@ -25,11 +26,8 @@ async def get_current_user(
 ) -> User:
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
-        try:
-            payload = jwt.decode(
-                token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
-            )
-        except jwt.PyJWTError:
+        payload = _verify_jwt_token(token)
+        if not payload:
             raise HTTPException(401, "Token inválido")
 
         # enforce token is an access token, not a refresh token
@@ -110,25 +108,25 @@ COOKIE_MAX_AGE = 86400 * 7
 
 
 def create_jwt_token(user_id: str, org_id: str) -> str:
-    payload = {
-        "sub": user_id,
-        "org": org_id,
-        "type": "access",
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(seconds=COOKIE_MAX_AGE),
-    }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    token, _ = _create_jwt_token(
+        {
+            "sub": user_id,
+            "org": org_id,
+            "type": "access",
+            "iat": datetime.now(timezone.utc),
+            "exp": datetime.now(timezone.utc) + timedelta(seconds=COOKIE_MAX_AGE),
+        },
+        token_type="access"
+    )
+    return token
 
 
 async def get_dashboard_user(request: FastAPIRequest) -> User | None:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
-    try:
-        payload = jwt.decode(
-            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
-        )
-    except jwt.PyJWTError:
+    payload = _verify_jwt_token(token)
+    if not payload:
         return None
     # Route through FastAPI DI so tests' dependency_overrides apply
     resolver = request.app.dependency_overrides.get(get_db_backend, get_db_backend)

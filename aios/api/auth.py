@@ -1,11 +1,16 @@
-"""Auth routes — register/login with refresh tokens, bcrypt hashing, rate limiting."""
+"""Auth routes — register/login with refresh tokens, bcrypt hashing, rate limiting.
+Supports Ed25519 JWT signing with HS256 fallback for backward compatibility during rotation.
+"""
 
+import base64
 import logging
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
 import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -17,6 +22,155 @@ from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Organization, User
 from aios.schemas import LoginRequest, RegisterRequest, TokenResponse
+
+
+# ─── JWT Key Management (Ed25519 with HS256 fallback) ───
+
+_JWT_PRIVATE_KEY: ed25519.Ed25519PrivateKey | None = None
+_JWT_PUBLIC_KEY: ed25519.Ed25519PublicKey | None = None
+_JWT_KEY_ID: str = ""
+
+
+def _load_ed25519_keys() -> tuple[ed25519.Ed25519PrivateKey | None, ed25519.Ed25519PublicKey | None, str]:
+    """Load or generate Ed25519 key pair for JWT signing."""
+    global _JWT_PRIVATE_KEY, _JWT_PUBLIC_KEY, _JWT_KEY_ID
+    
+    if _JWT_PRIVATE_KEY is not None and _JWT_PUBLIC_KEY is not None:
+        return _JWT_PRIVATE_KEY, _JWT_PUBLIC_KEY, _JWT_KEY_ID
+    
+    # Try to load from settings
+    if settings.jwt_ed25519_private_key and settings.jwt_ed25519_public_key:
+        try:
+            private_key_b64 = settings.jwt_ed25519_private_key
+            public_key_b64 = settings.jwt_ed25519_public_key
+            
+            _JWT_PRIVATE_KEY = ed25519.Ed25519PrivateKey.from_private_bytes(base64.b64decode(private_key_b64))
+            _JWT_PUBLIC_KEY = ed25519.Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
+            _JWT_KEY_ID = "ed25519-v1"
+            logger.info("Loaded Ed25519 JWT keys from config")
+            return _JWT_PRIVATE_KEY, _JWT_PUBLIC_KEY, _JWT_KEY_ID
+        except Exception as e:
+            logger.warning("Failed to load Ed25519 keys from config: %s", e)
+    
+    # Generate new key pair if not configured
+    _JWT_PRIVATE_KEY = ed25519.Ed25519PrivateKey.generate()
+    _JWT_PUBLIC_KEY = _JWT_PRIVATE_KEY.public_key()
+    _JWT_KEY_ID = f"ed25519-gen-{secrets.token_hex(4)}"
+    logger.warning("Generated ephemeral Ed25519 JWT keys — set AIOS_JWT_ED25519_PRIVATE_KEY and AIOS_JWT_ED25519_PUBLIC_KEY for persistence")
+    return _JWT_PRIVATE_KEY, _JWT_PUBLIC_KEY, _JWT_KEY_ID
+
+
+def _get_jwt_signing_key() -> tuple[bytes | ed25519.Ed25519PrivateKey, str, str]:
+    """Get the appropriate signing key based on configuration.
+    Returns (key, algorithm, key_id).
+    """
+    # If Ed25519 keys are configured, use them
+    if settings.jwt_ed25519_private_key and settings.jwt_ed25519_public_key:
+        private_key, _, key_id = _load_ed25519_keys()
+        return private_key, "EdDSA", key_id
+    
+    # Fallback to HS256
+    return settings.jwt_secret.encode(), "HS256", "hs256-v1"
+
+
+def _get_jwt_verification_key(algorithm: str = None) -> bytes | ed25519.Ed25519PublicKey:
+    """Get the appropriate verification key."""
+    if algorithm == "EdDSA" or (algorithm is None and settings.jwt_ed25519_public_key):
+        _, public_key, _ = _load_ed25519_keys()
+        return public_key
+    return settings.jwt_secret.encode()
+
+
+def _create_jwt_token(payload: dict, token_type: str = "access") -> tuple[str, str]:
+    """Create JWT token with appropriate algorithm.
+    Returns (token, key_id).
+    """
+    key, algorithm, key_id = _get_jwt_signing_key()
+    payload["type"] = token_type
+    payload["kid"] = key_id
+    token = jwt.encode(payload, key, algorithm=algorithm)
+    return token, key_id
+
+
+def _decode_jwt_token(token: str) -> dict | None:
+    """Decode JWT token trying both EdDSA and HS256."""
+    # Try to get key_id from header
+    try:
+        header = jwt.get_unverified_header(token)
+        key_id = header.get("kid", "")
+        algorithm = header.get("alg", "")
+    except Exception:
+        key_id = ""
+        algorithm = ""
+    
+    # Determine verification key based on key_id or algorithm
+    if key_id.startswith("ed25519") or algorithm == "EdDSA":
+        public_key = _get_jwt_verification_key("EdDSA")
+        algorithms = ["EdDSA"]
+    else:
+        public_key = _get_jwt_verification_key("HS256")
+        algorithms = ["HS256"]
+    
+    try:
+        return jwt.decode(token, public_key, algorithms=algorithms)
+    except jwt.PyJWTError as e:
+        # Fallback: try the other algorithm
+        if algorithms == ["EdDSA"]:
+            public_key = _get_jwt_verification_key("HS256")
+            try:
+                return jwt.decode(token, public_key, algorithms=["HS256"])
+            except jwt.PyJWTError:
+                pass
+        else:
+            _, public_key, _ = _load_ed25519_keys()
+            try:
+                return jwt.decode(token, public_key, algorithms=["EdDSA"])
+            except jwt.PyJWTError:
+                pass
+        logger.debug("JWT decode failed: %s", e)
+        return None
+
+
+def _create_email_token(user_id: str, purpose: str, expire_minutes: int = 60) -> str:
+    """JWT token for email verification or password reset."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
+    token, _ = _create_jwt_token(
+        {"sub": user_id, "purpose": purpose, "exp": expire, "iat": datetime.now(timezone.utc)},
+        token_type="email"
+    )
+    return token
+
+
+def _render_email_template(template_name: str, **kwargs) -> str:
+    """Load and render an HTML email template."""
+    from pathlib import Path
+    template_path = Path(__file__).parent.parent / "templates" / "emails" / f"{template_name}.html"
+    if not template_path.exists():
+        return ""
+    html = template_path.read_text()
+    for key, value in kwargs.items():
+        html = html.replace("{{" + key + "}}", str(value))
+    return html
+
+
+def get_jwt_key_info() -> dict:
+    """Get current JWT key configuration info for admin/monitoring."""
+    private_key, public_key, key_id = _load_ed25519_keys()
+    has_ed25519 = bool(settings.jwt_ed25519_private_key and settings.jwt_ed25519_public_key)
+    rotation_days = settings.jwt_key_rotation_days or 90
+    
+    return {
+        "algorithm": "EdDSA" if has_ed25519 else "HS256",
+        "key_id": key_id,
+        "has_persistent_keys": has_ed25519,
+        "rotation_days": rotation_days,
+        "public_key_fingerprint": base64.b64encode(
+            public_key.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw
+            )
+        ).decode()[:16] if public_key else None,
+    }
 
 
 # ─── Email helper (SMTP) ───
@@ -48,26 +202,6 @@ async def _send_email(to: str, subject: str, body: str) -> bool:
         logger.exception("Failed to send email to %s", to)
         return False
 
-
-def _create_email_token(user_id: str, purpose: str, expire_minutes: int = 60) -> str:
-    """JWT token for email verification or password reset."""
-    expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
-    return jwt.encode(
-        {"sub": user_id, "purpose": purpose, "exp": expire, "iat": datetime.now(timezone.utc)},
-        settings.jwt_secret, algorithm=settings.jwt_algorithm,
-    )
-
-
-def _render_email_template(template_name: str, **kwargs) -> str:
-    """Load and render an HTML email template."""
-    from pathlib import Path
-    template_path = Path(__file__).parent.parent / "templates" / "emails" / f"{template_name}.html"
-    if not template_path.exists():
-        return ""
-    html = template_path.read_text()
-    for key, value in kwargs.items():
-        html = html.replace("{{" + key + "}}", str(value))
-    return html
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -193,18 +327,25 @@ def _validate_password(password: str):
 
 def _create_access_token(user_id: str, org_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
-    return jwt.encode(
-        {"sub": user_id, "org": org_id, "iat": datetime.now(timezone.utc), "exp": expire, "type": "access"},
-        settings.jwt_secret, algorithm=settings.jwt_algorithm,
+    token, _ = _create_jwt_token(
+        {"sub": user_id, "org": org_id, "iat": datetime.now(timezone.utc), "exp": expire},
+        token_type="access"
     )
+    return token
 
 
 def _create_refresh_token(user_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_expire_days)
-    return jwt.encode(
-        {"sub": user_id, "iat": datetime.now(timezone.utc), "exp": expire, "type": "refresh"},
-        settings.jwt_secret, algorithm=settings.jwt_algorithm,
+    token, _ = _create_jwt_token(
+        {"sub": user_id, "iat": datetime.now(timezone.utc), "exp": expire},
+        token_type="refresh"
     )
+    return token
+
+
+def _verify_jwt_token(token: str) -> dict | None:
+    """Verify JWT token using appropriate algorithm."""
+    return _decode_jwt_token(token)
 
 
 # ─── Routes ───
@@ -297,9 +438,8 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
     if not raw:
         raise HTTPException(422, "refresh_token é obrigatório")
 
-    try:
-        payload = jwt.decode(raw, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    except jwt.PyJWTError:
+    payload = _verify_jwt_token(raw)
+    if not payload:
         raise HTTPException(401, "Token de atualização inválido ou expirado")
 
     if payload.get("type") != "refresh":
@@ -318,9 +458,8 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
 @router.post("/verify-email")
 async def verify_email(token: str = Query(...), db: DatabaseBackend = Depends(get_db_backend)):
     """Verify email address using signed token."""
-    try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    except jwt.PyJWTError:
+    payload = _verify_jwt_token(token)
+    if not payload:
         raise HTTPException(400, "Token de verificação inválido ou expirado")
     if payload.get("purpose") != "email_verify":
         raise HTTPException(400, "Finalidade do token inválida")
@@ -360,9 +499,8 @@ class ResetPasswordRequest(BaseModel):
 @router.post("/reset-password")
 async def reset_password(body: ResetPasswordRequest, db: DatabaseBackend = Depends(get_db_backend)):
     """Reset password using signed token."""
-    try:
-        payload = jwt.decode(body.token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    except jwt.PyJWTError:
+    payload = _verify_jwt_token(body.token)
+    if not payload:
         raise HTTPException(400, "Token de redefinição inválido ou expirado")
     if payload.get("purpose") != "password_reset":
         raise HTTPException(400, "Finalidade do token inválida")

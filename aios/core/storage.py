@@ -67,13 +67,21 @@ class LocalStorage(StorageBackend):
 
 
 class S3Storage(StorageBackend):
-    """S3-compatible storage (Supabase Storage, Cloudflare R2, MinIO)."""
+    """S3-compatible storage (Supabase Storage, Cloudflare R2, MinIO).
+    
+    Security hardening (C9):
+    - SSE-S3 encryption at rest (Server-Side Encryption)
+    - Versioning enabled for ransomware protection
+    - Object Lock for compliance (optional, requires bucket config)
+    """
 
     def __init__(self):
         self._client = None
         self._bucket = settings.s3_bucket
         self._endpoint = settings.s3_endpoint
         self._region = settings.s3_region
+        self._sse_enabled = getattr(settings, 's3_sse_enabled', True)
+        self._versioning_enabled = getattr(settings, 's3_versioning_enabled', True)
 
     async def _get_client(self):
         if self._client is None:
@@ -92,13 +100,48 @@ class S3Storage(StorageBackend):
             ).__aenter__()
         return self._client
 
+    def _put_args(self) -> dict:
+        """Additional arguments for put_object (SSE, etc.)."""
+        args = {}
+        if self._sse_enabled:
+            args["ServerSideEncryption"] = "AES256"
+        return args
+
     async def save(self, org_id: str, filename: str, content: bytes) -> str:
         client = await self._get_client()
         ext = Path(filename).suffix
         key = f"{org_id}/{uuid.uuid4().hex}{ext}"
-        await client.put_object(Bucket=self._bucket, Key=key, Body=content)
-        logger.info("Saved s3://%s/%s (%d bytes)", self._bucket, key, len(content))
+        await client.put_object(Bucket=self._bucket, Key=key, Body=content, **self._put_args())
+        logger.info("Saved s3://%s/%s (%d bytes, SSE=%s)", self._bucket, key, len(content), self._sse_enabled)
         return key
+
+    async def enable_versioning(self) -> bool:
+        """Enable bucket versioning for ransomware protection."""
+        client = await self._get_client()
+        try:
+            await client.put_bucket_versioning(
+                Bucket=self._bucket,
+                VersioningConfiguration={"Status": "Enabled"}
+            )
+            logger.info("Enabled versioning on bucket %s", self._bucket)
+            return True
+        except Exception as e:
+            logger.warning("Failed to enable versioning on %s: %s", self._bucket, e)
+            return False
+
+    async def enable_object_lock(self) -> bool:
+        """Enable Object Lock for compliance (requires bucket created with ObjectLockEnabled)."""
+        client = await self._get_client()
+        try:
+            await client.put_object_lock_configuration(
+                Bucket=self._bucket,
+                ObjectLockConfiguration={"ObjectLockEnabled": "Enabled"}
+            )
+            logger.info("Enabled Object Lock on bucket %s", self._bucket)
+            return True
+        except Exception as e:
+            logger.warning("Object Lock not supported or failed on %s: %s", self._bucket, e)
+            return False
 
     async def read(self, path: str) -> bytes | None:
         client = await self._get_client()

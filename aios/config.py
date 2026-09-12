@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
     s3_endpoint: str = ""  # for Supabase Storage, R2, MinIO
+    s3_sse_enabled: bool = True  # Server-Side Encryption (SSE-S3)
+    s3_versioning_enabled: bool = True  # Bucket versioning for ransomware protection
     db_backend: str = "sqlalchemy"  # "sqlalchemy" | "convex"
     db_replica_backend: str = ""  # failover backend type, empty = no failover
     convex_url: str = ""
@@ -35,6 +37,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60  # reduced from 1440 for security
     jwt_refresh_expire_days: int = 30
+    jwt_ed25519_private_key: str = ""  # Ed25519 private key (base64) for JWT signing
+    jwt_ed25519_public_key: str = ""   # Ed25519 public key (base64) for JWT verification
+    jwt_key_rotation_days: int = 90    # days before JWT key rotation
     log_format: str = "json"  # "text" | "json"
     https_only: bool = True
 
@@ -57,6 +62,8 @@ class Settings(BaseSettings):
     sendgrid_webhook_secret: str = ""  # SendGrid inbound parse webhook secret
     mailgun_webhook_secret: str = ""  # Mailgun webhook secret
     ses_webhook_secret: str = ""  # SES/SNS webhook secret
+    siem_webhook_url: str = ""  # SIEM webhook URL for audit log forwarding
+    siem_webhook_secret: str = ""  # SIEM webhook HMAC secret
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -69,6 +76,8 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     evolution_server_url: str = "http://evolution:8080"
     evolution_api_key: str = ""
+    evolution_ip_allowlist: str = ""  # comma-separated IPs/CIDRs allowed to access Evolution API (e.g. "10.0.0.0/8,192.168.1.0/24")
+    evolution_api_key_rotation_days: int = 30  # days before API key rotation recommended
     codex_model: str = "gpt-5.4"
     voice_provider: str = "selfhosted"  # "elevenlabs" | "vapi" | "retell" | "selfhosted"
     elevenlabs_api_key: str = ""

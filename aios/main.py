@@ -246,6 +246,10 @@ from aios.api.slack_webhook import router as slack_router  # noqa: E402
 app.include_router(slack_router)
 from aios.api.email_webhook import router as email_router  # noqa: E402
 app.include_router(email_router)
+from aios.api.voice_recordings import router as voice_rec_router  # noqa: E402
+app.include_router(voice_rec_router)
+from aios.api.inbox import router as inbox_router  # noqa: E402
+app.include_router(inbox_router)
 
 # Prometheus metrics instrumentation
 Instrumentator().instrument(app).expose(app)

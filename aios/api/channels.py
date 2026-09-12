@@ -1,14 +1,15 @@
 import logging
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
 
 from aios.channels.manager import manager as channel_mgr
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import ChannelConnection
+from aios.db.models import ChannelConnection, Conversation, Message
 from aios.schemas import ChannelCreate, ChannelOut, ChannelUpdate, PageResponse
 from .deps import get_current_user, get_org_id
 
@@ -276,3 +277,101 @@ async def stop_channel(
     channel.is_active = False
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/evolution/{instance_name}/analytics")
+async def evolution_analytics(
+    instance_name: str,
+    days: int = Query(7, ge=1, le=90),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Get Evolution instance message analytics using channel_connection_id and separate db session."""
+    
+    # Find channel connection for this instance
+    # Use JSON extraction compatible with both SQLite and PostgreSQL
+    from sqlalchemy import func
+    channel = (await db.execute(
+        select(ChannelConnection).where(
+            ChannelConnection.channel_type == "evolution",
+            ChannelConnection.org_id == org_id,
+            func.json_extract(ChannelConnection.config, '$.instance') == instance_name
+        )
+    )).scalar_one_or_none()
+    
+    if not channel:
+        raise HTTPException(404, "Instance not found or not linked to this org")
+    
+    channel_connection_id = channel.id
+    
+    # Use separate db session for analytics query
+    from aios.db.engine import async_session
+    
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    
+    async with async_session() as db2:
+        # Get message stats per day
+        daily_stats = await db2.execute(
+            select(
+                func.date(Conversation.created_at).label("day"),
+                func.count(Message.id).label("total_messages"),
+                func.count(Message.id).filter(Message.role == "user").label("inbound"),
+                func.count(Message.id).filter(Message.role == "assistant").label("outbound"),
+            )
+            .select_from(Conversation)
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(
+                Conversation.channel_connection_id == channel_connection_id,
+                Conversation.created_at >= since
+            )
+            .group_by(func.date(Conversation.created_at))
+            .order_by(func.date(Conversation.created_at))
+        )
+        
+        daily = [
+            {
+                "day": str(row.day),
+                "total": row.total_messages,
+                "inbound": row.inbound,
+                "outbound": row.outbound,
+            }
+            for row in daily_stats
+        ]
+        
+        # Total stats
+        total_stats = await db2.execute(
+            select(
+                func.count(Message.id).label("total"),
+                func.count(Message.id).filter(Message.role == "user").label("inbound"),
+                func.count(Message.id).filter(Message.role == "assistant").label("outbound"),
+            )
+            .select_from(Conversation)
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(
+                Conversation.channel_connection_id == channel_connection_id,
+                Conversation.created_at >= since
+            )
+        )
+        total_row = total_stats.first()
+        
+        # Last activity
+        last_msg = await db2.execute(
+            select(Message.created_at)
+            .select_from(Conversation)
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(Conversation.channel_connection_id == channel_connection_id)
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        )
+        last_activity = last_msg.scalar_one_or_none()
+    
+    return {
+        "instance_name": instance_name,
+        "channel_connection_id": channel_connection_id,
+        "period_days": days,
+        "total_messages": total_row.total if total_row else 0,
+        "inbound": total_row.inbound if total_row else 0,
+        "outbound": total_row.outbound if total_row else 0,
+        "daily": daily,
+        "last_activity": str(last_activity) if last_activity else None,
+    }

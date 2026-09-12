@@ -142,3 +142,21 @@ async def fleet_health_refresh(key: str = Body(...)):
         await db.commit()
 
     return {"instances": results}
+
+
+@router.get("/evolution/key-status")
+async def evolution_key_status(_: None = Depends(require_admin_key)):
+    """Get Evolution API key rotation status."""
+    from aios.core.evolution_api import get_evolution_key_rotation_status
+    return get_evolution_key_rotation_status()
+
+
+@router.get("/evolution/ip-allowlist")
+async def evolution_ip_allowlist(_: None = Depends(require_admin_key)):
+    """Get Evolution API IP allowlist configuration."""
+    from aios.core.evolution_api import _get_ip_allowlist
+    networks = _get_ip_allowlist()
+    return {
+        "configured": len(networks) > 0,
+        "networks": [str(n) for n in networks]
+    }

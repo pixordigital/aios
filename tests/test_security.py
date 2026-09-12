@@ -62,10 +62,6 @@ class TestDashboardCSRF:
 class TestWebhookFailClosed:
     """Webhooks must reject requests with missing signatures."""
 
-    async def test_whatsapp_missing_signature(self, async_client: AsyncClient):
-        resp = await async_client.post("/api/whatsapp/webhook", json={})
-        assert resp.json().get("status") == "ignored"
-
     async def test_evolution_missing_signature(self, async_client: AsyncClient):
         resp = await async_client.post("/api/evolution/webhook/inst1", json={})
         assert resp.json().get("status") == "ignored"

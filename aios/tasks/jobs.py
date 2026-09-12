@@ -270,6 +270,123 @@ async def quota_alert_job(ctx, payload: dict):
     await _send_quota_alert(payload.get("org_id"), payload.get("pct", 0), payload.get("plan", ""))
 
 
+async def transcribe_voice_recording(ctx, recording_id: str, language: str = "pt"):
+    """Transcribe a voice recording using Whisper."""
+    from aios.db.backend import db_session
+    from aios.db.models import VoiceRecording
+    from aios.core.storage import backend
+    
+    logger.info("Starting transcription for recording %s", recording_id)
+    
+    try:
+        async with db_session() as db:
+            recording = await db.get(VoiceRecording, recording_id)
+            if not recording:
+                logger.error("Recording %s not found", recording_id)
+                return {"error": "Recording not found"}
+            
+            if not recording.recording_storage_path:
+                recording.transcript_status = "failed"
+                await db.commit()
+                return {"error": "No audio file"}
+            
+            # Read audio file
+            audio_content = await backend().read(recording.recording_storage_path)
+            if not audio_content:
+                recording.transcript_status = "failed"
+                await db.commit()
+                return {"error": "Audio file not found in storage"}
+            
+            # Call Whisper API
+            import httpx
+            whisper_url = getattr(ctx.get("settings", {}), "voice_stt_url", "http://voice-stt:9000")
+            
+            async with httpx.AsyncClient(timeout=300) as client:
+                files = {"file": (f"recording-{recording.call_sid}.mp3", audio_content, "audio/mpeg")}
+                data = {"language": language, "response_format": "text"}
+                resp = await client.post(f"{whisper_url}/asr", files=files, data=data)
+                
+                if resp.status_code == 200:
+                    transcript = resp.text.strip()
+                    recording.transcript = transcript
+                    recording.transcript_status = "completed"
+                    recording.transcript_language = language
+                    await db.commit()
+                    logger.info("Transcription completed for recording %s", recording_id)
+                    return {"ok": True, "transcript": transcript}
+                else:
+                    recording.transcript_status = "failed"
+                    await db.commit()
+                    logger.error("Whisper transcription failed: %s", resp.text)
+                    return {"error": f"Whisper error: {resp.text}"}
+                    
+    except Exception as e:
+        logger.exception("Transcription failed for recording %s", recording_id)
+        try:
+            async with db_session() as db:
+                recording = await db.get(VoiceRecording, recording_id)
+                if recording:
+                    recording.transcript_status = "failed"
+                    await db.commit()
+        except Exception:
+            pass
+        return {"error": str(e)}
+
+
+async def download_voice_recording(ctx, recording_id: str, recording_url: str):
+    """Download a voice recording from URL and store in S3/local storage."""
+    from aios.db.backend import db_session
+    from aios.db.models import VoiceRecording
+    from aios.core.storage import backend, save_artifact
+    import httpx
+    
+    logger.info("Downloading voice recording %s from %s", recording_id, recording_url)
+    
+    try:
+        async with db_session() as db:
+            recording = await db.get(VoiceRecording, recording_id)
+            if not recording:
+                logger.error("Recording %s not found", recording_id)
+                return {"error": "Recording not found"}
+            
+            # Download audio file
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.get(recording_url)
+                if resp.status_code != 200:
+                    logger.error("Failed to download recording: %s", resp.status_code)
+                    return {"error": f"Download failed: {resp.status_code}"}
+                
+                audio_content = resp.content
+            
+            # Save to storage
+            filename = f"recording-{recording.call_sid}.mp3"
+            result = await save_artifact(
+                db=db,
+                org_id=recording.org_id,
+                filename=filename,
+                content=audio_content,
+                content_type="audio/mpeg",
+                conversation_id=recording.conversation_id,
+                description=f"Voice recording for call {recording.call_sid}",
+            )
+            
+            recording.recording_storage_path = result["id"]
+            recording.duration_seconds = len(audio_content) // 32000  # rough estimate for mp3
+            await db.commit()
+            
+            logger.info("Downloaded and saved recording %s", recording_id)
+            
+            # Queue transcription
+            from aios.tasks.queue import enqueue_job
+            await enqueue_job("transcribe_voice_recording", recording_id=recording_id, language="pt")
+            
+            return {"ok": True, "storage_path": result["id"]}
+            
+    except Exception as e:
+        logger.exception("Download failed for recording %s", recording_id)
+        return {"error": str(e)}
+
+
 # ARQ worker function registry
 FUNCTIONS = [
     process_inbound,
@@ -277,4 +394,6 @@ FUNCTIONS = [
     agent_run,
     workflow_run_job,
     quota_alert_job,
+    transcribe_voice_recording,
+    download_voice_recording,
 ]
