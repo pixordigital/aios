@@ -110,7 +110,18 @@ async function connectGoogleCalendar(){
     const r=await fetch('/api/auth/google/calendar/login', {credentials:'include'});
     const j=await r.json();
     if(j.authorization_url){ window.location.href=j.authorization_url; }
-    else { alert(j.error||'Falha ao iniciar OAuth'); btn.textContent='Conectar Google'; btn.disabled=false; }
+    else {
+      const msg=j.error||j.detail||j.message||'Falha ao iniciar OAuth';
+      // Se não configurado, mostra instruções
+      if(msg.includes('não configurado')){
+        alert(msg + '\n\nConfigure no Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nE no Google Cloud Console adicione redirect URI:\n' + window.location.origin + '/api/auth/google/calendar/callback');
+      } else if(r.status===401){
+        alert(msg + '\n\nSessão expirada — recarregue a página (F5) e faça login novamente.');
+      } else {
+        alert(msg);
+      }
+      btn.textContent='Conectar Google'; btn.disabled=false;
+    }
   }catch(e){ alert('Erro: '+e.message); btn.textContent='Conectar Google'; btn.disabled=false; }
 }
 async function disconnectCalendar(){

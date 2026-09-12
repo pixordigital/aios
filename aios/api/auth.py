@@ -594,13 +594,30 @@ async def google_callback(code: str, state: str, db: DatabaseBackend = Depends(g
 @router.get("/google/calendar/login")
 async def google_calendar_login(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
     """Redirect to Google OAuth for Calendar (per-org). Requires auth."""
-    from aios.api.deps import get_current_user
+    from aios.api.deps import get_current_user, get_dashboard_user
+    user = None
+    # Try API auth first, then dashboard cookie
     try:
         user = await get_current_user(request, db)
     except Exception:
-        raise HTTPException(401, "Autentique-se primeiro")
-    if not settings.google_client_id:
-        raise HTTPException(400, "Google OAuth não configurado — defina GOOGLE_CLIENT_ID/SECRET")
+        pass
+    if not user:
+        try:
+            user = await get_dashboard_user(request)
+        except Exception:
+            pass
+    if not user:
+        # also try request.state set by dashboard_auth (when called via /dashboard)
+        uid = getattr(request.state, "user_id", None)
+        if uid:
+            try:
+                user = await db.get(__import__("aios.db.models", fromlist=["User"]).User, uid)
+            except Exception:
+                pass
+    if not user:
+        raise HTTPException(401, "Sessão expirada — faça login novamente e recarregue a página")
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(400, "Google OAuth não configurado no servidor — configure AIOS_GOOGLE_CLIENT_ID e AIOS_GOOGLE_CLIENT_SECRET no Coolify → Environment, e adicione redirect URI https://seu-dominio.com/api/auth/google/calendar/callback no Google Cloud Console → Credentials → Authorized redirect URIs")
     state = secrets.token_urlsafe(32)
     # store org context
     _oauth_states[state] = {"provider": "google_calendar", "org_id": user.org_id, "user_id": user.id}
