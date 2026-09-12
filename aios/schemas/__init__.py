@@ -79,6 +79,7 @@ _GOVERNANCE_DEFAULT = {
     "max_trials": 3,  # Reflexion trials
     "hitl_enabled": True,
     "hitl_value_threshold": 5000,
+    "hitl_discount_threshold": 10,  # % desconto que exige aprovação humana
     "max_tokens_per_run": 500_000,
     "allowed_tools": "__all__",  # "__all__" or list of tool names
     "denied_tools": [],

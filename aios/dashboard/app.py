@@ -558,6 +558,7 @@ async def agent_save(
             "max_trials": max(1, min(5, int(max_trials or 3))),
             "hitl_enabled": True,
             "hitl_value_threshold": max(0, int(hitl_threshold or 5000)),
+            "hitl_discount_threshold": max(0, min(100, int(request.form.get("hitl_discount_threshold", 10) or 10))),
             "max_tokens_per_run": 500_000,
             "allowed_tools": "__all__",
             "denied_tools": [],

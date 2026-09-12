@@ -116,10 +116,11 @@ class AutonomousAgent:
         self.evaluator = Evaluator()
         self.reflector = Reflector(agent)
         self.max_trials = agent.governance_config.get("max_trials", MAX_TRIALS) if agent.governance_config else MAX_TRIALS
-        # HITL config
+        # HITL config — só quando realmente não pode resolver ou exige aprovação humana
         gov = agent.governance_config or {}
         self.hitl_enabled = gov.get("hitl_enabled", True)
         self.hitl_value_threshold = gov.get("hitl_value_threshold", HITL_VALUE_THRESHOLD)
+        self.hitl_discount_threshold = gov.get("hitl_discount_threshold", 10)  # % desconto que exige aprovação
 
     async def run(self, conversation_id: str, user_message: str, db=None) -> str:
         """Loop autônomo até done verificado ou HITL."""
@@ -228,20 +229,22 @@ class AutonomousAgent:
         return last_response or "Não consegui resolver. Tente reformular."
 
     def _needs_hitl(self, response: str, user_message: str) -> bool:
-        """Heurística HITL: valor alto, delete, ou fora da janela."""
+        """Heurística HITL: só quando realmente não pode resolver ou exige aprovação humana.
+        - Valor alto (≥R$5k + deal) → precisa aprovação
+        - Desconto >X% → precisa aprovação (ex: 10%)
+        - Delete/drop → precisa aprovação
+        - Fora disso, autônomo resolve sozinho
+        """
         text = (response + " " + user_message).lower()
         import re
-        # Busca qualquer valor R$ >= threshold (ex: R$ 5.000, R$6000, R$ 12k, 5000 reais)
-        # Pattern: R$ 5.000, R$5000, R$ 6k, 5000 reais
+        # 1. Valor alto (≥R$5k + deal/proposta) → HITL
         for m in re.finditer(r"r\$\s*([\d.,]+)\s*(k)?|(\d+)\s*reais|\b(\d+)k\b", text):
             val_str = m.group(1) or m.group(3) or m.group(4)
             if not val_str:
                 continue
             try:
-                # Remove separadores, handle k
                 is_k = bool(m.group(2) or m.group(4))
                 val_clean = val_str.replace(".", "").replace(",", ".")
-                # Handle Brazilian format: 5.000 -> 5000
                 if "." in val_str and "," not in val_str and len(val_str.split(".")[-1]) == 3:
                     val_clean = val_str.replace(".", "")
                 val = float(val_clean)
@@ -252,11 +255,20 @@ class AutonomousAgent:
                         return True
             except Exception:
                 continue
-        # Fallback: check for 5k, 6k etc directly
         if re.search(r"\b[5-9]\s*k\b|\b\d{2,}\s*k\b", text):
             if "crm_update" in text or "deal" in text or "proposta" in text:
                 return True
-        # Delete / drop
+        # 2. Desconto >X% → HITL (ex: 15% desconto)
+        for m in re.finditer(r"(\d+)\s*%\s*(desconto|off|discount)", text):
+            try:
+                pct = int(m.group(1))
+                if pct >= self.hitl_discount_threshold:
+                    return True
+            except Exception:
+                continue
+        if "desconto" in text and any(f"{p}%" in text for p in range(self.hitl_discount_threshold, 100)):
+            return True
+        # 3. Delete / drop → HITL
         if any(kw in text for kw in ["delete", "drop", "deletar", "apagar", "remover"]):
             return True
         return False
