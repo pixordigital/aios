@@ -163,8 +163,10 @@ async def guard_send(
         return False, "user opt-out recorded"
     if not window_open and not is_template and provider == "meta":
         return False, "fora da janela 24h exige template"
-    if not is_allowed_hour() and provider == "evolution":
-        return False, "fora do horário 8-20"
+    # AIOS diferencial: responde 24/7 independente do horário — sem bloqueio por horário
+    # is_allowed_hour() mantido apenas para métrica/SLA, não para bloquear envio
+    # if not is_allowed_hour() and provider == "evolution":
+    #     return False, "fora do horário 8-20"
     if is_duplicate(contact, text):
         return False, "duplicate 5min"
     spam = has_spam_signals(text)
