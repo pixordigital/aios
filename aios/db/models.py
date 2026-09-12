@@ -514,6 +514,22 @@ class CrmDeal(Base, TimestampMixin, OrgScopedMixin):
     team = relationship("Team")
 
 
+class CrmDealVersion(Base, TimestampMixin):
+    """Audit trail + versionamento para CRM — quem mudou o que e quando."""
+    __tablename__ = "crm_deal_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("crm_deals.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    changed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)  # user_id ou agent_id
+    changed_by_type: Mapped[str] = mapped_column(String(20), default="agent")  # agent|human|system
+    field: Mapped[str] = mapped_column(String(50))  # ex: stage, value, lead_email
+    old_value: Mapped[str] = mapped_column(Text, default="")
+    new_value: Mapped[str] = mapped_column(Text, default="")
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    deal = relationship("CrmDeal")
+
+
 class VoiceRecording(Base, TimestampMixin, OrgScopedMixin):
     """Voice call recording with transcript for search and compliance."""
     __tablename__ = "voice_recordings"

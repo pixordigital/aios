@@ -1,4 +1,5 @@
 import logging
+from sqlalchemy import text
 import httpx
 from pydantic import BaseModel, Field
 
@@ -98,18 +99,25 @@ class CRMTool(BaseTool):
         except Exception as e:
             logger.warning("CRM preset error %s", e)
 
-        # 1. Sempre cria no CRM interno (kanban) — 100% IA
+        # 1. Sempre cria no CRM interno (kanban) — 100% IA com deduplicação + validação + lock
+        # Validação
+        if not lead_email or "@" not in lead_email:
+            return {"ok": False, "error": "lead_email inválido"}
+        if not lead_name or len(lead_name.strip()) < 2:
+            return {"ok": False, "error": "lead_name obrigatório (≥2 chars)"}
+        if value and float(value) < 0:
+            return {"ok": False, "error": "value não pode ser negativo"}
         try:
             from aios.db.engine import async_session
-            from aios.db.models import CrmDeal
+            from aios.db.models import CrmDeal, CrmDealVersion
             import uuid
+            from sqlalchemy import select as _sel
             async with async_session() as s:
                 # tenta achar org via agent ou usa default
                 org_id = None
                 try:
                     from sqlalchemy import select
                     from aios.db.models import Agent
-                    # pega primeiro org se não houver contexto
                     from aios.db.models import Organization
                     org = (await s.execute(select(Organization).limit(1))).scalars().first()
                     if org:
@@ -117,6 +125,16 @@ class CRMTool(BaseTool):
                 except Exception:
                     pass
                 if org_id:
+                    # Deduplicação: verifica deal ativo para mesmo email (org_id lock)
+                    existing = (await s.execute(_sel(CrmDeal).where(CrmDeal.org_id == org_id, CrmDeal.lead_email == lead_email, CrmDeal.stage.notin_(["closed_won", "closed_lost"])))).scalars().first()
+                    if existing:
+                        logger.info("CRM deduplicação: deal ativo %s para %s", existing.id, lead_email)
+                        return {"ok": True, "provider": "internal-dedup", "deal_id": existing.id, "internal_id": existing.id, "payload": payload, "dedup": True}
+                    # Lock por org_id para evitar race (SELECT FOR UPDATE)
+                    try:
+                        await s.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": abs(hash(org_id)) % 2147483647})
+                    except Exception:
+                        pass
                     deal = CrmDeal(
                         org_id=org_id,
                         lead_name=lead_name,
@@ -128,6 +146,13 @@ class CRMTool(BaseTool):
                         extra_data={"notes": notes[:500], "company": company},
                     )
                     s.add(deal)
+                    await s.flush()
+                    # Versionamento: cria v1
+                    try:
+                        ver = CrmDealVersion(deal_id=deal.id, org_id=org_id, changed_by=None, changed_by_type="agent", field="create", old_value="", new_value=f"{lead_email}|{deal_stage}|{value}", extra_data={"company": company})
+                        s.add(ver)
+                    except Exception:
+                        pass
                     await s.commit()
                     await s.refresh(deal)
                     internal_id = deal.id
@@ -236,16 +261,34 @@ class CRMUpdateTool(BaseTool):
             except Exception as e:
                 logger.warning("HITL create failed %s", e)
 
-        # Auto-apply for non-critical stages: also update internal CrmDeal
+        # Auto-apply for non-critical stages: also update internal CrmDeal com lock + versionamento
         try:
             from aios.db.engine import async_session
-            from aios.db.models import CrmDeal
+            from aios.db.models import CrmDeal, CrmDealVersion
+            from sqlalchemy import text as _text2
             async with async_session() as s:
+                # Lock por org_id
                 deal = await s.get(CrmDeal, deal_id)
+                if deal:
+                    try:
+                        await s.execute(_text2("SELECT pg_advisory_xact_lock(:k)"), {"k": abs(hash(deal.org_id)) % 2147483647})
+                    except Exception:
+                        pass
                 if deal and stage in ("prospection","mql","sql","opportunity","closed_won","closed_lost"):
+                    old_stage = deal.stage
+                    old_value = deal.value
                     deal.stage = stage
                     if notes:
                         deal.extra_data = {**(deal.extra_data or {}), "last_ai_notes": notes[:500]}
+                    # Versionamento
+                    try:
+                        ver = CrmDealVersion(deal_id=deal.id, org_id=deal.org_id, changed_by=None, changed_by_type="agent", field="stage", old_value=str(old_stage), new_value=str(stage), extra_data={"old_value": str(old_value), "new_value": str(deal.value)})
+                        s.add(ver)
+                        if old_value != deal.value:
+                            ver2 = CrmDealVersion(deal_id=deal.id, org_id=deal.org_id, changed_by=None, changed_by_type="agent", field="value", old_value=str(old_value), new_value=str(deal.value))
+                            s.add(ver2)
+                    except Exception:
+                        pass
                     await s.commit()
         except Exception as e:
             logger.warning("Internal CRM update failed %s", e)
