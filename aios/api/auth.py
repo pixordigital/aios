@@ -523,30 +523,52 @@ _oauth_states: dict[str, dict] = {}  # fallback in-memory
 _OAUTH_TTL_SEC = 600  # state valid 10min
 
 
-async def _oauth_store(state: str, data: dict):
-    """Store OAuth state in Redis if available, else in-memory."""
+_oauth_redis = None
+
+
+async def _get_oauth_redis():
+    global _oauth_redis
+    if _oauth_redis is not None:
+        try:
+            await _oauth_redis.ping()
+            return _oauth_redis
+        except Exception:
+            _oauth_redis = None
     try:
         import redis.asyncio as aioredis
-        import json
-        r = aioredis.from_url(settings.redis_url or "redis://localhost:6379", decode_responses=True)
-        await r.set(f"oauth:state:{state}", json.dumps(data), ex=_OAUTH_TTL_SEC)
-        # also keep in-memory for fast local pop
-        _oauth_states[state] = data
+        _oauth_redis = aioredis.from_url(settings.redis_url or "redis://localhost:6379", decode_responses=True)
+        await _oauth_redis.ping()
+        return _oauth_redis
     except Exception:
+        return None
+
+
+async def _oauth_store(state: str, data: dict):
+    """Store OAuth state in Redis if available, else in-memory (reuse pool)."""
+    try:
+        import json
+        r = await _get_oauth_redis()
+        if r:
+            await r.set(f"oauth:state:{state}", json.dumps(data), ex=_OAUTH_TTL_SEC)
         _oauth_states[state] = data
+        if r:
+            return
+    except Exception:
+        pass
+    _oauth_states[state] = data
 
 
 async def _oauth_pop(state: str) -> dict | None:
-    """Pop OAuth state from Redis or in-memory."""
+    """Pop OAuth state from Redis or in-memory (reuse pool)."""
     try:
-        import redis.asyncio as aioredis
         import json
-        r = aioredis.from_url(settings.redis_url or "redis://localhost:6379", decode_responses=True)
-        raw = await r.get(f"oauth:state:{state}")
-        if raw:
-            await r.delete(f"oauth:state:{state}")
-            _oauth_states.pop(state, None)
-            return json.loads(raw)
+        r = await _get_oauth_redis()
+        if r:
+            raw = await r.get(f"oauth:state:{state}")
+            if raw:
+                await r.delete(f"oauth:state:{state}")
+                _oauth_states.pop(state, None)
+                return json.loads(raw)
     except Exception:
         pass
     return _oauth_states.pop(state, None)
@@ -650,20 +672,23 @@ async def google_calendar_login(request: Request, db: DatabaseBackend = Depends(
     if not settings.google_client_id or not settings.google_client_secret:
         raise HTTPException(400, "Google OAuth não configurado no servidor — configure AIOS_GOOGLE_CLIENT_ID e AIOS_GOOGLE_CLIENT_SECRET no Coolify → Environment, e adicione redirect URI https://seu-dominio.com/api/auth/google/calendar/callback no Google Cloud Console → Credentials → Authorized redirect URIs")
     state = secrets.token_urlsafe(32)
-    # store org context
-    await _oauth_store(state, {"provider": "google_calendar", "org_id": user.org_id, "user_id": user.id})
+    # use public base_url (handles Coolify custom domain via proxy headers) with fallback to settings.app_url
+    redirect_uri = f"{str(request.base_url).rstrip('/')}/api/auth/google/calendar/callback" if str(request.base_url).startswith("http") else f"{settings.app_url.rstrip('/')}/api/auth/google/calendar/callback"
+    # store org context + redirect_uri for callback verification
+    await _oauth_store(state, {"provider": "google_calendar", "org_id": user.org_id, "user_id": user.id, "redirect_uri": redirect_uri})
     scope = "openid email profile https://www.googleapis.com/auth/calendar"
-    params = f"?client_id={settings.google_client_id}&redirect_uri={settings.app_url}/api/auth/google/calendar/callback&response_type=code&scope={scope}&state={state}&access_type=offline&prompt=consent"
+    params = f"?client_id={settings.google_client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}&state={state}&access_type=offline&prompt=consent"
     return {"authorization_url": "https://accounts.google.com/o/oauth2/v2/auth" + params}
 
 
 @router.get("/google/calendar/callback")
-async def google_calendar_callback(code: str, state: str, db: DatabaseBackend = Depends(get_db_backend)):
+async def google_calendar_callback(code: str, state: str, request: Request, db: DatabaseBackend = Depends(get_db_backend)):
     """Handle Google Calendar OAuth callback — stores refresh token in org secrets."""
     stored = await _oauth_pop(state)
     if not stored or stored["provider"] != "google_calendar":
         raise HTTPException(400, "Parâmetro de estado inválido ou expirado")
     org_id = stored["org_id"]
+    redirect_uri = stored.get("redirect_uri") or f"{settings.app_url.rstrip('/')}/api/auth/google/calendar/callback"
     import httpx
     async with httpx.AsyncClient() as client:
         resp = await client.post(
@@ -672,7 +697,7 @@ async def google_calendar_callback(code: str, state: str, db: DatabaseBackend = 
                 "client_id": settings.google_client_id,
                 "client_secret": settings.google_client_secret,
                 "code": code,
-                "redirect_uri": f"{settings.app_url}/api/auth/google/calendar/callback",
+                "redirect_uri": redirect_uri,
                 "grant_type": "authorization_code",
             },
             headers={"Accept": "application/json"},
