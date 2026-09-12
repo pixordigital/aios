@@ -83,15 +83,38 @@ async def _openai_compat_tts(text: str, cfg: dict, voice: str = "") -> dict:
     base = cfg["tts_url"]
     if not base:
         return {"ok": False, "error": "sem tts_url self-hosted (VOICE_TTS_URL)"}
+    # Kokoro-FastAPI enhancements: weighted mix, SSML, pause/rate, voice tags
+    # Detect SSML/voice tags to enable allow_voice_tags
+    has_tags = "[voice:" in text or "[pause:" in text or "[rate:" in text or "<speak" in text
+    has_weighted = "(" in (voice or "") and ")" in (voice or "")
+    # Use PT-BR weighted mix as default for AIOS SDR
+    effective_voice = voice or "pf_dora(2)+bf_emma(1)" if "pt" in text.lower() or "olá" in text.lower() else (voice or "af_bella")
+    # Keep weighted syntax if already weighted, else use effective
+    if has_weighted:
+        effective_voice = voice
     try:
         async with httpx.AsyncClient(timeout=120) as client:
-            r = await client.post(
-                f"{base}/v1/audio/speech",
-                json={"model": "tts-1", "voice": voice or "af_sky", "input": text[:4000], "response_format": "mp3"},
-            )
+            payload = {
+                "model": "kokoro",
+                "voice": effective_voice,
+                "input": text[:5000],
+                "response_format": "mp3",
+                "speed": 0.95,
+            }
+            if has_tags:
+                payload["allow_voice_tags"] = True
+                # Detect SSML
+                if "<speak" in text:
+                    payload["ssml"] = True
+            r = await client.post(f"{base}/v1/audio/speech", json=payload)
             if r.status_code == 200 and r.content:
-                return {"ok": True, "audio_base64": base64.b64encode(r.content).decode(), "mime": "audio/mpeg", "provider": "selfhosted", "bytes": len(r.content)}
-            return {"ok": False, "error": r.text[:300], "status": r.status_code}
+                return {"ok": True, "audio_base64": base64.b64encode(r.content).decode(), "mime": "audio/mpeg", "provider": "selfhosted", "bytes": len(r.content), "voice": effective_voice}
+            # Fallback to simple tts-1 for non-Kokoro endpoints (e.g., OpenAI compat)
+            if r.status_code in (400, 404) and has_tags:
+                r2 = await client.post(f"{base}/v1/audio/speech", json={"model": "tts-1", "voice": voice or "af_sky", "input": text[:4000], "response_format": "mp3"})
+                if r2.status_code == 200 and r2.content:
+                    return {"ok": True, "audio_base64": base64.b64encode(r2.content).decode(), "mime": "audio/mpeg", "provider": "selfhosted", "bytes": len(r2.content)}
+            return {"ok": False, "error": r.text[:500], "status": r.status_code}
     except Exception as e:
         logger.exception("selfhosted tts failed")
         return {"ok": False, "error": str(e)}
