@@ -360,14 +360,44 @@ class WorkflowEngine:
                         "org_id": "",
                     },
                 )()
-            runtime = AgentRuntime(agent_model, self._db_factory)
+            # Use AutonomousAgent if agent is autonomous (100% autônomo)
+            try:
+                _gov = getattr(agent_model, "governance_config", None) or {}
+                _is_auto = _gov.get("autonomous", True) or _gov.get("autonomy") == "autonomous"
+            except Exception:
+                _is_auto = True
+            if _is_auto:
+                from aios.core.autonomous_agent import AutonomousAgent
+                runtime = AutonomousAgent(agent_model, self._db_factory)
+            else:
+                runtime = AgentRuntime(agent_model, self._db_factory)
             msg = shared.get(node.output_key, shared.get("initial_input", ""))
             try:
                 from aios.core.expressions import render_value as _rv
                 msg = _rv(msg, ctx) if isinstance(msg, str) and "{{" in msg else msg
             except Exception:
                 pass
-            output = await runtime.run(conv_id, str(msg))
+            # Retry with reflection if configured
+            _retries = getattr(node, "retry_count", 0) or 0
+            output = None
+            for _trial in range(_retries + 1):
+                try:
+                    output = await runtime.run(conv_id, str(msg))
+                    break
+                except Exception as _e:
+                    if _trial < _retries:
+                        # Generate reflection
+                        try:
+                            from aios.core.providers import get_provider
+                            _llm = get_provider(agent_model.llm_config.get("model", "openai/gpt-4o-mini") if hasattr(agent_model, "llm_config") else "openai/gpt-4o-mini")
+                            _refl = await _llm.chat_retry(messages=[{"role": "user", "content": f"Workflow node {node.id} failed: {_e}. Gere reflexão curta (1 frase) do que tentar diferente."}], model="openai/gpt-4o-mini", temperature=0.7, max_tokens=100)
+                            _msg_ref = _refl.get("content", "")[:200]
+                            msg = f"[Reflexão tentativa {_trial+1}: {_msg_ref}]\n" + str(msg)
+                        except Exception:
+                            pass
+                        continue
+                    else:
+                        raise
             result.outputs[node.id] = output
             result.node_status[node.id] = "done"
             try:
@@ -435,6 +465,15 @@ class WorkflowEngine:
                     shared[node.output_key] = output
                     shared[node.id] = output
             except Exception as e:
+                # Reflection for tool nodes if retry configured
+                if getattr(node, "retry_count", 0) > 0:
+                    try:
+                        from aios.core.providers import get_provider
+                        _llm2 = get_provider("openai/gpt-4o-mini")
+                        _refl2 = await _llm2.chat_retry(messages=[{"role": "user", "content": f"Tool {node.tool_name} failed: {e}. Sugira ajuste nos args."}], model="openai/gpt-4o-mini", temperature=0.7, max_tokens=100)
+                        logger.info("Workflow tool reflection for %s: %s", node.id, _refl2.get("content", "")[:200])
+                    except Exception:
+                        pass
                 logger.exception("Workflow node execution failed: %s", node.id)
                 result.errors[node.id] = str(e)
                 result.node_status[node.id] = "failed"
