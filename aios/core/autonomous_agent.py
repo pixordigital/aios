@@ -177,11 +177,30 @@ class AutonomousAgent:
     def _needs_hitl(self, response: str, user_message: str) -> bool:
         """Heurística HITL: valor alto, delete, ou fora da janela."""
         text = (response + " " + user_message).lower()
-        # Valor
         import re
-        # Busca R$ 5.000, R$5000, 5000 reais
-        if re.search(r"r\$\s*5\.?0{3,}|5000|\b5k\b", text):
-            # Se menciona valor e vai fazer crm_update_deal, precisa HITL
+        # Busca qualquer valor R$ >= threshold (ex: R$ 5.000, R$6000, R$ 12k, 5000 reais)
+        # Pattern: R$ 5.000, R$5000, R$ 6k, 5000 reais
+        for m in re.finditer(r"r\$\s*([\d.,]+)\s*(k)?|(\d+)\s*reais|\b(\d+)k\b", text):
+            val_str = m.group(1) or m.group(3) or m.group(4)
+            if not val_str:
+                continue
+            try:
+                # Remove separadores, handle k
+                is_k = bool(m.group(2) or m.group(4))
+                val_clean = val_str.replace(".", "").replace(",", ".")
+                # Handle Brazilian format: 5.000 -> 5000
+                if "." in val_str and "," not in val_str and len(val_str.split(".")[-1]) == 3:
+                    val_clean = val_str.replace(".", "")
+                val = float(val_clean)
+                if is_k:
+                    val *= 1000
+                if val >= self.hitl_value_threshold:
+                    if "crm_update" in text or "deal" in text or "proposta" in text:
+                        return True
+            except Exception:
+                continue
+        # Fallback: check for 5k, 6k etc directly
+        if re.search(r"\b[5-9]\s*k\b|\b\d{2,}\s*k\b", text):
             if "crm_update" in text or "deal" in text or "proposta" in text:
                 return True
         # Delete / drop
