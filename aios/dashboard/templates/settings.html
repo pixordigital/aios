@@ -59,6 +59,20 @@
       </div>
     </div>
 
+    <div class="card" style="border-left:3px solid var(--accent)">
+      <h3>📅 Google Calendar — Agendamento Real</h3>
+      <p class="text-xs text-tertiary" style="margin:0.25rem 0 0.75rem">Conecte para SDR agendar consulta/visita direto no Calendar (Roberto/Mariana). Sem isso, agente só usa <code>calculator</code>.</p>
+      <div class="grid-2">
+        <div style="grid-column:1 / -1"><label>Google Calendar Credentials (JSON service account) <span class="text-tertiary">{{ '✓ configurado' if secrets.google_calendar_credentials else '— vazio' }}</span></label><textarea class="input input-mono" name="google_calendar_credentials" rows="3" placeholder='{"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----..."}'>{{ secrets.google_calendar_credentials or '' }}</textarea><p class="text-xs text-tertiary" style="margin-top:0.25rem">Cole JSON do service account OU defina <code>AIOS_GOOGLE_CALENDAR_CREDENTIALS</code> no .env. <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color:var(--accent)">Criar service account →</a></p></div>
+        <div><label>Calendar ID</label><input class="input" name="google_calendar_id" value="{{ secrets.google_calendar_id or '' }}" placeholder="primary ou email@group.calendar.google.com"><p class="text-xs text-tertiary">Default: primary</p></div>
+        <div><label>Calendar Webhook URL (Calendly/Zapier)</label><input class="input" name="calendar_webhook_url" value="{{ secrets.calendar_webhook_url or '' }}" placeholder="https://hooks.zapier.com/..."><p class="text-xs text-tertiary">Opcional: webhook para n8n/Zapier</p></div>
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="testCalendar()">Testar Calendar</button><span id="test-calendar" class="text-xs"></span>
+        <a href="https://calendar.google.com/calendar/r/settings" target="_blank" class="btn btn-ghost btn-sm">Abrir Calendar →</a>
+      </div>
+    </div>
+
     <div class="card">
       <h3>Stripe / OAuth / Outros</h3>
       <div class="grid-2">
@@ -80,6 +94,17 @@
   </form>
 </div>
 <script>
+async function testCalendar(){
+  const el=document.getElementById('test-calendar');
+  el.textContent='testando...'; el.style.color='var(--text-tertiary)';
+  const fd=new FormData(document.querySelector('form'));
+  try{
+    const r=await fetch('/dashboard/settings/test-calendar',{method:'POST', body: fd});
+    const j=await r.json();
+    el.textContent=j.ok?'✓ ok':'✗ '+(j.error||j.status);
+    el.style.color=j.ok?'var(--green)':'var(--red)';
+  }catch(e){ el.textContent='erro'; el.style.color='var(--red)';}
+}
 async function testKey(provider){
   const el=document.getElementById('test-'+provider);
   el.textContent='testando...'; el.style.color='var(--text-tertiary)';

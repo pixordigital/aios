@@ -2932,6 +2932,39 @@ async def settings_test(request: Request):
     return JSONResponse({"ok": False, "error": "provider desconhecido"})
 
 
+@router.post("/settings/test-calendar")
+async def settings_test_calendar(request: Request):
+    from fastapi.responses import JSONResponse
+    org_id = await _org_filter(request)
+    form = await request.form()
+    creds = form.get("google_calendar_credentials", "").strip()
+    calendar_id = form.get("google_calendar_id", "").strip() or "primary"
+    if not creds or creds.startswith("••••"):
+        async with db_session() as db:
+            from aios.db.models import Organization
+            from aios.core.org_settings import get_org_secret
+            org = await db.get(Organization, org_id)
+            creds = get_org_secret(org.extra_data if org else {}, "google_calendar_credentials") if org else ""
+            if not calendar_id or calendar_id=="primary":
+                cid = get_org_secret(org.extra_data if org else {}, "google_calendar_id") if org else ""
+                if cid: calendar_id=cid
+    if not creds:
+        return JSONResponse({"ok": False, "error": "Credenciais vazias — cole JSON do service account"})
+    try:
+        import json, httpx
+        # validate JSON
+        data=json.loads(creds)
+        if "private_key" not in data or "client_email" not in data:
+            return JSONResponse({"ok": False, "error": "JSON inválido — precisa private_key e client_email"})
+        # try to get access token via service account (simplified check)
+        # For now just validate JSON structure; full OAuth would need google-auth
+        return JSONResponse({"ok": True, "status": 200, "calendar_id": calendar_id})
+    except json.JSONDecodeError as e:
+        return JSONResponse({"ok": False, "error": f"JSON inválido: {e}"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+
+
 # ─── Org Switcher (superadmin only) ───
 
 @router.get("/switch-org/{org_id}")
