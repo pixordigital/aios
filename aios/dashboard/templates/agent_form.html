@@ -304,7 +304,9 @@
         container.style.flexDirection='column';
         container.style.flex='1';
         container.innerHTML='<div id="prompt-pane"><textarea id="prompt-input" name="system_prompt" placeholder="Escreva em Markdown com TAGS fixas...&#10;&#10;#ROLE&#10;Você é...&#10;&#10;#CONTEXTO&#10;Empresa: {{empresa}}&#10;&#10;#OBJETIVO&#10;Missão: ...&#10;&#10;#FERRAMENTAS&#10;- \`tool\` — quando:"></textarea><div id="prompt-preview"></div></div><div style="display:flex;justify-content:flex-end;padding:0.4rem 0"><button type="button" onclick="togglePreview()" id="preview-btn" class="btn btn-ghost btn-sm">👁 Preview</button></div>';
-        var newTa=document.getElementById('prompt-input');
+        var newTa=container.querySelector('#prompt-input');
+        // disable old hidden textarea to avoid duplicate name submit
+        if(ta && ta!==newTa){ ta.removeAttribute('name'); ta.style.display='none'; }
         // restore value
         newTa.value=ta.value || '';
         if(!newTa.value.trim()){ newTa.value=PLACEHOLDER_PROMPT; newTa.dataset.isPlaceholder='1'; newTa.style.color='var(--text-tertiary)'; }
@@ -313,7 +315,7 @@
         newTa.addEventListener('blur', function(){ if(!this.value.trim()){ this.value=PLACEHOLDER_PROMPT; this.dataset.isPlaceholder='1'; this.style.color='var(--text-tertiary)'; } else { formatPrompt(); }});
         newTa.addEventListener('input', function(){ this.dataset.isPlaceholder='0'; this.style.color=''; updateTokenCount(this); if(_previewActive) updatePreview();});
         newTa.addEventListener('keydown', function(e){ if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); document.querySelector('form').requestSubmit(); }});
-        document.querySelector('form').addEventListener('submit', function(){ var v=newTa.value; if(newTa.dataset.isPlaceholder==='1') v=''; formatPrompt(); newTa.value=document.getElementById('prompt-input').value; });
+        document.querySelector('form').addEventListener('submit', function(){ if(window._lightTA && window._lightTA.dataset.isPlaceholder==='1') window._lightTA.value=''; formatPrompt(); });
         // initial
         updateTokenCount(newTa);
         if(_previewActive) updatePreview();
