@@ -529,22 +529,20 @@ _oauth_redis = None
 async def _get_oauth_redis():
     global _oauth_redis
     if _oauth_redis is not None:
-        try:
-            await _oauth_redis.ping()
-            return _oauth_redis
-        except Exception:
-            _oauth_redis = None
+        return _oauth_redis
     try:
         import redis.asyncio as aioredis
         _oauth_redis = aioredis.from_url(settings.redis_url or "redis://localhost:6379", decode_responses=True)
         await _oauth_redis.ping()
         return _oauth_redis
     except Exception:
+        _oauth_redis = None
         return None
 
 
 async def _oauth_store(state: str, data: dict):
     """Store OAuth state in Redis if available, else in-memory (reuse pool)."""
+    global _oauth_redis
     try:
         import json
         r = await _get_oauth_redis()
@@ -554,12 +552,13 @@ async def _oauth_store(state: str, data: dict):
         if r:
             return
     except Exception:
-        pass
+        _oauth_redis = None
     _oauth_states[state] = data
 
 
 async def _oauth_pop(state: str) -> dict | None:
     """Pop OAuth state from Redis or in-memory (reuse pool)."""
+    global _oauth_redis
     try:
         import json
         r = await _get_oauth_redis()
@@ -570,7 +569,7 @@ async def _oauth_pop(state: str) -> dict | None:
                 _oauth_states.pop(state, None)
                 return json.loads(raw)
     except Exception:
-        pass
+        _oauth_redis = None
     return _oauth_states.pop(state, None)
 
 
