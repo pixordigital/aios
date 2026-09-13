@@ -1,0 +1,1 @@
+{"title":"WhatsApp Gateway","panels":[{"title":"Ban Risk","targets":[{"expr":"whatsapp_ban_risk_score"}]},{"title":"Proxy Health","targets":[{"expr":"whatsapp_proxy_health"}]},{"title":"MOS","targets":[{"expr":"whatsapp_call_mos"}]},{"title":"Messages","targets":[{"expr":"whatsapp_messages_total"}]}]}

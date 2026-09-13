@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-  <div><h1>CRM IA — Monitoramento Agentes</h1><p class="text-sm text-secondary">Pipeline operado 100% por agentes • você monitora e aprova (HITL) • upsell R$97</p></div>
+  <div><h1>CRM IA — Monitoramento de Agentes</h1><p class="text-sm text-secondary">Pipeline operado 100% por agentes • você monitora e aprova (HITL) • upsell R$97</p></div>
   <div style="display:flex;gap:0.5rem">
-    <button class="btn btn-ghost btn-sm" onclick="location.href='/dashboard/crm?sync=hubspot'">↻ Sync HubSpot</button>
-    <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-deal').showModal()">+ Deal</button>
+    <button class="btn btn-ghost btn-sm" onclick="location.href='/dashboard/crm?sync=hubspot'">↻ Sincronizar HubSpot</button>
+    <a class="btn btn-ghost btn-sm" href="/dashboard/crm/custom-fields">⚙️ Campos Personalizados</a>
+    <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-deal').showModal()">+ Negócio</button>
   </div>
 </div>
 {% if not crm_enabled %}
@@ -14,11 +15,48 @@
 </div>
 {% else %}
 <div class="grid-4 mb-4">
-  <div class="stat-card"><p class="stat-label">Total deals</p><p class="stat-value">{{stats.total}}</p><span class="text-xs text-tertiary">R$ {{ "%.0f"|format(stats.total_value) }} pipeline</span></div>
+  <div class="stat-card"><p class="stat-label">Total de negócios</p><p class="stat-value">{{stats.total}}</p><span class="text-xs text-tertiary">R$ {{ "%.0f"|format(stats.total_value) }} pipeline</span></div>
   <div class="stat-card"><p class="stat-label">Custo IA</p><p class="stat-value">R$ {{ "%.2f"|format(stats.total_cost_brl) }}</p><span class="text-xs text-tertiary">{{stats.by_stage.mql}} mql • {{stats.by_stage.sql}} sql</span></div>
-  <div class="stat-card"><p class="stat-label">Taxa</p><p class="stat-value">{{ stats.by_stage.closed_won }}/{{stats.total}}</p><span class="text-xs text-tertiary">closed won</span></div>
+  <div class="stat-card"><p class="stat-label">Taxa</p><p class="stat-value">{{ stats.by_stage.closed_won }}/{{stats.total}}</p><span class="text-xs text-tertiary">ganhos</span></div>
   <div class="stat-card"><p class="stat-label">HITL pendentes</p><p class="stat-value">{{pending|length}}</p><a href="#pending" class="stat-link">Ver aprovações</a></div>
 </div>
+{% if pipeline_stats %}
+<div class="card mb-4" style="border-left:4px solid var(--cyan)">
+  <h2>📊 Conversão por Pipeline</h2>
+  <div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:0.75rem">
+    <thead>
+      <tr style="background:var(--bg-elevated);text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:0.5rem">Pipeline</th>
+        <th style="padding:0.5rem">MQL</th>
+        <th style="padding:0.5rem">SQL</th>
+        <th style="padding:0.5rem">Opp</th>
+        <th style="padding:0.5rem">Ganhos</th>
+        <th style="padding:0.5rem">Perdidos</th>
+        <th style="padding:0.5rem">Valor R$</th>
+        <th style="padding:0.5rem">Ganhos/Perdidos %</th>
+        <th style="padding:0.5rem">MQL→Ganhos %</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for p, ps in pipeline_stats.items() %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem;font-weight:600">{{p}}</td>
+        <td style="padding:0.5rem">{{ps.mql or 0}}</td>
+        <td style="padding:0.5rem">{{ps.sql or 0}}</td>
+        <td style="padding:0.5rem">{{ps.opportunity or 0}}</td>
+        <td style="padding:0.5rem;color:var(--green)">{{ps.closed_won or 0}}</td>
+        <td style="padding:0.5rem;color:var(--red)">{{ps.closed_lost or 0}}</td>
+        <td style="padding:0.5rem">R$ {{ "%.0f"|format(ps.total_value or 0) }}</td>
+        <td style="padding:0.5rem">{{ps.conversion or 0}}%</td>
+        <td style="padding:0.5rem">{{ps.mql_to_won or 0}}%</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endif %}
 <div class="card mb-4" style="border-left:4px solid var(--accent)">
   <h2>⚡ Fila do dia — quem ligar primeiro</h2>
   <p class="text-sm text-secondary">Score de timing: origem + recência + tentativas. Sem provedor externo.</p>
@@ -29,21 +67,36 @@
   </div>{% else %}<div class="text-sm text-tertiary">Sem deals abertos na fila.</div>{% endfor %}
 </div>
 <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap">
-  <input id="crm-q" class="input" placeholder="Buscar lead..." style="flex:1;min-width:180px" value="{{q or ''}}" onkeydown="if(event.key==='Enter') location.href='/dashboard/crm?q='+this.value">
-  <select id="crm-agent" class="input" style="width:180px" onchange="location.href='/dashboard/crm?agent_id='+this.value"><option value="">Todos agentes</option>{% for a in agents %}<option value="{{a.id}}" {% if agent_id==a.id %}selected{% endif %}>{{a.name}}</option>{% endfor %}</select>
+  <input id="crm-q" class="input" placeholder="Buscar nome/email/telefone..." style="flex:1;min-width:180px" value="{{q or ''}}" onkeydown="if(event.key==='Enter') location.href='/dashboard/crm?q='+encodeURIComponent(this.value)+'&pipeline='+document.getElementById('crm-pipeline').value+'&agent_id='+document.getElementById('crm-agent').value+'&sort='+document.getElementById('crm-sort').value">
+  <select id="crm-pipeline" class="input" style="width:160px"><option value="">Todas pipelines</option>{% for p in pipelines %}<option value="{{p}}" {% if pipeline==p %}selected{% endif %}>{{p}}</option>{% endfor %}</select>
+  <select id="crm-agent" class="input" style="width:160px"><option value="">Todos agentes</option>{% for a in agents %}<option value="{{a.id}}" {% if agent_id==a.id %}selected{% endif %}>{{a.name}}</option>{% endfor %}</select>
+  <select id="crm-sort" class="input" style="width:160px"><option value="" {% if not sort %}selected{% endif %}>Recentes</option><option value="value_desc" {% if sort=='value_desc' %}selected{% endif %}>Maior valor</option><option value="value_asc" {% if sort=='value_asc' %}selected{% endif %}>Menor valor</option><option value="score_desc" {% if sort=='score_desc' %}selected{% endif %}>Maior score</option></select>
+  <button class="btn btn-ghost btn-sm" onclick="location.href='/dashboard/crm?q='+encodeURIComponent(document.getElementById('crm-q').value)+'&pipeline='+document.getElementById('crm-pipeline').value+'&agent_id='+document.getElementById('crm-agent').value+'&sort='+document.getElementById('crm-sort').value">Filtrar</button>
+  <a class="btn btn-ghost btn-sm" href="/dashboard/crm/export?q={{q}}&pipeline={{pipeline}}&agent_id={{agent_id}}&sort={{sort}}">⬇ CSV</a>
+</div>
+<div class="card mb-4" style="border-left:4px solid var(--purple)">
+  <h3 style="font-size:0.875rem;margin-bottom:0.5rem">🔀 Mesclar negócios duplicados (C8)</h3>
+  <form method="POST" action="/dashboard/crm/merge" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end">
+    <div style="flex:1;min-width:200px"><label style="font-size:0.6875rem;color:var(--text-tertiary)">E-mail do lead</label><input name="lead_email" class="input" placeholder="lead@empresa.com" required></div>
+    <div style="width:160px"><label style="font-size:0.6875rem;color:var(--text-tertiary)">Manter</label><select name="keep_strategy" class="input"><option value="oldest">Mais antigo</option><option value="highest_value">Maior valor</option><option value="newest">Mais novo</option></select></div>
+    <button class="btn btn-primary btn-sm" onclick="return confirm('Mesclar todos negócios com este e-mail? Ação irreversível.')">Mesclar</button>
+  </form>
+  <p class="text-sm text-tertiary" style="margin-top:0.5rem">Encontra todos negócios com mesmo e-mail na org, combina notas, mantém maior valor, deleta os outros. Dedup automático já impede novos duplicados (exceto perdidos).</p>
 </div>
 <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.5rem" class="mb-4">
+  {% set stage_labels = {"prospection":"Prospecção","mql":"MQL","sql":"SQL","opportunity":"Oportunidade","closed_won":"Ganhos","closed_lost":"Perdidos"} %}
   {% for stage in ["prospection","mql","sql","opportunity","closed_won","closed_lost"] %}
   <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:0.5rem;min-height:320px">
-    <div style="font-weight:600;font-size:0.75rem;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:0.5rem">{{stage}} <span class="badge" style="font-size:0.625rem">{{stats.by_stage[stage] or 0}}</span></div>
+    <div style="font-weight:600;font-size:0.75rem;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:0.5rem">{{stage_labels[stage]}} <span class="badge" style="font-size:0.625rem">{{stats.by_stage[stage] or 0}}</span></div>
     <div style="display:flex;flex-direction:column;gap:0.375rem">
     {% for d in deals if d.stage==stage %}
       <div style="background:var(--bg);border:1px solid var(--border);border-left:3px solid {% if d.agent_id %}var(--accent){% else %}var(--amber){% endif %};border-radius:6px;padding:0.5rem">
         <div style="font-weight:600;font-size:0.8125rem">{{d.lead_name or d.lead_email[:15]}}</div>
         <div style="font-size:0.6875rem;color:var(--text-tertiary)">{{d.lead_email}} • {{d.lead_phone}}</div>
         <div style="font-size:0.6875rem">R$ {{ "%.0f"|format(d.value) }} • score {{d.score}} • <span class="font-mono">{{d.agent.name if d.agent else '—'}}</span></div>
-        <div style="font-size:0.6rem;color:var(--text-tertiary)">custo R$ {{ "%.2f"|format(d.cost_usd*5.5) }}</div>
+        <div style="font-size:0.6rem;color:var(--text-tertiary)">custo R$ {{ "%.2f"|format(d.cost_usd*5.5) }} • prob {{d.probability or 0}}% {{ '📅 '+d.close_date.strftime('%d/%m') if d.close_date else '' }}</div>
         <div style="display:flex;gap:0.25rem;margin-top:0.375rem;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="font-size:0.625rem" onclick="fetch('/dashboard/crm/{{d.id}}/detail').then(r=>r.text()).then(h=>{document.body.insertAdjacentHTML('beforeend',h);document.getElementById('deal-detail').showModal();})">🔍 Detalhes</button>
           <form method="POST" action="/dashboard/crm/{{d.id}}/move" style="display:inline"><input type="hidden" name="stage" value="{{ {'prospection':'mql','mql':'sql','sql':'opportunity','opportunity':'closed_won'}[stage] if stage in ['prospection','mql','sql','opportunity'] else stage }}"><button class="btn btn-ghost btn-sm" style="font-size:0.625rem">→ Avançar</button></form>
           <form method="POST" action="/dashboard/crm/{{d.id}}/delete" style="display:inline"><button class="btn btn-ghost btn-sm" style="font-size:0.625rem;color:var(--red)">×</button></form>
         </div>
@@ -58,12 +111,32 @@
 
 <dialog id="new-deal" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:1.25rem;width:min(480px,94vw);color:var(--text)">
   <form method="POST" action="/dashboard/crm/create" style="display:flex;flex-direction:column;gap:0.5rem">
-    <h2>Novo deal (IA vai operar)</h2>
-    <input name="lead_name" required class="input" placeholder="Nome lead">
-    <input name="lead_email" class="input" placeholder="email">
+    <h2>Novo negócio (IA vai operar)</h2>
+    <input name="lead_name" required class="input" placeholder="Nome do lead">
+    <input name="lead_email" class="input" placeholder="e-mail">
     <input name="lead_phone" class="input" placeholder="551199...">
     <input name="value" type="number" class="input" placeholder="valor R$">
+    <select name="pipeline" class="input"><option value="default">padrão</option>{% for p in pipelines %}<option value="{{p}}">{{p}}</option>{% endfor %}</select>
+    <input name="score" type="number" class="input" placeholder="score 0-100 (stage auto: ≥85=sql, ≥70=mql)" min="0" max="100" value="0">
     <select name="agent_id" class="input"><option value="">— agente responsável —</option>{% for a in agents %}<option value="{{a.id}}">{{a.name}}</option>{% endfor %}</select>
+    {% if custom_fields %}
+      {% set cf = custom_fields.get(pipelines[0] if pipelines else 'default', []) %}
+      {% for field_def in cf %}
+      <div style="display:flex;gap:0.5rem;align-items:center;padding:0.25rem;background:var(--bg);border-radius:4px;font-size:0.75rem">
+        <label style="width:100px;color:var(--text-tertiary)">{{field_def.label}}</label>
+        {% if field_def.type == "select" and field_def.options %}
+        <select name="{{field_def.key}}" class="input" style="flex:1" {% if field_def.required %}required{% endif %}>
+          <option value="">—</option>
+          {% for opt in field_def.options %}<option value="{{opt}}">{{opt}}</option>{% endfor %}
+        </select>
+        {% elif field_def.type == "number" %}
+        <input type="number" name="{{field_def.key}}" class="input" style="flex:1" {% if field_def.required %}required{% endif %}>
+        {% else %}
+        <input type="text" name="{{field_def.key}}" class="input" style="flex:1" {% if field_def.required %}required{% endif %}>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% endif %}
     <button class="btn btn-primary">Criar</button>
   </form>
 </dialog>

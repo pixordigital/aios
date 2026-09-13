@@ -1,0 +1,20 @@
+groups:
+- name: whatsapp_gateway
+  rules:
+  - alert: WhatsAppBanRiskHigh
+    expr: whatsapp_ban_risk_score > 80
+    for: 5m
+    labels: {severity: critical}
+    annotations: {summary: "Ban risk {{ $value }} on {{ $labels.instance }}"}
+  - alert: ProxyPoolDegraded
+    expr: avg(whatsapp_proxy_health) < 50
+    for: 10m
+    labels: {severity: warning}
+  - alert: CallMOSLow
+    expr: whatsapp_call_mos < 3.5
+    for: 10m
+    labels: {severity: warning}
+  - alert: LGPDSRPending
+    expr: whatsapp_lgpd_dsr_pending > 0
+    for: 12h
+    labels: {severity: critical}

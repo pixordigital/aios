@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen3:8b"
     voice_llm_model: str = "openai/gpt-4o-mini"  # voice agent LLM: openai/gpt-4o-mini | anthropic/claude-sonnet-4.5 | qwen/qwen-3-235b | ollama/qwen3:8b
 
+    whatsapp_coexistence_enabled: bool = True  # Coexistence (App + Cloud mesmo número)
+    whatsapp_embedded_signup_app_id: str = ""  # Meta App ID para Embedded Signup coexistence
+
     registration_enabled: bool = False  # fechar cadastros — home buttons desabilitados
 
     # ─── Calendar (P3) ───

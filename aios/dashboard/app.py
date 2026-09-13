@@ -2613,7 +2613,7 @@ async def lojista_create(request: Request, phone: str = Form(...), solution: str
     return RedirectResponse(f"/dashboard/evolution", status_code=303)
 
 @router.get("/crm", response_class=HTMLResponse)
-async def crm_page(request: Request, q: str = "", agent_id: str = ""):
+async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: str = "", sort: str = ""):
     org_id = await _org_filter(request)
     from aios.db.models import CrmDeal, Organization, Agent as _Ag, PendingAction
     async with db_session() as db:
@@ -2634,19 +2634,47 @@ async def crm_page(request: Request, q: str = "", agent_id: str = ""):
         stats = {"total":0,"by_stage":{s:0 for s in ["prospection","mql","sql","opportunity","closed_won","closed_lost"]},"total_value":0,"total_cost":0,"total_cost_brl":0}
         pending = []
         agents = (await db.execute(select(_Ag).where(_Ag.org_id==org_id).order_by(_Ag.name))).scalars().all()
+        pipeline_stats = {}
         if crm_enabled:
             query = select(CrmDeal).where(CrmDeal.org_id==org_id)
             if agent_id:
                 query = query.where(CrmDeal.agent_id==agent_id)
+            if pipeline:
+                query = query.where(CrmDeal.pipeline==pipeline)
             if q:
-                query = query.where((CrmDeal.lead_name.ilike(f"%{q}%")) | (CrmDeal.lead_email.ilike(f"%{q}%")))
-            deals = (await db.execute(query.order_by(CrmDeal.updated_at.desc()).limit(100))).scalars().all()
+                query = query.where((CrmDeal.lead_name.ilike(f"%{q}%")) | (CrmDeal.lead_email.ilike(f"%{q}%")) | (CrmDeal.lead_phone.ilike(f"%{q}%")))
+            # ordenação
+            if sort == "value_desc":
+                query = query.order_by(CrmDeal.value.desc())
+            elif sort == "value_asc":
+                query = query.order_by(CrmDeal.value.asc())
+            elif sort == "score_desc":
+                query = query.order_by(CrmDeal.score.desc())
+            else:
+                query = query.order_by(CrmDeal.updated_at.desc())
+            deals = (await db.execute(query.limit(200))).scalars().all()
+            # pipelines distintos para filtro
+            pipelines = sorted({d.pipeline for d in (await db.execute(select(CrmDeal.pipeline).where(CrmDeal.org_id==org_id).distinct())).scalars().all() if d}) or ["default"]
             for d in deals:
                 stats["by_stage"][d.stage] = stats["by_stage"].get(d.stage,0)+1
                 stats["total_value"] += d.value or 0
                 stats["total_cost"] += d.cost_usd or 0
+                # C5: pipeline conversion stats
+                p = d.pipeline or "default"
+                if p not in pipeline_stats:
+                    pipeline_stats[p] = {"prospection":0,"mql":0,"sql":0,"opportunity":0,"closed_won":0,"closed_lost":0,"total_value":0.0}
+                pipeline_stats[p][d.stage] = pipeline_stats[p].get(d.stage,0)+1
+                pipeline_stats[p]["total_value"] += d.value or 0
             stats["total"] = len(deals)
             stats["total_cost_brl"] = round(stats["total_cost"]*5.5,2)
+            # compute conversion per pipeline
+            for p, ps in pipeline_stats.items():
+                mql = ps.get("mql",0)
+                won = ps.get("closed_won",0)
+                lost = ps.get("closed_lost",0)
+                total_closed = won + lost
+                ps["conversion"] = round((won/total_closed*100) if total_closed else 0, 1)
+                ps["mql_to_won"] = round((won/mql*100) if mql else 0, 1)
             pending = (await db.execute(select(PendingAction).where(PendingAction.status=="pending").order_by(PendingAction.created_at.desc()).limit(20))).scalars().all()
             # enrich agent
             for d in deals:
@@ -2656,7 +2684,12 @@ async def crm_page(request: Request, q: str = "", agent_id: str = ""):
             queue = [{"id": r["deal"].id, "name": r["deal"].lead_name or r["deal"].lead_email, "phone": r["deal"].lead_phone, "stage": r["deal"].stage, "timing": r["timing"], "reasons": r["reasons"]} for r in rank_queue(deals, 10)]
         else:
             queue = []
-        return await _render("crm.html", request, title="CRM IA", crm_enabled=crm_enabled, deals=deals, stats=stats, pending=pending, agents=agents, q=q, agent_id=agent_id, queue=queue)
+            pipelines = ["default"]
+        # C9: Load custom field definitions per pipeline from org.extra_data
+        custom_fields = {}
+        if org and org.extra_data:
+            custom_fields = org.extra_data.get("crm_custom_fields", {})
+        return await _render("crm.html", request, title="CRM IA", crm_enabled=crm_enabled, deals=deals, stats=stats, pending=pending, agents=agents, q=q, agent_id=agent_id, queue=queue, pipelines=pipelines, pipeline=pipeline, sort=sort, pipeline_stats=pipeline_stats, custom_fields=custom_fields)
 
 @router.post("/crm/enable")
 async def crm_enable(request: Request):
@@ -2672,11 +2705,20 @@ async def crm_enable(request: Request):
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.post("/crm/create")
-async def crm_create(request: Request, lead_name: str = Form(...), lead_email: str = Form(""), lead_phone: str = Form(""), value: float = Form(0), agent_id: str = Form("")):
+async def crm_create(request: Request, lead_name: str = Form(...), lead_email: str = Form(""), lead_phone: str = Form(""), value: float = Form(0), agent_id: str = Form(""), pipeline: str = Form("default"), score: int = Form(0)):
     org_id = await _org_filter(request)
-    from aios.db.models import CrmDeal
+    form = await request.form()
+    from aios.db.models import CrmDeal, Organization
     async with db_session() as db:
-        d = CrmDeal(org_id=org_id, lead_name=lead_name, lead_email=lead_email, lead_phone=lead_phone, value=value, stage="prospection", agent_id=agent_id or None, extra_data={})
+        org = await db.get(Organization, org_id)
+        # C9: collect custom fields for this pipeline
+        custom_defs = (org.extra_data or {}).get("crm_custom_fields", {}).get(pipeline or "default", [])
+        extra = {}
+        for field_def in custom_defs:
+            key = field_def.get("key")
+            if key and form.get(key):
+                extra[key] = form.get(key)
+        d = CrmDeal(org_id=org_id, lead_name=lead_name, lead_email=lead_email, lead_phone=lead_phone, value=value, stage="prospection", agent_id=agent_id or None, pipeline=pipeline or "default", score=score, extra_data=extra)
         db.add(d)
         await db.commit()
     return RedirectResponse("/dashboard/crm", status_code=303)
@@ -2741,6 +2783,196 @@ async def crm_reject(request: Request, pid: str):
     approval_manager.reject(pid, decided_by=u.id if u else "dashboard")
     return RedirectResponse("/dashboard/crm", status_code=303)
 
+@router.get("/crm/export")
+async def crm_export(request: Request, q: str = "", agent_id: str = "", pipeline: str = "", sort: str = ""):
+    """C2: Export CSV 1-click com mesmos filtros do kanban"""
+    import csv, io
+    from fastapi.responses import StreamingResponse
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import CrmDeal
+        query = select(CrmDeal).where(CrmDeal.org_id==org_id)
+        if agent_id:
+            query = query.where(CrmDeal.agent_id==agent_id)
+        if pipeline:
+            query = query.where(CrmDeal.pipeline==pipeline)
+        if q:
+            query = query.where((CrmDeal.lead_name.ilike(f"%{q}%")) | (CrmDeal.lead_email.ilike(f"%{q}%")) | (CrmDeal.lead_phone.ilike(f"%{q}%")))
+        if sort == "value_desc":
+            query = query.order_by(CrmDeal.value.desc())
+        elif sort == "value_asc":
+            query = query.order_by(CrmDeal.value.asc())
+        elif sort == "score_desc":
+            query = query.order_by(CrmDeal.score.desc())
+        else:
+            query = query.order_by(CrmDeal.updated_at.desc())
+        deals = (await db.execute(query.limit(5000))).scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "lead_name", "lead_email", "lead_phone", "stage", "value", "score", "probability", "close_date", "pipeline", "agent", "source", "created_at", "updated_at", "notes"])
+    for d in deals:
+        agent_name = ""
+        if d.agent_id:
+            ag = await db.get(Agent, d.agent_id)
+            agent_name = ag.name if ag else ""
+        writer.writerow([d.id, d.lead_name, d.lead_email, d.lead_phone, d.stage, d.value, d.score, d.probability, d.close_date.isoformat() if d.close_date else "", d.pipeline, agent_name, d.source, d.created_at.isoformat() if d.created_at else "", d.updated_at.isoformat() if d.updated_at else "", (d.extra_data or {}).get("notes","")])
+    output.seek(0)
+    filename = f"crm_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    return StreamingResponse(io.BytesIO(output.getvalue().encode()), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+@router.get("/crm/{deal_id}/detail", response_class=HTMLResponse)
+async def crm_deal_detail(request: Request, deal_id: str):
+    """C6+C7: Deal detail modal - history (CrmDealVersion) + notes"""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import CrmDeal, CrmDealVersion, Agent
+        deal = await db.get(CrmDeal, deal_id)
+        if not deal or deal.org_id != org_id:
+            return HTMLResponse("Deal não encontrado", status_code=404)
+        
+        # Load version history
+        versions = (await db.execute(
+            select(CrmDealVersion).where(CrmDealVersion.deal_id==deal_id).order_by(CrmDealVersion.created_at.desc())
+        )).scalars().all()
+        
+        agent_name = ""
+        if deal.agent_id:
+            ag = await db.get(Agent, deal.agent_id)
+            agent_name = ag.name if ag else ""
+        
+        notes = (deal.extra_data or {}).get("notes", "")
+        
+        # C9: Load custom field definitions for this deal's pipeline
+        org = await db.get(Organization, org_id)
+        custom_fields = (org.extra_data or {}).get("crm_custom_fields", {}).get(deal.pipeline or "default", [])
+        
+        return await _render("crm_deal_detail.html", request, title=f"Deal {deal_id[:8]}", deal=deal, versions=versions, agent_name=agent_name, notes=notes, custom_fields=custom_fields)
+
+@router.post("/crm/{deal_id}/notes")
+async def crm_deal_notes(request: Request, deal_id: str):
+    """C7: Append notes to deal"""
+    org_id = await _org_filter(request)
+    form = await request.form()
+    note = form.get("note", "").strip()
+    if not note:
+        return RedirectResponse(f"/dashboard/crm", status_code=303)
+    async with db_session() as db:
+        from aios.db.models import CrmDeal
+        deal = await db.get(CrmDeal, deal_id)
+        if deal and deal.org_id == org_id:
+            extra = dict(deal.extra_data or {})
+            existing = extra.get("notes", "")
+            timestamp = datetime.now().strftime("%d/%m %H:%M")
+            extra["notes"] = (existing + "\n" if existing else "") + f"[{timestamp}] {note}"
+            deal.extra_data = extra
+            await db.commit()
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
+@router.post("/crm/{deal_id}/custom-fields")
+async def crm_deal_custom_fields(request: Request, deal_id: str):
+    """C9: Save custom field values on deal"""
+    org_id = await _org_filter(request)
+    form = await request.form()
+    async with db_session() as db:
+        from aios.db.models import CrmDeal, Organization
+        deal = await db.get(CrmDeal, deal_id)
+        if not deal or deal.org_id != org_id:
+            return RedirectResponse("/dashboard/crm", status_code=303)
+        
+        # Get field definitions for this pipeline
+        org = await db.get(Organization, org_id)
+        custom_defs = (org.extra_data or {}).get("crm_custom_fields", {}).get(deal.pipeline or "default", [])
+        
+        extra = dict(deal.extra_data or {})
+        for field_def in custom_defs:
+            key = field_def.get("key")
+            if key and form.get(key) is not None:
+                extra[key] = form.get(key)
+        deal.extra_data = extra
+        await db.commit()
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
+@router.get("/crm/custom-fields", response_class=HTMLResponse)
+async def crm_custom_fields(request: Request):
+    """C9: Configure custom fields per pipeline"""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import Organization
+        org = await db.get(Organization, org_id)
+        custom_fields = (org.extra_data or {}).get("crm_custom_fields", {}) if org else {}
+        pipelines = custom_fields.keys() if custom_fields else ["default"]
+    return await _render("crm_custom_fields.html", request, title="Campos Custom CRM", custom_fields=custom_fields, pipelines=pipelines)
+
+@router.post("/crm/custom-fields")
+async def crm_custom_fields_save(request: Request):
+    """C9: Save custom field definitions per pipeline"""
+    org_id = await _org_filter(request)
+    form = await request.form()
+    pipeline = form.get("pipeline", "default")
+    # Parse fields from form: field_0_key, field_0_label, field_0_type, field_1_key...
+    fields = []
+    i = 0
+    while True:
+        key = form.get(f"field_{i}_key")
+        if not key:
+            break
+        label = form.get(f"field_{i}_label", key)
+        ftype = form.get(f"field_{i}_type", "text")
+        required = form.get(f"field_{i}_required") == "on"
+        fields.append({"key": key, "label": label, "type": ftype, "required": required})
+        i += 1
+    async with db_session() as db:
+        from aios.db.models import Organization
+        org = await db.get(Organization, org_id)
+        if org:
+            extra = dict(org.extra_data or {})
+            cf = extra.get("crm_custom_fields", {})
+            cf[pipeline] = fields
+            extra["crm_custom_fields"] = cf
+            org.extra_data = extra
+            await db.commit()
+    return RedirectResponse("/dashboard/crm/custom-fields", status_code=303)
+
+@router.post("/crm/merge")
+async def crm_merge(request: Request):
+    """C8: Merge deals duplicados por lead_email"""
+    org_id = await _org_filter(request)
+    form = await request.form()
+    lead_email = form.get("lead_email", "").strip()
+    keep_strategy = form.get("keep_strategy", "oldest")
+    if not lead_email:
+        return RedirectResponse("/dashboard/crm", status_code=303)
+    async with db_session() as db:
+        from aios.db.models import CrmDeal
+        from sqlalchemy import select as _sel
+        deals = (await db.execute(_sel(CrmDeal).where(
+            CrmDeal.org_id == org_id,
+            CrmDeal.lead_email == lead_email
+        ).order_by(CrmDeal.created_at))).scalars().all()
+        if len(deals) <= 1:
+            return RedirectResponse("/dashboard/crm", status_code=303)
+        if keep_strategy == "highest_value":
+            keep_deal = max(deals, key=lambda d: d.value or 0)
+        elif keep_strategy == "newest":
+            keep_deal = max(deals, key=lambda d: d.created_at)
+        else:
+            keep_deal = min(deals, key=lambda d: d.created_at)
+        other_deals = [d for d in deals if d.id != keep_deal.id]
+        combined_notes = []
+        total_value = keep_deal.value or 0
+        for d in other_deals:
+            if d.extra_data and d.extra_data.get("notes"):
+                combined_notes.append(f"[merged from {d.id[:8]}] {d.extra_data['notes']}")
+            total_value = max(total_value, d.value or 0)
+            await db.delete(d)
+        if combined_notes:
+            existing = keep_deal.extra_data.get("notes", "") if keep_deal.extra_data else ""
+            keep_deal.extra_data = {**(keep_deal.extra_data or {}), "notes": (existing + "\n" if existing else "") + "\n".join(combined_notes)}
+        keep_deal.value = total_value
+        await db.commit()
+    return RedirectResponse("/dashboard/crm", status_code=303)
+
 @router.get("/flows", response_class=HTMLResponse)
 async def flows_page(request: Request, wf: str = ""):
     return await _render("flow_editor.html", request, title="Flow Editor", wf_id=wf)
@@ -2781,6 +3013,15 @@ async def knowledge_ingest(request: Request):
         await db.commit()
     return RedirectResponse("/dashboard/knowledge", status_code=303)
 
+# ─── WhatsApp Gateway (wrapper Python sobre Evolution) ───
+@router.get("/whatsapp", response_class=HTMLResponse)
+async def whatsapp_gateway_page(request: Request):
+    from aios.core.evolution_api import evo_fetch_instances
+    instances = await evo_fetch_instances()
+    # gateway metrics
+    gateway = {"provider": "wrapper", "version": "0.1.0", "proxy": "IPv6 /64 Hetzner + Squid", "storage": "SeaweedFS", "kms": "Vault"}
+    return await _render("whatsapp_instances.html", request, title="WhatsApp Gateway", instances=instances, gateway=gateway)
+
 # ─── Evolution Instances (gerenciar direto no AIOS) ───
 
 @router.get("/evolution", response_class=HTMLResponse)
@@ -2802,11 +3043,18 @@ async def evolution_page(request: Request):
     return await _render("evolution.html", request, title="Evolution — Instâncias", instances=instances, chan_map=chan_map)
 
 @router.post("/evolution/create")
-async def evolution_create(request: Request, instanceName: str = Form(...), agent_id: str = Form(""), team_id: str = Form("")):
+async def evolution_create(request: Request, instanceName: str = Form(...), agent_id: str = Form(""), team_id: str = Form(""), provider: str = Form("baileys")):
     org_id = await _org_filter(request)
     name = "".join(c for c in instanceName.lower().strip() if c.isalnum() or c in "-_") or "inst01"
-    from aios.core.evolution_api import evo_create_instance
-    res = await evo_create_instance(name)
+    # Gateway wrapper roteia provider
+    provider = (provider or "baileys").lower()
+    if provider in ("coexistence","cloud"):
+        from aios.core.whatsapp.provider.factory import get_provider
+        p = get_provider("coexistence" if provider=="coexistence" else "cloud")
+        res = await p.create_instance(name)
+    else:
+        from aios.core.evolution_api import evo_create_instance
+        res = await evo_create_instance(name)
     if res.get("ok"):
         # auto-cria canal Evolution vinculado
         from aios.db.models import ChannelConnection

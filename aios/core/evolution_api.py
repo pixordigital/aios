@@ -116,3 +116,19 @@ async def evo_restart(name: str):
             return {"ok": r.status_code in (200,201), "status": r.status_code}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+async def evo_send_text(instance: str, to: str, text: str) -> dict:
+    """C4: Envia texto simples via Evolution Baileys."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(
+                f"{_base()}/message/sendText/{instance}",
+                headers=_evo_headers(),
+                json={"number": to, "textMessage": {"text": text}},
+            )
+            if r.status_code in (200, 201):
+                return {"ok": True, "data": r.json()}
+            return {"ok": False, "status": r.status_code, "error": r.text[:500]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

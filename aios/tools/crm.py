@@ -2,6 +2,7 @@ import logging
 from sqlalchemy import text
 import httpx
 from pydantic import BaseModel, Field
+from datetime import datetime, timedelta, timezone
 
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY
@@ -18,6 +19,8 @@ class CRMCreateDealInput(BaseModel):
     )
     value: float = Field(default=0, description="Valor estimado")
     notes: str = Field(default="", description="Notas do SDR")
+    score: int = Field(default=0, description="lead_score 0-100 para auto stage")
+    pipeline: str = Field(default="default", description="pipeline/unidade")
 
 
 class CRMUpdateDealInput(BaseModel):
@@ -38,6 +41,8 @@ class CRMTool(BaseTool):
         deal_stage: str = "mql",
         value: float = 0,
         notes: str = "",
+        score: int = 0,
+        pipeline: str = "default",
     ) -> dict:
         from aios.config import settings
 
@@ -99,6 +104,17 @@ class CRMTool(BaseTool):
         except Exception as e:
             logger.warning("CRM preset error %s", e)
 
+        # C3: score → stage automático
+        try:
+            sc = int(score or 0)
+            if sc >= 85:
+                deal_stage = "sql"
+            elif sc >= 70:
+                deal_stage = "mql"
+            elif sc > 0 and sc < 20:
+                deal_stage = "prospection"
+        except Exception:
+            pass
         # 1. Sempre cria no CRM interno (kanban) — 100% IA com deduplicação + validação + lock
         # Validação
         if not lead_email or "@" not in lead_email:
@@ -135,6 +151,29 @@ class CRMTool(BaseTool):
                         await s.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": abs(hash(org_id)) % 2147483647})
                     except Exception:
                         pass
+                    # C10: Auto-calculate probability and close_date based on score + stage
+                    sc = int(score or 0)
+                    prob = 0.0
+                    close_dt = None
+                    if deal_stage == "closed_won":
+                        prob = 100.0
+                        close_dt = datetime.now(timezone.utc)
+                    elif deal_stage == "closed_lost":
+                        prob = 0.0
+                        close_dt = datetime.now(timezone.utc)
+                    elif deal_stage == "opportunity":
+                        prob = min(80 + (sc / 5), 95)
+                        close_dt = datetime.now(timezone.utc) + timedelta(days=14)
+                    elif deal_stage == "sql":
+                        prob = min(50 + (sc / 3), 75)
+                        close_dt = datetime.now(timezone.utc) + timedelta(days=30)
+                    elif deal_stage == "mql":
+                        prob = min(20 + (sc / 4), 45)
+                        close_dt = datetime.now(timezone.utc) + timedelta(days=60)
+                    else:  # prospection
+                        prob = min(sc / 5, 15)
+                        close_dt = datetime.now(timezone.utc) + timedelta(days=90)
+                    
                     deal = CrmDeal(
                         org_id=org_id,
                         lead_name=lead_name,
@@ -143,6 +182,10 @@ class CRMTool(BaseTool):
                         stage=deal_stage if deal_stage in ("prospection","mql","sql","opportunity","closed_won","closed_lost") else "mql",
                         value=float(value or 0),
                         source="whatsapp",
+                        score=int(score or 0),
+                        pipeline=(pipeline or "default")[:50],
+                        probability=round(prob, 1),
+                        close_date=close_dt,
                         extra_data={"notes": notes[:500], "company": company},
                     )
                     s.add(deal)
@@ -280,6 +323,27 @@ class CRMUpdateTool(BaseTool):
                     deal.stage = stage
                     if notes:
                         deal.extra_data = {**(deal.extra_data or {}), "last_ai_notes": notes[:500]}
+                    # C10: Update probability and close_date based on new stage
+                    sc = deal.score or 0
+                    if stage == "closed_won":
+                        deal.probability = 100.0
+                        deal.close_date = datetime.now(timezone.utc)
+                    elif stage == "closed_lost":
+                        deal.probability = 0.0
+                        deal.close_date = datetime.now(timezone.utc)
+                    elif stage == "opportunity":
+                        deal.probability = min(80 + (sc / 5), 95)
+                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=14)
+                    elif stage == "sql":
+                        deal.probability = min(50 + (sc / 3), 75)
+                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=30)
+                    elif stage == "mql":
+                        deal.probability = min(20 + (sc / 4), 45)
+                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=60)
+                    else:  # prospection
+                        deal.probability = min(sc / 5, 15)
+                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=90)
+                    deal.probability = round(deal.probability, 1)
                     # Versionamento
                     try:
                         ver = CrmDealVersion(deal_id=deal.id, org_id=deal.org_id, changed_by=None, changed_by_type="agent", field="stage", old_value=str(old_stage), new_value=str(stage), extra_data={"old_value": str(old_value), "new_value": str(deal.value)})
@@ -314,5 +378,87 @@ class CRMUpdateTool(BaseTool):
         return {"ok": True, "provider": "internal", "deal_id": deal_id, "stage": stage, "hitl": needs_hitl}
 
 
+class CRMMergeDealsInput(BaseModel):
+    lead_email: str = Field(description="Email do lead para buscar duplicados")
+    keep_strategy: str = Field(default="oldest", description="oldest|highest_value|newest - qual deal manter")
+
+
+class CRMMergeTool(BaseTool):
+    name = "crm_merge_deals"
+    description = "Mescla deals duplicados do mesmo lead_email na mesma org. Mantém 1 deal e deleta os outros."
+
+    async def run(self, lead_email: str, keep_strategy: str = "oldest") -> dict:
+        if not lead_email or "@" not in lead_email:
+            return {"ok": False, "error": "lead_email inválido"}
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal, CrmDealVersion, Organization
+            from sqlalchemy import select as _sel
+            import uuid
+            async with async_session() as s:
+                org = (await s.execute(_sel(Organization).limit(1))).scalars().first()
+                if not org:
+                    return {"ok": False, "error": "Org não encontrada"}
+                org_id = org.id
+                
+                # Find all deals with same email
+                deals = (await s.execute(_sel(CrmDeal).where(
+                    CrmDeal.org_id == org_id, 
+                    CrmDeal.lead_email == lead_email
+                ).order_by(CrmDeal.created_at))).scalars().all()
+                
+                if len(deals) <= 1:
+                    return {"ok": True, "merged": 0, "message": "Nenhum duplicado encontrado", "deals": [d.id for d in deals]}
+                
+                # Choose which to keep
+                if keep_strategy == "highest_value":
+                    keep_deal = max(deals, key=lambda d: d.value or 0)
+                elif keep_strategy == "newest":
+                    keep_deal = max(deals, key=lambda d: d.created_at)
+                else:  # oldest
+                    keep_deal = min(deals, key=lambda d: d.created_at)
+                
+                other_deals = [d for d in deals if d.id != keep_deal.id]
+                merged_count = 0
+                combined_notes = []
+                total_value = keep_deal.value or 0
+                
+                # Lock
+                try:
+                    from sqlalchemy import text
+                    await s.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": abs(hash(org_id)) % 2147483647})
+                except Exception:
+                    pass
+                
+                for d in other_deals:
+                    # Combine notes
+                    if d.extra_data and d.extra_data.get("notes"):
+                        combined_notes.append(f"[merged from {d.id[:8]}] {d.extra_data['notes']}")
+                    # Track value
+                    total_value = max(total_value, d.value or 0)
+                    # Version record for merge
+                    try:
+                        ver = CrmDealVersion(deal_id=keep_deal.id, org_id=org_id, changed_by=None, changed_by_type="system", field="merge", old_value=d.id, new_value=keep_deal.id, extra_data={"merged_deal_id": d.id, "merged_stage": d.stage, "merged_value": d.value})
+                        s.add(ver)
+                    except Exception:
+                        pass
+                    # Delete merged deal
+                    await s.delete(d)
+                    merged_count += 1
+                
+                # Update kept deal with combined data
+                if combined_notes:
+                    existing_notes = keep_deal.extra_data.get("notes", "") if keep_deal.extra_data else ""
+                    keep_deal.extra_data = {**(keep_deal.extra_data or {}), "notes": (existing_notes + "\n" if existing_notes else "") + "\n".join(combined_notes)}
+                keep_deal.value = total_value
+                await s.commit()
+                
+                return {"ok": True, "merged": merged_count, "kept_deal_id": keep_deal.id, "deals_before": len(deals), "message": f"Mesclados {merged_count} duplicados no deal {keep_deal.id[:8]}"}
+        except Exception as e:
+            logger.warning("CRM merge failed %s", e)
+            return {"ok": False, "error": str(e)}
+
+
 TOOL_REGISTRY["crm_create_deal"] = {"code_reference": "aios.tools.crm.CRMTool"}
 TOOL_REGISTRY["crm_update_deal"] = {"code_reference": "aios.tools.crm.CRMUpdateTool"}
+TOOL_REGISTRY["crm_merge_deals"] = {"code_reference": "aios.tools.crm.CRMMergeTool"}

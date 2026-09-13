@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4"><div><h1>WhatsApp Gateway</h1><p class="text-sm text-secondary">Wrapper Python sobre Evolution API — anti-ban 7 layers, LGPD, proxy IPv6</p></div><a href="/dashboard/evolution" class="btn btn-ghost btn-sm">Evolution legada</a></div>
+<div id="gw" class="card">Carregando /api/whatsapp/metrics/summary...</div>
+<script>fetch('/api/whatsapp/metrics/summary').then(r=>r.json()).then(j=>{document.getElementById('gw').textContent=JSON.stringify(j,null,2)}).catch(e=>{document.getElementById('gw').textContent='erro '+e})</script>
+{% endblock %}

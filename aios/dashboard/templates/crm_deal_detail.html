@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<dialog id="deal-detail" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:1.25rem;width:min(600px,94vw);color:var(--text);max-height:80vh;overflow:auto" open>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <h2 style="font-size:1rem">📋 Deal {{deal.id[:8]}} — {{deal.lead_name or deal.lead_email}}</h2>
+    <form method="dialog"><button class="btn btn-ghost btn-sm" style="line-height:1">✕</button></form>
+  </div>
+  
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-size:0.75rem;margin-bottom:1rem;padding:0.75rem;background:var(--bg);border-radius:6px">
+    <div><span style="color:var(--text-tertiary)">Pipeline</span><br><b>{{deal.pipeline}}</b></div>
+    <div><span style="color:var(--text-tertiary)">Stage</span><br><span class="badge">{{deal.stage}}</span></div>
+    <div><span style="color:var(--text-tertiary)">Valor</span><br><b>R$ {{ "%.0f"|format(deal.value) }}</b></div>
+    <div><span style="color:var(--text-tertiary)">Score</span><br><b>{{deal.score}}</b></div>
+    <div><span style="color:var(--text-tertiary)">Probabilidade (C10)</span><br><b style="color:var(--{{ 'green' if deal.probability >= 50 else 'cyan' if deal.probability >= 20 else 'amber' }})">{{deal.probability or 0}}%</b></div>
+    <div><span style="color:var(--text-tertiary)">Previsão Fechamento</span><br><b>{{deal.close_date.strftime('%d/%m/%Y') if deal.close_date else '—'}}</b></div>
+    <div><span style="color:var(--text-tertiary)">Dono</span><br><b>{{agent_name or '—'}}</b></div>
+    <div><span style="color:var(--text-tertiary)">Origem</span><br><b>{{deal.source}}</b></div>
+  </div>
+
+  {% if custom_fields %}
+  <div style="margin-bottom:1rem">
+    <h3 style="font-size:0.875rem;margin-bottom:0.5rem">⚙️ Campos Custom (C9) — Pipeline {{deal.pipeline}}</h3>
+    <form method="POST" action="/dashboard/crm/{{deal.id}}/custom-fields" style="display:grid;gap:0.5rem">
+      {% for field_def in custom_fields %}
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <label style="width:120px;font-size:0.75rem;color:var(--text-tertiary)">{{field_def.label}}</label>
+        {% if field_def.type == "select" and field_def.options %}
+        <select name="{{field_def.key}}" class="input" style="flex:1">
+          <option value="">—</option>
+          {% for opt in field_def.options %}
+          <option value="{{opt}}" {% if (deal.extra_data or {}).get(field_def.key) == opt %}selected{% endif %}>{{opt}}</option>
+          {% endfor %}
+        </select>
+        {% elif field_def.type == "number" %}
+        <input type="number" name="{{field_def.key}}" class="input" style="flex:1" value="{{(deal.extra_data or {}).get(field_def.key) or ''}}">
+        {% else %}
+        <input type="text" name="{{field_def.key}}" class="input" style="flex:1" value="{{(deal.extra_data or {}).get(field_def.key) or ''}}">
+        {% endif %}
+      </div>
+      {% endfor %}
+      <button class="btn btn-primary btn-sm" style="justify-self:start">Salvar campos</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if versions %}
+  <div style="margin-bottom:1rem">
+    <h3 style="font-size:0.875rem;margin-bottom:0.5rem">🕐 Histórico (C6)</h3>
+    <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+      {% for v in versions %}
+      <div style="padding:0.5rem;border-bottom:1px solid var(--border);font-size:0.6875rem">
+        <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.25rem">
+          <span class="font-mono" style="color:var(--text-tertiary)">{{v.created_at.strftime('%d/%m %H:%M') if v.created_at else ''}}</span>
+          <span class="badge" style="font-size:0.55rem">{{v.field}}</span>
+          <span style="color:var(--text-tertiary)">{{v.changed_by_type}}</span>
+        </div>
+        <div style="color:var(--red);font-family:monospace">{{v.old_value or '—'}}</div>
+        <div style="color:var(--green);font-family:monospace">{{v.new_value or '—'}}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div>
+    <h3 style="font-size:0.875rem;margin-bottom:0.5rem">💬 Comentários / Notas (C7)</h3>
+    <div style="max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:0.5rem;margin-bottom:0.5rem;font-size:0.75rem;white-space:pre-wrap">{{notes or 'Sem notas'}}</div>
+    <form method="POST" action="/dashboard/crm/{{deal.id}}/notes" style="display:flex;gap:0.5rem">
+      <textarea name="note" class="input" placeholder="Adicionar nota..." style="flex:1;min-height:60px;resize:vertical;font-size:0.75rem"></textarea>
+      <button class="btn btn-primary btn-sm" style="align-self:flex-end">Salvar</button>
+    </form>
+  </div>
+</dialog>
+<script>
+  // Auto-close on outside click
+  document.getElementById('deal-detail').addEventListener('click', function(e) {
+    if (e.target === this) this.close();
+  });
+</script>
+{% endblock %}

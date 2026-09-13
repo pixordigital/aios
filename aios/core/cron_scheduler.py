@@ -12,6 +12,7 @@ _running = False
 _task: asyncio.Task | None = None
 _last_backup_day: str | None = None
 _last_proactive_alert_day: str | None = None
+_last_crm_mql_alert_day: str | None = None
 
 async def _tick():
     from aios.db.engine import async_session
@@ -98,7 +99,6 @@ async def _proactive_alerts_tick():
     """Daily 08:00 UTC proactive sales drop alerts via WhatsApp."""
     global _last_proactive_alert_day
     now = datetime.now(timezone.utc)
-    # run once at 08:00 UTC (window 08:00-08:01)
     if now.hour != 8 or now.minute not in (0, 1):
         return
     today = now.date().isoformat()
@@ -113,7 +113,6 @@ async def _proactive_alerts_tick():
         from sqlalchemy import select
 
         async with async_session() as sess:
-            # Find orgs with proactive_alerts enabled AND active evolution channel
             orgs = (
                 await sess.execute(
                     select(Organization.id).where(
@@ -124,7 +123,6 @@ async def _proactive_alerts_tick():
             ).scalars().all()
 
             for org_id in orgs:
-                # Verify active evolution channel exists
                 has_evo = (
                     await sess.execute(
                         select(ChannelConnection.id).where(
@@ -149,6 +147,72 @@ async def _proactive_alerts_tick():
         logger.exception("Proactive alerts tick failed: %s", e)
 
 
+async def _crm_mql_stale_tick():
+    """C4: Daily 09:00 UTC - deals em mql >7d sem mover → push WhatsApp pro dono."""
+    global _last_crm_mql_alert_day
+    now = datetime.now(timezone.utc)
+    if now.hour != 9 or now.minute not in (0, 1):
+        return
+    today = now.date().isoformat()
+    if _last_crm_mql_alert_day == today:
+        return
+    _last_crm_mql_alert_day = today
+    logger.info("crm mql stale 09:00 trigger")
+
+    try:
+        from aios.db.engine import async_session
+        from aios.db.models import CrmDeal, Organization, ChannelConnection, Agent
+        from sqlalchemy import select, and_
+        from aios.core.evolution_api import evo_send_text
+        from datetime import timedelta
+
+        async with async_session() as sess:
+            orgs = (await sess.execute(select(Organization.id).where(Organization.is_active==True))).scalars().all()
+            for org_id in orgs:
+                # active evolution channel
+                ch = (await sess.execute(
+                    select(ChannelConnection).where(
+                        ChannelConnection.org_id==org_id,
+                        ChannelConnection.channel_type=="evolution",
+                        ChannelConnection.is_active==True
+                    ).limit(1)
+                )).scalars().first()
+                if not ch or not ch.config or not ch.config.get("instance"):
+                    continue
+                instance = ch.config["instance"]
+
+                # deals mql >7d
+                cutoff = datetime.now() - timedelta(days=7)
+                stale = (await sess.execute(
+                    select(CrmDeal).where(
+                        CrmDeal.org_id==org_id,
+                        CrmDeal.stage=="mql",
+                        CrmDeal.updated_at < cutoff
+                    )
+                )).scalars().all()
+
+                for d in stale:
+                    # find owner phone - agent or org admin
+                    to_phone = None
+                    owner_name = "Time"
+                    if d.agent_id:
+                        ag = await sess.get(Agent, d.agent_id)
+                        if ag and ag.extra_data and ag.extra_data.get("phone"):
+                            to_phone = ag.extra_data["phone"]
+                        owner_name = ag.name if ag else "SDR"
+                    if not to_phone:
+                        # fallback: first active channel's default_number or org extra_data
+                        to_phone = ch.config.get("default_number") or (ch.extra_data or {}).get("admin_phone")
+                    if not to_phone:
+                        continue
+
+                    msg = f"⚠️ Deal parado há 7+ dias\nLead: {d.lead_name or d.lead_email}\nValor: R$ {d.value:,.0f}\nPipeline: {d.pipeline}\nDono: {owner_name}\nAcesse: {os.getenv('AIOS_APP_URL','')}/dashboard/crm"
+                    await evo_send_text(instance, to_phone, msg)
+                    logger.info("CRM mql stale alert sent org=%s deal=%s", org_id, d.id)
+    except Exception as e:
+        logger.exception("CRM mql stale tick failed: %s", e)
+
+
 async def _loop():
     while _running:
         try:
@@ -163,6 +227,10 @@ async def _loop():
             await _proactive_alerts_tick()
         except Exception:
             logger.exception("proactive alerts tick failed")
+        try:
+            await _crm_mql_stale_tick()
+        except Exception:
+            logger.exception("crm mql stale tick failed")
         await asyncio.sleep(60)
 
 def start_cron_scheduler():

@@ -60,6 +60,33 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  squid:
+    image: sameersbn/squid:latest
+    ports: ["3128:3128"]
+    volumes: ["./deploy/squid/squid.conf:/etc/squid/squid.conf"]
+    restart: unless-stopped
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -master.port=9333 -volume.port=9334 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -dir=/data"
+    ports: ["8333:8333","9333:9333"]
+    volumes: ["seaweedfs-data:/data","./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json"]
+    restart: unless-stopped
+
+  vault:
+    image: hashicorp/vault:1.15
+    cap_add: ["IPC_LOCK"]
+    ports: ["8200:8200"]
+    environment: {VAULT_ADDR: "http://0.0.0.0:8200"}
+    volumes: ["vault-data:/vault/file","./deploy/vault/config.hcl:/vault/config/config.hcl"]
+    command: "server -config=/vault/config/config.hcl"
+    restart: unless-stopped
+
+  janus:
+    image: canyan/janus-gateway:latest
+    ports: ["8088:8088","8188:8188","10000-10200:10000-10200/udp"]
+    restart: unless-stopped
+
   worker:
     build: .
     command: ["python", "-m", "aios.tasks.worker"]
@@ -91,6 +118,8 @@ services:
 volumes:
   redis-data:
   postgres-data:
+  seaweedfs-data:
+  vault-data:
 
 networks:
   default:

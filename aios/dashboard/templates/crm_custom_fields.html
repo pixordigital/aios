@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div><h1>⚙️ Campos Custom por Pipeline (C9)</h1><p class="text-sm text-secondary">Defina campos extras por pipeline (franquia: unidade, CNPJ; clínica: convênio, procedimento; ecommerce: SKU, marketplace). Guardados em JSON extra_data — sem migração.</p></div>
+  <a class="btn btn-ghost btn-sm" href="/dashboard/crm">← Voltar CRM</a>
+</div>
+
+<div class="card mb-4">
+  <h2>Pipelines existentes</h2>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem">
+    {% for p in pipelines %}
+    <a class="btn btn-sm {% if custom_fields.get(p) %}btn-primary{% else %}btn-ghost{% endif %}" href="/dashboard/crm/custom-fields?pipeline={{p}}">{{p}}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Configurar: {{request.query_params.pipeline or (pipelines[0] if pipelines else 'default')}}</h2>
+  <form method="POST" action="/dashboard/crm/custom-fields" id="cf-form" style="display:flex;flex-direction:column;gap:0.5rem">
+    <input type="hidden" name="pipeline" value="{{request.query_params.pipeline or (pipelines[0] if pipelines else 'default')}}">
+    
+    <div id="fields-container">
+      {% set current_fields = custom_fields.get(request.query_params.pipeline or (pipelines[0] if pipelines else 'default'), []) %}
+      {% for field_def in current_fields %}
+      <div class="field-row" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end;padding:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px">
+        <input type="text" name="field_{{loop.index0}}_key" class="input" placeholder="chave (ex: unidade_cnpj)" value="{{field_def.key}}" required style="flex:1;min-width:160px">
+        <input type="text" name="field_{{loop.index0}}_label" class="input" placeholder="Label (ex: Unidade/CNPJ)" value="{{field_def.label}}" style="flex:1;min-width:160px">
+        <select name="field_{{loop.index0}}_type" class="input" style="width:140px">
+          <option value="text" {% if field_def.type=='text' %}selected{% endif %}>Texto</option>
+          <option value="number" {% if field_def.type=='number' %}selected{% endif %}>Número</option>
+          <option value="select" {% if field_def.type=='select' %}selected{% endif %}>Select</option>
+          <option value="email" {% if field_def.type=='email' %}selected{% endif %}>Email</option>
+          <option value="phone" {% if field_def.type=='phone' %}selected{% endif %}>Telefone</option>
+        </select>
+        <label style="font-size:0.75rem;display:flex;gap:0.25rem;align-items:center"><input type="checkbox" name="field_{{loop.index0}}_required" {% if field_def.required %}checked{% endif %}> Obrigatório</label>
+        <button type="button" class="btn btn-ghost btn-sm btn-danger" onclick="this.closest('.field-row').remove()">🗑</button>
+      </div>
+      {% endfor %}
+    </div>
+    
+    <button type="button" class="btn btn-ghost btn-sm" onclick="addField()" style="align-self:flex-start">+ Adicionar campo</button>
+    <button class="btn btn-primary" style="align-self:flex-start">Salvar configuração</button>
+  </form>
+  
+  <details style="margin-top:1rem">
+    <summary class="text-sm text-secondary">Como usar</summary>
+    <ul class="text-sm text-tertiary" style="margin-top:0.5rem">
+      <li>Campos ficam em <code>deal.extra_data.chave</code> — sem coluna nova, sem migração</li>
+      <li>Pipeline "franquia": unidade, cnpj, regiao</li>
+      <li>Pipeline "clinica": convenio, procedimento, medico</li>
+      <li>Pipeline "ecommerce": sku, marketplace, variacao</li>
+      <li>Aparecem no modal 🔍 Detalhes do deal e no formulário de criação</li>
+      <li>Incluídos no Export CSV</li>
+    </ul>
+  </details>
+</div>
+
+<script>
+let fieldCounter = {{current_fields|length}};
+function addField() {
+  const container = document.getElementById('fields-container');
+  const div = document.createElement('div');
+  div.className = 'field-row';
+  div.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end;padding:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px';
+  div.innerHTML = `
+    <input type="text" name="field_${fieldCounter}_key" class="input" placeholder="chave (ex: unidade_cnpj)" required style="flex:1;min-width:160px">
+    <input type="text" name="field_${fieldCounter}_label" class="input" placeholder="Label (ex: Unidade/CNPJ)" style="flex:1;min-width:160px">
+    <select name="field_${fieldCounter}_type" class="input" style="width:140px">
+      <option value="text">Texto</option>
+      <option value="number">Número</option>
+      <option value="select">Select</option>
+      <option value="email">Email</option>
+      <option value="phone">Telefone</option>
+    </select>
+    <label style="font-size:0.75rem;display:flex;gap:0.25rem;align-items:center"><input type="checkbox" name="field_${fieldCounter}_required"> Obrigatório</label>
+    <button type="button" class="btn btn-ghost btn-sm btn-danger" onclick="this.closest('.field-row').remove()">🗑</button>
+  `;
+  container.appendChild(div);
+  fieldCounter++;
+}
+</script>
+{% endblock %}

@@ -508,6 +508,9 @@ class CrmDeal(Base, TimestampMixin, OrgScopedMixin):
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
     team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     pipeline: Mapped[str] = mapped_column(String(50), default="default")
+    # C10: Forecast fields
+    close_date: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    probability: Mapped[float] = mapped_column(default=0.0)
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     agent = relationship("Agent")

@@ -71,7 +71,7 @@
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
                     <div><label>ElevenLabs API key</label><input type="text" name="config_voice_eleven_key" value="{{ channel.config.get('elevenlabs_api_key', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="sk_..."></div>
-                    <div><label>Voice ID</label><input type="text" name="config_voice_id" value="{{ channel.config.get('elevenlabs_voice_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="pN..."></div>
+                    <div><label>ID da Voz</label><input type="text" name="config_voice_id" value="{{ channel.config.get('elevenlabs_voice_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="pN..."></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
                     <div><label>TTS URL (self-hosted)</label><input type="text" name="config_voice_tts" value="{{ channel.config.get('tts_url', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="http://voice-tts:8000"></div>
