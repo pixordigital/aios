@@ -24,7 +24,7 @@
   </div>
   <div style="flex:1;position:relative;background:var(--bg);min-height:560px;pointer-events:auto" id="flow-wrapper"><div style="height:560px;min-height:560px;pointer-events:auto" id="flow-root"></div><div id="fallback-canvas" style="display:none;position:absolute;inset:0;background:var(--bg);overflow:auto;padding:12px"></div><div id="save-status" class="text-xs" style="position:absolute;bottom:8px;right:10px;background:var(--bg-elevated);border:1px solid var(--border);padding:4px 8px;border-radius:6px;color:var(--text-secondary);display:none;z-index:5"></div><div id="flow-error" style="display:none;position:absolute;inset:0;background:var(--bg-elevated);padding:2rem;text-align:center;color:var(--text-tertiary)"></div></div>
 </div>
-<div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Paleta → arraste ferramenta para o canvas. Clique no nó para editar label/tool/params (JSON). Conecte handles para definir <code>depends_on</code>. Salvar persiste posições.</p></div>
+<div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Paleta → <b>arraste</b> ou <b>clique</b> para criar nó. <b>Conecte:</b> arraste do ponto direito → ponto esquerdo, ou <b>Shift+clique</b> origem → destino. Clique no nó para editar. Salvar persiste posições.</p></div>
 
 <!-- P0-2: Tour 30s -->
 <div id="flow-tour">
@@ -100,6 +100,216 @@
 </style>
 <link href="https://cdn.jsdelivr.net/npm/reactflow@11/dist/style.css" rel="stylesheet">
 <script type="importmap">{"imports":{"react":"https://esm.sh/react@18","react-dom":"https://esm.sh/react-dom@18","reactflow":"https://esm.sh/reactflow@11"}}</script>
+<script>
+// Fallback plain canvas - funciona mesmo se esm.sh/ReactFlow falhar + suporta pan/zoom n8n-like
+(function(){
+  const palette=document.getElementById('palette');
+  const wrapper=document.getElementById('flow-wrapper');
+  const fallback=document.getElementById('fallback-canvas');
+  const saveStatus=document.getElementById('save-status');
+  function toast2(m, ok=true){ if(!saveStatus) return; saveStatus.textContent=m; saveStatus.style.display='block'; saveStatus.style.borderColor= ok?'var(--accent)':'var(--red)'; saveStatus.style.color= ok?'var(--accent)':'var(--red)'; setTimeout(()=>saveStatus.style.display='none',2500);}
+  let pendingDrag=null;
+  // Pan/zoom state n8n-like
+  let panX=0, panY=0, scale=1, isPanning=false, startPan={x:0,y:0}, startOffset={x:0,y:0};
+  function applyTransform(){
+    if(!fallback) return;
+    const content=fallback.querySelector('#fallback-content');
+    if(content) content.style.transform=`translate(${panX}px, ${panY}px) scale(${scale})`;
+    fallback.style.backgroundImage=`radial-gradient(circle, var(--border) 1px, transparent 1px)`;
+    fallback.style.backgroundSize=`${20*scale}px ${20*scale}px`;
+    fallback.style.backgroundPosition=`${panX}px ${panY}px`;
+  }
+  palette?.addEventListener('dragstart', e=>{
+    const el=e.target.closest('[draggable]');
+    if(!el) return;
+    pendingDrag={tool: el.dataset.tool, label: el.dataset.label||el.dataset.tool};
+    try{ e.dataTransfer.setData('text/plain', el.dataset.tool); e.dataTransfer.setData('application/reactflow', el.dataset.tool); }catch(_){}
+  });
+  palette?.addEventListener('click', e=>{
+    const el=e.target.closest('[data-tool]');
+    if(!el || pendingDrag) return;
+    const tool=el.dataset.tool, label=el.dataset.label||tool;
+    addFallbackNode(tool,label, null);
+  });
+  wrapper?.addEventListener('dragover', e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; });
+  wrapper?.addEventListener('drop', e=>{
+    e.preventDefault();
+    let tool=null,label=null;
+    try{ tool=e.dataTransfer.getData('application/reactflow')||e.dataTransfer.getData('text/plain'); label=e.dataTransfer.getData('label')||tool; }catch(_){}
+    if(!tool && pendingDrag){ tool=pendingDrag.tool; label=pendingDrag.label; }
+    if(!tool) return;
+    const rect=wrapper.getBoundingClientRect();
+    // ajusta por pan/zoom
+    const x=(e.clientX-rect.left - panX)/scale;
+    const y=(e.clientY-rect.top - panY)/scale;
+    addFallbackNode(tool,label, {x, y});
+    pendingDrag=null;
+  });
+  function addFallbackNode(tool,label,pos){
+    if(document.querySelector('.react-flow')) return;
+    window.__flowStore = window.__flowStore || [];
+    const store=window.__flowStore;
+    const p=pos || {x: (40 - panX)/scale + (store.length%3)*180, y: (40 - panY)/scale + Math.floor(store.length/3)*80};
+    const id='n_'+Date.now()+'_'+Math.random().toString(36).slice(2,4);
+    const item={id, label:label||tool, tool_name:tool, tool_args:{}, position:p, depends_on:[]};
+    store.push(item);
+    window.__flowStore=store;
+    renderFallback();
+    toast2('Nó '+(label||tool)+' adicionado ✓');
+    if(fallback) fallback.style.display='block';
+  }
+  window._addFallbackNode=addFallbackNode;
+  function renderFallback(){
+    if(!fallback) return;
+    if(document.querySelector('.react-flow')){ fallback.style.display='none'; return; }
+    const store=window.__flowStore||[];
+    fallback.style.display='block';
+    fallback.style.position='absolute'; fallback.style.inset='0'; fallback.style.overflow='hidden'; fallback.style.cursor=isPanning?'grabbing':'grab';
+    let content=fallback.querySelector('#fallback-content');
+    if(!content){ content=document.createElement('div'); content.id='fallback-content'; content.style.position='absolute'; content.style.inset='0'; content.style.transformOrigin='0 0'; fallback.appendChild(content); }
+    content.innerHTML = store.length ? store.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick(event, '${n.id}')" draggable="true" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${n.label} • ${n.tool_name} <button onclick="event.stopPropagation(); window._delFallbackNode('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">×</button></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:180px">Nenhum nó — arraste ou clique na paleta à esquerda<br><span style="font-size:0.75rem">Arraste o fundo para navegar • Scroll para zoom • como n8n</span></div>';
+    applyTransform();
+    // drag nós no fallback
+    content.querySelectorAll('[data-id]').forEach(el=>{
+      el.addEventListener('dragstart', ev=>{ ev.dataTransfer.setData('text/plain', el.dataset.id); ev.stopPropagation(); });
+      el.addEventListener('mousedown', ev=>{ ev.stopPropagation(); });
+    });
+  }
+  window.__renderFallback=renderFallback;
+  window._delFallbackNode=(id)=>{ window.__flowStore=(window.__flowStore||[]).filter(n=>n.id!==id); renderFallback(); };
+  // Pan do canvas fallback (arrastar fundo) + zoom wheel - n8n like + touch
+  fallback?.addEventListener('mousedown', e=>{
+    if(e.target.closest('[data-id]')) return;
+    if(e.button!==0 && e.button!==1) return;
+    isPanning=true; startPan={x:e.clientX, y:e.clientY}; startOffset={x:panX, y:panY};
+    fallback.style.cursor='grabbing';
+    e.preventDefault();
+  });
+  fallback?.addEventListener('touchstart', e=>{
+    if(e.target.closest('[data-id]')) return;
+    if(e.touches.length!==1) return;
+    isPanning=true; startPan={x:e.touches[0].clientX, y:e.touches[0].clientY}; startOffset={x:panX, y:panY};
+    e.preventDefault();
+  }, {passive:false});
+  fallback?.addEventListener('touchmove', e=>{
+    if(!isPanning || e.touches.length!==1) return;
+    panX=startOffset.x + (e.touches[0].clientX - startPan.x);
+    panY=startOffset.y + (e.touches[0].clientY - startPan.y);
+    applyTransform();
+    e.preventDefault();
+  }, {passive:false});
+  fallback?.addEventListener('touchend', ()=>{ isPanning=false; }, {passive:true});
+  window.addEventListener('mousemove', e=>{
+    if(!isPanning) return;
+    panX=startOffset.x + (e.clientX - startPan.x);
+    panY=startOffset.y + (e.clientY - startPan.y);
+    applyTransform();
+  });
+  window.addEventListener('touchmove', e=>{
+    if(!isPanning || e.touches.length!==1) return;
+    panX=startOffset.x + (e.touches[0].clientX - startPan.x);
+    panY=startOffset.y + (e.touches[0].clientY - startPan.y);
+    applyTransform();
+    e.preventDefault();
+  }, {passive:false});
+  window.addEventListener('mouseup', ()=>{ if(isPanning){ isPanning=false; if(fallback) fallback.style.cursor='grab'; }});
+  window.addEventListener('touchend', ()=>{ if(isPanning){ isPanning=false; }}, {passive:true});
+  fallback?.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const delta=e.deltaY>0 ? -0.08 : 0.08;
+    scale=Math.min(2, Math.max(0.4, scale+delta));
+    applyTransform();
+  }, {passive:false});
+  // Pan para ReactFlow (n8n-like) quando fallback oculto - mouse + touch
+  let rfPan=false, rfStart={x:0,y:0}, rfOrigin={x:0,y:0};
+  wrapper?.addEventListener('mousedown', e=>{
+    if(!document.querySelector('.react-flow')) return;
+    if(e.target.closest('.react-flow__node') || e.target.closest('[data-tool]') || e.target.closest('button')) return;
+    if(e.button!==0) return;
+    rfPan=true; rfStart={x:e.clientX, y:e.clientY};
+    const vp=window.__rfInstance?.getViewport?.() || {x:0,y:0,zoom:1};
+    rfOrigin={x:vp.x, y:vp.y};
+    wrapper.style.cursor='grabbing';
+    e.preventDefault();
+  });
+  wrapper?.addEventListener('touchstart', e=>{
+    if(!document.querySelector('.react-flow')) return;
+    if(e.target.closest('.react-flow__node')) return;
+    if(e.touches.length!==1) return;
+    rfPan=true; rfStart={x:e.touches[0].clientX, y:e.touches[0].clientY};
+    const vp=window.__rfInstance?.getViewport?.() || {x:0,y:0,zoom:1};
+    rfOrigin={x:vp.x, y:vp.y};
+    e.preventDefault();
+  }, {passive:false});
+  window.addEventListener('mousemove', e=>{
+    if(!rfPan) return;
+    const dx=e.clientX - rfStart.x, dy=e.clientY - rfStart.y;
+    if(window.__rfInstance?.setViewport){
+      const cur=window.__rfInstance.getViewport();
+      window.__rfInstance.setViewport({x: rfOrigin.x + dx, y: rfOrigin.y + dy, zoom: cur.zoom});
+    }
+  });
+  window.addEventListener('touchmove', e=>{
+    if(!rfPan || e.touches.length!==1) return;
+    const dx=e.touches[0].clientX - rfStart.x, dy=e.touches[0].clientY - rfStart.y;
+    if(window.__rfInstance?.setViewport){
+      const cur=window.__rfInstance.getViewport();
+      window.__rfInstance.setViewport({x: rfOrigin.x + dx, y: rfOrigin.y + dy, zoom: cur.zoom});
+    }
+    e.preventDefault();
+  }, {passive:false});
+  window.addEventListener('mouseup', ()=>{ if(rfPan){ rfPan=false; if(wrapper) wrapper.style.cursor=''; }});
+  window.addEventListener('touchend', ()=>{ if(rfPan) rfPan=false; }, {passive:true});
+  wrapper?.addEventListener('wheel', e=>{
+    if(!document.querySelector('.react-flow')) return;
+  }, {passive:true});
+  // Botões zoom
+  const zoomBar=document.createElement('div');
+  zoomBar.style.cssText='position:absolute;bottom:10px;left:10px;display:flex;gap:4px;z-index:4';
+  zoomBar.innerHTML=`<button class="btn btn-ghost btn-sm" style="min-width:32px" title="Zoom -">−</button><button class="btn btn-ghost btn-sm" title="Reset">100%</button><button class="btn btn-ghost btn-sm" style="min-width:32px" title="Zoom +">+</button>`;
+  fallback?.appendChild(zoomBar);
+  zoomBar.querySelectorAll('button').forEach((b,i)=>{
+    b.onclick=()=>{
+      if(i===0) scale=Math.max(0.4, scale-0.15);
+      else if(i===2) scale=Math.min(2, scale+0.15);
+      else { scale=1; panX=0; panY=0; }
+      applyTransform();
+    };
+  });
+  // Drag nó no fallback para reposicionar
+  fallback?.addEventListener('dragover', e=>e.preventDefault());
+  fallback?.addEventListener('drop', e=>{
+    const draggedId=e.dataTransfer.getData('text/plain');
+    if(!draggedId || !draggedId.startsWith('n_')) return;
+    const store=window.__flowStore||[];
+    const node=store.find(n=>n.id===draggedId);
+    if(!node) return;
+    const rect=fallback.getBoundingClientRect();
+    node.position={x: (e.clientX-rect.left - panX)/scale, y: (e.clientY-rect.top - panY)/scale};
+    renderFallback();
+  });
+  // Salvar fallback via API
+  const saveBtn2=document.getElementById('btn-save');
+  if(saveBtn2){ saveBtn2.addEventListener('click', async (e)=>{
+    if(document.querySelector('.react-flow')) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    const name=(document.getElementById('wf-name')?.value||'').trim()||'Flow '+new Date().toISOString().slice(0,10);
+    const store=window.__flowStore||[];
+    if(!store.length){ toast2('Adicione nós primeiro', false); return; }
+    try{
+      let wfId=new URLSearchParams(location.search).get('wf');
+      if(!wfId){
+        const r=await fetch('/api/workflows',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({name, description:'criado via fallback'})});
+        if(!r.ok) throw new Error(await r.text());
+        const j=await r.json(); wfId=j.id; history.replaceState(null,'','?wf='+wfId);
+      }
+      const r2=await fetch(`/api/workflows/${wfId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},credentials:'include',body:JSON.stringify({name, nodes: store})});
+      if(!r2.ok) throw new Error(await r2.text());
+      toast2('Salvo ✓');
+    }catch(err){ toast2('Erro: '+err.message, false); }
+  }); }
+})();
+</script>
 <script type="module">
 import React from "react";
 import ReactDOM from "react-dom";
@@ -130,7 +340,7 @@ function App(){
   const syncToRf = React.useCallback((list)=>{
     window.__flowStore = list;
     if(window.__renderFallback) window.__renderFallback();
-    const ns=list.map((n,i)=>({id:n.id, position:n.position||{x:20+i*220,y:40+Math.floor(i/4)*90}, data:{label:(n.label||n.id.slice(0,6))+" • "+(n.tool_name||"agent")}, style:{background:n.agent_id?'var(--accent-subtle)':'var(--bg-elevated)',border:`1px solid ${n.tool_name?'var(--accent)':'var(--border)'}`,borderRadius:8,padding:'8px 10px',fontSize:12,minWidth:120}}));
+    const ns=list.map((n,i)=>({id:n.id, position:n.position||{x:20+i*220,y:40+Math.floor(i/4)*90}, data:{label:(n.label||n.id.slice(0,6))+" • "+(n.tool_name||"agent")}, style:{background:n.agent_id?'var(--accent-subtle)':'var(--bg-elevated)',border:`1px solid ${n.tool_name?'var(--accent)':'var(--border)'}`,borderRadius:8,padding:'8px 10px',fontSize:12,minWidth:120}, sourcePosition: 'right', targetPosition: 'left'}));
     const es=list.flatMap(n=>(n.depends_on||[]).map(d=>({id:d+"->"+n.id, source:d, target:n.id, animated:true, style:{stroke:"var(--accent)"}})));
     setNodes(ns); setEdges(es);
   },[]);
@@ -173,15 +383,30 @@ function App(){
     }));
   },[]);
 
-  const onNodeClick = React.useCallback((_,node)=>{
+  const onNodeClick = React.useCallback((e,node)=>{
+    // Debug: always toast to confirm click received
+    // toast('Click nó '+node.id.slice(0,6));
+    if(e.shiftKey || e.ctrlKey || e.metaKey){
+      e.preventDefault(); e.stopPropagation();
+      const targetId=node.id;
+      const sourceId=window._reactConnectFrom;
+      if(!sourceId){ window._reactConnectFrom=targetId; toast('Origem '+targetId.slice(0,6)+' → Shift+clique no destino'); return; }
+      if(sourceId===targetId){ window._reactConnectFrom=null; toast('Cancelado'); return; }
+      setStore(prev=>{ const nl=prev.map(s=>s.id===targetId?{...s, depends_on:[...(s.depends_on||[]).filter(x=>x!==sourceId), sourceId]}:s); syncToRf(nl); return nl; });
+      window._reactConnectFrom=null; toast('Conectado '+sourceId.slice(0,6)+' → '+targetId.slice(0,6)+' ✓'); return;
+    }
     const s=store.find(x=>x.id===node.id);
-    if(!s) return;
+    if(!s){ toast('Nó não encontrado', false); return; }
     selectedRef.current=s.id;
-    document.getElementById("m-label").value=s.label||"";
-    document.getElementById("m-tool").value=s.tool_name||"";
-    document.getElementById("m-params").value=JSON.stringify(s.tool_args||{},null,2);
-    document.getElementById("node-modal").style.display='flex';
-  },[store]);
+    const modal=document.getElementById("node-modal");
+    if(modal){ modal.style.display='flex'; modal.style.alignItems='center'; modal.style.justifyContent='center'; }
+    const lbl=document.getElementById("m-label");
+    const tool=document.getElementById("m-tool");
+    const params=document.getElementById("m-params");
+    if(lbl) lbl.value=s.label||"";
+    if(tool) tool.value=s.tool_name||"";
+    if(params) params.value=JSON.stringify(s.tool_args||{},null,2);
+  },[store, syncToRf]);
 
   // drop from palette
   const onDragOver = React.useCallback((e)=>{e.preventDefault(); e.dataTransfer.dropEffect='move';},[]);
@@ -303,7 +528,8 @@ function App(){
     };
   },[store,nodes,syncToRf,rfInstance]);
 
-  const rfProps={nodes,edges,onNodesChange,onEdgesChange,onConnect,onNodeClick,onEdgesDelete,onInit:setRfInstance,onDragOver,onDrop,fitView:true, snapToGrid:true, snapGrid:[12,12]};
+  const onInitRf = React.useCallback((inst)=>{ setRfInstance(inst); window.__rfInstance=inst; },[]);
+  const rfProps={nodes,edges,onNodesChange,onEdgesChange,onConnect,onNodeClick,onEdgesDelete,onInit:onInitRf,onDragOver,onDrop,fitView:true, snapToGrid:true, snapGrid:[12,12], panOnDrag:true, panOnScroll:true, zoomOnScroll:true, zoomOnDoubleClick:true, panOnScrollMode:"free", selectionOnDrag:false};
   // placeholder if no wf
   if(!wfId) {
     return React.createElement("div",{style:{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text-tertiary)",flexDirection:"column",gap:8}},
@@ -327,7 +553,7 @@ setTimeout(()=>{
       if(!canvas) return;
       // pega store via global se existir
       const nodes=window.__flowStore || [];
-      canvas.innerHTML = nodes.length ? nodes.map(n=>`<div data-id="${n.id}" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid ${n.tool_name?'var(--accent)':'var(--border)'};border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab">${n.label||n.id.slice(0,6)} • ${n.tool_name||'agent'} <button onclick="window.__flowDelete && window.__flowDelete('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer">×</button></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:200px">Nenhum nó — clique na paleta à esquerda</div>';
+      canvas.innerHTML = nodes.length ? nodes.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick && window._fallbackNodeClick(event, '${n.id}')" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid ${n.tool_name?'var(--accent)':'var(--border)'};border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab">${n.label||n.id.slice(0,6)} • ${n.tool_name||'agent'} <button onclick="event.stopPropagation(); window.__flowDelete && window.__flowDelete('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer">×</button></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:200px">Nenhum nó — clique na paleta à esquerda</div>';
     };
     // expõe para click handler atualizar fallback
     window.__renderFallback = renderFallback;
@@ -365,6 +591,35 @@ setTimeout(()=>{
     // window.flowTourShow();
   }
 }, 800);
+// Patch: fallback node click -> edit modal (fix "nem clicar no nó pra editar")
+window._fallbackNodeClick=(e,id)=>{
+  if(e.shiftKey||e.ctrlKey||e.metaKey){
+    e.stopPropagation();
+    if(!window._fallbackSelected){ window._fallbackSelected=id; window.__renderFallback&&window.__renderFallback(); return; }
+    if(window._fallbackSelected===id){ window._fallbackSelected=null; window.__renderFallback&&window.__renderFallback(); return; }
+    const st=window.__flowStore||[]; const tgt=st.find(x=>x.id===id);
+    if(tgt){ if(!tgt.depends_on) tgt.depends_on=[]; if(!tgt.depends_on.includes(window._fallbackSelected)) tgt.depends_on.push(window._fallbackSelected); else tgt.depends_on=tgt.depends_on.filter(x=>x!==window._fallbackSelected); }
+    window._fallbackSelected=null; window.__renderFallback&&window.__renderFallback(); return;
+  }
+  const st=window.__flowStore||[]; const s=st.find(x=>x.id===id); if(!s) return;
+  window._fallbackEditId=id;
+  const modal=document.getElementById("node-modal");
+  if(modal){ modal.style.display='flex'; modal.style.alignItems='center'; modal.style.justifyContent='center'; }
+  const lbl=document.getElementById("m-label"), tool=document.getElementById("m-tool"), params=document.getElementById("m-params");
+  if(lbl) lbl.value=s.label||""; if(tool) tool.value=s.tool_name||""; if(params) params.value=JSON.stringify(s.tool_args||{},null,2);
+};
+// Patch modal save to handle fallback edit
+const _origFallbackSave = document.getElementById("m-save")?.onclick;
+document.getElementById("m-save")?.addEventListener('click', (e)=>{
+  if(document.querySelector('.react-flow')) return;
+  const id=window._fallbackEditId; if(!id) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  let args={}; try{ const t=document.getElementById("m-params").value.trim(); args=t?JSON.parse(t):{}; }catch(err){ alert('JSON inválido'); return; }
+  const label=document.getElementById("m-label").value, tool=document.getElementById("m-tool").value;
+  const st=window.__flowStore||[]; const s=st.find(x=>x.id===id); if(s){ s.label=label; s.tool_name=tool; s.tool_args=args; }
+  document.getElementById("node-modal").style.display='none';
+  window.__renderFallback&&window.__renderFallback();
+}, true);
 // also add help button to re-show
 const helpBtn=document.createElement('button');
 helpBtn.className='btn btn-ghost btn-sm';
