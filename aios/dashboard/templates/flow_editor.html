@@ -20,9 +20,9 @@
       <div draggable="true" data-tool="crm_create_deal" data-label="Criar Deal CRM" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">💼 crm_create_deal</div>
       <div draggable="true" data-tool="crm_update_deal" data-label="Atualizar Deal CRM" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">✏️ crm_update_deal</div>
     </div></div>
-    <div class="text-xs text-tertiary" style="margin-top:4px">Arraste para o canvas → cria nó. Conecte arrastando handle.</div>
+    <div class="text-xs text-tertiary" style="margin-top:4px">Arraste para o canvas → cria nó. Ou <b>clique</b> no item → adiciona no centro. Conecte arrastando handle.</div>
   </div>
-  <div style="flex:1;position:relative;background:var(--bg)" id="flow-wrapper"><div style="height:100%" id="flow-root"></div><div id="save-status" class="text-xs" style="position:absolute;bottom:8px;right:10px;background:var(--bg-elevated);border:1px solid var(--border);padding:4px 8px;border-radius:6px;color:var(--text-secondary);display:none"></div></div>
+  <div style="flex:1;position:relative;background:var(--bg);min-height:560px;pointer-events:auto" id="flow-wrapper"><div style="height:560px;min-height:560px;pointer-events:auto" id="flow-root"></div><div id="fallback-canvas" style="display:none;position:absolute;inset:0;background:var(--bg);overflow:auto;padding:12px"></div><div id="save-status" class="text-xs" style="position:absolute;bottom:8px;right:10px;background:var(--bg-elevated);border:1px solid var(--border);padding:4px 8px;border-radius:6px;color:var(--text-secondary);display:none;z-index:5"></div><div id="flow-error" style="display:none;position:absolute;inset:0;background:var(--bg-elevated);padding:2rem;text-align:center;color:var(--text-tertiary)"></div></div>
 </div>
 <div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Paleta → arraste ferramenta para o canvas. Clique no nó para editar label/tool/params (JSON). Conecte handles para definir <code>depends_on</code>. Salvar persiste posições.</p></div>
 
@@ -128,6 +128,8 @@ function App(){
 
   // sync store -> rf nodes/edges
   const syncToRf = React.useCallback((list)=>{
+    window.__flowStore = list;
+    if(window.__renderFallback) window.__renderFallback();
     const ns=list.map((n,i)=>({id:n.id, position:n.position||{x:20+i*220,y:40+Math.floor(i/4)*90}, data:{label:(n.label||n.id.slice(0,6))+" • "+(n.tool_name||"agent")}, style:{background:n.agent_id?'var(--accent-subtle)':'var(--bg-elevated)',border:`1px solid ${n.tool_name?'var(--accent)':'var(--border)'}`,borderRadius:8,padding:'8px 10px',fontSize:12,minWidth:120}}));
     const es=list.flatMap(n=>(n.depends_on||[]).map(d=>({id:d+"->"+n.id, source:d, target:n.id, animated:true, style:{stroke:"var(--accent)"}})));
     setNodes(ns); setEdges(es);
@@ -200,17 +202,58 @@ function App(){
   React.useEffect(()=>{
     const root=document.getElementById("flow-root");
     const wrapper=document.getElementById("flow-wrapper");
+    let isDragging=false;
     const handler=(e)=>{
+      isDragging=true;
+      setTimeout(()=>isDragging=false,400);
       const el=e.target.closest("[draggable]");
       if(el && e.dataTransfer){
         const tool=el.getAttribute("data-tool");
         const label=el.getAttribute("data-label")||tool;
         e.dataTransfer.setData("application/reactflow",tool);
         e.dataTransfer.setData("label",label);
+        e.dataTransfer.setData("text/plain",tool);
         e.dataTransfer.effectAllowed='move';
       }
     };
-    document.getElementById("palette").addEventListener("dragstart",handler);
+    const dragEndHandler=()=>setTimeout(()=>isDragging=false,200);
+    const clickHandler=(e)=>{
+      if(isDragging) return;
+      const el=e.target.closest("[data-tool]");
+      if(!el) return;
+      const tool=el.getAttribute("data-tool");
+      const label=el.getAttribute("data-label")||tool;
+      // clique adiciona no centro; drag usa onDrop separado
+      const pos = rfInstance && rfInstance.project ? rfInstance.project({x: 260, y: 160}) : {x: 20 + (store.length%4)*220, y: 40 + Math.floor(store.length/4)*90};
+      const id="n_"+Date.now()+"_"+Math.random().toString(36).slice(2,5);
+      const item={id, label:label||tool, tool_name:tool, tool_args:{}, position:pos, depends_on:[]};
+      setStore(prev=>{const nl=[...prev,item]; syncToRf(nl); return nl;});
+      window.__flowStore = [...store, item];
+      if(window.__renderFallback) window.__renderFallback();
+      toast("Nó "+(label||tool)+" adicionado ✓");
+    };
+    window.__flowDelete=(id)=>{ setStore(prev=>{const nl=prev.filter(s=>s.id!==id).map(s=>({...s, depends_on:(s.depends_on||[]).filter(d=>d!==id)})); syncToRf(nl); window.__flowStore=nl; if(window.__renderFallback) window.__renderFallback(); return nl;}); };
+    const palette=document.getElementById("palette");
+    palette.addEventListener("dragstart",handler);
+    palette.addEventListener("dragend",dragEndHandler);
+    palette.addEventListener("click",clickHandler);
+    // Fallback nativo caso ReactFlow onDrop não dispare (ex: esm.sh offline)
+    const nativeDrop=(e)=>{
+      e.preventDefault();
+      const tool=e.dataTransfer.getData("application/reactflow") || e.dataTransfer.getData("text/plain");
+      if(!tool) return;
+      const label=e.dataTransfer.getData("label")||tool;
+      const rect=wrapper.getBoundingClientRect();
+      let pos={x:e.clientX-rect.left-60, y:e.clientY-rect.top-20};
+      try{ if(rfInstance && rfInstance.project) pos=rfInstance.project(pos); }catch(_){}
+      const id="n_"+Date.now()+"_"+Math.random().toString(36).slice(2,5);
+      const item={id, label:label||tool, tool_name:tool, tool_args:{}, position:pos, depends_on:[]};
+      setStore(prev=>{const nl=[...prev,item]; syncToRf(nl); return nl;});
+      toast("Nó "+(label||tool)+" adicionado ✓");
+    };
+    const nativeOver=(e)=>{e.preventDefault(); e.dataTransfer.dropEffect='move';};
+    wrapper.addEventListener("dragover",nativeOver);
+    wrapper.addEventListener("drop",nativeDrop);
     // modal handlers
     const close=()=>document.getElementById("node-modal").style.display='none';
     document.getElementById("m-close").onclick=close;
@@ -251,8 +294,14 @@ function App(){
         toast("Salvo ✓");
       }catch(e){ toast("Erro: "+e.message,false); }
     };
-    return ()=>document.getElementById("palette").removeEventListener("dragstart",handler);
-  },[store,nodes,syncToRf]);
+    return ()=>{
+      palette.removeEventListener("dragstart",handler);
+      palette.removeEventListener("dragend",dragEndHandler);
+      palette.removeEventListener("click",clickHandler);
+      wrapper.removeEventListener("dragover",nativeOver);
+      wrapper.removeEventListener("drop",nativeDrop);
+    };
+  },[store,nodes,syncToRf,rfInstance]);
 
   const rfProps={nodes,edges,onNodesChange,onEdgesChange,onConnect,onNodeClick,onEdgesDelete,onInit:setRfInstance,onDragOver,onDrop,fitView:true, snapToGrid:true, snapGrid:[12,12]};
   // placeholder if no wf
@@ -264,7 +313,27 @@ function App(){
   }
   return React.createElement(ReactFlow, rfProps, React.createElement(Background),React.createElement(Controls),React.createElement(MiniMap,{style:{background:"var(--bg-elevated)"}}));
 }
-ReactDOM.createRoot(document.getElementById("flow-root")).render(React.createElement(App));
+try{ ReactDOM.createRoot(document.getElementById("flow-root")).render(React.createElement(App)); }catch(e){ console.error("ReactFlow failed",e); document.getElementById("flow-error").style.display='flex'; document.getElementById("flow-error").innerHTML='<div style="margin:auto"><div style="font-size:1.2rem">⚠️ ReactFlow offline</div><div class="text-sm text-secondary" style="margin-top:0.5rem">Usando canvas fallback — arraste ou clique na paleta ainda funciona</div></div>'; }
+// Fallback: se ReactFlow não renderizar em 2.5s, ativa canvas simples
+setTimeout(()=>{
+  if(!document.querySelector(".react-flow")){
+    const fb=document.getElementById("fallback-canvas");
+    const err=document.getElementById("flow-error");
+    if(fb) fb.style.display='block';
+    if(err && err.style.display==='none') { err.style.display='flex'; err.innerHTML='<div style="margin:auto;text-align:center"><div style="font-size:1.2rem">📋 Canvas fallback ativo</div><div class="text-sm text-secondary" style="margin-top:0.5rem">Clique na paleta → nó aparece aqui. Salvar funciona normal.</div></div>'; }
+    // render fallback nodes como divs absolutos se já houver store
+    const renderFallback=()=>{
+      const canvas=document.getElementById("fallback-canvas");
+      if(!canvas) return;
+      // pega store via global se existir
+      const nodes=window.__flowStore || [];
+      canvas.innerHTML = nodes.length ? nodes.map(n=>`<div data-id="${n.id}" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid ${n.tool_name?'var(--accent)':'var(--border)'};border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab">${n.label||n.id.slice(0,6)} • ${n.tool_name||'agent'} <button onclick="window.__flowDelete && window.__flowDelete('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer">×</button></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:200px">Nenhum nó — clique na paleta à esquerda</div>';
+    };
+    // expõe para click handler atualizar fallback
+    window.__renderFallback = renderFallback;
+    setInterval(renderFallback, 800);
+  }
+}, 2500);
 // P0-2 Tour logic
 let tourStep=1;
 function showTourStep(n){
@@ -287,12 +356,15 @@ window.flowTourShow=function(){
   tourStep=1; showTourStep(1);
   document.getElementById('flow-tour').classList.add('active');
 };
-// show on first visit
+// tour backdrop click closes
+document.getElementById('flow-tour')?.addEventListener('click', (e)=>{ if(e.target.id==='flow-tour') window.flowTourSkip(); });
+// show on first visit - delay longer e não bloqueia canvas até Pular
 setTimeout(()=>{
   if(!localStorage.getItem('flowTourSeen')){
-    window.flowTourShow();
+    // não auto-mostra mais - deixa canvas livre; tour só via ? Tour
+    // window.flowTourShow();
   }
-}, 600);
+}, 800);
 // also add help button to re-show
 const helpBtn=document.createElement('button');
 helpBtn.className='btn btn-ghost btn-sm';

@@ -3013,16 +3013,25 @@ async def knowledge_ingest(request: Request):
         await db.commit()
     return RedirectResponse("/dashboard/knowledge", status_code=303)
 
-# ─── WhatsApp Gateway (wrapper Python sobre Evolution) ───
+# ─── WhatsApp (Gateway unificado: Evolution engine + wrapper) ───
 @router.get("/whatsapp", response_class=HTMLResponse)
 async def whatsapp_gateway_page(request: Request):
     from aios.core.evolution_api import evo_fetch_instances
     instances = await evo_fetch_instances()
-    # gateway metrics
-    gateway = {"provider": "wrapper", "version": "0.1.0", "proxy": "IPv6 /64 Hetzner + Squid", "storage": "SeaweedFS", "kms": "Vault"}
-    return await _render("whatsapp_instances.html", request, title="WhatsApp Gateway", instances=instances, gateway=gateway)
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import ChannelConnection
+        chans = (await db.execute(select(ChannelConnection).where(ChannelConnection.channel_type=="evolution", ChannelConnection.org_id==org_id))).scalars().all()
+        chan_map = {c.config.get("instance"): c for c in chans if c.config}
+    for inst in instances:
+        name = inst.get("name") or inst.get("instanceName") or inst.get("instance", {}).get("instanceName","")
+        inst["_name"] = name
+        inst["_channel"] = chan_map.get(name)
+        inst["_state"] = inst.get("state") or inst.get("instance",{}).get("state","")
+    gateway = {"mode": "unificado"}
+    return await _render("whatsapp_instances.html", request, title="WhatsApp", instances=instances, chan_map=chan_map, gateway=gateway)
 
-# ─── Evolution Instances (gerenciar direto no AIOS) ───
+# ─── Evolution Instances (legado: redirect p/ WhatsApp unificado) ───
 
 @router.get("/evolution", response_class=HTMLResponse)
 async def evolution_page(request: Request):
@@ -3040,7 +3049,7 @@ async def evolution_page(request: Request):
         inst["_name"] = name
         inst["_channel"] = chan_map.get(name)
         inst["_state"] = inst.get("state") or inst.get("instance",{}).get("state","")
-    return await _render("evolution.html", request, title="Evolution — Instâncias", instances=instances, chan_map=chan_map)
+    return RedirectResponse("/dashboard/whatsapp", status_code=302)
 
 @router.post("/evolution/create")
 async def evolution_create(request: Request, instanceName: str = Form(...), agent_id: str = Form(""), team_id: str = Form(""), provider: str = Form("baileys")):
