@@ -167,7 +167,7 @@
     fallback.style.position='absolute'; fallback.style.inset='0'; fallback.style.overflow='hidden'; fallback.style.cursor=isPanning?'grabbing':'grab';
     let content=fallback.querySelector('#fallback-content');
     if(!content){ content=document.createElement('div'); content.id='fallback-content'; content.style.position='absolute'; content.style.inset='0'; content.style.transformOrigin='0 0'; fallback.appendChild(content); }
-    content.innerHTML = store.length ? store.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick(event, '${n.id}')" draggable="true" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${n.label} • ${n.tool_name} <button onclick="event.stopPropagation(); window._delFallbackNode('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">×</button></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:180px">Nenhum nó — arraste ou clique na paleta à esquerda<br><span style="font-size:0.75rem">Arraste o fundo para navegar • Scroll para zoom • como n8n</span></div>';
+    content.innerHTML = store.length ? store.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick(event, '${n.id}')" draggable="true" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${n.label} • ${n.tool_name} <button onclick="event.stopPropagation(); window._delFallbackNode('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">×</button><span data-handle="source" data-id="${n.id}" draggable="true" onclick="window._fallbackHandleClick(event, '${n.id}')" ondragstart="event.stopPropagation(); event.dataTransfer.setData('text/plain', 'conn:${n.id}'); window._fallbackDragSource='${n.id}';" ontouchstart="window._fallbackDragSource='${n.id}';" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--accent);border:2px solid var(--bg);border-radius:50%;cursor:crosshair;touch-action:none"></span><span data-handle="target" data-id="${n.id}" onclick="window._fallbackHandleClick(event, '${n.id}')" style="position:absolute;left:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--bg-elevated);border:2px solid var(--accent);border-radius:50%"></span></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:180px">Nenhum nó — arraste ou clique na paleta à esquerda<br><span style="font-size:0.75rem">Toque no nó para editar • Arraste handle direita→esquerda para conectar • Fundo para pan</span></div>';
     applyTransform();
     // drag nós no fallback
     content.querySelectorAll('[data-id]').forEach(el=>{
@@ -177,54 +177,73 @@
   }
   window.__renderFallback=renderFallback;
   window._delFallbackNode=(id)=>{ window.__flowStore=(window.__flowStore||[]).filter(n=>n.id!==id); renderFallback(); };
-  // Pan do canvas fallback (arrastar fundo) + zoom wheel - n8n like + touch
+  // Pan do canvas fallback - mouse
   fallback?.addEventListener('mousedown', e=>{
-    if(e.target.closest('[data-id]')) return;
+    if(e.target.closest('[data-id]') || e.target.closest('[data-handle]') || e.target.closest('button')) return;
     if(e.button!==0 && e.button!==1) return;
     isPanning=true; startPan={x:e.clientX, y:e.clientY}; startOffset={x:panX, y:panY};
     fallback.style.cursor='grabbing';
     e.preventDefault();
   });
-  fallback?.addEventListener('touchstart', e=>{
-    if(e.target.closest('[data-id]')) return;
-    if(e.touches.length!==1) return;
-    isPanning=true; startPan={x:e.touches[0].clientX, y:e.touches[0].clientY}; startOffset={x:panX, y:panY};
-    e.preventDefault();
-  }, {passive:false});
-  fallback?.addEventListener('touchmove', e=>{
-    if(!isPanning || e.touches.length!==1) return;
-    panX=startOffset.x + (e.touches[0].clientX - startPan.x);
-    panY=startOffset.y + (e.touches[0].clientY - startPan.y);
-    applyTransform();
-    e.preventDefault();
-  }, {passive:false});
-  fallback?.addEventListener('touchend', ()=>{ isPanning=false; }, {passive:true});
   window.addEventListener('mousemove', e=>{
     if(!isPanning) return;
     panX=startOffset.x + (e.clientX - startPan.x);
     panY=startOffset.y + (e.clientY - startPan.y);
     applyTransform();
   });
-  window.addEventListener('touchmove', e=>{
-    if(!isPanning || e.touches.length!==1) return;
-    panX=startOffset.x + (e.touches[0].clientX - startPan.x);
-    panY=startOffset.y + (e.touches[0].clientY - startPan.y);
+  window.addEventListener('mouseup', ()=>{ if(isPanning){ isPanning=false; if(fallback) fallback.style.cursor='grab'; }});
+  // Pan fallback - touch (only when dragging background, not nodes/handles)
+  let touchPanId=null;
+  fallback?.addEventListener('touchstart', e=>{
+    if(e.target.closest('[data-id]') || e.target.closest('[data-handle]')) return;
+    if(e.touches.length!==1) return;
+    const t=e.touches[0];
+    touchPanId=t.identifier;
+    isPanning=true; startPan={x:t.clientX, y:t.clientY}; startOffset={x:panX, y:panY};
+  }, {passive:true});
+  fallback?.addEventListener('touchmove', e=>{
+    if(!isPanning || touchPanId===null) return;
+    const t=[...e.touches].find(x=>x.identifier===touchPanId);
+    if(!t) return;
+    // Only pan if moved >10px to avoid blocking taps
+    const dx=t.clientX-startPan.x, dy=t.clientY-startPan.y;
+    if(Math.hypot(dx,dy) < 8) return;
+    panX=startOffset.x + dx;
+    panY=startOffset.y + dy;
     applyTransform();
     e.preventDefault();
   }, {passive:false});
-  window.addEventListener('mouseup', ()=>{ if(isPanning){ isPanning=false; if(fallback) fallback.style.cursor='grab'; }});
-  window.addEventListener('touchend', ()=>{ if(isPanning){ isPanning=false; }}, {passive:true});
+  fallback?.addEventListener('touchend', e=>{
+    if(touchPanId!==null && [...e.changedTouches].some(x=>x.identifier===touchPanId)){
+      isPanning=false; touchPanId=null;
+    }
+  }, {passive:true});
+  fallback?.addEventListener('touchcancel', ()=>{ isPanning=false; touchPanId=null; }, {passive:true});
+  window.addEventListener('touchmove', e=>{
+    if(!isPanning || touchPanId===null) return;
+    const t=[...e.touches].find(x=>x.identifier===touchPanId);
+    if(!t) return;
+    panX=startOffset.x + (t.clientX - startPan.x);
+    panY=startOffset.y + (t.clientY - startPan.y);
+    applyTransform();
+    e.preventDefault();
+  }, {passive:false});
+  window.addEventListener('touchend', e=>{
+    if(touchPanId!==null && [...e.changedTouches].some(x=>x.identifier===touchPanId)){
+      isPanning=false; touchPanId=null;
+    }
+  }, {passive:true});
   fallback?.addEventListener('wheel', e=>{
     e.preventDefault();
     const delta=e.deltaY>0 ? -0.08 : 0.08;
     scale=Math.min(2, Math.max(0.4, scale+delta));
     applyTransform();
   }, {passive:false});
-  // Pan para ReactFlow (n8n-like) quando fallback oculto - mouse + touch
-  let rfPan=false, rfStart={x:0,y:0}, rfOrigin={x:0,y:0};
+  // Pan para ReactFlow (n8n-like) quando fallback oculto - mouse + touch (com threshold para não bloquear taps)
+  let rfPan=false, rfStart={x:0,y:0}, rfOrigin={x:0,y:0}, rfTouchId=null;
   wrapper?.addEventListener('mousedown', e=>{
     if(!document.querySelector('.react-flow')) return;
-    if(e.target.closest('.react-flow__node') || e.target.closest('[data-tool]') || e.target.closest('button')) return;
+    if(e.target.closest('.react-flow__node') || e.target.closest('[data-tool]') || e.target.closest('button') || e.target.closest('.react-flow__handle')) return;
     if(e.button!==0) return;
     rfPan=true; rfStart={x:e.clientX, y:e.clientY};
     const vp=window.__rfInstance?.getViewport?.() || {x:0,y:0,zoom:1};
@@ -234,13 +253,13 @@
   });
   wrapper?.addEventListener('touchstart', e=>{
     if(!document.querySelector('.react-flow')) return;
-    if(e.target.closest('.react-flow__node')) return;
+    if(e.target.closest('.react-flow__node') || e.target.closest('.react-flow__handle')) return;
     if(e.touches.length!==1) return;
+    rfTouchId=e.touches[0].identifier;
     rfPan=true; rfStart={x:e.touches[0].clientX, y:e.touches[0].clientY};
     const vp=window.__rfInstance?.getViewport?.() || {x:0,y:0,zoom:1};
     rfOrigin={x:vp.x, y:vp.y};
-    e.preventDefault();
-  }, {passive:false});
+  }, {passive:true});
   window.addEventListener('mousemove', e=>{
     if(!rfPan) return;
     const dx=e.clientX - rfStart.x, dy=e.clientY - rfStart.y;
@@ -250,8 +269,11 @@
     }
   });
   window.addEventListener('touchmove', e=>{
-    if(!rfPan || e.touches.length!==1) return;
-    const dx=e.touches[0].clientX - rfStart.x, dy=e.touches[0].clientY - rfStart.y;
+    if(!rfPan || rfTouchId===null) return;
+    const t=[...e.touches].find(x=>x.identifier===rfTouchId);
+    if(!t) return;
+    const dx=t.clientX - rfStart.x, dy=t.clientY - rfStart.y;
+    if(Math.hypot(dx,dy) < 8) return;
     if(window.__rfInstance?.setViewport){
       const cur=window.__rfInstance.getViewport();
       window.__rfInstance.setViewport({x: rfOrigin.x + dx, y: rfOrigin.y + dy, zoom: cur.zoom});
@@ -259,7 +281,13 @@
     e.preventDefault();
   }, {passive:false});
   window.addEventListener('mouseup', ()=>{ if(rfPan){ rfPan=false; if(wrapper) wrapper.style.cursor=''; }});
-  window.addEventListener('touchend', ()=>{ if(rfPan) rfPan=false; }, {passive:true});
+  window.addEventListener('touchend', e=>{
+    if(rfTouchId!==null && [...e.changedTouches].some(x=>x.identifier===rfTouchId)){
+      rfPan=false; rfTouchId=null; if(wrapper) wrapper.style.cursor='';
+    } else if(!e.changedTouches.length){
+      rfPan=false; rfTouchId=null;
+    }
+  }, {passive:true});
   wrapper?.addEventListener('wheel', e=>{
     if(!document.querySelector('.react-flow')) return;
   }, {passive:true});
@@ -335,6 +363,8 @@ function App(){
   const rfWrapperRef=React.useRef(null);
   const [rfInstance,setRfInstance]=React.useState(null);
   const selectedRef=React.useRef(null);
+  // Expor para fallback touch handlers
+  React.useEffect(()=>{ window._reactSetStore=setStore; window._reactSyncToRf=syncToRf; }, [syncToRf]);
 
   // sync store -> rf nodes/edges
   const syncToRf = React.useCallback((list)=>{
@@ -553,7 +583,7 @@ setTimeout(()=>{
       if(!canvas) return;
       // pega store via global se existir
       const nodes=window.__flowStore || [];
-      canvas.innerHTML = nodes.length ? nodes.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick && window._fallbackNodeClick(event, '${n.id}')" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid ${n.tool_name?'var(--accent)':'var(--border)'};border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab">${n.label||n.id.slice(0,6)} • ${n.tool_name||'agent'} <button onclick="event.stopPropagation(); window.__flowDelete && window.__flowDelete('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer">×</button></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:200px">Nenhum nó — clique na paleta à esquerda</div>';
+      canvas.innerHTML = nodes.length ? nodes.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick && window._fallbackNodeClick(event, '${n.id}')" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid ${n.tool_name?'var(--accent)':'var(--border)'};border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab">${n.label||n.id.slice(0,6)} • ${n.tool_name||'agent'} <button onclick="event.stopPropagation(); window.__flowDelete && window.__flowDelete('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer">×</button><span data-handle="source" data-id="${n.id}" draggable="true" onclick="window._fallbackHandleClick(event, '${n.id}')" ondragstart="event.stopPropagation(); event.dataTransfer.setData('text/plain', 'conn:${n.id}'); window._fallbackDragSource='${n.id}';" ontouchstart="window._fallbackDragSource='${n.id}';" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--accent);border:2px solid var(--bg);border-radius:50%;cursor:crosshair;touch-action:none"></span><span data-handle="target" data-id="${n.id}" onclick="window._fallbackHandleClick(event, '${n.id}')" style="position:absolute;left:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--bg-elevated);border:2px solid var(--accent);border-radius:50%"></span></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:200px">Nenhum nó — clique na paleta à esquerda</div>';
     };
     // expõe para click handler atualizar fallback
     window.__renderFallback = renderFallback;
@@ -582,6 +612,50 @@ window.flowTourShow=function(){
   tourStep=1; showTourStep(1);
   document.getElementById('flow-tour').classList.add('active');
 };
+// Unified handle tap for connect - mobile-friendly (fallback + ReactFlow)
+(function(){
+  const wrapper=document.getElementById('flow-wrapper');
+  function doConnect(e, nodeId){
+    if(!window._reactConnectFrom && !window._fallbackSelected){
+      window._reactConnectFrom=nodeId; window._fallbackSelected=nodeId;
+      const t=document.getElementById('save-status');
+      if(t){ t.textContent='Origem '+nodeId.slice(0,6)+' → toque no destino'; t.style.display='block'; t.style.borderColor='var(--amber)'; t.style.color='var(--amber)'; setTimeout(()=>t.style.display='none',2000); }
+      const el=document.querySelector(`[data-id="${nodeId}"]`); if(el){ el.style.outline='2px solid var(--amber)'; setTimeout(()=>el.style.outline='',2000); }
+      return;
+    }
+    const src=window._reactConnectFrom || window._fallbackSelected;
+    if(src===nodeId){ window._reactConnectFrom=null; window._fallbackSelected=null; const t=document.getElementById('save-status'); if(t){ t.textContent='Cancelado'; t.style.display='block'; setTimeout(()=>t.style.display='none',1000); } return; }
+    const store=window.__flowStore||[];
+    const tgt=store.find(x=>x.id===nodeId);
+    if(tgt){
+      if(!tgt.depends_on) tgt.depends_on=[];
+      if(!tgt.depends_on.includes(src)) tgt.depends_on.push(src); else tgt.depends_on=tgt.depends_on.filter(x=>x!==src);
+      if(window.__renderFallback) window.__renderFallback();
+      window.dispatchEvent(new CustomEvent('flow-connect-react',{detail:{source:src, target:nodeId}}));
+    }
+    window._reactConnectFrom=null; window._fallbackSelected=null;
+    const t2=document.getElementById('save-status'); if(t2){ t2.textContent='Conectado ✓'; t2.style.display='block'; t2.style.borderColor='var(--accent)'; t2.style.color='var(--accent)'; setTimeout(()=>t2.style.display='none',1500); }
+  }
+  wrapper?.addEventListener('click', e=>{
+    const h=e.target.closest('.react-flow__handle, [data-handle="source"], [data-handle="target"]');
+    if(!h) return;
+    e.stopPropagation(); e.preventDefault();
+    const nodeEl=h.closest('.react-flow__node, [data-id]');
+    if(!nodeEl) return;
+    const nid=nodeEl.dataset.id || h.dataset.id;
+    doConnect(e, nid);
+  });
+  wrapper?.addEventListener('touchend', e=>{
+    const h=e.target.closest('.react-flow__handle, [data-handle="source"], [data-handle="target"]');
+    if(!h) return;
+    const nodeEl=h.closest('.react-flow__node, [data-id]');
+    if(!nodeEl) return;
+    const nid=nodeEl.dataset.id || h.dataset.id;
+    // Use changedTouches
+    doConnect(e, nid);
+    e.preventDefault();
+  }, {passive:false});
+})();
 // tour backdrop click closes
 document.getElementById('flow-tour')?.addEventListener('click', (e)=>{ if(e.target.id==='flow-tour') window.flowTourSkip(); });
 // show on first visit - delay longer e não bloqueia canvas até Pular
@@ -592,15 +666,17 @@ setTimeout(()=>{
   }
 }, 800);
 // Patch: fallback node click -> edit modal (fix "nem clicar no nó pra editar")
+window._fallbackHandleClick=(e,id)=>{
+  e.stopPropagation();
+  if(!window._fallbackSelected){ window._fallbackSelected=id; window.__renderFallback&&window.__renderFallback(); return; }
+  if(window._fallbackSelected===id){ window._fallbackSelected=null; window.__renderFallback&&window.__renderFallback(); return; }
+  const st=window.__flowStore||[]; const tgt=st.find(x=>x.id===id);
+  // Here id is target, source is _fallbackSelected
+  if(tgt){ if(!tgt.depends_on) tgt.depends_on=[]; if(!tgt.depends_on.includes(window._fallbackSelected)) tgt.depends_on.push(window._fallbackSelected); else tgt.depends_on=tgt.depends_on.filter(x=>x!==window._fallbackSelected); }
+  window._fallbackSelected=null; window.__renderFallback&&window.__renderFallback();
+};
 window._fallbackNodeClick=(e,id)=>{
-  if(e.shiftKey||e.ctrlKey||e.metaKey){
-    e.stopPropagation();
-    if(!window._fallbackSelected){ window._fallbackSelected=id; window.__renderFallback&&window.__renderFallback(); return; }
-    if(window._fallbackSelected===id){ window._fallbackSelected=null; window.__renderFallback&&window.__renderFallback(); return; }
-    const st=window.__flowStore||[]; const tgt=st.find(x=>x.id===id);
-    if(tgt){ if(!tgt.depends_on) tgt.depends_on=[]; if(!tgt.depends_on.includes(window._fallbackSelected)) tgt.depends_on.push(window._fallbackSelected); else tgt.depends_on=tgt.depends_on.filter(x=>x!==window._fallbackSelected); }
-    window._fallbackSelected=null; window.__renderFallback&&window.__renderFallback(); return;
-  }
+  if(e.target.closest('[data-handle]') || e.target.closest('button')) return;
   const st=window.__flowStore||[]; const s=st.find(x=>x.id===id); if(!s) return;
   window._fallbackEditId=id;
   const modal=document.getElementById("node-modal");
@@ -620,6 +696,95 @@ document.getElementById("m-save")?.addEventListener('click', (e)=>{
   document.getElementById("node-modal").style.display='none';
   window.__renderFallback&&window.__renderFallback();
 }, true);
+// Unified touch/click handlers for mobile - garante editar e conectar mesmo se ReactFlow onNodeClick falhar
+(function(){
+  const wrapper=document.getElementById('flow-wrapper');
+  // Helper to open modal for any node id (ReactFlow ou fallback)
+  function openEditModal(nodeId){
+    const store=window.__flowStore||[];
+    const s=store.find(x=>x.id===nodeId);
+    if(!s) return;
+    window._fallbackEditId=nodeId; // for fallback save
+    const modal=document.getElementById('node-modal');
+    if(modal){ modal.style.display='flex'; modal.style.alignItems='center'; modal.style.justifyContent='center'; }
+    const lbl=document.getElementById('m-label'), tool=document.getElementById('m-tool'), params=document.getElementById('m-params');
+    if(lbl) lbl.value=s.label||""; if(tool) tool.value=s.tool_name||""; if(params) params.value=JSON.stringify(s.tool_args||{},null,2);
+  }
+  // Click on node body -> edit (fallback ou ReactFlow quando onNodeClick não dispara)
+  wrapper?.addEventListener('click', e=>{
+    const handle=e.target.closest('.react-flow__handle, [data-handle]');
+    if(handle) return; // handle clique é para conectar, não editar
+    const nodeEl=e.target.closest('.react-flow__node, [data-id]');
+    if(!nodeEl) return;
+    // Evita duplo quando ReactFlow já tratou (se modal já aberto, não reabre)
+    const modal=document.getElementById('node-modal');
+    if(modal && modal.style.display==='flex') return;
+    const nodeId=nodeEl.dataset.id || nodeEl.getAttribute('data-id');
+    if(nodeId && !e.target.closest('button')){
+      // Só se não foi drag (evita abrir ao soltar após arrastar nó)
+      if(window._dragMoved) return;
+      openEditModal(nodeId);
+    }
+  });
+  // Handle click -> conectar (mobile-friendly, sem precisar Shift)
+  wrapper?.addEventListener('click', e=>{
+    const handle=e.target.closest('.react-flow__handle, [data-handle="source"], [data-handle="target"]');
+    if(!handle) return;
+    e.stopPropagation(); e.preventDefault();
+    const nodeEl=handle.closest('.react-flow__node, [data-id]');
+    if(!nodeEl) return;
+    const nodeId=nodeEl.dataset.id || handle.dataset.id;
+    // Usa mesma lógica de seleção do fallback/React
+    if(!window._reactConnectFrom && !window._fallbackSelected){
+      window._reactConnectFrom=nodeId; window._fallbackSelected=nodeId;
+      const toastEl=document.getElementById('save-status');
+      if(toastEl){ toastEl.textContent='Origem '+nodeId.slice(0,6)+' → toque no destino'; toastEl.style.display='block'; setTimeout(()=>toastEl.style.display='none',2000); }
+      return;
+    }
+    const sourceId=window._reactConnectFrom || window._fallbackSelected;
+    if(sourceId===nodeId){ window._reactConnectFrom=null; window._fallbackSelected=null; return; }
+    // Conecta source -> target
+    const store=window.__flowStore||[];
+    const tgt=store.find(x=>x.id===nodeId);
+    if(tgt){
+      if(!tgt.depends_on) tgt.depends_on=[];
+      if(!tgt.depends_on.includes(sourceId)) tgt.depends_on.push(sourceId);
+      // Atualiza via React setStore se disponível, senão via fallback render
+      if(window.__flowStore){
+        // Dispara atualização React via evento custom
+        window.dispatchEvent(new CustomEvent('flow-connect', {detail:{source:sourceId, target:nodeId}}));
+      }
+      if(window.__renderFallback) window.__renderFallback();
+      // Se ReactFlow ativo, também atualiza via store
+      const evt=new CustomEvent('flow-connect-react', {detail:{source:sourceId, target:nodeId}});
+      window.dispatchEvent(evt);
+    }
+    window._reactConnectFrom=null; window._fallbackSelected=null;
+    const toastEl=document.getElementById('save-status');
+    if(toastEl){ toastEl.textContent='Conectado ✓'; toastEl.style.display='block'; setTimeout(()=>toastEl.style.display='none',1500); }
+  });
+  // Escuta evento para atualizar React store quando fallback conecta
+  window.addEventListener('flow-connect-react', e=>{
+    // Tenta atualizar React store se App expôs setter
+    if(window._reactSetStore){
+      const {source, target}=e.detail;
+      window._reactSetStore(prev=>{
+        const nl=prev.map(s=>s.id===target?{...s, depends_on:[...(s.depends_on||[]).filter(x=>x!==source), source]}:s);
+        if(window._reactSyncToRf) window._reactSyncToRf(nl);
+        return nl;
+      });
+    }
+  });
+  // Detecta drag move para não confundir com clique
+  let dragMoved=false;
+  wrapper?.addEventListener('mousedown', ()=>{ dragMoved=false; });
+  wrapper?.addEventListener('mousemove', ()=>{ dragMoved=true; });
+  wrapper?.addEventListener('touchmove', ()=>{ dragMoved=true; }, {passive:true});
+  wrapper?.addEventListener('mouseup', ()=>{ setTimeout(()=>dragMoved=false, 100); });
+  wrapper?.addEventListener('touchend', ()=>{ setTimeout(()=>dragMoved=false, 100); });
+  window._dragMoved = false;
+  setInterval(()=>{ window._dragMoved=dragMoved; }, 50);
+})();
 // also add help button to re-show
 const helpBtn=document.createElement('button');
 helpBtn.className='btn btn-ghost btn-sm';
@@ -628,5 +793,31 @@ helpBtn.title='Mostrar tour novamente';
 helpBtn.onclick=window.flowTourShow;
 helpBtn.style.marginLeft='0.5rem';
 document.querySelector('.flex-between.mb-4 .flex.gap-2')?.appendChild(helpBtn);
+</script>
+<script>
+// Touch drag para reposicionar nós no fallback (mobile) - delegado
+(function(){
+  const fb=document.getElementById('fallback-canvas');
+  let dragId=null, sx=0, sy=0, ox=0, oy=0;
+  function getScale(){ try{ const c=fb?.querySelector('#fallback-content'); const m=c?.style.transform.match(/scale\(([^)]+)\)/); return m?parseFloat(m[1]):1; }catch(_){return 1;} }
+  fb?.addEventListener('touchstart', e=>{
+    const el=e.target.closest('[data-id]');
+    if(!el || e.target.closest('[data-handle]') || e.target.closest('button')) return;
+    if(e.touches.length!==1) return;
+    const id=el.dataset.id; const nd=(window.__flowStore||[]).find(n=>n.id===id); if(!nd) return;
+    dragId=id; sx=e.touches[0].clientX; sy=e.touches[0].clientY; ox=nd.position.x; oy=nd.position.y;
+    e.stopPropagation();
+  }, {passive:true});
+  fb?.addEventListener('touchmove', e=>{
+    if(!dragId || e.touches.length!==1) return;
+    const sc=getScale();
+    const dx=(e.touches[0].clientX - sx)/sc, dy=(e.touches[0].clientY - sy)/sc;
+    const nd=(window.__flowStore||[]).find(n=>n.id===dragId);
+    if(nd){ nd.position.x=ox+dx; nd.position.y=oy+dy; window.__renderFallback&&window.__renderFallback(); }
+    e.preventDefault(); e.stopPropagation();
+  }, {passive:false});
+  fb?.addEventListener('touchend', ()=>{ dragId=null; }, {passive:true});
+  fb?.addEventListener('touchcancel', ()=>{ dragId=null; }, {passive:true});
+})();
 </script>
 {% endblock %}

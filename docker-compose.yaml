@@ -1,0 +1,475 @@
+services:
+    redis:
+        image: 'redis:7-alpine'
+        command:
+            - redis-server
+            - '--requirepass'
+            - '${REDIS_PASSWORD:-changeme}'
+            - '--appendonly'
+            - 'yes'
+            - '--maxmemory'
+            - 256mb
+            - '--maxmemory-policy'
+            - allkeys-lru
+        volumes:
+            - '38908ddf-a875-4105-a93f-a4570513911f_redis-data:/data'
+        healthcheck:
+            test:
+                - CMD
+                - redis-cli
+                - '-a'
+                - '${REDIS_PASSWORD:-changeme}'
+                - ping
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 10s
+        restart: unless-stopped
+        container_name: redis-38908ddf-a875-4105-a93f-a4570513911f-222816157418
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=redis-38908ddf-a875-4105-a93f-a4570513911f-222816157418
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+        environment:
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: redis-38908ddf-a875-4105-a93f-a4570513911f-222816157418
+            SERVICE_NAME_REDIS: redis
+        env_file:
+            - .env
+
+    otel:
+        image: 'otel/opentelemetry-collector-contrib:0.128.0'
+        command:
+            - '--config=/etc/otelcol.yaml'
+        volumes:
+            - '/data/coolify/applications/38908ddf-a875-4105-a93f-a4570513911f/deploy/otel-collector.yml:/etc/otelcol.yaml:ro'
+        ports:
+            - '4317:4317'
+            - '4318:4318'
+        restart: unless-stopped
+        container_name: otel-38908ddf-a875-4105-a93f-a4570513911f-222816167357
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=otel-38908ddf-a875-4105-a93f-a4570513911f-222816167357
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+        environment:
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: otel-38908ddf-a875-4105-a93f-a4570513911f-222816167357
+            SERVICE_NAME_OTEL: otel
+        env_file:
+            - .env
+
+    litellm:
+        image: 'ghcr.io/berriai/litellm:main-latest'
+        command:
+            - '--config'
+            - /app/litellm.yaml
+            - '--port'
+            - '4000'
+            - '--num_workers'
+            - '1'
+        volumes:
+            - '/data/coolify/applications/38908ddf-a875-4105-a93f-a4570513911f/deploy/litellm.yaml:/app/litellm.yaml:ro'
+        environment:
+            OPENAI_API_KEY: ''
+            ANTHROPIC_API_KEY: ''
+            GOOGLE_API_KEY: ''
+            MUSE_API_KEY: ''
+            DEEPSEEK_API_KEY: ''
+            QWEN_API_KEY: ''
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: litellm-38908ddf-a875-4105-a93f-a4570513911f-222816191603
+            SERVICE_NAME_LITELLM: litellm
+        ports:
+            - '4000:4000'
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - 'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:4000/health/liveliness'', timeout=5).read()"'
+            interval: 15s
+            timeout: 10s
+            start_period: 30s
+            retries: 5
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 1G
+                reservations:
+                    cpus: '0.5'
+                    memory: 512M
+        container_name: litellm-38908ddf-a875-4105-a93f-a4570513911f-222816191603
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=litellm-38908ddf-a875-4105-a93f-a4570513911f-222816191603
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+        env_file:
+            - .env
+
+    evolution:
+        image: 'evoapicloud/evolution-api:v2.3.7'
+        environment:
+            SERVER_URL: 'http://evolution:8080'
+            AUTHENTICATION_TYPE: apikey
+            AUTHENTICATION_API_KEY: '${EVOLUTION_API_KEY:-evolution_secret_change_me}'
+            AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: 'true'
+            QRCODE_LIMIT: '30'
+            QRCODE_COLOR: '#00e5a0'
+            DATABASE_ENABLED: 'true'
+            DATABASE_PROVIDER: postgresql
+            DATABASE_CONNECTION_URI: 'postgresql://supabase_admin:sSpCePJGfhQlE0J6LhFu03pqa01MLwyU@supabase-db:5432/aios'
+            REDIS_ENABLED: 'true'
+            REDIS_URI: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6'
+            REDIS_PREFIX_KEY: evolution
+            CACHE_REDIS_ENABLED: 'true'
+            CACHE_REDIS_URI: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6'
+            CACHE_REDIS_PREFIX_KEY: evolution-cache
+            CACHE_LOCAL_ENABLED: 'true'
+            S3_ENABLED: 'false'
+            LANGUAGE: pt-BR
+            EVOLUTION_API_KEY: evolution_secret_change_me
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: evolution-38908ddf-a875-4105-a93f-a4570513911f-222816239942
+            SERVICE_NAME_EVOLUTION: evolution
+        volumes:
+            - '38908ddf-a875-4105-a93f-a4570513911f_evolution-data:/evolution/instances'
+            - '38908ddf-a875-4105-a93f-a4570513911f_evolution-store:/evolution/store'
+        ports:
+            - '8080:8080'
+        depends_on:
+            redis:
+                condition: service_healthy
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - 'wget -qO- http://localhost:8080/ || exit 1'
+            interval: 15s
+            timeout: 10s
+            start_period: 20s
+            retries: 5
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 1024M
+                reservations:
+                    cpus: '0.2'
+                    memory: 256M
+        container_name: evolution-38908ddf-a875-4105-a93f-a4570513911f-222816239942
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=evolution-38908ddf-a875-4105-a93f-a4570513911f-222816239942
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+            - supabase
+        env_file:
+            - .env
+
+    app:
+        build: .
+        ports:
+            - '8777:8777'
+        environment:
+            REDIS_HOST: redis
+            REDIS_PORT: '6379'
+            REDIS_PASSWORD: changeme
+            AIOS_DEBUG: 'false'
+            AIOS_APP_URL: '${AIOS_APP_URL}'
+            AIOS_DATABASE_URL: 'postgresql+asyncpg://supabase_admin:sSpCePJGfhQlE0J6LhFu03pqa01MLwyU@supabase-db:5432/aios'
+            AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0'
+            AIOS_JWT_SECRET: '${AIOS_JWT_SECRET}'
+            AIOS_ADMIN_MASTER_KEY: c14f4fd66c39770232de0a1f1714add00e2d87d1c4ee76861daaa27142c4aed1
+            AIOS_LLM_PROVIDER: openrouter
+            AIOS_LITELLM_BASE_URL: 'http://litellm:4000'
+            AIOS_LITELLM_API_KEY: sk-litellm
+            EVOLUTION_API_KEY: evolution_secret_change_me
+            EVOLUTION_SERVER_URL: 'http://evolution:8080'
+            AIOS_OPENROUTER_API_KEY: ''
+            AIOS_OPENAI_API_KEY: ''
+            AIOS_ANTHROPIC_API_KEY: ''
+            AIOS_STORAGE_BACKEND: local
+            AIOS_S3_BUCKET: ''
+            AIOS_S3_REGION: ''
+            AIOS_S3_ACCESS_KEY: ''
+            AIOS_S3_SECRET_KEY: ''
+            AIOS_S3_ENDPOINT: ''
+            AIOS_STRIPE_SECRET_KEY: ''
+            AIOS_STRIPE_WEBHOOK_SECRET: ''
+            AIOS_SMTP_HOST: ''
+            AIOS_SMTP_PASSWORD: ''
+            AIOS_VOICE_PROVIDER: selfhosted
+            AIOS_ELEVENLABS_API_KEY: ''
+            AIOS_ELEVENLABS_VOICE_ID: ''
+            AIOS_VAPI_API_KEY: ''
+            AIOS_VAPI_ASSISTANT_ID: ''
+            AIOS_VAPI_PHONE_NUMBER_ID: ''
+            AIOS_RETELL_API_KEY: ''
+            AIOS_RETELL_AGENT_ID: ''
+            AIOS_VOICE_TTS_URL: 'http://voice-tts-kokoro:8880/v1'
+            AIOS_VOICE_STT_URL: 'http://voice-stt:9000'
+            AIOS_VOICE_BRIDGE_URL: ''
+            AIOS_VOICE_FROM_NUMBER: ''
+            AIOS_VOICE_WEBHOOK_SECRET: ''
+            OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel:4317'
+            AIOS_LOG_FORMAT: json
+            AIOS_HTTPS_ONLY: 'true'
+            AIOS_DASHBOARD_ENABLED: 'true'
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: app-38908ddf-a875-4105-a93f-a4570513911f-222816270975
+            SERVICE_NAME_APP: app
+            SERVICE_NAME_WORKER: worker
+            SERVICE_NAME_VOICE_AGENT: voice-agent
+            SERVICE_NAME_VOICE_TTS_KOKORO: voice-tts-kokoro
+        volumes:
+            - '38908ddf-a875-4105-a93f-a4570513911f_app-data:/data'
+        depends_on:
+            redis:
+                condition: service_healthy
+        healthcheck:
+            test:
+                - CMD
+                - curl
+                - '-sf'
+                - 'http://localhost:8777/health/live'
+            interval: 15s
+            timeout: 10s
+            start_period: 90s
+            start_interval: 5s
+            retries: 10
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 1536M
+                reservations:
+                    cpus: '0.5'
+                    memory: 512M
+        container_name: app-38908ddf-a875-4105-a93f-a4570513911f-222816270975
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=app-38908ddf-a875-4105-a93f-a4570513911f-222816270975
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+            - supabase
+        env_file:
+            - .env
+        image: '38908ddf-a875-4105-a93f-a4570513911f_app:9fc14b2efc7924acf368097fd4387dc5cd7d5d29'
+
+    worker:
+        build: .
+        command:
+            - python
+            - '-m'
+            - aios.tasks.worker
+        environment:
+            REDIS_HOST: redis
+            REDIS_PORT: '6379'
+            REDIS_PASSWORD: changeme
+            AIOS_DEBUG: 'false'
+            AIOS_LLM_PROVIDER: openrouter
+            AIOS_LITELLM_BASE_URL: 'http://litellm:4000'
+            AIOS_LITELLM_API_KEY: sk-litellm
+            AIOS_DATABASE_URL: 'postgresql+asyncpg://supabase_admin:sSpCePJGfhQlE0J6LhFu03pqa01MLwyU@supabase-db:5432/aios'
+            AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0'
+            AIOS_JWT_SECRET: '${AIOS_JWT_SECRET}'
+            AIOS_LOG_FORMAT: json
+            OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel:4317'
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: worker-38908ddf-a875-4105-a93f-a4570513911f-222816369141
+            SERVICE_NAME_APP: app
+            SERVICE_NAME_WORKER: worker
+            SERVICE_NAME_VOICE_AGENT: voice-agent
+            SERVICE_NAME_VOICE_TTS_KOKORO: voice-tts-kokoro
+        volumes:
+            - '38908ddf-a875-4105-a93f-a4570513911f_app-data:/data'
+        depends_on:
+            redis:
+                condition: service_healthy
+        healthcheck:
+            test:
+                - CMD-SHELL
+                - "python -c \"import os,redis;from urllib.parse import urlparse;u=os.environ.get('AIOS_REDIS_URL','redis://redis:6379/0');p=urlparse(u);r=redis.Redis(host=p.hostname or 'redis',port=p.port or 6379,password=p.password or os.environ.get('REDIS_PASSWORD',''));r.ping()\""
+            interval: 30s
+            timeout: 10s
+            start_period: 30s
+            retries: 3
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 1G
+        container_name: worker-38908ddf-a875-4105-a93f-a4570513911f-222816369141
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=worker-38908ddf-a875-4105-a93f-a4570513911f-222816369141
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+            - supabase
+        env_file:
+            - .env
+        image: '38908ddf-a875-4105-a93f-a4570513911f_worker:9fc14b2efc7924acf368097fd4387dc5cd7d5d29'
+
+    voice-agent:
+        profiles:
+            - voice
+        build: ./deploy/voice-stream
+        environment:
+            AIOS_URL: 'http://app:8777'
+            AIOS_ADMIN_MASTER_KEY: c14f4fd66c39770232de0a1f1714add00e2d87d1c4ee76861daaa27142c4aed1
+            OLLAMA_URL: 'http://ollama:11434/v1'
+            OLLAMA_MODEL: 'qwen3:8b'
+            OPENROUTER_API_KEY: '${AIOS_OPENROUTER_API_KEY:-}'
+            VOICE_LLM_MODEL: openai/gpt-4o-mini
+            AIOS_VOICE_LLM_MODEL: openai/gpt-4o-mini
+            TTS_WS_URL: 'ws://voice-tts-stream:8001/tts/ws'
+            VOICE_TTS_ENGINE: kokoro
+            VOICE_TTS_VOICE: ptbr
+            KOKORO_URL: 'http://voice-tts-kokoro:8880/v1'
+            PIPER_URL: 'http://voice-tts:8000/v1'
+            STT_URL: 'http://voice-stt:9000/v1'
+            AIOS_OPENROUTER_API_KEY: ''
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: voice-agent-38908ddf-a875-4105-a93f-a4570513911f-222816400696
+            SERVICE_NAME_VOICE_AGENT: voice-agent
+            SERVICE_NAME_VOICE_TTS_KOKORO: voice-tts-kokoro
+        depends_on:
+            redis:
+                condition: service_healthy
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    cpus: '1'
+                    memory: 2G
+        container_name: voice-agent-38908ddf-a875-4105-a93f-a4570513911f-222816400696
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=voice-agent-38908ddf-a875-4105-a93f-a4570513911f-222816400696
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+        env_file:
+            - .env
+        image: '38908ddf-a875-4105-a93f-a4570513911f_voice-agent:9fc14b2efc7924acf368097fd4387dc5cd7d5d29'
+
+    voice-tts-kokoro:
+        image: 'ghcr.io/remsky/kokoro-fastapi-cpu:latest'
+        environment:
+            USE_GPU: 'false'
+            COOLIFY_BRANCH: '"main"'
+            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
+            COOLIFY_CONTAINER_NAME: voice-tts-kokoro-38908ddf-a875-4105-a93f-a4570513911f-222816424549
+            SERVICE_NAME_VOICE_TTS_KOKORO: voice-tts-kokoro
+        volumes:
+            - '38908ddf-a875-4105-a93f-a4570513911f_voice-kokoro-data:/app/api/src/models'
+        restart: unless-stopped
+        deploy:
+            resources:
+                limits:
+                    cpus: '1.5'
+                    memory: 2G
+        container_name: voice-tts-kokoro-38908ddf-a875-4105-a93f-a4570513911f-222816424549
+        labels:
+            - coolify.managed=true
+            - coolify.version=4.1.2
+            - coolify.applicationId=4
+            - coolify.type=application
+            - coolify.name=voice-tts-kokoro-38908ddf-a875-4105-a93f-a4570513911f-222816424549
+            - coolify.resourceName=pixor-aios
+            - coolify.projectName=pixor
+            - coolify.serviceName=pixor-aios
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        networks:
+            - pixor-aios
+        env_file:
+            - .env
+
+volumes:
+    38908ddf-a875-4105-a93f-a4570513911f_redis-data:
+        name: 38908ddf-a875-4105-a93f-a4570513911f_redis-data
+    38908ddf-a875-4105-a93f-a4570513911f_evolution-data:
+        name: 38908ddf-a875-4105-a93f-a4570513911f_evolution-data
+    38908ddf-a875-4105-a93f-a4570513911f_evolution-store:
+        name: 38908ddf-a875-4105-a93f-a4570513911f_evolution-store
+    38908ddf-a875-4105-a93f-a4570513911f_app-data:
+        name: 38908ddf-a875-4105-a93f-a4570513911f_app-data
+    38908ddf-a875-4105-a93f-a4570513911f_voice-kokoro-data:
+        name: 38908ddf-a875-4105-a93f-a4570513911f_voice-kokoro-data
+
+networks:
+    pixor-aios:
+        name: 38908ddf-a875-4105-a93f-a4570513911f
+        external: true
+    supabase:
+        name: x7cec17of43bremk02s521wj
+        external: true
