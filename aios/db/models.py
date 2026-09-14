@@ -553,3 +553,288 @@ class VoiceRecording(Base, TimestampMixin, OrgScopedMixin):
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     conversation = relationship("Conversation")
+
+
+# =============================================================================
+# Ruflo-inspired patterns: Persistent cross-session memory (AgentDB)
+# =============================================================================
+
+class AgentKnowledge(Base, TimestampMixin, OrgScopedMixin):
+    """Persistent agent knowledge base — survives restarts, shared across sessions.
+    
+    AgentDB pattern: key-value knowledge with embeddings for similarity search.
+    Stores facts, patterns, preferences, and learned behaviors.
+    """
+    __tablename__ = "agent_knowledge"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    knowledge_type: Mapped[str] = mapped_column(String(50))  # fact|pattern|preference|procedure|correction
+    key: Mapped[str] = mapped_column(String(255), index=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)  # vector embedding for similarity
+    confidence: Mapped[float] = mapped_column(default=1.0)  # 0.0-1.0
+    source: Mapped[str] = mapped_column(String(50), default="agent")  # agent|human|eval|reflection
+    usage_count: Mapped[int] = mapped_column(default=0)
+    last_accessed: Mapped[datetime | None] = mapped_column(nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    agent = relationship("Agent")
+
+
+class AgentLearning(Base, TimestampMixin, OrgScopedMixin):
+    """Agent learning records — what worked, what didn't, for continuous improvement.
+    
+    AgentDB pattern: stores successful/failed patterns with context for future agents.
+    """
+    __tablename__ = "agent_learnings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    learning_type: Mapped[str] = mapped_column(String(50))  # success_pattern|failure_pattern|optimization|correction
+    trigger_context: Mapped[str] = mapped_column(Text, default="")  # what triggered this learning
+    action_taken: Mapped[str] = mapped_column(Text, default="")  # what was done
+    outcome: Mapped[str] = mapped_column(Text, default="")  # what happened
+    success: Mapped[bool] = mapped_column(default=True)
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)  # tokens, latency, cost, score
+    pattern_signature: Mapped[str] = mapped_column(String(64), index=True)  # hash for deduplication
+    confidence: Mapped[float] = mapped_column(default=1.0)
+    applied_count: Mapped[int] = mapped_column(default=0)  # how many times this was reused
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    agent = relationship("Agent")
+
+
+class AgentReflection(Base, TimestampMixin, OrgScopedMixin):
+    """Agent self-reflection entries — post-task analysis for continuous improvement.
+    
+    AgentDB pattern: structured reflection after each task for meta-learning.
+    """
+    __tablename__ = "agent_reflections"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True)
+    task_summary: Mapped[str] = mapped_column(Text, default="")
+    what_went_well: Mapped[str] = mapped_column(Text, default="")
+    what_could_improve: Mapped[str] = mapped_column(Text, default="")
+    key_insight: Mapped[str] = mapped_column(Text, default="")
+    action_items: Mapped[list] = mapped_column(JSON, default=list)
+    score: Mapped[float] = mapped_column(default=0.0)  # self-assessment 0-1
+    tokens_used: Mapped[int] = mapped_column(default=0)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    agent = relationship("Agent")
+
+
+# =============================================================================
+# Ruflo-inspired patterns: Swarm coordination enhancements
+# =============================================================================
+
+class TeamSwarmConfig(Base, TimestampMixin):
+    """Swarm coordination configuration for teams — leader/worker patterns, consensus."""
+    __tablename__ = "team_swarm_configs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    team_id: Mapped[str] = mapped_column(ForeignKey("teams.id"), unique=True, index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    
+    # Swarm mode
+    swarm_mode: Mapped[str] = mapped_column(String(30), default="supervisor")  # supervisor|consensus|pipeline|mesh
+    
+    # Leader election
+    leader_election: Mapped[str] = mapped_column(String(30), default="static")  # static|dynamic|performance
+    leader_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    leadership_ttl_seconds: Mapped[int] = mapped_column(default=3600)  # re-elect period
+    
+    # Task distribution
+    task_distribution: Mapped[str] = mapped_column(String(30), default="round_robin")  # round_robin|skill_based|load_balanced|priority
+    max_concurrent_tasks: Mapped[int] = mapped_column(default=10)
+    task_timeout_seconds: Mapped[int] = mapped_column(default=300)
+    
+    # Consensus
+    consensus_threshold: Mapped[float] = mapped_column(default=0.6)  # 0.0-1.0
+    consensus_timeout_seconds: Mapped[int] = mapped_column(default=60)
+    
+    # Communication
+    broadcast_enabled: Mapped[bool] = mapped_column(default=True)
+    shared_memory_enabled: Mapped[bool] = mapped_column(default=True)
+    shared_memory_ttl_hours: Mapped[int] = mapped_column(default=24)
+    
+    # Retry/Recovery
+    max_retries: Mapped[int] = mapped_column(default=3)
+    retry_backoff_seconds: Mapped[int] = mapped_column(default=5)
+    failure_escalation: Mapped[str] = mapped_column(String(30), default="leader")  # leader|supervisor|human
+    
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class SwarmTask(Base, TimestampMixin):
+    """Distributed task in a swarm — tracked for coordination and observability."""
+    __tablename__ = "swarm_tasks"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    team_id: Mapped[str] = mapped_column(ForeignKey("teams.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True, index=True)
+    
+    task_id: Mapped[str] = mapped_column(String(64), index=True)  # external task ID
+    task_type: Mapped[str] = mapped_column(String(50))  # agent_call|tool_call|consensus|broadcast
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    priority: Mapped[int] = mapped_column(default=0)
+    
+    assigned_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="queued")  # queued|assigned|running|done|failed|consensus
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    
+    depends_on: Mapped[list] = mapped_column(JSON, default=list)  # list[task_id]
+    consensus_votes: Mapped[dict] = mapped_column(JSON, default=dict)  # {agent_id: vote}
+    
+    attempts: Mapped[int] = mapped_column(default=0)
+    max_attempts: Mapped[int] = mapped_column(default=3)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class SwarmMessage(Base, TimestampMixin):
+    """Inter-agent messages for swarm communication and shared memory."""
+    __tablename__ = "swarm_messages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    team_id: Mapped[str] = mapped_column(ForeignKey("teams.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    swarm_task_id: Mapped[str | None] = mapped_column(ForeignKey("swarm_tasks.id"), nullable=True, index=True)
+    
+    sender_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    recipient_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)  # None = broadcast
+    
+    message_type: Mapped[str] = mapped_column(String(30))  # task|result|consensus|memory|heartbeat
+    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    
+    # For shared memory
+    memory_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    memory_ttl_seconds: Mapped[int | None] = mapped_column(nullable=True)
+    read_by: Mapped[list] = mapped_column(JSON, default=list)  # [agent_id]
+    
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# =============================================================================
+# SPARC Workflow Methodology
+# =============================================================================
+
+class SparcWorkflow(Base, TimestampMixin, OrgScopedMixin):
+    """SPARC methodology workflow template — Spec, Pseudocode, Architect, Refine, Code, Test."""
+    __tablename__ = "sparc_workflows"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    
+    # Current phase
+    current_phase: Mapped[str] = mapped_column(String(30), default="spec")  # spec|pseudocode|architect|refine|code|test|refactor
+    phase_status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|in_progress|done|skipped
+    
+    # Phase outputs (JSON for flexibility)
+    spec_output: Mapped[dict] = mapped_column(JSON, default=dict)
+    pseudocode_output: Mapped[dict] = mapped_column(JSON, default=dict)
+    architect_output: Mapped[dict] = mapped_column(JSON, default=dict)
+    refine_output: Mapped[dict] = mapped_column(JSON, default=dict)
+    code_output: Mapped[dict] = mapped_column(JSON, default=dict)
+    test_output: Mapped[dict] = mapped_column(JSON, default=dict)
+    refactor_output: Mapped[dict] = mapped_column(JSON, default=dict)
+    
+    # Context passed between phases
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
+    
+    # Iteration tracking
+    iteration: Mapped[int] = mapped_column(default=1)
+    max_iterations: Mapped[int] = mapped_column(default=3)
+    
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active|completed|abandoned
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class SparcPhaseLog(Base, TimestampMixin):
+    """Log of each SPARC phase execution for audit and learning."""
+    __tablename__ = "sparc_phase_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    sparc_workflow_id: Mapped[str] = mapped_column(ForeignKey("sparc_workflows.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    
+    phase: Mapped[str] = mapped_column(String(30))  # spec|pseudocode|architect|refine|code|test|refactor
+    iteration: Mapped[int] = mapped_column(default=1)
+    
+    input_context: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    
+    status: Mapped[str] = mapped_column(String(20), default="in_progress")  # in_progress|completed|failed
+    duration_seconds: Mapped[int] = mapped_column(default=0)
+    tokens_used: Mapped[int] = mapped_column(default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# =============================================================================
+# Background Learning/Optimization Workers
+# =============================================================================
+
+class LearningJob(Base, TimestampMixin):
+    """Background learning jobs — pattern extraction, optimization, agent improvement."""
+    __tablename__ = "learning_jobs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    
+    job_type: Mapped[str] = mapped_column(String(50))  # pattern_extraction|optimization|skill_synthesis|memory_consolidation|eval_review
+    trigger: Mapped[str] = mapped_column(String(50), default="scheduled")  # scheduled|threshold|manual|event
+    
+    status: Mapped[str] = mapped_column(String(30), default="queued")  # queued|running|completed|failed
+    priority: Mapped[int] = mapped_column(default=0)
+    
+    input_config: Mapped[dict] = mapped_column(JSON, default=dict)  # time_range, filters, etc.
+    result: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    duration_seconds: Mapped[int] = mapped_column(default=0)
+    
+    # For recurring jobs
+    cron_expr: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
+    is_recurring: Mapped[bool] = mapped_column(default=False)
+    
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class OptimizationRecord(Base, TimestampMixin):
+    """Record of optimization attempts and their outcomes."""
+    __tablename__ = "optimization_records"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    
+    optimization_type: Mapped[str] = mapped_column(String(50))  # prompt|tools|memory|model|workflow|swarm
+    target_metric: Mapped[str] = mapped_column(String(50))  # latency|cost|success_rate|tokens|quality_score
+    
+    before_value: Mapped[float] = mapped_column(default=0.0)
+    after_value: Mapped[float] = mapped_column(default=0.0)
+    improvement_pct: Mapped[float] = mapped_column(default=0.0)
+    
+    change_summary: Mapped[str] = mapped_column(Text, default="")
+    change_details: Mapped[dict] = mapped_column(JSON, default=dict)
+    
+    validation_method: Mapped[str] = mapped_column(String(50))  # eval|shadow|canary|ab_test
+    validation_score: Mapped[float] = mapped_column(default=0.0)
+    is_accepted: Mapped[bool] = mapped_column(default=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    accepted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)

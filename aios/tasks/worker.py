@@ -134,13 +134,56 @@ async def canary_rollback_job(ctx):
         pass
 
 
+async def _learning_job_wrapper(ctx, job_fn_name: str):
+    try:
+        from aios.tasks.learning_worker import (
+            pattern_extraction_job, memory_consolidation_job,
+            optimization_review_job, eval_review_job,
+        )
+        mapping = {
+            "pattern_extraction": pattern_extraction_job,
+            "memory_consolidation": memory_consolidation_job,
+            "optimization_review": optimization_review_job,
+            "eval_review": eval_review_job,
+        }
+        fn = mapping.get(job_fn_name)
+        if fn:
+            await fn(ctx)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("learning job %s failed", job_fn_name)
+
+
+async def _pattern_extraction_cron(ctx):
+    await _learning_job_wrapper(ctx, "pattern_extraction")
+
+
+async def _memory_consolidation_cron(ctx):
+    await _learning_job_wrapper(ctx, "memory_consolidation")
+
+
+async def _optimization_review_cron(ctx):
+    await _learning_job_wrapper(ctx, "optimization_review")
+
+
+async def _eval_review_cron(ctx):
+    await _learning_job_wrapper(ctx, "eval_review")
+
+
 class WorkerSettings:
-    functions = FUNCTIONS + [backup_job, approval_expire_job, autoscale_job, canary_rollback_job]
+    functions = FUNCTIONS + [
+        backup_job, approval_expire_job, autoscale_job, canary_rollback_job,
+        _learning_job_wrapper,
+    ]
     cron_jobs = [
         cron(backup_job, hour=3, minute=0),
         cron(approval_expire_job, minute=5),
         cron(autoscale_job, minute=0),
         cron(canary_rollback_job, minute=10),
+        cron(_pattern_extraction_cron, minute=30),
+        cron(_memory_consolidation_cron, minute=0),
+        cron(_optimization_review_cron, minute=15),
+        cron(_eval_review_cron, minute=25),
     ]
     redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379"))
     max_jobs = 20

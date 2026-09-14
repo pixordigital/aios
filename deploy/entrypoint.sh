@@ -2,15 +2,20 @@
 set -e
 
 wait_for_postgres() {
-  echo "[entrypoint] waiting for postgres..."
+  # If AIOS_DATABASE_URL uses supabase, check that host instead (Ruflo: supabase migration)
+  PG_CHECK_HOST="${PGHOST:-postgres}"
+  if echo "${AIOS_DATABASE_URL:-}" | grep -q "supabase-db"; then
+    PG_CHECK_HOST="supabase-db"
+  fi
+  echo "[entrypoint] waiting for postgres at $PG_CHECK_HOST..."
   i=0
-  until pg_isready -h "${PGHOST:-postgres}" -p "${PGPORT:-5432}" -U "${POSTGRES_USER:-aios}" -d "${POSTGRES_DB:-aios}" 2>/dev/null; do
+  until pg_isready -h "$PG_CHECK_HOST" -p "${PGPORT:-5432}" -U "${POSTGRES_USER:-aios}" -d "${POSTGRES_DB:-aios}" 2>/dev/null; do
     i=$((i+1))
-    if [ "$i" -ge 30 ]; then
-      echo "[entrypoint] postgres not ready after 30 tries, continuing anyway"
+    if [ "$i" -ge 15 ]; then
+      echo "[entrypoint] postgres $PG_CHECK_HOST not ready after 15 tries, continuing anyway (AIOS_DATABASE_URL may use different host)"
       break
     fi
-    echo "[entrypoint] postgres not ready, retry $i/30..."
+    echo "[entrypoint] postgres not ready, retry $i/15..."
     sleep 2
   done
   echo "[entrypoint] postgres check done"

@@ -32,9 +32,15 @@ from .crm2 import router as crm_router
 from .voice import router as voice_router
 from .license import router as license_router
 from .whatsapp import router as whatsapp_router
+from .agent_db import router as agent_db_router
+from .swarm import router as swarm_router
+from .sparc import router as sparc_router
 
 api_router = APIRouter()
 api_router.include_router(whatsapp_router)
+api_router.include_router(agent_db_router)
+api_router.include_router(swarm_router)
+api_router.include_router(sparc_router)
 api_router.include_router(crm_router)
 api_router.include_router(voice_router)
 api_router.include_router(license_router)

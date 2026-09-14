@@ -32,6 +32,25 @@ from aios.core.scheduler import scheduler
 from aios.db.backend import DatabaseBackend
 from aios.db.models import Team
 
+# Ruflo wiring: auto-inject top learnings + post-run reflection (fire-and-forget)
+async def _maybe_reflect(team, agents, conv_id: str, user_msg: str, agent_response: str):
+    try:
+        from aios.core.agent_db import agent_db
+        # pick first agent for reflection
+        agent = agents[0] if agents else None
+        if not agent:
+            return
+        org_id = getattr(agent, "org_id", "") or getattr(team, "org_id", "")
+        # create reflection async, don't block
+        await agent_db.create_reflection(
+            agent_id=agent.id, org_id=org_id, conversation_id=conv_id,
+            task_summary=user_msg[:500], what_went_well=agent_response[:500],
+            key_insight=agent_response[:200] if len(agent_response) > 20 else "",
+            score=0.7,
+        )
+    except Exception:
+        pass
+
 logger = logging.getLogger(__name__)
 
 _SUPERVISOR_SYSTEM_PROMPT = """You are a routing supervisor. Analyze the incoming message and pick the best agent from the list below.
@@ -65,17 +84,24 @@ class TeamOrchestrator:
             )
         match self.strategy:
             case "supervisor":
-                return await self._supervisor_route(conversation_id, message, db)
+                result = await self._supervisor_route(conversation_id, message, db)
             case "round_robin":
-                return await self._round_robin(conversation_id, message, db)
+                result = await self._round_robin(conversation_id, message, db)
             case "broadcast":
-                return await self._broadcast(conversation_id, message, db)
+                result = await self._broadcast(conversation_id, message, db)
             case "semantic":
-                return await self._semantic_route(conversation_id, message, db)
+                result = await self._semantic_route(conversation_id, message, db)
             case "hierarchical":
-                return await self._hierarchical_route(conversation_id, message, db)
+                result = await self._hierarchical_route(conversation_id, message, db)
             case _:
-                return await self._round_robin(conversation_id, message, db)
+                result = await self._round_robin(conversation_id, message, db)
+        # Ruflo: fire-and-forget reflection (best-effort)
+        try:
+            import asyncio as _asyncio
+            _asyncio.create_task(_maybe_reflect(self.team, self.agents, conversation_id, message, result))
+        except Exception:
+            pass
+        return result
 
     async def handle_message_stream(
         self, conversation_id: str, message: str, db: DatabaseBackend | None = None
