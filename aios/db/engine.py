@@ -20,7 +20,7 @@ _pool_kwargs = (
     if _is_postgres()
     else {}
 )
-_connect_kwargs = {"server_settings": {"search_path": "aios,public"}} if _is_postgres() else {}
+_connect_kwargs = {"server_settings": {"search_path": "public,aios"}} if _is_postgres() else {}
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,

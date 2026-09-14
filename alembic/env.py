@@ -42,7 +42,7 @@ def do_run_migrations(connection):
 async def run_async_migrations() -> None:
     connect_args = {}
     if "postgresql" in settings.database_url:
-        connect_args["server_settings"] = {"search_path": "aios"}
+        connect_args["server_settings"] = {"search_path": "public,aios"}
     connectable = create_async_engine(
         settings.database_url, poolclass=pool.NullPool,
         connect_args=connect_args,
