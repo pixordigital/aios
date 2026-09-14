@@ -114,6 +114,7 @@ class Agent(Base, TimestampMixin, OrgScopedMixin):
         "episodic": {"enabled": True, "summarize_after": 10},
     })
     governance_config: Mapped[dict] = mapped_column(JSON, default=dict)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)  # project_path, custom config
     status: Mapped[str] = mapped_column(String(20), default="draft")
 
     organization = relationship("Organization", back_populates="agents")

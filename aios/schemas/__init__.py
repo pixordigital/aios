@@ -98,6 +98,7 @@ class AgentCreate(BaseModel):
     tools: list[str] = Field(default_factory=list, max_length=50)
     memory_config: dict = Field(default_factory=lambda: dict(_AGENT_MEMORY_DEFAULT))
     governance_config: dict = Field(default_factory=lambda: dict(_GOVERNANCE_DEFAULT))
+    extra_data: dict = Field(default_factory=dict)  # project_path, custom config
 
     @field_validator("tools")
     @classmethod
@@ -111,7 +112,7 @@ class AgentCreate(BaseModel):
                 raise ImportError
         except Exception:
             # fallback list when registry not yet populated
-            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","voice_call","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox","crm","lead_scoring","dynamic"}
+            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","voice_call","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox","crm","lead_scoring","dynamic","load_project_skills"}
         invalid = [t for t in v if t not in allowed]
         if invalid:
             raise ValueError(f"tools inválidas: {invalid}")
@@ -139,6 +140,7 @@ class AgentUpdate(BaseModel):
     tools: list[str] | None = Field(default=None, max_length=50)
     memory_config: dict | None = None
     governance_config: dict | None = None
+    extra_data: dict | None = None  # project_path, custom config
     status: str | None = Field(default=None, max_length=20)
 
     @field_validator("tools")
@@ -152,7 +154,7 @@ class AgentUpdate(BaseModel):
             if not allowed:
                 raise ImportError
         except Exception:
-            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","voice_call","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox"}
+            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","voice_call","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox","load_project_skills"}
         invalid = [t for t in v if t not in allowed]
         if invalid:
             raise ValueError(f"tools inválidas: {invalid}")
@@ -183,6 +185,7 @@ class AgentOut(BaseModel):
     tools: list
     memory_config: dict
     governance_config: dict
+    extra_data: dict
     status: str
     org_id: str
     created_at: datetime | None = None

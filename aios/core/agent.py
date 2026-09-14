@@ -453,6 +453,12 @@ class AgentRuntime:
         )
         return result.output or f"Subagent {result.status}: {result.error}"
 
+    async def load_project_skills(self, project_path: str) -> str:
+        """Load and format project skills for explicit injection."""
+        from aios.core.skill_loader import skill_loader
+        skills = skill_loader.load_skills(project_path)
+        return skill_loader.format_skills_for_context(skills)
+
     async def _build_context(
         self, conversation_id: str, user_message: str, db: DatabaseBackend | None = None
     ) -> list[dict]:
@@ -471,10 +477,24 @@ class AgentRuntime:
         # skill injection — load relevant skills for this task
         try:
             from aios.core.skills import skill_store
-            skills = await skill_store.list(agent_id=self.agent.id, q=user_message[:100])
-            if skills:
-                skill_lines = [f"- {s.name}: {s.description}" for s in skills[:5]]
-                ctx.append({"role": "system", "content": "Relevant skills:\n" + "\n".join(skill_lines)})
+            from aios.core.skill_loader import skill_loader
+
+            # Load DB-stored skills (extracted from past runs)
+            db_skills = await skill_store.list(agent_id=self.agent.id, q=user_message[:100])
+
+            # Load project skills (AGENTS.md, CLAUDE.md, etc.) — runtime injection
+            # Check if agent has a project path configured
+            project_path = (self.agent.extra_data or {}).get("project_path") if hasattr(self.agent, 'extra_data') else None
+            project_skills = skill_loader.get_skills_for_task(user_message, project_path, max_skills=5)
+
+            all_skill_lines = []
+            if db_skills:
+                all_skill_lines.extend([f"- {s.name}: {s.description}" for s in db_skills[:3]])
+            if project_skills:
+                all_skill_lines.extend([f"- {s.name} (project): {s.description}" for s in project_skills[:3]])
+
+            if all_skill_lines:
+                ctx.append({"role": "system", "content": "Relevant skills:\n" + "\n".join(all_skill_lines)})
         except Exception:
             pass  # skill injection is best-effort
 

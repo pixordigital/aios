@@ -7,6 +7,7 @@ from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, AgentInstance
 from aios.schemas import AgentCreate, AgentOut, AgentUpdate, PageResponse
 from aios.templates import apply_template
+from aios.core.skill_loader import skill_loader
 from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -47,6 +48,7 @@ async def create_agent(
         llm_config=final_llm,
         tools=final_tools,
         memory_config=final_mem,
+        extra_data=body.extra_data or {},
     )
     db.add(agent)
     await db.commit()
@@ -363,6 +365,7 @@ async def import_agent(
         tools=body.get("tools", []),
         memory_config=body.get("memory_config", {}),
         governance_config=body.get("governance_config", {}),
+        extra_data=body.get("extra_data", {}),
     )
     db.add(agent)
     await db.commit()
@@ -467,4 +470,57 @@ async def spawn_subagent(
         "output": result.output,
         "error": result.error,
         "duration_ms": result.duration_ms,
+    }
+
+
+@router.post("/{agent_id}/skills/reload")
+async def reload_agent_skills(
+    agent_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Reload project skills for an agent (clears cache and reloads from disk)."""
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+
+    project_path = (agent.extra_data or {}).get("project_path")
+    if not project_path:
+        return {"skills": [], "message": "No project_path configured on agent"}
+
+    # Force reload
+    skills = skill_loader.load_skills(project_path, force_reload=True)
+    formatted = skill_loader.format_skills_for_context(skills)
+
+    return {
+        "skills_count": len(skills),
+        "skills": [{"name": s.name, "source": s.source_file, "tags": s.tags} for s in skills],
+        "formatted_context": formatted,
+    }
+
+
+@router.get("/{agent_id}/skills")
+async def get_agent_skills(
+    agent_id: str,
+    q: str = Query("", description="Query to filter skills"),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Get skills relevant to a query (DB + project skills)."""
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+
+    from aios.core.skills import skill_store
+
+    # DB skills
+    db_skills = await skill_store.list(agent_id=agent_id, q=q)
+
+    # Project skills
+    project_path = (agent.extra_data or {}).get("project_path")
+    project_skills = skill_loader.get_skills_for_task(q, project_path) if q and project_path else []
+
+    return {
+        "db_skills": [{"id": s.id, "name": s.name, "description": s.description, "usage_count": s.usage_count} for s in db_skills],
+        "project_skills": [{"name": s.name, "source": s.source_file, "description": s.description, "tags": s.tags} for s in project_skills],
     }

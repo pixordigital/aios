@@ -1,9 +1,13 @@
-"""Usage tracking and plan limit enforcement per org."""
+"""Usage tracking and plan limit enforcement per org.
+
+Atomic enforcement using DB row-level locks (SELECT FOR UPDATE) to prevent
+race conditions on concurrent agent runs — Paperclip-style atomic checkout.
+"""
 
 import logging
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from aios.config import PLANS, DEFAULT_PLAN
 from aios.db.models import Agent, Organization, Team, UsageRecord
@@ -22,7 +26,11 @@ def _plan_limit(org: Organization, key: str):
 
 
 async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
-    """Check if org can execute another agent run. Returns (allowed, reason)."""
+    """Check if org can execute another agent run. Returns (allowed, reason).
+
+    Uses atomic SELECT FOR UPDATE on UsageRecord to prevent double-spending
+    on concurrent runs — same pattern as Paperclip's atomic task checkout.
+    """
     org = await db.get(Organization, org_id)
     if not org:
         return False, "Organization not found"
@@ -50,36 +58,63 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         if count >= max_teams:
             return False, f"Plan limit: max {max_teams} teams ({plan_name} plan)"
 
-    # daily message check
+    # atomic daily/monthly budget check with row lock
     today = date.today().isoformat()
+    start_month = date.today().replace(day=1).isoformat()
+
     max_msgs = limits.get("max_messages_per_day", 99999)
-    if max_msgs != 99999:
-        record = (await db.execute(
-            select(UsageRecord).where(UsageRecord.org_id == org_id, UsageRecord.date == today)
-        )).scalar_one_or_none()
-        if record and record.messages >= max_msgs:
+    max_tokens = limits.get("max_tokens_per_month", 999999999)
+    max_cost_brl = limits.get("max_cost_brl")
+
+    if max_msgs != 99999 or max_tokens != 999999999 or (max_cost_brl and max_cost_brl != 999999):
+        # Lock the current day's usage row (creates if missing) to prevent races
+        await db.execute(
+            text("""
+                INSERT INTO usage_records (org_id, date, messages, llm_tokens, llm_calls, cost_usd)
+                VALUES (:org_id, :date, 0, 0, 0, 0)
+                ON CONFLICT (org_id, date) DO NOTHING
+            """),
+            {"org_id": org_id, "date": today},
+        )
+        await db.commit()
+
+        # Now lock the row for update
+        usage_row = (await db.execute(
+            text("SELECT * FROM usage_records WHERE org_id = :org_id AND date = :date FOR UPDATE"),
+            {"org_id": org_id, "date": today},
+        )).mappings().first()
+
+        if usage_row:
+            msgs_used = usage_row["messages"]
+            tokens_used = usage_row["llm_tokens"]
+            cost_used = usage_row["cost_usd"] or 0.0
+        else:
+            msgs_used = tokens_used = 0
+            cost_used = 0.0
+
+        # Check daily message limit
+        if max_msgs != 99999 and msgs_used >= max_msgs:
             return False, f"Daily message limit reached ({max_msgs}/{plan_name} plan)"
 
-    # monthly token check
-    max_tokens = limits.get("max_tokens_per_month", 999999999)
-    if max_tokens != 999999999:
-        from sqlalchemy import extract as _extract
-        import datetime as _dt
-        now = _dt.date.today()
-        start_month = now.replace(day=1).isoformat()
-        q = select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month)
-        total = (await db.execute(q)).scalar() or 0
-        if total >= max_tokens:
-            return False, f"Monthly token limit reached ({max_tokens}/{plan_name} plan)"
+        # Check monthly token limit (sum from start of month)
+        if max_tokens != 999999999:
+            monthly_tokens = (await db.execute(
+                select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(
+                    UsageRecord.org_id == org_id, UsageRecord.date >= start_month
+                )
+            )).scalar() or 0
+            if monthly_tokens >= max_tokens:
+                return False, f"Monthly token limit reached ({max_tokens}/{plan_name} plan)"
 
-    # P0-15 guardrail custo estimado: USD*5.5 vs max_cost_brl
-    max_cost_brl = limits.get("max_cost_brl")
-    if max_cost_brl and max_cost_brl != 999999:
-        from datetime import date as _d2
-        _start_month = _d2.today().replace(day=1).isoformat()
-        _total_cost = (await db.execute(select(func.coalesce(func.sum(UsageRecord.cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= _start_month))).scalar() or 0
-        if _total_cost * 5.5 >= max_cost_brl:
-            return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${_total_cost*5.5:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
+        # Check monthly cost guardrail (BRL estimate: USD * 5.5)
+        if max_cost_brl and max_cost_brl != 999999:
+            monthly_cost = (await db.execute(
+                select(func.coalesce(func.sum(UsageRecord.cost_usd), 0)).where(
+                    UsageRecord.org_id == org_id, UsageRecord.date >= start_month
+                )
+            )).scalar() or 0
+            if monthly_cost * 5.5 >= max_cost_brl:
+                return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${monthly_cost*5.5:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
 
     # soft limit warnings (80/90) without blocking
     try:
@@ -142,32 +177,27 @@ async def _send_quota_alert(org_id: str, pct: float, plan: str):
 
 
 async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_calls: int = 1, cost_usd: float = 0.0):
+    """Atomically increment usage counters — prevents double-counting on concurrent runs."""
     today = date.today().isoformat()
-    record = (
-        await db.execute(select(UsageRecord).where(UsageRecord.org_id == org_id, UsageRecord.date == today))
-    ).scalar_one_or_none()
 
-    if record:
-        record.messages += messages
-        record.llm_tokens += tokens
-        record.llm_calls += llm_calls
-        record.cost_usd = (record.cost_usd or 0) + cost_usd
-    else:
-        db.add(
-            UsageRecord(
-                org_id=org_id,
-                date=today,
-                messages=messages,
-                llm_tokens=tokens,
-                llm_calls=llm_calls,
-                cost_usd=cost_usd,
-            )
-        )
+    # Atomic upsert with increment (PostgreSQL/SQLite compatible)
+    await db.execute(
+        text("""
+            INSERT INTO usage_records (org_id, date, messages, llm_tokens, llm_calls, cost_usd)
+            VALUES (:org_id, :date, :messages, :tokens, :calls, :cost)
+            ON CONFLICT (org_id, date) DO UPDATE SET
+                messages = usage_records.messages + :messages,
+                llm_tokens = usage_records.llm_tokens + :tokens,
+                llm_calls = usage_records.llm_calls + :calls,
+                cost_usd = usage_records.cost_usd + :cost
+        """),
+        {"org_id": org_id, "date": today, "messages": messages, "tokens": tokens, "calls": llm_calls, "cost": cost_usd},
+    )
     await db.commit()
+
     try:
         if cost_usd:
             from prometheus_client import Counter as _PC
-
             _PC("aios_cost_usd_total", "cost").inc(cost_usd)
     except Exception:
         pass
