@@ -17,6 +17,7 @@ from .library import router as library_router
 from .rubrics import router as rubrics_router
 from .threads import router as threads_router
 from .meta import router as meta_router
+from aios.integrations.arvo.routes import router as arvo_router
 from .workflows import router as workflows_router
 from .versions import router as versions_router
 from .mcp import router as mcp_router
@@ -72,3 +73,4 @@ api_router.include_router(library_router)
 api_router.include_router(rubrics_router)
 api_router.include_router(threads_router)
 api_router.include_router(meta_router)
+api_router.include_router(arvo_router)

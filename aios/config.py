@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     google_calendar_credentials: str = ""  # JSON service account inline ou path (env GOOGLE_CALENDAR_CREDENTIALS / AIOS_GOOGLE_CALENDAR_CREDENTIALS)
     google_calendar_id: str = "primary"  # calendarId (env GOOGLE_CALENDAR_ID)
     calendar_webhook_url: str = ""  # webhook Calendly/Zapier/n8n (env CALENDAR_WEBHOOK_URL / AIOS_CALENDAR_WEBHOOK_URL)
+    # AIOS ↔ ARVO integration (Fase 1A — feature-flag off por padrão)
+    arvo_integration_enabled: bool = False
+    arvo_base_url: str = ""
+    arvo_service_key_id: str = ""
+    arvo_service_key: str = ""
 
 
 
