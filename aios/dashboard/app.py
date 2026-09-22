@@ -3184,11 +3184,18 @@ async def settings_page(request: Request):
         from aios.db.models import Organization
         org = await db.get(Organization, org_id)
         secrets = {}
+        pending_expiry_days = 7
         if org and isinstance(org.extra_data, dict):
             secrets = org.extra_data.get("secrets", {}) if isinstance(org.extra_data.get("secrets"), dict) else {}
+            try:
+                pending_expiry_days = int(org.extra_data.get("pending_expiry_days", 7))
+                if not 1 <= pending_expiry_days <= 60:
+                    pending_expiry_days = 7
+            except Exception:
+                pending_expiry_days = 7
         masked = {k: mask_key(v) if v else "" for k, v in secrets.items()}
         has_key = {k: bool(secrets.get(k)) for k in ALLOWED_KEYS}
-    return await _render("settings.html", request, title="Configurações", secrets=secrets, masked=masked, has_key=has_key)
+    return await _render("settings.html", request, title="Configurações", secrets=secrets, masked=masked, has_key=has_key, pending_expiry_days=pending_expiry_days)
 
 
 @router.post("/settings/save")
@@ -3217,6 +3224,12 @@ async def settings_save(request: Request):
             if form.get(clear_key):
                 secrets.pop(k, None)
         data["secrets"] = secrets
+        # expiry per org (default 7, 1-60)
+        try:
+            exp = int(form.get("pending_expiry_days", "7"))
+            data["pending_expiry_days"] = exp if 1 <= exp <= 60 else 7
+        except Exception:
+            data["pending_expiry_days"] = 7
         org.extra_data = data
         await db.commit()
     return RedirectResponse("/dashboard/settings?saved=1", status_code=303)

@@ -213,6 +213,40 @@ async def _crm_mql_stale_tick():
         logger.exception("CRM mql stale tick failed: %s", e)
 
 
+async def _expire_pending_tick():
+    """Daily 02:00 UTC — expira PendingAction alert-only por org pending_expiry_days (default 7)."""
+    now = datetime.now(timezone.utc)
+    if now.hour != 2 or now.minute not in (0, 1):
+        return
+    try:
+        from aios.db.engine import async_session
+        from aios.db.models import Organization, PendingAction
+        from sqlalchemy import select
+
+        async with async_session() as sess:
+            orgs = (await sess.execute(select(Organization).where(Organization.is_active == True))).scalars().all()
+            for org in orgs:
+                try:
+                    days = int((org.extra_data or {}).get("pending_expiry_days", 7))
+                    if not 1 <= days <= 60:
+                        days = 7
+                except Exception:
+                    days = 7
+                cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - __import__("datetime").timedelta(days=days)
+                # expira pending antigos
+                from sqlalchemy import update
+
+                await sess.execute(
+                    update(PendingAction)
+                    .where(PendingAction.status == "pending", PendingAction.created_at < cutoff)
+                    .values(status="expired")
+                )
+                await sess.commit()
+            logger.info("expire_pending tick done")
+    except Exception:
+        logger.exception("expire_pending tick failed")
+
+
 async def _loop():
     while _running:
         try:
@@ -231,6 +265,10 @@ async def _loop():
             await _crm_mql_stale_tick()
         except Exception:
             logger.exception("crm mql stale tick failed")
+        try:
+            await _expire_pending_tick()
+        except Exception:
+            logger.exception("expire_pending tick failed")
         await asyncio.sleep(60)
 
 def start_cron_scheduler():

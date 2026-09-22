@@ -83,6 +83,16 @@
       </div>
     </div>
 
+    <div class="card" style="border-left:3px solid var(--amber)">
+      <h3>⏰ Alertas — Expiração por organização</h3>
+      <p class="text-xs text-tertiary" style="margin:0.25rem 0 0.75rem">Alertas `PendingAction` (Deal Desk) expiram automaticamente. Padrão 7 dias, configurável por negócio.</p>
+      <div style="display:flex;gap:0.75rem;align-items:end;max-width:320px">
+        <div style="flex:1"><label>Expiração (dias)</label><select name="pending_expiry_days" class="input"><option value="3" {% if pending_expiry_days==3 %}selected{% endif %}>3 dias</option><option value="7" {% if pending_expiry_days==7 %}selected{% endif %}>7 dias (padrão)</option><option value="14" {% if pending_expiry_days==14 %}selected{% endif %}>14 dias</option><option value="30" {% if pending_expiry_days==30 %}selected{% endif %}>30 dias</option><option value="60" {% if pending_expiry_days==60 %}selected{% endif %}>60 dias</option></select></div>
+        <div class="text-xs text-tertiary" style="padding-bottom:0.5rem">Cron 02:00 UTC</div>
+      </div>
+      <p class="text-xs text-tertiary" style="margin-top:0.5rem">Alert-only: expira para `expired`, nunca bloqueia. Validação humana obrigatória.</p>
+    </div>
+
     <div class="card">
       <h3>Stripe / OAuth / Outros</h3>
       <div class="grid-2">

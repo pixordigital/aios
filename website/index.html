@@ -647,8 +647,23 @@
     </div>
 </section>
 
-<!-- Compare + ROI Calculator -->
-<section id="compare-roi">
+    <!-- Deal Desk Governado — wedge -->
+    <section id="deal-desk" style="background:var(--surface);">
+        <div class="inner">
+            <div class="section-label">NOVO — Deal Desk Governado + Budget 2026</div>
+            <h2 class="section-title">Desconto fora da política <span style="color:var(--cyan)">não vira invoice</span> sem prova</h2>
+            <p class="section-desc">Regra genérica por plano (free 5% · pro 12% · enterprise 18%) → <strong>alerta</strong> com <code>exposure estimada</code> e <code>EvidencePack 3 camadas</code> (SOURCE/CALCULATION/EVIDENCE). <strong>Humano decide</strong> via <code>PendingAction</code>. Expira em 7 dias por org (configurável em /dashboard/settings).</p>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px">
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px"><h4 style="font-weight:600;margin-bottom:8px">🔔 Alert-only</h4><p style="font-size:13px;color:var(--text-dim)">Nunca auto-aprova. Disclaimer v1-long: “Alerta informativo, requer validação humana. Sem responsabilidade civil/criminal.”</p></div>
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px"><h4 style="font-weight:600;margin-bottom:8px">💰 Budget 2026</h4><p style="font-size:13px;color:var(--text-dim)">WhatsApp BR: marketing 0.0627, utility/service 0.0042, 1000 service grátis + 72h entry-point. Burn diário → “Dura até 28/09 (36d)”. Orçamento por org ou avançado por agente/team.</p></div>
+                <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px"><h4 style="font-weight:600;margin-bottom:8px">📊 Control Center</h4><p style="font-size:13px;color:var(--text-dim)"><a href="/dashboard/control-center" style="color:var(--cyan)">/dashboard/control-center</a> — HITL queue, degradação 24h, financeiro, humano vs agente.</p></div>
+            </div>
+            <p style="font-size:12px;color:var(--text-muted);margin-top:16px">* PLANS é fonte da verdade. Expira em X dias por org (7 padrão) — cron 02:00 UTC. Block só para PLANS.</p>
+        </div>
+    </section>
+
+    <!-- Compare + ROI Calculator -->
+    <section id="compare-roi">
     <div class="inner">
         <div class="section-label">07 / Compare e calcule seu ROI</div>
         <h2 class="section-title">Por que <span style="color:var(--accent)">R$89 fixo</span> vence<br>cobrança por minuto?</h2>
