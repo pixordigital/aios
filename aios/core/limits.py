@@ -119,21 +119,31 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
             if total_brl >= max_cost_brl:
                 return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${total_brl:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
 
-        # Budget check (por org, ou avançado por agente/team se scope preenchido)
+        # Budget check — informativo, nunca bloqueia (usuário pode pagar mais). Apenas alerta.
+        # creation (one_off) e operation (monthly) são só forecast/controle, não gate.
         try:
             from sqlalchemy import select as _s2
 
             from aios.db.models import Budget
 
-            budgets = (await db.execute(select(Budget).where(Budget.org_id == org_id, Budget.period == "monthly"))).scalars().all()
+            budgets = (await db.execute(select(Budget).where(Budget.org_id == org_id))).scalars().all()
             for b in budgets:
-                # escopo vazio = org inteiro
+                if b.type == "creation":
+                    continue  # one_off informativo, sem checagem mensal
                 if b.scope and b.scope.get("agents"):
-                    continue  # avançado checado em runtime por agente_id
+                    continue  # avançado filtrado em runtime
                 spent = (await db.execute(select(func.coalesce(func.sum(UsageRecord.cost_usd + UsageRecord.whatsapp_cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month))).scalar() or 0
                 spent_brl = spent * 5.5
-                if spent_brl >= b.amount_brl and b.block_on_exceed:
-                    return False, f"Orçamento {b.name} R${b.amount_brl:.0f} atingido (uso R${spent_brl:.2f}) — bloqueado para evitar overage. Ajuste em /dashboard/billing"
+                pct = (spent_brl / b.amount_brl * 100) if b.amount_brl else 0
+                if pct >= 80:
+                    logger.warning("Budget %s %s%% org %s (R$%.2f/R$%.0f)", b.name, round(pct), org_id, spent_brl, b.amount_brl)
+                    # alerta 80/90/100 sem bloquear
+                    try:
+                        from aios.tasks.queue import enqueue_job
+
+                        await enqueue_job("aios.tasks.jobs.budget_alert_job", {"org_id": org_id, "budget_id": b.id, "pct": round(pct), "spent_brl": spent_brl})
+                    except Exception:
+                        pass
         except Exception:
             pass
 
