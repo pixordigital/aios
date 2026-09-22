@@ -1,11 +1,47 @@
-"""Rotas de integração ARVO ↔ AIOS (Fase 1C/2). Feature-gated + HMAC."""
+"""Rotas de integração ARVO ↔ AIOS (Fase 1C/2 + Fase payload). Feature-gated + HMAC + idempotency."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import threading
+import time
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from aios.config import settings
 from .auth import verify_request
 
 router = APIRouter(prefix="/api/integrations/arvo/v1", tags=["arvo-integration"])
+
+# ponytail: in-memory idempotency, TTL 24h; upgrade para DB em Fase 1-persist
+_events: dict[str, tuple[float, dict]] = {}
+_events_lock = threading.Lock()
+_EVENTS_TTL = 86400
+
+
+class ArvoEvent(BaseModel):
+    type: str = Field(..., max_length=64, pattern=r"^[a-z0-9_.-]+$")
+    payload: dict = Field(default_factory=dict)
+    occurred_at: str | None = None
+
+
+def _get_idempotent(key: str) -> dict | None:
+    now = time.time()
+    with _events_lock:
+        for k, (exp, _) in list(_events.items()):
+            if exp < now:
+                del _events[k]
+        if key in _events:
+            return _events[key][1]
+    return None
+
+
+def _store_idempotent(key: str, resp: dict) -> None:
+    with _events_lock:
+        _events[key] = (time.time() + _EVENTS_TTL, resp)
+
+
+def _clear_events() -> None:
+    with _events_lock:
+        _events.clear()
 
 
 def _require_enabled() -> None:
@@ -38,3 +74,19 @@ async def health():
 @router.post("/health", dependencies=[Depends(_require_auth)])
 async def health_probe():
     return await health()
+
+
+@router.post("/events", dependencies=[Depends(_require_auth)])
+async def ingest_event(
+    body: ArvoEvent,
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+):
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise HTTPException(400, "Invalid Idempotency-Key")
+    cached = _get_idempotent(idempotency_key)
+    if cached is not None:
+        return {**cached, "deduplicated": True}
+    # Fase payload: ack only; processamento real hookável aqui
+    resp = {"status": "processed", "idempotency_key": idempotency_key, "type": body.type, "deduplicated": False}
+    _store_idempotent(idempotency_key, {k: v for k, v in resp.items() if k != "deduplicated"})
+    return resp

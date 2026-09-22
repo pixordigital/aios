@@ -1,4 +1,7 @@
-"""Cliente HTTP para o peer ARVO (Fase 1D). Assina requests via auth.sign_request."""
+"""Cliente HTTP para o peer ARVO (Fase 1D + payload). Assina requests via auth.sign_request."""
+
+import json
+import uuid
 
 import httpx
 
@@ -19,5 +22,19 @@ async def ping() -> dict:
     path = f"{PATH_PREFIX}/health"
     async with httpx.AsyncClient(base_url=settings.arvo_base_url) as c:
         r = await c.get(path, headers=_headers("GET", path))
+        r.raise_for_status()
+        return r.json()
+
+
+async def send_event(event_type: str, payload: dict, idempotency_key: str | None = None) -> dict:
+    """POST /events idempotente."""
+    body_dict = {"type": event_type, "payload": payload}
+    body = json.dumps(body_dict, separators=(",", ":")).encode()
+    path = f"{PATH_PREFIX}/events"
+    headers = _headers("POST", path, body)
+    headers["Idempotency-Key"] = idempotency_key or str(uuid.uuid4())
+    headers["Content-Type"] = "application/json"
+    async with httpx.AsyncClient(base_url=settings.arvo_base_url) as c:
+        r = await c.post(path, content=body, headers=headers)
         r.raise_for_status()
         return r.json()

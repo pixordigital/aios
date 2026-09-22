@@ -70,3 +70,38 @@ def test_health_requires_auth_when_enabled():
         settings.arvo_service_key_id = orig_id
         settings.arvo_service_key = orig_key
         _clear_nonces()
+
+
+def test_events_idempotency():
+    import json
+    from fastapi.testclient import TestClient
+    from aios.config import settings
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+
+    c = TestClient(app)
+    orig_enabled, orig_id, orig_key = settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        path = "/api/integrations/arvo/v1/events"
+        body = json.dumps({"type": "test.event", "payload": {"a": 1}}, separators=(",", ":")).encode()
+        hdr = sign_request("POST", path, body, "kid-1", "secret-1")
+        hdr["Idempotency-Key"] = "idem-1"
+        hdr["Content-Type"] = "application/json"
+        r = c.post(path, content=body, headers=hdr)
+        assert r.status_code == 200 and r.json()["deduplicated"] is False
+        hdr2 = sign_request("POST", path, body, "kid-1", "secret-1")
+        hdr2["Idempotency-Key"] = "idem-1"
+        hdr2["Content-Type"] = "application/json"
+        r2 = c.post(path, content=body, headers=hdr2)
+        assert r2.json()["deduplicated"] is True
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
