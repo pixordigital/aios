@@ -90,6 +90,40 @@ async def create_budget(body: BudgetCreate, db: DatabaseBackend = Depends(get_db
     return b
 
 
+@router.put("/budget/{bid}")
+async def update_budget(bid: str, body: BudgetCreate, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    b = await db.get(Budget, bid)
+    if not b or b.org_id != org_id:
+        raise HTTPException(404)
+    if body.amount_brl <= 0:
+        raise HTTPException(400, "amount_brl deve ser >0")
+    b.name = body.name
+    b.type = body.type if body.type in ("creation", "operation") else b.type
+    b.amount_brl = body.amount_brl
+    b.period = body.period
+    b.scope = body.scope or {}
+    b.country = body.country
+    b.block_on_exceed = body.block_on_exceed
+    await db.commit()
+    await db.refresh(b)
+    return b
+
+
+@router.patch("/budget/{bid}")
+async def patch_budget(bid: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    b = await db.get(Budget, bid)
+    if not b or b.org_id != org_id:
+        raise HTTPException(404)
+    for k in ("name", "amount_brl", "type", "period", "scope", "country", "block_on_exceed"):
+        if k in body:
+            setattr(b, k, body[k])
+    if b.amount_brl <= 0:
+        raise HTTPException(400, "amount_brl deve ser >0")
+    await db.commit()
+    await db.refresh(b)
+    return b
+
+
 @router.delete("/budget/{bid}")
 async def delete_budget(bid: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     b = await db.get(Budget, bid)

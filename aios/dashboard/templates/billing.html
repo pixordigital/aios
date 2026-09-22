@@ -58,6 +58,18 @@
     {% else %}
     <p class="text-sm text-secondary" style="margin-top:0.5rem">Nenhum orçamento — crie um para ver “quanto tempo dura” com seu burn atual (LLM + WhatsApp BR).</p>
     {% endif %}
+    {% if budgets %}
+    <div style="margin-top:0.75rem;border-top:1px solid var(--border);padding-top:0.5rem">
+        <div style="font-size:0.8125rem;font-weight:600;margin-bottom:0.375rem">Orçamentos criados (editável/deletável)</div>
+        {% for b in budgets %}
+        <div style="display:flex;align-items:center;gap:0.5rem;padding:0.375rem 0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:0.375rem">
+            <div style="flex:1"><div style="font-weight:600;font-size:0.8125rem">{{ b.name }} — R$ {{ "%.0f"|format(b.amount_brl) }} <span style="font-weight:400;color:var(--text-tertiary)">({{ b.type }}/{{ b.period }})</span></div><div style="font-size:0.6875rem;color:var(--text-tertiary)">{{ b.id[:8] }} • {{ b.country }} • {{ b.scope or '{}' }}</div></div>
+            <button class="btn btn-ghost btn-sm" onclick="editBudget('{{ b.id }}','{{ b.name }}',{{ b.amount_brl }},'{{ b.type }}')">Editar</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="deleteBudget('{{ b.id }}')">Deletar</button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
     <details style="margin-top:0.75rem"><summary style="font-size:0.8125rem;cursor:pointer;color:var(--accent)">+ Criar orçamento (por org ou avançado por agente/team)</summary>
         <form id="budgetForm" style="margin-top:0.75rem;display:grid;gap:0.5rem;max-width:520px" onsubmit="createBudget(event)">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem"><input name="name" class="input" placeholder="Nome (ex: Operação)" required><select name="type" class="input"><option value="operation">Operação (mensal)</option><option value="creation">Criação (one-off)</option></select></div>
@@ -69,6 +81,8 @@
     </details>
     <script>
     async function createBudget(e){ e.preventDefault(); const fd=new FormData(e.target); const scope={}; if(fd.get('agents')) scope.agents=fd.get('agents').split(',').map(s=>s.trim()).filter(Boolean); if(fd.get('teams')) scope.teams=fd.get('teams').split(',').map(s=>s.trim()).filter(Boolean); const body={name:fd.get('name'), type:fd.get('type'), amount_brl:parseFloat(fd.get('amount_brl')), period:fd.get('type')=='creation'?'one_off':'monthly', scope, country:fd.get('country'), block_on_exceed:fd.get('block_on_exceed')==='on'}; const r=await fetch('/api/billing/budget',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if(r.ok) location.reload(); else alert('Erro '+(await r.text()).slice(0,200));}
+    async function deleteBudget(id){ if(!confirm('Deletar orçamento '+id+'?')) return; const r=await fetch('/api/billing/budget/'+id,{method:'DELETE'}); if(r.ok) location.reload(); else alert('Erro '+(await r.text()).slice(0,200));}
+    async function editBudget(id, oldName, oldAmount, oldType){ const name=prompt('Nome', oldName); if(name===null) return; const amount=prompt('Valor R$', oldAmount); if(amount===null) return; const type=prompt('Tipo creation/operation', oldType)||oldType; const r=await fetch('/api/billing/budget/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name, amount_brl:parseFloat(amount), type, period:type=='creation'?'one_off':'monthly', scope:{}, country:'BR', block_on_exceed:false})}); if(r.ok) location.reload(); else alert('Erro '+(await r.text()).slice(0,200));}
     async function fetchCreationCost(){ const r=await fetch('/api/billing/creation-cost?agent_type=sdr&model=openai/gpt-4o-mini'); const j=await r.json(); document.getElementById('ccost').textContent='R$ '+j.cost_brl+' ('+j.agent_type+')';}
     fetchCreationCost();
     </script>
