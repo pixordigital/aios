@@ -837,5 +837,33 @@ class OptimizationRecord(Base, TimestampMixin):
     is_accepted: Mapped[bool] = mapped_column(default=False)
     accepted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     accepted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    
+
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# =============================================================================
+# AIOS ↔ ARVO integration — Fase 1-persist (DB nonce + idempotency)
+# =============================================================================
+
+
+class IntegrationNonce(Base):
+    """HMAC nonce dedup persistido — sobrevive restart, cross-instance."""
+
+    __tablename__ = "integration_nonces"
+    nonce: Mapped[str] = mapped_column(String(64), primary_key=True)
+    peer: Mapped[str] = mapped_column(String(20), default="arvo")
+    expires_at: Mapped[datetime] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class IntegrationEvent(Base):
+    """Idempotency log para POST /events — deduplica por Idempotency-Key."""
+
+    __tablename__ = "integration_events"
+    idempotency_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    peer: Mapped[str] = mapped_column(String(20), default="arvo")
+    type: Mapped[str] = mapped_column(String(64), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    response: Mapped[dict] = mapped_column(JSON, default=dict)
+    expires_at: Mapped[datetime] = mapped_column(index=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
