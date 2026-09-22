@@ -1778,6 +1778,25 @@ async def billing_page(request: Request):
             for v in model_map.values():
                 v["cost"] = round(v["cost"], 4)
         model_breakdown = sorted(model_map.values(), key=lambda x: x["tokens"], reverse=True)
+        # budgets
+        from aios.db.models import Budget as _Budget
+
+        budgets = (await db.execute(_select(_Budget).where(_Budget.org_id == org_id).order_by(_Budget.created_at.desc()))).scalars().all()
+        # forecast para orçamento principal (primeiro operation ou maior amount)
+        budget_forecast = None
+        try:
+            op_b = next((b for b in budgets if b.type == "operation"), budgets[0] if budgets else None)
+            if op_b:
+                daily_brl = (monthly.get("avg_daily_cost", 0) * 5.5) or 1
+                spent_brl = monthly.get("total_cost", 0) * 5.5
+                remaining = max(op_b.amount_brl - spent_brl, 0)
+                days_left = int(remaining / daily_brl) if daily_brl > 0 else 999
+                from datetime import date, timedelta as _td
+
+                date_end = (date.today() + _td(days=days_left)).isoformat() if days_left < 999 else None
+                budget_forecast = {"budget": op_b, "spent_brl": round(spent_brl, 2), "daily_burn_brl": round(daily_brl, 2), "remaining_brl": round(remaining, 2), "days_left": days_left, "date_end": date_end}
+        except Exception:
+            budget_forecast = None
     daily_msgs = usage["messages_today"]
 
     stripe_prices = {}
@@ -1792,7 +1811,8 @@ async def billing_page(request: Request):
                    agent_count=agent_count, team_count=team_count,
                    daily_msgs=daily_msgs, monthly=monthly, agent_breakdown=agent_breakdown, model_breakdown=model_breakdown, plans=PLANS,
                    org_id=org_id, stripe_prices=json.dumps(stripe_prices),
-                   subscription_id=org.extra_data.get("stripe_subscription_id") if org else None)
+                   subscription_id=org.extra_data.get("stripe_subscription_id") if org else None,
+                   budgets=budgets, budget_forecast=budget_forecast)
 
 
 @router.get("/promptlab", response_class=HTMLResponse)

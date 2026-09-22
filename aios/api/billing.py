@@ -9,9 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from aios.config import PLANS, STRIPE_PRICE_MAP, settings
-from aios.core.limits import get_usage_summary
+from aios.core.limits import get_monthly_usage, get_usage_summary
+from aios.core.whatsapp_pricing import estimate_creation_cost, get_rates, whatsapp_cost_for_messages
 from aios.db.backend import db_session, get_db_backend, DatabaseBackend
-from aios.db.models import Organization
+from aios.db.models import Budget, Organization
 from .deps import get_current_user, get_org_id
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,112 @@ async def usage_summary(
 ):
     """Return usage summary for org."""
     return await get_usage_summary(org_id, db)
+
+
+class BudgetCreate(BaseModel):
+    name: str = "Operação"
+    type: str = "operation"  # creation|operation
+    amount_brl: float
+    period: str = "monthly"
+    scope: dict = {}
+    country: str = "BR"
+    block_on_exceed: bool = True
+
+
+@router.get("/budget")
+async def list_budgets(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    rows = (await db.execute(select(Budget).where(Budget.org_id == org_id).order_by(Budget.created_at.desc()))).scalars().all()
+    return rows
+
+
+@router.post("/budget")
+async def create_budget(body: BudgetCreate, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    if body.amount_brl <= 0:
+        raise HTTPException(400, "amount_brl deve ser >0")
+    if body.type not in ("creation", "operation"):
+        raise HTTPException(400, "type creation|operation")
+    b = Budget(org_id=org_id, name=body.name, type=body.type, amount_brl=body.amount_brl, period=body.period, scope=body.scope or {}, country=body.country, block_on_exceed=body.block_on_exceed, alert_at=[80, 90, 100])
+    db.add(b)
+    await db.commit()
+    await db.refresh(b)
+    return b
+
+
+@router.delete("/budget/{bid}")
+async def delete_budget(bid: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    b = await db.get(Budget, bid)
+    if not b or b.org_id != org_id:
+        raise HTTPException(404)
+    await db.delete(b)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/budget/forecast")
+async def budget_forecast(budget_id: str = "", db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    """Quanto tempo dura? Usa burn 7d (LLM+WA). Retorna cenários antes/depois 01/10."""
+    from datetime import date, timedelta
+
+    monthly = await get_monthly_usage(org_id, db)
+    # burn últimos 7d
+    all_daily = monthly.get("daily_series", [])
+    last7 = all_daily[-7:] if len(all_daily) >= 7 else all_daily
+    daily_brl = sum((d.get("cost", 0) * 5.5) for d in last7) / max(len(last7), 1) if last7 else monthly.get("avg_daily_cost", 0) * 5.5
+    # adiciona WA custo se houver
+    wa_daily = 0.0
+    for d in last7:
+        wa_daily += (d.get("whatsapp_cost", 0) or 0) * 5.5 if "whatsapp_cost" in d else 0
+    if last7:
+        daily_brl = (sum((d.get("cost", 0) * 5.5) for d in last7) + wa_daily) / len(last7)
+    spent_brl = monthly.get("total_cost", 0) * 5.5
+    # se budget_id fornecido, usa esse budget, senão usa max_cost_brl do plano
+    amount_brl = None
+    budget = None
+    if budget_id:
+        budget = await db.get(Budget, budget_id)
+        if budget and budget.org_id == org_id:
+            amount_brl = budget.amount_brl
+    if amount_brl is None:
+        # fallback plano
+        from aios.config import PLANS
+
+        org = await db.get(Organization, org_id)
+        plan = (org.extra_data or {}).get("plan", "free") if org else "free"
+        amount_brl = PLANS.get(plan, {}).get("max_cost_brl", 100)
+        if amount_brl == 999999:
+            amount_brl = 800
+    remaining = max(amount_brl - spent_brl, 0)
+    days_left = int(remaining / daily_brl) if daily_brl > 0 else 999
+    from datetime import datetime, timezone
+
+    date_end = (date.today() + timedelta(days=days_left)).isoformat() if days_left < 999 else None
+    # cenário pós 01/10: sem free service/utility dentro janela → +38% WA (estimativa)
+    wa_after = daily_brl * 0.38 if any(c in str(monthly) for c in ["whatsapp"]) else 0  # placeholder
+    # calcula WA split exemplo para BR: assume 60% inside_window
+    scenario_after_days = int(remaining / (daily_brl * 1.38)) if daily_brl > 0 else days_left
+    return {
+        "amount_brl": amount_brl,
+        "spent_brl": round(spent_brl, 2),
+        "daily_burn_brl": round(daily_brl, 2),
+        "remaining_brl": round(remaining, 2),
+        "days_left": days_left,
+        "date_end": date_end,
+        "scenario_before_oct": {"days_left": days_left, "daily_burn": round(daily_brl, 2)},
+        "scenario_after_oct": {"days_left": scenario_after_days, "daily_burn": round(daily_brl * 1.38, 2), "note": "sem free service/utility dentro janela"},
+        "monthly": monthly,
+        "budget_id": budget_id or None,
+    }
+
+
+@router.get("/whatsapp/rates")
+async def whatsapp_rates(country: str = "BR"):
+    return get_rates(country)
+
+
+@router.get("/creation-cost")
+async def creation_cost(agent_type: str = "sdr", model: str = "openai/gpt-4o-mini"):
+    """Estimativa automática criação agente."""
+    return {"agent_type": agent_type, "model": model, "cost_brl": estimate_creation_cost(agent_type, model), "note": "3000 tokens teste"}
 
 
 @router.post("/create-checkout")

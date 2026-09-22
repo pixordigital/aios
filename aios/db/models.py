@@ -245,6 +245,9 @@ class UsageRecord(Base):
     llm_tokens: Mapped[int] = mapped_column(default=0)
     llm_calls: Mapped[int] = mapped_column(default=0)
     cost_usd: Mapped[float] = mapped_column(default=0.0)
+    whatsapp_messages: Mapped[int] = mapped_column(default=0)
+    whatsapp_cost_usd: Mapped[float] = mapped_column(default=0.0)
+    whatsapp_split: Mapped[dict] = mapped_column(JSON, default=dict)  # {marketing,utility,service,auth}
 
 
 class RemoteInstance(Base, TimestampMixin):
@@ -867,3 +870,18 @@ class IntegrationEvent(Base):
     response: Mapped[dict] = mapped_column(JSON, default=dict)
     expires_at: Mapped[datetime] = mapped_column(index=True)
     created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class Budget(Base, TimestampMixin, OrgScopedMixin):
+    """Orçamento criação (one_off) + operação (monthly) com escopo org ou avançado por agente/team."""
+
+    __tablename__ = "budgets"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(100), default="Operação")
+    type: Mapped[str] = mapped_column(String(20), default="operation")  # creation|operation
+    amount_brl: Mapped[float] = mapped_column(default=0.0)
+    period: Mapped[str] = mapped_column(String(20), default="monthly")  # monthly|one_off
+    scope: Mapped[dict] = mapped_column(JSON, default=dict)  # {agents:[], teams:[], channels:[], categories:[]}
+    country: Mapped[str] = mapped_column(String(5), default="BR")
+    block_on_exceed: Mapped[bool] = mapped_column(default=True)
+    alert_at: Mapped[list] = mapped_column(JSON, default=list)  # [80,90,100]

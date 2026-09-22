@@ -113,8 +113,29 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
                     UsageRecord.org_id == org_id, UsageRecord.date >= start_month
                 )
             )).scalar() or 0
-            if monthly_cost * 5.5 >= max_cost_brl:
-                return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${monthly_cost*5.5:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
+            # inclui WhatsApp se houver
+            wa_cost = (await db.execute(select(func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month))).scalar() or 0
+            total_brl = (monthly_cost + wa_cost) * 5.5
+            if total_brl >= max_cost_brl:
+                return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${total_brl:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
+
+        # Budget check (por org, ou avançado por agente/team se scope preenchido)
+        try:
+            from sqlalchemy import select as _s2
+
+            from aios.db.models import Budget
+
+            budgets = (await db.execute(select(Budget).where(Budget.org_id == org_id, Budget.period == "monthly"))).scalars().all()
+            for b in budgets:
+                # escopo vazio = org inteiro
+                if b.scope and b.scope.get("agents"):
+                    continue  # avançado checado em runtime por agente_id
+                spent = (await db.execute(select(func.coalesce(func.sum(UsageRecord.cost_usd + UsageRecord.whatsapp_cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month))).scalar() or 0
+                spent_brl = spent * 5.5
+                if spent_brl >= b.amount_brl and b.block_on_exceed:
+                    return False, f"Orçamento {b.name} R${b.amount_brl:.0f} atingido (uso R${spent_brl:.2f}) — bloqueado para evitar overage. Ajuste em /dashboard/billing"
+        except Exception:
+            pass
 
     # soft limit warnings (80/90) without blocking
     try:
