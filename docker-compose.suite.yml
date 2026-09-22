@@ -1,0 +1,28 @@
+# Suite AIOS + ARVO — HMAC, events, control center. Run both as one suite.
+# Usage: docker compose -f docker-compose.suite.yml up
+
+services:
+  aios:
+    build: .
+    ports: ["8777:8777"]
+    env_file: .env
+    environment:
+      AIOS_ARVO_INTEGRATION_ENABLED: "true"
+      AIOS_ARVO_BASE_URL: http://arvo:9777
+      AIOS_ARVO_SERVICE_KEY_ID: suite-kid
+      AIOS_ARVO_SERVICE_KEY: suite-secret
+    depends_on:
+      - arvo
+  arvo:
+    build:
+      context: ../arvo
+      dockerfile: Dockerfile
+    ports: ["9777:9777"]
+    env_file: ../arvo/.env
+    environment:
+      ARVO_AIOS_INTEGRATION_ENABLED: "true"
+      ARVO_AIOS_BASE_URL: http://aios:8777
+      ARVO_AIOS_SERVICE_KEY_ID: suite-kid
+      ARVO_AIOS_SERVICE_KEY: suite-secret
+
+# Health: GET /health/live on both, POST /api/.../events HMAC 200

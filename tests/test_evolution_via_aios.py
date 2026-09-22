@@ -15,6 +15,7 @@ Usage:
     pytest tests/test_evolution_via_aios.py -v -s
 """
 
+import logging
 import os
 import pytest
 import asyncio
