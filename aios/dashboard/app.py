@@ -483,12 +483,38 @@ async def agent_list(request: Request):
 
 
 @router.get("/agents/new", response_class=HTMLResponse)
-async def agent_new_form(request: Request):
+async def agent_new_form(request: Request, type: str | None = None, template: str | None = None):
+    from types import SimpleNamespace
     org_id = await _org_filter(request)
+    tname = type or template
+    preset_agent = None
+    if tname:
+        from aios.templates import TEMPLATES
+        tmpl = TEMPLATES.get(tname)
+        if tmpl:
+            name_map = {
+                "deal_auditor": "Deal Auditor",
+                "pricing_guardian": "Pricing Guardian",
+                "evidence_compiler": "Evidence Compiler",
+                "performance_watcher": "Performance Watcher",
+                "human_auditor": "Human Auditor Assistant",
+            }
+            preset_name = name_map.get(tname, tname.replace("_", " ").title())
+            preset_agent = SimpleNamespace(
+                id="",
+                name=preset_name,
+                agent_type=tname,
+                system_prompt=tmpl.get("system_prompt", ""),
+                llm_config=tmpl.get("llm_config", {}),
+                tools=tmpl.get("tools", []),
+                memory_config=tmpl.get("memory_config", {}),
+                governance_config=tmpl.get("governance_config", {}),
+                status="draft",
+            )
     async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
     return await _render("agent_form.html", request, title="Novo Agente",
-                   agent=None, agent_types=AGENT_TYPES, agents=agents)
+                   agent=preset_agent, agent_types=AGENT_TYPES, agents=agents)
 
 
 @router.get("/agents/{aid}/edit", response_class=HTMLResponse)
