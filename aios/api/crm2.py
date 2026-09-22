@@ -64,15 +64,25 @@ async def update_deal(deal_id: str, body: dict, db: DatabaseBackend = Depends(ge
     deal = await db.get(CrmDeal, deal_id)
     if not deal or deal.org_id != org_id:
         raise HTTPException(404)
-    # HITL: discount >15% precisa aprovação
-    if body.get("value") and float(body["value"]) > 0 and deal.value > 0:
-        discount = (deal.value - float(body["value"]))/deal.value*100 if deal.value else 0
-        if discount > 15:
-            from aios.db.models import PendingAction
-            pa = PendingAction(agent_id=deal.agent_id or deal.id, conversation_id=deal.id, tool_name="crm_update_deal", tool_args={"deal_id": deal_id, "value": body["value"], "discount": discount}, context_summary=f"Desconto {discount:.1f}% em deal {deal.lead_name}", status="pending")
-            db.add(pa)
-            await db.commit()
-            return {"pending_approval": True, "discount": discount, "message": "Desconto >15% requer aprovação do manager"}
+    # Deal Desk Governado — wedge (PLANS + HITL alert)
+    try:
+        from aios.governance.deal_desk import audit_deal_change, check_human_deviation
+        from aios.db.models import Organization as _Org
+        _org = await db.get(_Org, org_id)
+        if body.get("value"):
+            allowed, pa, exposure = await audit_deal_change(deal, float(body["value"]), body.get("extra_data"), _org, db, changed_by=user.id if hasattr(user, "id") else "human", agent_id=deal.agent_id)
+            if not allowed and pa:
+                await db.commit()
+                return {"pending_approval": True, "discount": pa.tool_args.get("discount"), "exposure": exposure, "pending_id": pa.id, "message": f"Desconto {pa.tool_args.get('discount'):.1f}% > política {pa.tool_args.get('max_discount')}% — aguardando aprovação (Evidence: CrmDealVersion + AuditLog)"}
+        # desvio humano
+        if body.get("stage"):
+            pa2 = await check_human_deviation(deal, body, _org, db, user.id if hasattr(user, "id") else "human")
+            if pa2:
+                await db.commit()
+                # não bloqueia, só alerta — retorna deal + alerta
+                pass
+    except Exception:
+        pass
     old_stage = deal.stage
     for k in ["stage","value","score","lead_name","lead_email","lead_phone","agent_id","team_id","extra_data"]:
         if k in body:

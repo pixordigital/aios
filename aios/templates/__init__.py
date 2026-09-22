@@ -7,6 +7,11 @@ from aios.templates.data_analyst import DATA_ANALYST_TEMPLATE
 from aios.templates.data_scientist import DATA_SCIENTIST_TEMPLATE
 from aios.templates.orchestrator import ORCHESTRATOR_TEMPLATE
 from aios.templates.manager import MANAGER_TEMPLATE
+from aios.templates.deal_auditor import DEAL_AUDITOR_TEMPLATE
+from aios.templates.pricing_guardian import PRICING_GUARDIAN_TEMPLATE
+from aios.templates.evidence_compiler import EVIDENCE_COMPILER_TEMPLATE
+from aios.templates.performance_watcher import PERFORMANCE_WATCHER_TEMPLATE
+from aios.templates.human_auditor import HUMAN_AUDITOR_TEMPLATE
 
 TEMPLATES = {
     "orchestrator": ORCHESTRATOR_TEMPLATE,
@@ -16,6 +21,11 @@ TEMPLATES = {
     "support": SUPPORT_TEMPLATE,
     "data_analyst": DATA_ANALYST_TEMPLATE,
     "data_scientist": DATA_SCIENTIST_TEMPLATE,
+    "deal_auditor": DEAL_AUDITOR_TEMPLATE,
+    "pricing_guardian": PRICING_GUARDIAN_TEMPLATE,
+    "evidence_compiler": EVIDENCE_COMPILER_TEMPLATE,
+    "performance_watcher": PERFORMANCE_WATCHER_TEMPLATE,
+    "human_auditor": HUMAN_AUDITOR_TEMPLATE,
 }
 
 

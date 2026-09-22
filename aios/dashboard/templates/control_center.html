@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div>
+    <h1>Control Center — Deal Desk Governado</h1>
+    <p class="text-sm text-secondary">HITL + degradação + financeiro + humano — wedge wedge</p>
+  </div>
+  <div class="flex-center gap-2">
+    <a href="/dashboard/teams/new?template=deal_desk" class="btn btn-primary btn-sm">+ Deal Desk Team</a>
+    <a href="/api/crm/queue" class="btn btn-ghost btn-sm">Fila</a>
+  </div>
+</div>
+
+<div class="grid-4 mb-4">
+  <div class="stat-card" style="border-left:3px solid var(--amber)">
+    <p class="stat-label">HITL Pendentes</p>
+    <p class="stat-value">{{ pending|length }}</p>
+    <span class="text-xs text-tertiary">Aguardando humano</span>
+  </div>
+  <div class="stat-card">
+    <p class="stat-label">Deals</p>
+    <p class="stat-value">{{ deals|length }}</p>
+    <span class="text-xs text-tertiary">Top 10 recentes</span>
+  </div>
+  <div class="stat-card">
+    <p class="stat-label">Métricas 24h</p>
+    <p class="stat-value">{{ metrics|length }}</p>
+    <span class="text-xs text-tertiary">AgentMetric horas</span>
+  </div>
+  <div class="stat-card">
+    <p class="stat-label">Logs</p>
+    <p class="stat-value">{{ logs|length }}</p>
+    <span class="text-xs text-tertiary">Audit trail</span>
+  </div>
+</div>
+
+<div class="grid-2 mb-4">
+  <div class="card">
+    <h2 style="font-size:0.9rem;margin-bottom:0.5rem">🔔 HITL Queue — Deal Desk</h2>
+    {% if pending %}
+      {% for p in pending %}
+      <div style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.5rem;margin-bottom:0.375rem">
+        <div class="flex-between"><span style="font-weight:600;font-size:0.8rem">{{ p.tool }}</span><span class="badge" style="font-size:0.6rem">{{ p.status }}</span></div>
+        <div class="text-xs text-secondary" style="margin-top:0.25rem">{{ p.summary }}</div>
+        <div class="text-xs text-tertiary">{{ p.id }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="text-sm text-secondary">Nenhum pendente — fila limpa ✅</p>
+    {% endif %}
+    <a href="/dashboard/approvals" class="btn btn-ghost btn-sm" style="margin-top:0.5rem">Ver aprovações →</a>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:0.9rem;margin-bottom:0.5rem">📉 Degradação 24h — Performance Watcher</h2>
+    {% if metrics %}
+      <div style="font-family:monospace;font-size:0.7rem;max-height:220px;overflow-y:auto">
+        <div class="flex-between text-xs text-tertiary" style="border-bottom:1px solid var(--border);padding-bottom:0.25rem"><span>hora</span><span>msgs</span><span>avg_ms</span><span>errors</span></div>
+        {% for m in metrics[:12] %}
+        <div class="flex-between" style="padding:0.2rem 0;border-bottom:1px solid var(--bg)"><span>{{ m.hour }}</span><span>{{ m.messages }}</span><span>{{ m.avg_ms }}</span><span style="color:var(--red)">{% if m.errors>0 %}{{ m.errors }}{% else %}0{% endif %}</span></div>
+        {% endfor %}
+      </div>
+      <p class="text-xs text-tertiary" style="margin-top:0.5rem">Alerta se errors +50% ou avg_ms +15% 7d — HITL performance_watcher.</p>
+    {% else %}
+      <p class="text-sm text-secondary">Sem métricas ainda — rode agentes.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-2 mb-4">
+  <div class="card">
+    <h2 style="font-size:0.9rem;margin-bottom:0.5rem">💰 Financeiro — Pricing Guardian</h2>
+    {% for d in deals %}
+    <div style="display:flex;justify-content:space-between;padding:0.35rem 0;border-bottom:1px solid var(--bg);font-size:0.8rem">
+      <span>{{ d.name }} ({{ d.stage }})</span><span>R$ {{ "%.0f"|format(d.value) }}</span>
+    </div>
+    {% else %}
+    <p class="text-sm text-secondary">Nenhum deal</p>
+    {% endfor %}
+    <p class="text-xs text-tertiary" style="margin-top:0.5rem">Desconto > política → Finding + PendingAction (evidence). PLANS: free 5%, pro 12%, enterprise 18%.</p>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:0.9rem;margin-bottom:0.5rem">👤 Humano vs Agente — CrmDealVersion</h2>
+    {% if versions %}
+      {% for v in versions[:8] %}
+      <div style="font-size:0.75rem;padding:0.25rem 0;border-bottom:1px solid var(--bg)">
+        <span style="font-weight:600">{{ v.field }}</span> {{ v.changed_by_type }}: {{ v.old_value[:20] }} → {{ v.new_value[:20] }} <span class="text-xs text-tertiary">{{ v.created_at }}</span>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="text-sm text-secondary">Sem versionamento ainda.</p>
+    {% endif %}
+    <p class="text-xs text-tertiary" style="margin-top:0.5rem">Stage skip ou close_date 3× → alerta human_auditor.</p>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <h2 style="font-size:0.9rem;margin-bottom:0.5rem">📋 Audit Trail — Evidence Pack 3 camadas</h2>
+  <div style="max-height:300px;overflow-y:auto;font-family:monospace;font-size:0.7rem">
+    {% for l in logs[:12] %}
+    <div style="padding:0.25rem 0;border-bottom:1px solid var(--bg)"><span style="color:var(--accent)">{{ l.action }}</span> {{ l.resource_type }}/{{ l.resource_id[:8] if l.resource_id else "" }} — {{ l.details }} <span class="text-xs text-tertiary">{{ l.created_at }}</span></div>
+    {% else %}
+    <p class="text-sm text-secondary">Sem logs</p>
+    {% endfor %}
+  </div>
+  <div class="flex-center gap-2" style="margin-top:0.75rem">
+    <a href="/api/crm/queue" class="btn btn-ghost btn-sm">Fila</a>
+    <a href="/dashboard/agents" class="btn btn-ghost btn-sm">Agentes (5 novos: deal_auditor, pricing_guardian...)</a>
+    <a href="/dashboard/teams" class="btn btn-ghost btn-sm">Deal Desk Team</a>
+  </div>
+</div>
+{% endblock %}

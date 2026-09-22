@@ -75,14 +75,19 @@ def _cost_estimate(model: str, tokens: int = 4096) -> float:
 def _compatible_agent_types(agent_type: str) -> list[str]:
     """Recommend compatible teammates for a given agent type."""
     MAP = {
-        "orchestrator": ["manager", "sdr", "closer", "support", "data_analyst", "data_scientist", "custom"],
-        "manager": ["orchestrator", "sdr", "closer", "support", "data_analyst", "data_scientist", "custom"],
-        "sdr": ["closer", "support", "manager", "custom"],
-        "closer": ["sdr", "support", "manager", "custom"],
+        "orchestrator": ["manager", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor", "custom"],
+        "manager": ["orchestrator", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "custom"],
+        "sdr": ["closer", "support", "manager", "pricing_guardian", "custom"],
+        "closer": ["sdr", "support", "manager", "deal_auditor", "custom"],
         "support": ["sdr", "closer", "manager", "custom"],
-        "data_analyst": ["data_scientist", "manager", "custom"],
-        "data_scientist": ["data_analyst", "manager", "custom"],
-        "custom": ["orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist"],
+        "data_analyst": ["data_scientist", "performance_watcher", "manager", "custom"],
+        "data_scientist": ["data_analyst", "performance_watcher", "manager", "custom"],
+        "deal_auditor": ["pricing_guardian", "evidence_compiler", "human_auditor", "manager", "custom"],
+        "pricing_guardian": ["deal_auditor", "closer", "manager", "custom"],
+        "evidence_compiler": ["deal_auditor", "human_auditor", "manager", "custom"],
+        "performance_watcher": ["data_analyst", "data_scientist", "manager", "custom"],
+        "human_auditor": ["deal_auditor", "evidence_compiler", "manager", "custom"],
+        "custom": ["orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"],
     }
     return MAP.get(agent_type, ["custom"])
 
@@ -160,6 +165,11 @@ def _agent_type_label(value: str) -> str:
         "support": "Suporte",
         "data_analyst": "Analista de Dados",
         "data_scientist": "Cientista de Dados",
+        "deal_auditor": "Deal Auditor",
+        "pricing_guardian": "Pricing Guardian",
+        "evidence_compiler": "Evidence Compiler",
+        "performance_watcher": "Performance Watcher",
+        "human_auditor": "Human Auditor",
     }
     return LABELS.get(value, value)
 
@@ -427,9 +437,33 @@ async def autoscale_page(request: Request):
     return await _render("autoscale.html", request, title="Autoscale", autoscale=result, history=history, wf_history=wf_history)
 
 
+@router.get("/control-center", response_class=HTMLResponse)
+async def control_center(request: Request):
+    """Deal Desk Governado — HITL + degradação + financeiro + humano desvios. Wedge Control Center."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from sqlalchemy import select, desc
+        from aios.db.models import AgentMetric, AuditLog, CrmDeal, CrmDealVersion, PendingAction
+        # HITL queue
+        pending = (await db.execute(select(PendingAction).where(PendingAction.status == "pending").order_by(desc(PendingAction.created_at)).limit(20))).scalars().all()
+        # metrics 7d
+        metrics = (await db.execute(select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(desc(AgentMetric.hour)).limit(24))).scalars().all()
+        # deals com versionamento recente (human deviation)
+        versions = (await db.execute(select(CrmDealVersion).where(CrmDealVersion.org_id == org_id).order_by(desc(CrmDealVersion.created_at)).limit(20))).scalars().all()
+        # deals totais
+        deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(desc(CrmDeal.updated_at)).limit(10))).scalars().all()
+        # audit últimos
+        logs = (await db.execute(select(AuditLog).where(AuditLog.org_id == org_id).order_by(desc(AuditLog.created_at)).limit(20))).scalars().all()
+        # degradação simples: avg errors últimos 24h vs anterior
+        hist = [{"hour": m.hour, "errors": m.errors, "avg_ms": m.avg_response_ms, "messages": m.messages} for m in metrics]
+        pending_data = [{"id": p.id[:8], "tool": p.tool_name, "summary": p.context_summary[:120], "status": p.status} for p in pending]
+        deals_data = [{"id": d.id[:8], "name": d.lead_name, "stage": d.stage, "value": d.value} for d in deals]
+    return await _render("control_center.html", request, title="Control Center — Deal Desk Governado", pending=pending_data, metrics=hist, versions=versions, deals=deals_data, logs=logs)
+
+
 # ─── Agent CRUD ───
 
-AGENT_TYPES = ["custom", "orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist"]
+AGENT_TYPES = ["custom", "orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"]
 ROUTING_STRATEGIES = ["supervisor", "round_robin", "broadcast", "semantic"]
 
 
@@ -892,6 +926,7 @@ async def team_quick_create(request: Request, template: str = Form(...)):
             "comercial": {"name": "Time Comercial", "strategy": "hierarchical", "types": ["sdr", "closer", "manager"], "orchestrator_type": "closer", "manager_type": "manager"},
             "suporte": {"name": "Time Suporte", "strategy": "hierarchical", "types": ["support", "manager"], "orchestrator_type": "support", "manager_type": "manager"},
             "dados": {"name": "Time Dados", "strategy": "hierarchical", "types": ["data_analyst", "data_scientist", "manager"], "orchestrator_type": "data_scientist", "manager_type": "manager"},
+            "deal_desk": {"name": "Deal Desk Governado", "strategy": "hierarchical", "types": ["deal_auditor", "pricing_guardian", "evidence_compiler", "human_auditor", "manager"], "orchestrator_type": "deal_auditor", "manager_type": "manager"},
         }
         cfg = templates.get(template, templates["followup"])
         # pick agents
