@@ -76,6 +76,7 @@ async def _process_inbound_once(
     extra_data: str = "{}",
 ):
     """Single attempt at processing an inbound message."""
+    from aios.core.agent import AgentRuntime
     from aios.db.backend import db_session
     from aios.db.models import Agent, ChannelConnection, Conversation, Message, Team
     from aios.core.limits import check_org_limits, track_usage
@@ -229,8 +230,8 @@ async def agent_run(ctx, payload: dict):
     org_id = payload.get("org_id") or ""
     attempt = payload.get("attempt", 1)
     try:
-        from aios.db.backend import db_session
         from aios.db.models import Agent as AgentModel
+
         from aios.db.engine import async_session as _sess
         async with _sess() as sess:
             agent = await sess.get(AgentModel, agent_id)
@@ -265,8 +266,8 @@ async def workflow_run_job(ctx, payload: dict):
     wf_id = payload.get("workflow_id")
     run_id = payload.get("run_id")
     try:
-        from aios.db.backend import db_session
         from aios.db.models import Workflow, WorkflowRun
+
         from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
         from sqlalchemy.orm import selectinload
         from aios.db.engine import async_session as _sess
@@ -303,8 +304,9 @@ async def transcribe_voice_recording(ctx, recording_id: str, language: str = "pt
     from aios.db.backend import db_session
     from aios.db.models import VoiceRecording
     from aios.core.storage import backend
-    
+
     logger.info("Starting transcription for recording %s", recording_id)
+
     
     try:
         async with db_session() as db:
@@ -365,7 +367,7 @@ async def download_voice_recording(ctx, recording_id: str, recording_url: str):
     """Download a voice recording from URL and store in S3/local storage."""
     from aios.db.backend import db_session
     from aios.db.models import VoiceRecording
-    from aios.core.storage import backend, save_artifact
+    from aios.core.storage import save_artifact
     import httpx
     
     logger.info("Downloading voice recording %s from %s", recording_id, recording_url)
@@ -415,6 +417,71 @@ async def download_voice_recording(ctx, recording_id: str, recording_url: str):
         return {"error": str(e)}
 
 
+async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str | None = None):
+    """Run agent for commitment.at_risk and publish agent.action.completed via outbox."""
+    from aios.config import settings
+
+    if not settings.arvo_integration_enabled or not settings.arvo_base_url:
+        return {"skipped": True, "reason": "integration disabled"}
+
+    import uuid
+
+    from aios.db.engine import async_session
+    from aios.db.models import Agent
+    from sqlalchemy import select
+
+    org_id = payload.get("org_id") or payload.get("orgId") or ""
+    finding_id = payload.get("finding_id") or payload.get("opportunity_id") or payload.get("id") or "unknown"
+    business_trace_id = business_trace_id or payload.get("business_trace_id") or str(finding_id)
+
+    agent = None
+    if org_id:
+        try:
+            async with async_session() as s:
+                q = await s.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active").limit(1))
+                agent = q.scalars().first()
+        except Exception:
+            logger.exception("commitment.at_risk agent lookup failed")
+
+    if not agent:
+        logger.error(
+            "commitment.at_risk skipped: no active agent for organization %s",
+            org_id,
+        )
+        return {"skipped": True, "reason": "no active agent"}
+
+    try:
+        gov = agent.governance_config or {}
+        is_auto = gov.get("autonomous") is True or gov.get("autonomy") == "autonomous"
+        conv_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"commitment:{finding_id}:{business_trace_id}"))
+        msg = f"Commitment at risk: {finding_id}. Details: {payload}. Trace {business_trace_id}. Provide action plan concise."
+        if is_auto:
+            from aios.core.autonomous_agent import AutonomousAgent
+            auto = AutonomousAgent(agent)
+            result_text = await auto.run(conv_id, msg)
+        else:
+            from aios.core.agent import AgentRuntime
+            rt = AgentRuntime(agent)
+            result_text = await rt.run(conv_id, msg)
+    except Exception:
+        logger.exception("commitment.at_risk agent execution failed")
+        raise
+
+    try:
+        from aios.integrations.arvo.publisher import enqueue_outbox
+        await enqueue_outbox(
+            "agent.action.completed",
+            {"finding_id": str(finding_id), "org_id": org_id, "output": result_text[:2000], "agent_id": getattr(agent, "id", None) if agent else None},
+            business_trace_id=str(business_trace_id),
+            idempotency_key=f"agent.action.completed:{business_trace_id}"[:128],
+        )
+    except Exception:
+        logger.exception("publish agent.action.completed failed")
+        raise
+
+    return {"finding_id": str(finding_id), "business_trace_id": str(business_trace_id), "output": result_text[:500]}
+
+
 # ARQ worker function registry
 FUNCTIONS = [
     process_inbound,
@@ -424,4 +491,5 @@ FUNCTIONS = [
     quota_alert_job,
     transcribe_voice_recording,
     download_voice_recording,
+    process_commitment_at_risk,
 ]

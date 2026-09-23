@@ -1,8 +1,5 @@
 """Suite AIOS+ARVO — HMAC cross, events, suite health."""
 
-import json
-import sys
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,8 +18,7 @@ def test_suite_imports():
 def test_suite_hmac_cross():
     """AIOS signs with arvo key, ARVO verifies and vice-versa (shared kid)."""
     from aios.integrations.arvo.auth import sign_request as aios_sign, verify_request as aios_verify, _clear_nonces as aios_clear
-    from pathlib import Path
-    import importlib.util, sys
+    import importlib.util
 
     # load ARVO auth without importing app (avoid env)
     import importlib.machinery
@@ -98,3 +94,96 @@ def test_suite_control_center_exists():
     c = TestClient(app)
     # unauth -> redirect to login (suite still has dashboard)
     assert c.get("/dashboard/control-center", follow_redirects=False).status_code in (200, 302, 303, 307)
+
+
+async def test_event_retry_uses_fresh_hmac_nonce(monkeypatch):
+    import httpx
+    from aios.config import settings
+    from aios.integrations.arvo.client import send_event
+
+    nonces = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def request(self, method, path, **kwargs):
+            request = httpx.Request(method, f"http://peer.test{path}")
+            nonces.append(kwargs["headers"]["X-Service-Nonce"])
+            if len(nonces) == 1:
+                raise httpx.ConnectError("timeout", request=request)
+            return httpx.Response(200, request=request, json={"status": "ok"})
+
+    async def no_sleep(delay):
+        return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr("aios.integrations.arvo.client.asyncio.sleep", no_sleep)
+    monkeypatch.setattr(settings, "arvo_base_url", "http://peer.test")
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret")
+    await send_event("test.event", {}, "idem")
+    assert len(nonces) == 2 and nonces[0] != nonces[1]
+
+
+async def test_commitment_processing_is_org_scoped(test_org, monkeypatch):
+    from aios.config import settings
+    from sqlalchemy import func, select
+    from aios.db.engine import async_session
+    from aios.db.models import IntegrationOutbox
+    from aios.tasks.jobs import process_commitment_at_risk
+
+    async def no_enqueue(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", no_enqueue)
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_base_url", "http://peer.test")
+    payload = {"finding_id": "finding-1", "org_id": test_org.id, "business_trace_id": "trace-1"}
+    result = await process_commitment_at_risk(None, payload, "trace-1")
+
+    async with async_session() as session:
+        assert result["skipped"] is True
+        assert await session.scalar(select(func.count(IntegrationOutbox.id))) == 0
+
+
+async def test_outbox_single_flush_records_failed_attempts(monkeypatch):
+    from aios.config import settings
+    from aios.db.engine import async_session
+    from aios.db.models import IntegrationOutbox
+    from aios.integrations.arvo.publisher import enqueue_outbox, integration_outbox_flush
+
+    async def no_enqueue(*args, **kwargs):
+        return None
+
+    async def fail_send(*args, **kwargs):
+        raise RuntimeError("peer unavailable")
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", no_enqueue)
+    monkeypatch.setattr("aios.integrations.arvo.client.send_event", fail_send)
+    enabled = settings.arvo_integration_enabled
+    base_url = settings.arvo_base_url
+    settings.arvo_integration_enabled = True
+    settings.arvo_base_url = "http://peer.test"
+    try:
+        outbox_id = await enqueue_outbox(
+            "test.event",
+            {"id": "1"},
+            idempotency_key="retry-test",
+        )
+        for _ in range(5):
+            with pytest.raises(RuntimeError, match="peer unavailable"):
+                await integration_outbox_flush(None, outbox_id)
+        async with async_session() as session:
+            row = await session.get(IntegrationOutbox, outbox_id)
+            assert row.attempts == 5
+            assert row.status == "failed"
+    finally:
+        settings.arvo_integration_enabled = enabled
+        settings.arvo_base_url = base_url

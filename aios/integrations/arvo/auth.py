@@ -36,6 +36,11 @@ def _clear_nonces() -> None:
         _seen_nonces.clear()
 
 
+def _forget_nonce(nonce: str) -> None:
+    with _lock:
+        _seen_nonces.pop(nonce, None)
+
+
 def _body_hash(body: bytes | None) -> str:
     return hashlib.sha256(body or b"").hexdigest()
 

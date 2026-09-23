@@ -426,6 +426,45 @@
                 </p>
             </div>
         </div>
+
+        <!-- Integration Flow -->
+        <div style="margin-top:32px;background:var(--bg);border:1px solid var(--cyan);border-radius:12px;padding:32px;position:relative;overflow:hidden">
+            <div style="position:absolute;top:-40px;right:-40px;width:200px;height:200px;background:radial-gradient(circle,rgba(0,229,160,0.08) 0%,transparent 70%);pointer-events:none"></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+                <span style="font-size:24px">🔄</span>
+                <h3 style="font-size:18px;font-weight:600">Fluxo de Integração — Outbox + Eventos Assíncronos</h3>
+                <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">HMAC-SHA256</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:16px">
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <span style="font-size:20px">1️⃣</span>
+                        <strong style="font-size:14px">ARVO detecta risco</strong>
+                    </div>
+                    <p style="font-size:13px;color:var(--text-dim);line-height:1.6"><code>audit_job</code> roda → calcula exposure → cria <code>Finding</code> + <code>business_trace_id</code> → publica <code>commitment.at_risk</code> no outbox (HMAC + Idempotency-Key)</p>
+                </div>
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <span style="font-size:20px">2️⃣</span>
+                        <strong style="font-size:14px">AIOS consome + executa</strong>
+                    </div>
+                    <p style="font-size:13px;color:var(--text-dim);line-height:1.6">Worker lê outbox → POST <code>/events</code> (dedup) → enfileira <code>process_commitment_at_risk</code> → roda agente (AutonomousAgent/AgentRuntime) → publica <code>agent.action.completed</code> no outbox</p>
+                </div>
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <span style="font-size:20px">3️⃣</span>
+                        <strong style="font-size:14px">ARVO registra evidência</strong>
+                    </div>
+                    <p style="font-size:13px;color:var(--text-dim);line-height:1.6">Worker lê outbox → POST <code>/events</code> → <code>_handle_agent_action_completed</code> → cria <code>FindingEvidence</code> + <code>provenance.business_trace_id</code></p>
+                </div>
+            </div>
+            <div style="margin-top:20px;padding:16px;background:var(--cyan-dim);border:1px solid var(--cyan);border-radius:8px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                <span style="font-size:11px;border:1px solid var(--cyan);color:var(--cyan);padding:4px 8px;border-radius:99px">Outbox transacional</span>
+                <span style="font-size:13px;color:var(--text-dim)">SQLite/Postgres tabela <code>integration_outbox</code> com retry (5x) + cron 30s. Sobrevive a restart.</span>
+                <span style="font-size:11px;border:1px solid var(--cyan);color:var(--cyan);padding:4px 8px;border-radius:99px">Idempotência</span>
+                <span style="font-size:13px;color:var(--text-dim)"><code>integration_nonces</code> (600s) + <code>integration_events</code> (24h TTL) — dedup de retries por 24h.</span>
+            </div>
+        </div>
     </div>
 </section>
 

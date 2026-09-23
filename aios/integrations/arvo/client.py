@@ -1,4 +1,7 @@
-"""Cliente HTTP para o peer ARVO (Fase 1D + payload + retry). HMAC + timeout + backoff."""
+"""Cliente HTTP para o peer ARVO.
+
+HMAC + timeout + backoff.
+"""
 
 import asyncio
 import json
@@ -7,6 +10,7 @@ import uuid
 import httpx
 
 from aios.config import settings
+
 from .auth import sign_request
 
 PATH_PREFIX = "/api/v1/integrations/aios/v1"
@@ -23,14 +27,22 @@ def _headers(method: str, path: str, body: bytes | None = None) -> dict[str, str
 async def _request_with_retry(method: str, path: str, **kw) -> httpx.Response:
     if not settings.arvo_base_url:
         raise RuntimeError("ARVO integration not configured (arvo_base_url)")
+    headers_factory = kw.pop("headers_factory", None)
     last_exc: Exception | None = None
     for attempt in range(_RETRIES):
         try:
-            async with httpx.AsyncClient(base_url=settings.arvo_base_url, timeout=_TIMEOUT) as c:
-                r = await c.request(method, path, **kw)
+            request_kw = dict(kw)
+            if headers_factory:
+                request_kw["headers"] = headers_factory()
+            async with httpx.AsyncClient(
+                base_url=settings.arvo_base_url, timeout=_TIMEOUT
+            ) as c:
+                r = await c.request(method, path, **request_kw)
                 # retry em 5xx e 429, não em 4xx (auth/idempotency)
                 if r.status_code >= 500 or r.status_code == 429:
-                    raise httpx.HTTPStatusError(f"retryable {r.status_code}", request=r.request, response=r)
+                    raise httpx.HTTPStatusError(
+                        f"retryable {r.status_code}", request=r.request, response=r
+                    )
                 return r
         except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError) as e:
             last_exc = e
@@ -49,14 +61,23 @@ async def ping() -> dict:
     return r.json()
 
 
-async def send_event(event_type: str, payload: dict, idempotency_key: str | None = None) -> dict:
+async def send_event(
+    event_type: str, payload: dict, idempotency_key: str | None = None
+) -> dict:
     """POST /events idempotente. Retry 3× em 5xx/timeout."""
     body_dict = {"type": event_type, "payload": payload}
     body = json.dumps(body_dict, separators=(",", ":")).encode()
     path = f"{PATH_PREFIX}/events"
-    headers = _headers("POST", path, body)
-    headers["Idempotency-Key"] = idempotency_key or str(uuid.uuid4())
-    headers["Content-Type"] = "application/json"
-    r = await _request_with_retry("POST", path, content=body, headers=headers)
+    key = idempotency_key or str(uuid.uuid4())
+
+    def headers_factory():
+        headers = _headers("POST", path, body)
+        headers["Idempotency-Key"] = key
+        headers["Content-Type"] = "application/json"
+        return headers
+
+    r = await _request_with_retry(
+        "POST", path, content=body, headers_factory=headers_factory
+    )
     r.raise_for_status()
     return r.json()

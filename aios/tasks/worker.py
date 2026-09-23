@@ -170,10 +170,21 @@ async def _eval_review_cron(ctx):
     await _learning_job_wrapper(ctx, "eval_review")
 
 
+async def integration_outbox_flush_job(ctx, outbox_id: str | None = None):
+    from aios.integrations.arvo.publisher import integration_outbox_flush
+    return await integration_outbox_flush(ctx, outbox_id=outbox_id)
+
+
+async def integration_outbox_cron(ctx):
+    from aios.integrations.arvo.publisher import flush_outbox
+    await flush_outbox(batch=20)
+
+
 class WorkerSettings:
     functions = FUNCTIONS + [
         backup_job, approval_expire_job, autoscale_job, canary_rollback_job,
         _learning_job_wrapper,
+        integration_outbox_flush_job,
     ]
     cron_jobs = [
         cron(backup_job, hour=3, minute=0),
@@ -184,6 +195,7 @@ class WorkerSettings:
         cron(_memory_consolidation_cron, minute=0),
         cron(_optimization_review_cron, minute=15),
         cron(_eval_review_cron, minute=25),
+        cron(integration_outbox_cron, second=30),
     ]
     redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379"))
     max_jobs = 20

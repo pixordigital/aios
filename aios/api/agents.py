@@ -1,6 +1,7 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy import select
-import json
 
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
@@ -11,6 +12,7 @@ from aios.core.skill_loader import skill_loader
 from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=AgentOut)
@@ -393,7 +395,7 @@ async def push_agent_to_fleet(
 
     for instance_id in target_instance_ids:
         inst = await db.get(RemoteInstance, instance_id)
-        if not inst or not inst.is_active:
+        if not inst or inst.org_id != org_id or not inst.is_active:
             results.append({"instance_id": instance_id, "status": "skipped", "reason": "not found or inactive"})
             continue
 

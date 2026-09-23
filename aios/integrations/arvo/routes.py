@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from aios.config import settings
-from .auth import verify_request
+from .auth import _forget_nonce, verify_request
 
 logger = logging.getLogger(__name__)
 
@@ -19,19 +19,20 @@ router = APIRouter(prefix="/api/integrations/arvo/v1", tags=["arvo-integration"]
 _events: dict[str, tuple[float, dict]] = {}
 _events_lock = threading.Lock()
 _EVENTS_TTL = 86400
+_PROCESSING_TTL = 60
 
 
-async def _db_persist_nonce(nonce: str) -> bool:
-    """Tenta inserir nonce no DB; False se duplicate. Fallback True se DB off."""
+async def _db_persist_nonce(nonce: str) -> bool | None:
+    """Insert nonce; False means duplicate, None means persistence unavailable."""
     try:
         from sqlalchemy import delete
 
         from aios.db.engine import async_session
         from aios.db.models import IntegrationNonce
 
-        expires = datetime.now(timezone.utc) + timedelta(seconds=600)
+        expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=600)
         async with async_session() as s:
-            await s.execute(delete(IntegrationNonce).where(IntegrationNonce.expires_at < datetime.now(timezone.utc)))
+            await s.execute(delete(IntegrationNonce).where(IntegrationNonce.expires_at < datetime.now(timezone.utc).replace(tzinfo=None)))
             s.add(IntegrationNonce(nonce=nonce, peer="arvo", expires_at=expires))
             await s.commit()
             return True
@@ -43,8 +44,8 @@ async def _db_persist_nonce(nonce: str) -> bool:
             except Exception:
                 pass
             return False
-        logger.debug("nonce DB fallback (in-memory only): %s", e)
-        return True
+        logger.error("nonce persistence unavailable: %s", e)
+        return None
 
 
 async def _db_get_event(key: str) -> dict | None:
@@ -54,9 +55,9 @@ async def _db_get_event(key: str) -> dict | None:
 
         async with async_session() as s:
             obj = await s.get(IntegrationEvent, key)
-            if obj and obj.expires_at > datetime.now(timezone.utc):
+            if obj and obj.expires_at > datetime.now(timezone.utc).replace(tzinfo=None):
                 return obj.response
-            if obj and obj.expires_at <= datetime.now(timezone.utc):
+            if obj and obj.expires_at <= datetime.now(timezone.utc).replace(tzinfo=None):
                 await s.delete(obj)
                 await s.commit()
     except Exception as e:
@@ -64,17 +65,60 @@ async def _db_get_event(key: str) -> dict | None:
     return None
 
 
-async def _db_store_event(key: str, type_: str, payload: dict, resp: dict) -> None:
-    try:
-        from aios.db.engine import async_session
-        from aios.db.models import IntegrationEvent
+async def _db_claim_event(key: str, type_: str, payload: dict) -> tuple[bool, dict | None]:
+    from sqlalchemy.exc import IntegrityError
 
-        expires = datetime.now(timezone.utc) + timedelta(seconds=_EVENTS_TTL)
-        async with async_session() as s:
-            s.add(IntegrationEvent(idempotency_key=key, peer="arvo", type=type_, payload=payload, response=resp, expires_at=expires))
+    from aios.db.engine import async_session
+    from aios.db.models import IntegrationEvent
+
+    expires = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_PROCESSING_TTL)
+    async with async_session() as s:
+        existing = await s.get(IntegrationEvent, key)
+        if existing and existing.expires_at > datetime.now(timezone.utc).replace(tzinfo=None):
+            return False, existing.response
+        if existing:
+            await s.delete(existing)
+            await s.flush()
+        s.add(
+            IntegrationEvent(
+                idempotency_key=key,
+                peer="arvo",
+                type=type_,
+                payload=payload,
+                response={"status": "processing"},
+                expires_at=expires,
+            )
+        )
+        try:
             await s.commit()
-    except Exception as e:
-        logger.debug("event DB store fallback: %s", e)
+            return True, None
+        except IntegrityError:
+            await s.rollback()
+            existing = await s.get(IntegrationEvent, key)
+            return False, existing.response if existing else None
+
+
+async def _db_complete_event(key: str, response: dict) -> None:
+    from aios.db.engine import async_session
+    from aios.db.models import IntegrationEvent
+
+    async with async_session() as s:
+        row = await s.get(IntegrationEvent, key)
+        if row:
+            row.response = response
+            row.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_EVENTS_TTL)
+            await s.commit()
+
+
+async def _db_release_event(key: str) -> None:
+    from aios.db.engine import async_session
+    from aios.db.models import IntegrationEvent
+
+    async with async_session() as s:
+        row = await s.get(IntegrationEvent, key)
+        if row and row.response.get("status") == "processing":
+            await s.delete(row)
+            await s.commit()
 
 
 class ArvoEvent(BaseModel):
@@ -131,9 +175,12 @@ async def _require_auth(request: Request) -> None:
     body = await request.body()
     if not verify_request(kid, ts, nonce, request.method, request.url.path, body or None, sig, settings.arvo_service_key):
         raise HTTPException(401, "Invalid service signature")
-    # DB nonce dedup (survive restart) — fallback para in-memory se DB off
-    if not await _db_persist_nonce(nonce):
+    persisted = await _db_persist_nonce(nonce)
+    if persisted is False:
         raise HTTPException(401, "Replay nonce (DB)")
+    if persisted is None:
+        _forget_nonce(nonce)
+        raise HTTPException(503, "Replay protection unavailable")
 
 
 @router.get("/health", dependencies=[Depends(_require_auth)])
@@ -170,9 +217,14 @@ async def get_context(body: ContextRequest):
     return {"org_id": body.org_id, "plan": plan, "agents": agents_info, "business_trace_id": body.business_trace_id, "event_version": "1"}
 
 
-async def _handle_commitment_at_risk(payload: dict, trace_id: str | None) -> dict:
-    """Phase 4 slice: commitment.at_risk → cria pending audit log + tenta notificar. Minimal, não bloqueia."""
+async def _handle_commitment_at_risk(
+    payload: dict,
+    trace_id: str | None,
+    idempotency_key: str,
+) -> dict:
+    """Phase 4 slice: commitment.at_risk → audit + enqueue agent run → outbox agent.action.completed."""
     finding_id = payload.get("finding_id") or payload.get("opportunity_id") or payload.get("id") or "unknown"
+    trace_id = trace_id or payload.get("business_trace_id") or str(finding_id)
     extra = {"finding_id": finding_id, "business_trace_id": trace_id, "payload": payload}
     try:
         org_id = payload.get("org_id")
@@ -187,8 +239,20 @@ async def _handle_commitment_at_risk(payload: dict, trace_id: str | None) -> dic
             logger.info("commitment.at_risk trace %s finding %s (no org_id, skip audit)", trace_id, finding_id)
     except Exception as e:
         logger.debug("commitment.at_risk audit fallback: %s", e)
-    # ponytail: no auto-execution, just ACK; caller (ARVO) drives next step via agent.action.completed
-    return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id}
+    # enqueue agent execution via ARQ (non-blocking) + inline fallback if no redis
+    enqueued = False
+    try:
+        from aios.tasks.queue import enqueue_job
+        await enqueue_job(
+            "process_commitment_at_risk",
+            payload=payload,
+            business_trace_id=trace_id,
+            _job_id=f"commitment:{idempotency_key}",
+        )
+        enqueued = True
+    except Exception:
+        logger.debug("commitment.at_risk queue unavailable; using background fallback", exc_info=True)
+    return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id, "enqueued": enqueued}
 
 
 @router.post("/events", dependencies=[Depends(_require_auth)])
@@ -203,16 +267,46 @@ async def ingest_event(
         return {**cached, "deduplicated": True}
     db_cached = await _db_get_event(idempotency_key)
     if db_cached is not None:
+        if db_cached.get("status") == "processing":
+            raise HTTPException(503, "Event processing in progress")
         _store_idempotent(idempotency_key, db_cached)
         return {**db_cached, "deduplicated": True}
-    # Phase 4: vertical slice handler
     trace_id = body.business_trace_id or body.payload.get("business_trace_id")
-    extra_resp: dict = {}
-    if body.type == "commitment.at_risk":
-        extra_resp = await _handle_commitment_at_risk(body.payload, trace_id)
-    # Phase 5: echo trace
-    resp = {"status": "processed", "idempotency_key": idempotency_key, "type": body.type, "business_trace_id": trace_id, "event_version": body.event_version or "1", "deduplicated": False, **extra_resp}
-    stripped = {k: v for k, v in resp.items() if k != "deduplicated"}
-    _store_idempotent(idempotency_key, stripped)
-    await _db_store_event(idempotency_key, body.type, {**body.payload, "business_trace_id": trace_id} if trace_id else body.payload, stripped)
-    return resp
+    event_payload = {**body.payload, "business_trace_id": trace_id} if trace_id else body.payload
+    claimed, existing = await _db_claim_event(idempotency_key, body.type, event_payload)
+    if not claimed:
+        if existing is None:
+            raise HTTPException(503, "Idempotency reservation unavailable")
+        if existing.get("status") == "processing":
+            raise HTTPException(503, "Event processing in progress")
+        _store_idempotent(idempotency_key, existing)
+        return {**existing, "deduplicated": True}
+    side_effect_started = False
+    try:
+        extra_resp: dict = {}
+        if body.type == "commitment.at_risk":
+            extra_resp = await _handle_commitment_at_risk(
+                body.payload,
+                trace_id,
+                idempotency_key,
+            )
+            if not extra_resp.get("enqueued"):
+                raise HTTPException(503, "ARVO integration queue unavailable")
+            side_effect_started = True
+        resp = {
+            "status": "processed",
+            "idempotency_key": idempotency_key,
+            "type": body.type,
+            "business_trace_id": trace_id,
+            "event_version": body.event_version or "1",
+            "deduplicated": False,
+            **extra_resp,
+        }
+        stripped = {k: v for k, v in resp.items() if k != "deduplicated"}
+        await _db_complete_event(idempotency_key, stripped)
+        _store_idempotent(idempotency_key, stripped)
+        return resp
+    except Exception:
+        if not side_effect_started:
+            await _db_release_event(idempotency_key)
+        raise

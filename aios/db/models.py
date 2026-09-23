@@ -872,6 +872,22 @@ class IntegrationEvent(Base):
     created_at: Mapped[datetime] = mapped_column(default=_now)
 
 
+class IntegrationOutbox(Base, TimestampMixin):
+    """Transactional outbox — pending events for async publish to peer."""
+
+    __tablename__ = "integration_outbox"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    peer: Mapped[str] = mapped_column(String(20), default="arvo", index=True)
+    event_type: Mapped[str] = mapped_column(String(64), default="", index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    business_trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending|sent|failed
+    attempts: Mapped[int] = mapped_column(default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
 class Budget(Base, TimestampMixin, OrgScopedMixin):
     """Orçamento criação (one_off) + operação (monthly) com escopo org ou avançado por agente/team."""
 
