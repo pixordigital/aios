@@ -81,6 +81,13 @@ class ArvoEvent(BaseModel):
     type: str = Field(..., max_length=64, pattern=r"^[a-z0-9_.-]+$")
     payload: dict = Field(default_factory=dict)
     occurred_at: str | None = None
+    business_trace_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+    event_version: str | None = Field(default="1", max_length=16)
+
+
+class ContextRequest(BaseModel):
+    business_trace_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
+    org_id: str | None = None
 
 
 def _get_idempotent(key: str) -> dict | None:
@@ -139,6 +146,51 @@ async def health_probe():
     return await health()
 
 
+@router.post("/context", dependencies=[Depends(_require_auth)])
+async def get_context(body: ContextRequest):
+    """Phase 2 — minimal agent-context per contract. No org leak if unknown."""
+    # ponytail: minimal context, reuse existing agents table if org_id provided
+    agents_info: list[dict] = []
+    plan = "free"
+    if body.org_id:
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import Agent, Organization
+            from sqlalchemy import select
+
+            async with async_session() as s:
+                org = await s.get(Organization, body.org_id)
+                if org and isinstance(org.extra_data, dict):
+                    plan = org.extra_data.get("plan", "free")
+                q = await s.execute(select(Agent).where(Agent.org_id == body.org_id).limit(10))
+                for ag in q.scalars().all():
+                    agents_info.append({"id": ag.id, "name": ag.name, "type": ag.agent_type})
+        except Exception as e:
+            logger.debug("context DB fallback: %s", e)
+    return {"org_id": body.org_id, "plan": plan, "agents": agents_info, "business_trace_id": body.business_trace_id, "event_version": "1"}
+
+
+async def _handle_commitment_at_risk(payload: dict, trace_id: str | None) -> dict:
+    """Phase 4 slice: commitment.at_risk → cria pending audit log + tenta notificar. Minimal, não bloqueia."""
+    finding_id = payload.get("finding_id") or payload.get("opportunity_id") or payload.get("id") or "unknown"
+    extra = {"finding_id": finding_id, "business_trace_id": trace_id, "payload": payload}
+    try:
+        org_id = payload.get("org_id")
+        if org_id:
+            from aios.db.engine import async_session
+            from aios.db.models import AuditLog
+
+            async with async_session() as s:
+                s.add(AuditLog(org_id=org_id, action="commitment.at_risk", resource_type="finding", resource_id=str(finding_id), details=extra))
+                await s.commit()
+        else:
+            logger.info("commitment.at_risk trace %s finding %s (no org_id, skip audit)", trace_id, finding_id)
+    except Exception as e:
+        logger.debug("commitment.at_risk audit fallback: %s", e)
+    # ponytail: no auto-execution, just ACK; caller (ARVO) drives next step via agent.action.completed
+    return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id}
+
+
 @router.post("/events", dependencies=[Depends(_require_auth)])
 async def ingest_event(
     body: ArvoEvent,
@@ -153,8 +205,14 @@ async def ingest_event(
     if db_cached is not None:
         _store_idempotent(idempotency_key, db_cached)
         return {**db_cached, "deduplicated": True}
-    resp = {"status": "processed", "idempotency_key": idempotency_key, "type": body.type, "deduplicated": False}
+    # Phase 4: vertical slice handler
+    trace_id = body.business_trace_id or body.payload.get("business_trace_id")
+    extra_resp: dict = {}
+    if body.type == "commitment.at_risk":
+        extra_resp = await _handle_commitment_at_risk(body.payload, trace_id)
+    # Phase 5: echo trace
+    resp = {"status": "processed", "idempotency_key": idempotency_key, "type": body.type, "business_trace_id": trace_id, "event_version": body.event_version or "1", "deduplicated": False, **extra_resp}
     stripped = {k: v for k, v in resp.items() if k != "deduplicated"}
     _store_idempotent(idempotency_key, stripped)
-    await _db_store_event(idempotency_key, body.type, body.payload, stripped)
+    await _db_store_event(idempotency_key, body.type, {**body.payload, "business_trace_id": trace_id} if trace_id else body.payload, stripped)
     return resp
