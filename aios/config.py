@@ -29,8 +29,9 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     ollama_base_url: str = "http://localhost:11434"
-    redis_url: str = ""  # e.g. redis://:password@host:6379/0
-    redis_password: str = ""  # used when redis_url lacks embedded creds
+    redis_url: str = ""  # e.g. redis://user:password@host:6379/0 SASL
+    redis_username: str = ""  # SASL username (default = "default" quando só password)
+    redis_password: str = ""  # used when redis_url lacks embedded creds (SASL)
     app_data_dir: str = "./data"
 
     jwt_secret: str = ""

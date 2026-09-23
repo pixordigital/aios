@@ -19,13 +19,20 @@ _redis_pool: Optional[ArqRedis] = None
 
 
 def _parse_redis(url: str) -> RedisSettings:
-    """Parse redis:// URL into RedisSettings."""
+    """Parse redis:// URL into RedisSettings — SASL (user:pass) + TLS (rediss://)."""
     parsed = urlparse(url)
+    # fallback para envs quando URL sem credenciais (SASL)
+    username = parsed.username or settings.redis_username or None
+    password = parsed.password or settings.redis_password or None
+    # rediss:// → TLS
+    is_tls = parsed.scheme == "rediss"
     return RedisSettings(
         host=parsed.hostname or "localhost",
         port=parsed.port or 6379,
         database=int(parsed.path.lstrip("/") or "0"),
-        password=parsed.password or None,
+        username=username,
+        password=password,
+        ssl=is_tls,
     )
 
 
