@@ -1182,6 +1182,7 @@ async def channel_save(
     config_evo_meta_token: str = Form(""), config_evo_meta_phone: str = Form(""),
     config_evo_meta_waba: str = Form(""), config_evo_meta_template: str = Form(""), config_evo_meta_lang: str = Form("pt_BR"),
     config_slack_token: str = Form(""), config_slack_secret: str = Form(""),
+    config_slack_channel_id: str = Form(""),
     config_telegram_token: str = Form(""), config_discord_token: str = Form(""),
     config_email_imap: str = Form(""), config_email_smtp: str = Form(""),
     config_email_addr: str = Form(""), config_email_pass: str = Form(""),
@@ -1212,6 +1213,8 @@ async def channel_save(
                 config["meta_lang"] = config_evo_meta_lang or "pt_BR"
     elif channel_type == "slack":
         config = {"bot_token": config_slack_token, "signing_secret": config_slack_secret}
+        if config_slack_channel_id:
+            config["slack_channel_id"] = config_slack_channel_id.strip()
     elif channel_type == "telegram":
         config = {"bot_token": config_telegram_token}
     elif channel_type == "discord":

@@ -1,4 +1,10 @@
-"""Slack webhook — inbound events from Slack app."""
+"""Slack webhook — inbound events from Slack app.
+
+Routing: each Slack channel (a manager's or orchestrator's channel) maps to its
+own ChannelConnection via config.slack_channel_id. With no match, falls back to
+the first active Slack connection — which is the correct behaviour for DM-only
+setups, since each person gets their own DM channel.
+"""
 
 import hashlib
 import hmac
@@ -14,9 +20,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/slack", tags=["slack"])
 
 
-def _verify_slack_signature(request: Request, body: bytes) -> bool:
-    """Verify Slack request signature."""
-    if not settings.slack_signing_secret:
+def _verify_slack_signature(request: Request, body: bytes, secret: str = "") -> bool:
+    """Verify Slack request signature.
+
+    Falls back to the global setting when the connection has no secret of its own.
+    """
+    secret = secret or settings.slack_signing_secret
+    if not secret:
         return True  # No secret configured, skip verification
 
     timestamp = request.headers.get("x-slack-request-timestamp", "")
@@ -32,17 +42,17 @@ def _verify_slack_signature(request: Request, body: bytes) -> bool:
 
     basestring = f"v0:{timestamp}:{body.decode()}"
     expected = "v0=" + hmac.new(
-        settings.slack_signing_secret.encode(), basestring.encode(), hashlib.sha256
+        secret.encode(), basestring.encode(), hashlib.sha256
     ).hexdigest()
 
     return hmac.compare_digest(expected, sig)
 
 
 async def _find_connection(db, slack_channel_id: str = ""):
-    """Route by Slack channel: prefer connection whose config matches.
+    """Route by Slack channel.
 
     Each team/manager 1:1 channel gets its own ChannelConnection with
-    config.slack_channel_id set. Falls back to first active slack conn.
+    config.slack_channel_id set. Falls back to the first active Slack conn.
     """
     from sqlalchemy import select
 
@@ -63,14 +73,15 @@ async def _find_connection(db, slack_channel_id: str = ""):
     return conns[0] if conns else None
 
 
+def _channel_id_of(event: dict) -> str:
+    """Slack puts the channel in different places depending on the event type."""
+    return event.get("channel") or (event.get("item", {}) or {}).get("channel", "")
+
+
 @router.post("/webhook")
 async def slack_webhook(request: Request):
     """Receive Slack events → dispatch to agent."""
     raw_body = await request.body()
-
-    if not _verify_slack_signature(request, raw_body):
-        logger.warning("Slack webhook signature verification failed")
-        raise HTTPException(401, "Invalid signature")
 
     try:
         body = await request.json()
@@ -79,95 +90,83 @@ async def slack_webhook(request: Request):
 
     # URL verification challenge
     if body.get("type") == "url_verification":
+        if not _verify_slack_signature(request, raw_body):
+            logger.warning("Slack webhook signature verification failed")
+            raise HTTPException(401, "Invalid signature")
         return {"challenge": body.get("challenge", "")}
 
-    # Event callback
-    if body.get("type") == "event_callback":
-        event = body.get("event", {})
-        event_type = event.get("type", "")
+    # Resolve the connection first: each one may carry its own signing secret.
+    from aios.db.backend import db_session
 
-        if event_type == "message" and not event.get("bot_id"):
-            # User message (not from bot)
-            text = event.get("text", "")
-            user_id = event.get("user", "")
-            channel_id = event.get("channel", "")
-            team_id = event.get("team_id", "")
-            ts = event.get("ts", "")
+    event = body.get("event", {}) if body.get("type") == "event_callback" else {}
+    event_type = event.get("type", "")
+    channel_id = _channel_id_of(event)
 
-            from aios.core.dispatch import dispatch_inbound
+    async with db_session() as db:
+        conn = await _find_connection(db, channel_id)
+        conn_secret = (conn.config or {}).get("signing_secret", "") if conn else ""
 
-            async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
-                conn = await _find_connection(db, channel_id)
+    if not _verify_slack_signature(request, raw_body, conn_secret):
+        logger.warning("Slack webhook signature verification failed")
+        raise HTTPException(401, "Invalid signature")
 
-                if conn:
-                    await dispatch_inbound(
-                        channel_type="slack",
-                        channel_connection_id=conn.id,
-                        conversation_id="",
-                        text=text,
-                        user_id=user_id,
-                        extra_data={
-                            "event": "message",
-                            "channel_id": channel_id,
-                            "team_id": team_id,
-                            "ts": ts,
-                            "thread_ts": event.get("thread_ts", ""),
-                        },
-                    )
+    if not conn:
+        logger.warning("Slack webhook: no active slack connection for channel %s", channel_id)
+        return {"status": "ok"}
 
-        elif event_type == "app_mention":
-            # Bot mentioned
-            text = event.get("text", "")
-            user_id = event.get("user", "")
-            channel_id = event.get("channel", "")
-            team_id = event.get("team_id", "")
+    if body.get("type") != "event_callback":
+        return {"status": "ok"}
 
-            from aios.core.dispatch import dispatch_inbound
+    from aios.core.dispatch import dispatch_inbound
 
-            async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
-                conn = await _find_connection(db, channel_id)
+    if event_type == "message" and not event.get("bot_id"):
+        # User message — covers both message.channels and message.im (DMs)
+        await dispatch_inbound(
+            channel_type="slack",
+            channel_connection_id=conn.id,
+            conversation_id="",
+            text=event.get("text", ""),
+            user_id=event.get("user", ""),
+            extra_data={
+                "event": "message",
+                "channel_id": channel_id,
+                "team_id": event.get("team_id", ""),
+                "ts": event.get("ts", ""),
+                "thread_ts": event.get("thread_ts", ""),
+            },
+        )
 
-                if conn:
-                    await dispatch_inbound(
-                        channel_type="slack",
-                        channel_connection_id=conn.id,
-                        conversation_id="",
-                        text=text,
-                        user_id=user_id,
-                        extra_data={
-                            "event": "app_mention",
-                            "channel_id": channel_id,
-                            "team_id": team_id,
-                        },
-                    )
+    elif event_type == "app_mention":
+        # Bot mentioned
+        await dispatch_inbound(
+            channel_type="slack",
+            channel_connection_id=conn.id,
+            conversation_id="",
+            text=event.get("text", ""),
+            user_id=event.get("user", ""),
+            extra_data={
+                "event": "app_mention",
+                "channel_id": channel_id,
+                "team_id": event.get("team_id", ""),
+            },
+        )
 
-        elif event_type == "reaction_added":
-            # Reaction added to message
-            reaction = event.get("reaction", "")
-            user_id = event.get("user", "")
-            item = event.get("item", {})
-            channel_id = item.get("channel", "")
-            ts = item.get("ts", "")
-
-            from aios.core.dispatch import dispatch_inbound
-
-            async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
-                conn = await _find_connection(db, channel_id)
-
-                if conn:
-                    await dispatch_inbound(
-                        channel_type="slack",
-                        channel_connection_id=conn.id,
-                        conversation_id="",
-                        text=f"reaction:{reaction}",
-                        user_id=user_id,
-                        extra_data={
-                            "event": "reaction_added",
-                            "reaction": reaction,
-                            "channel_id": channel_id,
-                            "message_ts": ts,
-                        },
-                    )
+    elif event_type == "reaction_added":
+        # Reaction added to message
+        item = event.get("item", {})
+        await dispatch_inbound(
+            channel_type="slack",
+            channel_connection_id=conn.id,
+            conversation_id="",
+            text=f"reaction:{event.get('reaction', '')}",
+            user_id=event.get("user", ""),
+            extra_data={
+                "event": "reaction_added",
+                "reaction": event.get("reaction", ""),
+                "channel_id": channel_id,
+                "message_ts": item.get("ts", ""),
+            },
+        )
 
     return {"status": "ok"}
 

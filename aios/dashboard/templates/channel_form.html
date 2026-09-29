@@ -33,6 +33,7 @@
             <div id="creds-slack" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div><label>Token do bot</label><input type="text" name="config_slack_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="xoxb-..."></div>
                 <div><label>Segredo de assinatura</label><input type="text" name="config_slack_secret" value="{{ channel.config.get('signing_secret', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="abc..."></div>
+                <div><label>ID do canal <span class="text-xs text-tertiary">— opcional</span></label><input type="text" name="config_slack_channel_id" value="{{ channel.config.get('slack_channel_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="C0123ABCD"><small class="text-xs text-tertiary">Roteia as mensagens deste canal para o agente/time ligado a esta conexão. Deixe vazio para cair na primeira conexão Slack ativa (comportamento correto para uso só por DM).</small></div>
             </div>
             <div id="creds-telegram" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div><label>Token do bot</label><input type="text" name="config_telegram_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123:ABC..."></div>
