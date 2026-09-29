@@ -362,8 +362,15 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
         email_l = body.email.lower().strip()
         domain = email_l.split("@")[1] if "@" in email_l else ""
         # check control plane blacklist table (if exists)
+        # Params are bound into the statement: DatabaseBackend.execute(stmt)
+        # takes one argument. Passing a dict positionally raised TypeError,
+        # which the surrounding `except Exception` swallowed — so the blacklist
+        # silently never blocked anyone.
         from sqlalchemy import text
-        hit = await db.execute(text("SELECT 1 FROM blacklist WHERE email=:e OR domain=:d LIMIT 1"), {"e": email_l, "d": domain})
+        hit = await db.execute(
+            text("SELECT 1 FROM blacklist WHERE email=:e OR domain=:d LIMIT 1")
+            .bindparams(e=email_l, d=domain)
+        )
         if hit.first():
             raise HTTPException(403, "Cadastro bloqueado — entre em contato com suporte")
     except HTTPException:

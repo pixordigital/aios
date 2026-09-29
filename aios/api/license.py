@@ -74,7 +74,13 @@ async def heartbeat(request: Request):
                         "INSERT INTO blacklist (id, email, domain, reason, evidence, expires_at) "
                         "VALUES (:id, :email, :domain, :reason, :evidence::jsonb, now() + interval '5 years') "
                         "ON CONFLICT DO NOTHING"
-                    ), {"id": str(_uuid.uuid4()), "email": email or None, "domain": domain, "reason": f"tamper reincidente: {tamper}", "evidence": __import__("json").dumps(body)})
+                    ).bindparams(
+                        id=str(_uuid.uuid4()),
+                        email=email or None,
+                        domain=domain,
+                        reason=f"tamper reincidente: {tamper}",
+                        evidence=__import__("json").dumps(body),
+                    ))
                     await db.commit()
                 except Exception:
                     logger.exception("blacklist insert failed")

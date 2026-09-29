@@ -71,21 +71,22 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     max_cost_brl = limits.get("max_cost_brl")
 
     if max_msgs != 99999 or max_tokens != 999999999 or (max_cost_brl and max_cost_brl != 999999):
-        # Lock the current day's usage row (creates if missing) to prevent races
+        # Lock the current day's usage row (creates if missing) to prevent races.
+        # Params must be bound into the statement: DatabaseBackend.execute(stmt)
+        # takes a single argument and rejects a positional params dict.
         await db.execute(
             text("""
                 INSERT INTO usage_records (org_id, date, messages, llm_tokens, llm_calls, cost_usd)
                 VALUES (:org_id, :date, 0, 0, 0, 0)
                 ON CONFLICT (org_id, date) DO NOTHING
-            """),
-            {"org_id": org_id, "date": today},
+            """).bindparams(org_id=org_id, date=today),
         )
         await db.commit()
 
         # Now lock the row for update
         usage_row = (await db.execute(
-            text("SELECT * FROM usage_records WHERE org_id = :org_id AND date = :date FOR UPDATE"),
-            {"org_id": org_id, "date": today},
+            text("SELECT * FROM usage_records WHERE org_id = :org_id AND date = :date FOR UPDATE")
+            .bindparams(org_id=org_id, date=today),
         )).mappings().first()
 
         if usage_row:
@@ -225,8 +226,10 @@ async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_c
                 llm_tokens = usage_records.llm_tokens + :tokens,
                 llm_calls = usage_records.llm_calls + :calls,
                 cost_usd = usage_records.cost_usd + :cost
-        """),
-        {"org_id": org_id, "date": today, "messages": messages, "tokens": tokens, "calls": llm_calls, "cost": cost_usd},
+        """).bindparams(
+            org_id=org_id, date=today, messages=messages,
+            tokens=tokens, calls=llm_calls, cost=cost_usd,
+        ),
     )
     await db.commit()
 
