@@ -262,7 +262,9 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       voice-tts-kokoro: { condition: service_started }
-      voice-stt-whisper: { condition: service_started }
+      # voice-stt-whisper is profile "voice-stt", not "voice" — a depends_on across
+      # profiles makes the project invalid whenever only "voice" is active.
+      # Enable COMPOSE_PROFILES=voice,voice-stt to bring STT up alongside.
     restart: unless-stopped
     deploy:
       resources:
