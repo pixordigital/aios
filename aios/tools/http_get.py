@@ -1,45 +1,14 @@
 """HTTP GET tool — fetch URL content for the agent."""
 
-import ipaddress
 import logging
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
 from aios.tools.base import BaseTool
+from aios.tools.ssrf import is_private_host as _is_private
 from aios.tools.registry import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
-
-# ponytail: static blocklist — expand if more metadata endpoints appear
-_PRIVATE_BLOCKS = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-]
-
-
-def _is_private(host: str) -> bool:
-    """Resolve hostname and check if IP is private/internal."""
-    try:
-        import socket
-        addr = socket.getaddrinfo(host, 80)[0][4][0]
-    except Exception:
-        return True  # fail closed
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return True
-    for block in _PRIVATE_BLOCKS:
-        if ip in block:
-            return True
-    return False
-
 
 class HttpGetInput(BaseModel):
     url: str = Field(description="URL to fetch (https://...)")

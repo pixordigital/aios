@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY
+from aios.tools.ssrf import check_url
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +25,24 @@ class EtlUrlTool(BaseTool):
     async def run(self, url: str, max_pages: int = 3) -> dict:
         if not re.match(r"^https?://", url):
             return {"ok": False, "error": "URL deve começar com http:// ou https://"}
+        # SSRF: block private/loopback/metadata hosts, and validate every
+        # followed hop ourselves instead of letting httpx follow blindly.
+        err = check_url(url)
+        if err:
+            return {"ok": False, "error": f"blocked: {err}"}
         max_pages = max(1, min(5, int(max_pages or 3)))
         try:
             import httpx
             from bs4 import BeautifulSoup
 
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers={"User-Agent": "AIOS-ETL/1.0"}) as c:
+            async with httpx.AsyncClient(timeout=15, follow_redirects=False, headers={"User-Agent": "AIOS-ETL/1.0"}) as c:
                 r = await c.get(url)
+                if r.status_code in (301, 302, 303, 307, 308):
+                    loc = r.headers.get("location", "")
+                    rerr = check_url(loc)
+                    if rerr:
+                        return {"ok": False, "error": f"redirect blocked: {rerr}"}
+                    r = await c.get(loc)
                 if r.status_code != 200:
                     return {"ok": False, "error": f"fetch {r.status_code}", "url": url}
                 html = r.text
@@ -48,6 +60,8 @@ class EtlUrlTool(BaseTool):
                             links.append(href if href.startswith("http") else url.rstrip("/") + href)
                     links = list(dict.fromkeys(links))[: max_pages - 1]
                     for link in links:
+                        if check_url(link):  # every hop checked, no blind redirect
+                            continue
                         try:
                             rr = await c.get(link)
                             if rr.status_code == 200:
