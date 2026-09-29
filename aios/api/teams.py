@@ -28,10 +28,20 @@ async def create_team(
         cnt = (await db.execute(select(_func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
         if cnt >= limits.get("max_teams", 1):
             raise HTTPException(403, detail=f"quota max_teams {limits['max_teams']} for {plan}")
+    # todo time tem manager: sem lider nao ha como coordenar nem escalar
+    if not body.manager_agent_id:
+        agent_count = (await db.execute(select(_func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
+        if agent_count > 0:
+            raise HTTPException(422, detail="manager_agent_id required: every team needs a manager")
+    if body.manager_agent_id:
+        _m = await db.get(Agent, body.manager_agent_id)
+        if not _m or _m.org_id != org_id:
+            raise HTTPException(422, detail="manager_agent_id invalid or belongs to another org")
     team = Team(
         org_id=org_id,
         name=body.name,
         routing_strategy=body.routing_strategy,
+        manager_agent_id=body.manager_agent_id or None,
         extra_data=body.extra_data,
     )
     db.add(team)

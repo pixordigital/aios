@@ -4,6 +4,52 @@ import pytest
 from httpx import AsyncClient
 
 
+class TestTeamManagerRequired:
+    """Every team must have a manager."""
+
+    async def test_team_without_manager_rejected(self, auth_client: AsyncClient):
+        """With agents in the org, creating a manager-less team must fail."""
+        await auth_client.post(
+            "/api/agents",
+            json={"name": "Mgr Candidate", "agent_type": "manager"},
+        )
+        response = await auth_client.post(
+            "/api/teams",
+            json={"name": "No Manager Team", "routing_strategy": "supervisor"},
+        )
+        assert response.status_code == 422
+        assert "manager" in response.json()["detail"].lower()
+
+    async def test_team_with_manager_accepted(self, auth_client: AsyncClient):
+        """Supplying a valid manager satisfies the rule."""
+        agent = await auth_client.post(
+            "/api/agents",
+            json={"name": "Real Manager", "agent_type": "manager"},
+        )
+        mgr_id = agent.json()["id"]
+        response = await auth_client.post(
+            "/api/teams",
+            json={
+                "name": "Managed Team",
+                "routing_strategy": "supervisor",
+                "manager_agent_id": mgr_id,
+            },
+        )
+        assert response.status_code == 200
+
+    async def test_manager_from_other_org_rejected(self, auth_client: AsyncClient):
+        """A manager id that does not exist must not be accepted."""
+        response = await auth_client.post(
+            "/api/teams",
+            json={
+                "name": "Bad Manager Team",
+                "routing_strategy": "supervisor",
+                "manager_agent_id": "00000000-0000-0000-0000-000000000000",
+            },
+        )
+        assert response.status_code == 422
+
+
 class TestTeams:
     """Team CRUD tests."""
 
@@ -66,10 +112,10 @@ class TestTeams:
 
     async def test_assign_agents_to_team(self, auth_client: AsyncClient):
         """Test assigning agents to team."""
-        # Create agents
+        # Create agents — one of them is the team manager (required rule)
         agent1 = await auth_client.post(
             "/api/agents",
-            json={"name": "Agent 1", "agent_type": "custom"}
+            json={"name": "Agent 1", "agent_type": "manager"}
         )
         agent2 = await auth_client.post(
             "/api/agents",
@@ -80,7 +126,11 @@ class TestTeams:
         # Create team
         team_resp = await auth_client.post(
             "/api/teams",
-            json={"name": "Agent Team", "routing_strategy": "supervisor"}
+            json={
+                "name": "Agent Team",
+                "routing_strategy": "supervisor",
+                "manager_agent_id": agent1.json()["id"],
+            }
         )
         team_id = team_resp.json()["id"]
 

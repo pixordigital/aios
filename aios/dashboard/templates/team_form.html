@@ -10,6 +10,12 @@
 </div>
 {% endif %}
 
+{% if request.query_params.get('error') == 'manager-required' %}
+<div style="color:var(--red);background:var(--red-subtle);border:1px solid var(--red);border-radius:var(--radius-sm);padding:0.75rem 1rem;margin-bottom:1rem;font-size:0.8125rem">
+    Toda equipe precisa de um manager. Ele coordena, escala e responde pelo time — sem ele o time não tem liderança.
+</div>
+{% endif %}
+
 <form method="POST" action="/dashboard/teams/save">
     <input type="hidden" name="team_id" value="{{ team.id if team else '' }}">
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem">

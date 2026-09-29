@@ -199,6 +199,7 @@ class AgentOut(BaseModel):
 class TeamCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     routing_strategy: str = Field(default="supervisor", max_length=50)
+    manager_agent_id: str | None = Field(default=None, description="Required when the org has agents: every team needs a manager")
     extra_data: dict = Field(default_factory=dict)
 
 

@@ -888,6 +888,9 @@ async def team_save(
         agent_count = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
         if agent_count > 0 and not orchestrator_agent_id:
             return RedirectResponse("/dashboard/teams/new?error=orchestrator-required", status_code=303)
+        # todo time tem manager: um time sem lider nao escala nem escala sozinho
+        if agent_count > 0 and not manager_agent_id:
+            return RedirectResponse("/dashboard/teams/new?error=manager-required", status_code=303)
         # validate orchestrator/manager belong to org and in list
         if orchestrator_agent_id:
             _o = await db.get(Agent, orchestrator_agent_id)
@@ -980,6 +983,9 @@ async def team_quick_create(request: Request, template: str = Form(...)):
             orch_id = member_ids[0]
         if by_type.get(cfg["manager_type"]):
             mgr_id = by_type[cfg["manager_type"]][0].id
+        if not mgr_id:
+            # todo time tem manager — quick-create nao pode contornar a regra
+            return RedirectResponse("/dashboard/teams/new?error=manager-required", status_code=303)
         # ensure orch/mgr in members
         if orch_id and orch_id not in member_ids:
             member_ids.append(orch_id)
