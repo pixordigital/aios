@@ -1,0 +1,48 @@
+# AIOS — Slack app manifest
+#
+# Replaces ~10 manual clicks in api.slack.com with one import + one Install.
+#
+# Use: api.slack.com/apps → Create New App → From a manifest → paste this file
+#
+# Why a manifest: the blocker we hit is that OAuth scopes and event subscriptions
+# are two separate pages, and scopes only take effect on the workspace AFTER a
+# reinstall. A manifest sets both up together, so there is nothing to forget.
+#
+# After import, click "Install to Workspace" → Allow. That single click is the
+# only step that cannot be automated: Slack requires a logged-in human admin to
+# approve an app's access to a workspace. No skill, CLI or API can do it.
+
+display_information:
+  name: AIOS
+  description: Internal agent platform — talks to your manager and orchestrator agents.
+  background_color: "#0a0a0a"
+
+features:
+  bot_user:
+    display_name: aios
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      # --- required for the integration to function ---
+      - app_mentions:read      # @mention events
+      - chat:write             # send agent replies
+      - channels:history       # read public channel messages
+      - im:history             # read DMs
+      - reactions:read         # reaction_added events
+      # --- lets us create the 4 team channels and invite the bot ---
+      - conversations:read     # list channels
+      - conversations:write    # create channels, add the bot
+
+settings:
+  event_subscriptions:
+    request_url: http://178.105.181.38:8777/api/slack/webhook
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.im
+      - reaction_added
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

@@ -1,15 +1,19 @@
 """Slack channel — Events API inbound (webhook) + Web API outbound.
 
-Inbound arrives via POST /api/slack/webhook. Outbound is lazy: the Bolt app is
-built on first send, so a ChannelConnection that was never started at boot can
-still deliver.
+Inbound arrives via POST /api/slack/webhook. Outbound posts directly to the
+Web API via httpx (already a dependency) rather than pulling in slack-bolt for
+a single chat.postMessage call.
 """
 
 import logging
 
+import httpx
+
 from aios.channels.base import Channel, OutboundMessage
 
 logger = logging.getLogger(__name__)
+
+_API = "https://slack.com/api/chat.postMessage"
 
 
 class SlackChannel(Channel):
@@ -22,12 +26,11 @@ class SlackChannel(Channel):
         self._config = connection.config if connection else {}
         self._app = None
 
-    async def _ensure_app(self):
-        """Build the Bolt app on first use.
+    def _ensure_app(self):
+        """Return the bot token, or None if unconfigured.
 
         delivery.py calls build() per send, which returns a fresh instance — so
-        start() at boot never reaches the object that actually delivers. Lazy
-        init is the fix; same pattern as the Evolution channel.
+        start() at boot never reaches the object that actually delivers.
         """
         if self._app is not None:
             return self._app
@@ -35,8 +38,7 @@ class SlackChannel(Channel):
         if not token:
             logger.warning("Slack send skipped: bot_token not configured")
             return None
-        from slack_bolt.async_app import AsyncApp
-        self._app = AsyncApp(token=token)
+        self._app = token
         return self._app
 
     def _resolve_channel(self, message: OutboundMessage) -> str:
@@ -45,7 +47,7 @@ class SlackChannel(Channel):
         return (
             extra.get("channel_id")
             or extra.get("channel")
-            or self._config.get("default_channel")
+            or self._config.get("slack_channel_id")
             or ""
         )
 
@@ -54,19 +56,36 @@ class SlackChannel(Channel):
         if not channel:
             logger.warning("Slack send skipped: no channel in extra_data or config")
             return None
-        app = await self._ensure_app()
-        if not app:
+        token = self._ensure_app()
+        if not token:
             return None
+
+        payload = {"channel": channel, "text": message.text}
+        extra = message.extra_data or {}
+        if extra.get("thread_ts"):
+            payload["thread_ts"] = extra["thread_ts"]
+
         try:
-            resp = await app.client.chat_postMessage(channel=channel, text=message.text)
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    _API,
+                    json=payload,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            data = resp.json()
         except Exception:
-            # slack_bolt raises SlackApiError; surface it so delivery can retry
-            logger.exception("Slack chat_postMessage failed for channel %s", channel)
+            logger.exception("Slack chat.postMessage transport error for %s", channel)
             raise
-        return resp.get("ts") if resp else None
+
+        if not data.get("ok"):
+            # Surface as an exception so delivery.py retries instead of dropping.
+            raise RuntimeError(
+                f"slack chat.postMessage failed: {data.get('error')} (channel={channel})"
+            )
+        return data.get("ts")
 
     async def start(self) -> None:
-        await self._ensure_app()
+        self._ensure_app()
 
     async def stop(self) -> None:
         self._app = None
