@@ -10,8 +10,13 @@
 </div>
 {% if not crm_enabled %}
 <div class="card mb-4" style="border-left:4px solid var(--amber);background:var(--amber-subtle)">
+  {% if internal_mode %}
+  <h2>🔒 CRM IA está desativado nesta organização</h2><p class="text-sm text-secondary">Ferramenta interna — sem cobrança. Ative para os agentes operarem o pipeline com HITL.</p>
+  <form method="POST" action="/dashboard/crm/enable" style="margin-top:0.5rem"><button class="btn btn-primary btn-sm">Ativar CRM IA</button></form>
+  {% else %}
   <h2>🔒 CRM IA é upsell privado</h2><p class="text-sm text-secondary">Seu plano atual não inclui o CRM. Ative por R$97/mês e deixe os agentes operarem 100% com HITL.</p>
   <form method="POST" action="/dashboard/crm/enable" style="margin-top:0.5rem"><button class="btn btn-primary btn-sm">Ativar CRM IA — R$97/mês</button></form>
+  {% endif %}
 </div>
 {% else %}
 <div class="grid-4 mb-4">

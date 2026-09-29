@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>Cobrança & Uso</h1><p class="text-sm text-secondary mt-1">Tokens, custo e previsão de pagamento — tudo claro</p></div>
+    <div><h1>{% if internal_mode %}Uso & Custos{% else %}Cobrança & Uso{% endif %}</h1><p class="text-sm text-secondary mt-1">{% if internal_mode %}Tokens e custo por agente/equipe — controle interno, sem cobrança{% else %}Tokens, custo e previsão de pagamento — tudo claro{% endif %}</p></div>
     <div style="display:flex;gap:0.5rem">
-        {% if current_plan=='free' %}<form method="POST" action="/dashboard/billing/trial"><button class="btn btn-primary btn-sm">🎁 14 dias Pro grátis sem cartão</button></form>{% endif %}
+        {% if not internal_mode and current_plan=='free' %}<form method="POST" action="/dashboard/billing/trial"><button class="btn btn-primary btn-sm">🎁 14 dias Pro grátis sem cartão</button></form>{% endif %}
+        {% if internal_mode %}<span class="badge" style="background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan)">Modo interno</span>{% endif %}
         <a href="/api/analytics/usage/daily?days=30" class="btn btn-ghost btn-sm" target="_blank">📥 CSV</a>
         <button class="btn btn-ghost btn-sm" onclick="location.reload()">↻ Atualizar</button>
     </div>
@@ -19,17 +20,21 @@
 <div class="card mb-4" style="border-left:4px solid {{status_color}};background:{{status_bg}}">
     <div class="flex-between" style="flex-wrap:wrap;gap:0.75rem">
         <div>
-            <div style="font-size:0.75rem;font-weight:600;color:var(--text-tertiary)">PLANO ATUAL</div>
-            <div style="font-size:1.25rem;font-weight:700">{{ plans.get(current_plan, {}).get('name', current_plan) }} <span class="badge" style="border-color:{{status_color}};color:{{status_color}};margin-left:0.5rem">{{monthly.status | upper}}</span></div>
-            <div style="font-size:0.75rem;color:var(--text-secondary)">{{monthly.period}} • fatura em {{monthly.next_billing}} ({{monthly.remaining_days}} dias)</div>
+            <div style="font-size:0.6875rem;color:var(--text-tertiary)">{% if internal_mode %}ORGANIZAÇÃO{% else %}PLANO ATUAL{% endif %}</div>
+            <div style="font-size:1.25rem;font-weight:700">{{ plans.get(current_plan, {}).get('name', current_plan) }} {% if internal_mode %}<span class="badge" style="background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan);margin-left:0.5rem">uso interno</span>{% else %}<span class="badge" style="border-color:{{status_color}};color:{{status_color}};margin-left:0.5rem">{{monthly.status | upper}}</span>{% endif %}</div>
+            <div style="font-size:0.75rem;color:var(--text-secondary)">{{monthly.period}} {% if internal_mode %}• {{monthly.day_of_month}}/{{monthly.days_in_month}} dias no ciclo{% else %}• fatura em {{monthly.next_billing}} ({{monthly.remaining_days}} dias){% endif %}</div>
         </div>
         <div style="text-align:right">
-            {% if subscription_id %}<span class="badge" style="border-color:var(--green);color:var(--green)">Assinatura ativa</span>{% else %}<span class="badge">Sem assinatura</span>{% endif %}
-            <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem">ID: {{subscription_id[:12] if subscription_id else '—'}}</div>
+            {% if internal_mode %}<span class="badge" style="background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan)">sem cobrança</span>
+            {% elif subscription_id %}<span class="badge" style="border-color:var(--green);color:var(--green)">Assinatura ativa</span>{% else %}<span class="badge">Sem assinatura</span>{% endif %}
+            {% if not internal_mode %}<div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem">ID: {{subscription_id[:12] if subscription_id else '—'}}</div>{% endif %}
         </div>
     </div>
-    {% if monthly.will_exceed %}
+    {% if monthly.will_exceed and not internal_mode %}
     <div style="margin-top:0.75rem;padding:0.5rem 0.75rem;background:var(--red-subtle);border:1px solid var(--red);border-radius:6px;font-size:0.8125rem;color:var(--red)">⚠️ Projeção indica estouro do plano: {{monthly.forecast_tokens|int}} tokens projetados > {{monthly.max_tokens}} limite. Considere upgrade.</div>
+    {% endif %}
+    {% if monthly.will_exceed and internal_mode %}
+    <div style="margin-top:0.75rem;padding:0.5rem 0.75rem;background:var(--amber-subtle);border:1px solid var(--amber);border-radius:6px;font-size:0.8125rem;color:var(--amber)">⚠️ Consumo alto: {{monthly.forecast_tokens|int}} tokens projetados neste ciclo. Sem cobrança — vale revisar os agentes mais caros.</div>
     {% endif %}
 </div>
 
@@ -172,6 +177,26 @@
     </div>
 </div>
 
+{% if internal_mode %}
+<div class="card mb-4" style="border-left:3px solid var(--accent);background:var(--accent-subtle)">
+    <h2 class="mb-3">Ferramenta interna — sem cobrança</h2>
+    <p class="text-sm text-secondary mb-3">
+        Modo interno ativo (<code>AIOS_INTERNAL_MODE=true</code>): as quotas de plano ficam desligadas e os agentes rodam sem limite comercial.
+        Os números acima servem para <strong>controle de custo</strong> — tokens e gasto real por agente, time e organização.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.75rem">
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem">
+            <div style="font-size:0.6875rem;color:var(--text-tertiary)">Ciclo de medição</div><div style="font-weight:600">{{monthly.period}}</div><div style="font-size:0.75rem;color:var(--text-secondary)">{{monthly.day_of_month}}/{{monthly.days_in_month}} dias decorridos</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem">
+            <div style="font-size:0.6875rem;color:var(--text-tertiary)">Gasto até agora</div><div style="font-weight:700">R$ {{"%.2f"|format(monthly.total_cost*5.5)}}</div><div style="font-size:0.75rem;color:var(--text-secondary)">câmbio 5,5 · BYOK na sua fatura do provider</div>
+        </div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem">
+            <div style="font-size:0.6875rem;color:var(--text-tertiary)">Orçamento</div><div style="font-size:0.8125rem">Defina tetos por organização, time ou agente abaixo — o alerta é informativo, nunca bloqueia.</div>
+        </div>
+    </div>
+</div>
+{% else %}
 <div class="card mb-4">
     <h2 class="mb-3">Quando vou pagar?</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.75rem">
@@ -209,6 +234,7 @@
         {% endfor %}
     </div>
 </div>
+{% endif %}
 
 <script>
 function upgrade(plan) {

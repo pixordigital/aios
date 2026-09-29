@@ -29,6 +29,7 @@ from aios.db.models import Agent, ChannelConnection, Conversation, Invitation, M
 from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
 from aios.api.auth import _validate_password
+from aios.config import settings
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -222,6 +223,7 @@ async def _render(name: str, request: Request, **kw) -> str:
         "request": request,
         "user_email": getattr(state, "user_email", None) if state else None,
         "is_superadmin": is_sa,
+        "internal_mode": settings.internal_mode,
         "is_impersonating": getattr(state, "is_impersonating", False) if state else False,
         "orgs": orgs,
         "active_org_id": active_org_id,

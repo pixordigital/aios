@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>Agentes & Especialistas</h1><p class="text-sm text-secondary mt-1">{{ agents|length }} agente{{ 's' if agents|length != 1 }} · {{ agents | selectattr("status","equalto","active") | list | length }} ativos</p></div>
+    <div><h1>Agentes & Times</h1><p class="text-sm text-secondary mt-1">{{ agents|length }} agente{{ 's' if agents|length != 1 }} · {{ agents | selectattr("status","equalto","active") | list | length }} ativos</p></div>
     <div class="flex-center gap-2">
         <a href="/dashboard/control-center" class="btn btn-ghost">📊 Control Center</a>
         <a href="/dashboard/agents/new" class="btn btn-primary">+ Novo Agente</a>
@@ -85,6 +85,49 @@
             </div>
             <a href="/dashboard/agents/new?type=human_auditor" class="btn btn-primary btn-sm w-full" style="text-align:center;font-size:0.75rem;padding:0.375rem">Ativar / Calibrar</a>
         </div>
+    </div>
+</div>
+
+<!-- Todos os blueprints (TEMPLATES) — fonte da verdade: aios/templates/__init__.py -->
+<div class="card mb-4" style="border:1px solid var(--border);padding:1.25rem">
+    <div class="flex-between mb-3" style="flex-wrap:wrap;gap:0.75rem">
+        <div>
+            <h2 style="font-size:1.05rem;font-weight:700;display:flex;align-items:center;gap:0.5rem">
+                <span>🧩</span> Todos os blueprints ({{ agent_templates|length }})
+            </h2>
+            <p class="text-xs text-secondary mt-1">Cada blueprint define prompt, ferramentas, memória e governança. Edite tudo depois de criar.</p>
+        </div>
+        <span class="badge" style="font-size:0.7rem;background:var(--bg-hover);color:var(--text-secondary)">{{ agent_templates|length }} tipos</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));gap:0.5rem">
+        {% for key, tpl in agent_templates.items() %}
+        <a href="/dashboard/agents/new?type={{ key }}"
+           class="card"
+           style="background:var(--bg, #0a0a0a);border:1px solid var(--border);padding:0.625rem;display:flex;flex-direction:column;gap:0.25rem;text-decoration:none;color:inherit;transition:border-color .15s"
+           onmouseover="this.style.borderColor='var(--accent)'"
+           onmouseout="this.style.borderColor='var(--border)'">
+            <span class="text-xs text-secondary">{{ agent_type_label(key) }}</span>
+            <code style="font-size:0.7rem;color:var(--accent)">{{ key }}</code>
+            {% if tpl.get('voice') or 'voice' in (tpl.get('tools') or []) %}
+            <span class="badge" style="font-size:0.55rem;background:var(--purple-dim, rgba(167,139,250,.15));color:var(--purple, #a78bfa);align-self:flex-start">🎙️ voz</span>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Voice agents -->
+<div class="card mb-4" style="border:1px solid rgba(167,139,250,0.25);padding:1.25rem">
+    <h2 style="font-size:1.05rem;font-weight:700;display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">
+        <span>🎙️</span> Agentes de voz
+    </h2>
+    <p class="text-xs text-secondary mb-3">SDR, Closer, Suporte e Gerente já vêm com pass de voz PT-BR (Kokoro self-hosted, $0/min) e podem atender ligação e WhatsApp no mesmo número.</p>
+    <div class="flex-center gap-2" style="flex-wrap:wrap">
+        <a href="/dashboard/voice" class="btn btn-primary btn-sm">Configurar voz</a>
+        <a href="/dashboard/agents/new?type=sdr" class="btn btn-ghost btn-sm">+ Agente de voz (SDR)</a>
+        <a href="/dashboard/agents/new?type=closer" class="btn btn-ghost btn-sm">+ Agente de voz (Closer)</a>
+        <a href="/dashboard/agents/new?type=support" class="btn btn-ghost btn-sm">+ Agente de voz (Suporte)</a>
     </div>
 </div>
 
