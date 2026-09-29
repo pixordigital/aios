@@ -180,12 +180,47 @@ async def integration_outbox_cron(ctx):
     await flush_outbox(batch=20)
 
 
+def _aliased(fn, name: str):
+    """Register fn under an alternate name.
+
+    ARQ keys its function registry on ``func.name`` (default: ``__name__``), but
+    most enqueue sites here pass the fully-qualified path, e.g.
+    ``enqueue_job("aios.tasks.jobs.process_inbound", ...)``. Without this the
+    worker logs "function ... not found" and drops the job.
+    """
+    async def wrapper(ctx, *args, **kwargs):
+        return await fn(ctx, *args, **kwargs)
+
+    wrapper.__name__ = name
+    wrapper.__qualname__ = name
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
+
+def _registry(functions, namespace: str | None = None):
+    """Every job registered under its bare name and its qualified name.
+
+    Enqueue sites address jobs as "aios.tasks.jobs.<name>" even when the
+    function itself is imported from another module (deliver_message lives in
+    aios.core.delivery but is dispatched as aios.tasks.jobs.deliver_message),
+    so pass ``namespace`` to force the addressable form.
+    """
+    out = []
+    for fn in functions:
+        out.append(fn)
+        bare = fn.__name__
+        for qual in {f"{fn.__module__}.{bare}", f"{namespace}.{bare}" if namespace else None}:
+            if qual and qual != bare:
+                out.append(_aliased(fn, qual))
+    return out
+
+
 class WorkerSettings:
-    functions = FUNCTIONS + [
+    functions = _registry(FUNCTIONS, namespace="aios.tasks.jobs") + _registry([
         backup_job, approval_expire_job, autoscale_job, canary_rollback_job,
         _learning_job_wrapper,
         integration_outbox_flush_job,
-    ]
+    ])
     cron_jobs = [
         cron(backup_job, hour=3, minute=0),
         cron(approval_expire_job, minute=5),
@@ -229,7 +264,7 @@ class WorkerSettings:
 async def run():
     """Entry point for ``aios-worker`` script — blocks on event loop."""
     from arq.worker import Worker
-    worker = Worker(functions=FUNCTIONS, redis_settings=WorkerSettings.redis_settings)
+    worker = Worker(functions=WorkerSettings.functions, redis_settings=WorkerSettings.redis_settings)
     await worker.run()
 
 
