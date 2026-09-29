@@ -1,5 +1,7 @@
 """HTTP client for AIOS API."""
 
+from __future__ import annotations  # noqa: F401  (list[str] would collide with the .list() methods below)
+
 import logging
 from typing import Any
 
