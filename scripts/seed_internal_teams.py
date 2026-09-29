@@ -80,7 +80,9 @@ async def main():
 
             members = []
             for atype in member_types:
-                agent, created = await _get_or_create_agent(db, org.id, f"{team_name}-{atype}", atype)
+                # team "red" + type "red" would otherwise produce "red-red"
+                agent_name = f"{team_name}-{atype}" if team_name != atype else f"{atype}-agent"
+                agent, created = await _get_or_create_agent(db, org.id, agent_name, atype)
                 members.append(agent)
                 print(f"  {'+' if created else '='} agent {agent.name}")
             manager, created = await _get_or_create_agent(db, org.id, f"{team_name}-manager", "manager")
