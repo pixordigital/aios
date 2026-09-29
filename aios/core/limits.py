@@ -5,6 +5,7 @@ race conditions on concurrent agent runs — Paperclip-style atomic checkout.
 """
 
 import logging
+import uuid as _uuid
 from datetime import date
 
 from sqlalchemy import func, select, text
@@ -23,6 +24,16 @@ def _plan_limit(org: Organization, key: str):
     plan_name = _get_plan(org)
     limits = PLANS.get(plan_name, PLANS[DEFAULT_PLAN])
     return limits.get(key)
+
+
+async def _is_sqlite(db) -> bool:
+    """True when the backend is SQLite (tests, local dev). Postgres is the target."""
+    try:
+        sess = await db._sess()  # noqa: SLF001 - internal but the only handle we have
+        bind = sess.get_bind() if hasattr(sess, "get_bind") else None
+        return bool(bind and bind.dialect.name == "sqlite")
+    except Exception:
+        return False
 
 
 async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
@@ -76,17 +87,23 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         # takes a single argument and rejects a positional params dict.
         await db.execute(
             text("""
-                INSERT INTO usage_records (org_id, date, messages, llm_tokens, llm_calls, cost_usd)
-                VALUES (:org_id, :date, 0, 0, 0, 0)
+                INSERT INTO usage_records
+                    (id, org_id, date, messages, llm_tokens, llm_calls, cost_usd,
+                     whatsapp_messages, whatsapp_cost_usd)
+                VALUES (:id, :org_id, :date, 0, 0, 0, 0, 0, 0)
                 ON CONFLICT (org_id, date) DO NOTHING
-            """).bindparams(org_id=org_id, date=today),
+            """).bindparams(id=_uuid.uuid4().hex, org_id=org_id, date=today),
         )
         await db.commit()
 
-        # Now lock the row for update
+        # Now lock the row for update. FOR UPDATE is Postgres/MySQL only —
+        # SQLite rejects it outright, and it serialises writers anyway.
+        for_update = "" if _is_sqlite(db) else " FOR UPDATE"
         usage_row = (await db.execute(
-            text("SELECT * FROM usage_records WHERE org_id = :org_id AND date = :date FOR UPDATE")
-            .bindparams(org_id=org_id, date=today),
+            text(
+                "SELECT * FROM usage_records WHERE org_id = :org_id AND date = :date"
+                + for_update
+            ).bindparams(org_id=org_id, date=today),
         )).mappings().first()
 
         if usage_row:
@@ -219,14 +236,17 @@ async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_c
     # Atomic upsert with increment (PostgreSQL/SQLite compatible)
     await db.execute(
         text("""
-            INSERT INTO usage_records (org_id, date, messages, llm_tokens, llm_calls, cost_usd)
-            VALUES (:org_id, :date, :messages, :tokens, :calls, :cost)
+            INSERT INTO usage_records
+                (id, org_id, date, messages, llm_tokens, llm_calls, cost_usd,
+                 whatsapp_messages, whatsapp_cost_usd)
+            VALUES (:id, :org_id, :date, :messages, :tokens, :calls, :cost, 0, 0)
             ON CONFLICT (org_id, date) DO UPDATE SET
                 messages = usage_records.messages + :messages,
                 llm_tokens = usage_records.llm_tokens + :tokens,
                 llm_calls = usage_records.llm_calls + :calls,
                 cost_usd = usage_records.cost_usd + :cost
         """).bindparams(
+            id=_uuid.uuid4().hex,
             org_id=org_id, date=today, messages=messages,
             tokens=tokens, calls=llm_calls, cost=cost_usd,
         ),

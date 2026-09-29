@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import Column, ForeignKey, Integer, String, Table, Text, UniqueConstraint, text
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -238,16 +238,19 @@ class Artifact(Base, TimestampMixin):
 
 class UsageRecord(Base):
     __tablename__ = "usage_records"
+    __table_args__ = (UniqueConstraint("org_id", "date", name="uq_usage_records_org_date"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
-    messages: Mapped[int] = mapped_column(default=0)
-    llm_tokens: Mapped[int] = mapped_column(default=0)
-    llm_calls: Mapped[int] = mapped_column(default=0)
-    cost_usd: Mapped[float] = mapped_column(default=0.0)
-    whatsapp_messages: Mapped[int] = mapped_column(default=0)
-    whatsapp_cost_usd: Mapped[float] = mapped_column(default=0.0)
-    whatsapp_split: Mapped[dict] = mapped_column(JSON, default=dict)  # {marketing,utility,service,auth}
+    # server_default matters: limits.py writes usage rows with raw SQL, which
+    # bypasses SQLAlchemy's Python-side defaults and would hit NOT NULL.
+    messages: Mapped[int] = mapped_column(default=0, server_default="0")
+    llm_tokens: Mapped[int] = mapped_column(default=0, server_default="0")
+    llm_calls: Mapped[int] = mapped_column(default=0, server_default="0")
+    cost_usd: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    whatsapp_messages: Mapped[int] = mapped_column(default=0, server_default="0")
+    whatsapp_cost_usd: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    whatsapp_split: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
 
 
 class RemoteInstance(Base, TimestampMixin):
