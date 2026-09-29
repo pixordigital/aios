@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 # Cloud metadata + RFC1918 + loopback + link-local + unique-local.
 _PRIVATE_BLOCKS = [
+    ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
