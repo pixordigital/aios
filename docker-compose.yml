@@ -40,7 +40,7 @@ services:
   app:
     build: .
     ports:
-      - "8777:8777"
+      - "8779:8777"
     env_file: .env
     environment:
       AIOS_REDIS_URL: "redis://:${AIOS_REDIS_PASSWORD}@redis:6379/0"
