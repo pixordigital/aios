@@ -107,6 +107,11 @@ class Settings(BaseSettings):
 
     registration_enabled: bool = False  # fechar cadastros — home buttons desabilitados
 
+    # ─── Internal mode (P1 pivot) ───
+    # True = ferramenta interna de times de agentes: ignora quotas PLANS,
+    # gates de CRM/billing e limites de instâncias. Tracking de uso continua.
+    internal_mode: bool = False  # env AIOS_INTERNAL_MODE
+
     # ─── Calendar (P3) ───
     google_calendar_credentials: str = ""  # JSON service account inline ou path (env GOOGLE_CALENDAR_CREDENTIALS / AIOS_GOOGLE_CALENDAR_CREDENTIALS)
     google_calendar_id: str = "primary"  # calendarId (env GOOGLE_CALENDAR_ID)

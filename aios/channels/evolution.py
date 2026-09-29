@@ -329,7 +329,9 @@ class EvolutionChannel(Channel):
             if not org:
                 return {"ok": True}
 
-            from aios.config import PLANS
+            from aios.config import PLANS, settings
+            if settings.internal_mode:
+                return {"ok": True}  # ferramenta interna: sem limite de instâncias
             plan = PLANS.get(org.plan, PLANS["free"])
             max_instances = plan.get("max_evolution_instances", 0)
 

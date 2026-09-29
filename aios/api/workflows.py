@@ -60,14 +60,14 @@ async def create_workflow(
     user=Depends(get_current_user),
 ):
     _require_role(user, ["admin", "org_admin"])
-    # per-agent quota check
+    # per-agent quota check (bypass em internal_mode)
     from aios.core.agent_health import health_tracker as _ht
-    from aios.config import PLANS
+    from aios.config import PLANS, settings
     from aios.db.models import Organization
 
     org = await db.get(Organization, org_id)
     plan = org.extra_data.get("plan", "free") if org else "free"
-    if plan not in ("unlimited", "enterprise") and plan != "pro":
+    if not settings.internal_mode and plan not in ("unlimited", "enterprise") and plan != "pro":
         existing = (
             (await db.execute(select(Workflow).where(Workflow.org_id == org_id)))
             .scalars()

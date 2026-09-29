@@ -17,13 +17,13 @@ async def create_team(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    # quota P0-14: API directa não burla PLANS
-    from aios.config import PLANS
+    # quota P0-14: API directa não burla PLANS (bypass em internal_mode)
+    from aios.config import PLANS, settings
     from aios.db.models import Organization as _Org
     from sqlalchemy import func as _func
     org = await db.get(_Org, org_id)
     plan = ((org.extra_data or {}).get("plan", "free") if org else "free")
-    if plan not in ("unlimited",):
+    if not settings.internal_mode and plan not in ("unlimited",):
         limits = PLANS.get(plan, PLANS["free"])
         cnt = (await db.execute(select(_func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
         if cnt >= limits.get("max_teams", 1):

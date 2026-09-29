@@ -11,6 +11,9 @@ router = APIRouter(prefix="/api/crm", tags=["crm"])
 STAGES = ["prospection","mql","sql","opportunity","closed_won","closed_lost"]
 
 def _crm_enabled(org):
+    from aios.config import settings
+    if settings.internal_mode:
+        return True  # ferramenta interna: CRM sempre ativo
     if not org: return False
     data = org.extra_data or {}
     if data.get("plan") in ("unlimited","enterprise"): return True
@@ -155,6 +158,34 @@ async def enable_crm(db: DatabaseBackend = Depends(get_db_backend), org_id: str 
     org.extra_data = data
     await db.commit()
     return {"ok": True, "crm_enabled": True}
+
+@router.post("/goals")
+async def set_goal(body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    """Set monthly sales goal: {year_month: YYYY-MM, target_brl, team_id?}."""
+    from aios.core.sales_goals import set_goal as _set
+    from aios.db.models import Organization
+    org = await db.get(Organization, org_id)
+    if not _crm_enabled(org):
+        raise HTTPException(402, "CRM IA upsell")
+    ym = (body.get("year_month") or "")[:7]
+    target = float(body.get("target_brl", 0))
+    if len(ym) != 7 or target <= 0:
+        raise HTTPException(422, "year_month YYYY-MM + target_brl > 0 required")
+    goal = await _set(db, org_id, ym, target, team_id=body.get("team_id"),
+                      created_by=user.id if hasattr(user, "id") else None)
+    return {"id": goal.id, "year_month": goal.year_month, "target_brl": goal.target_brl, "team_id": goal.team_id}
+
+
+@router.get("/goals/current")
+async def goal_current(year_month: str = "", team_id: str = "", db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    """Goal progress + pace for a month (default current)."""
+    from aios.core.sales_goals import month_progress
+    from aios.db.models import Organization
+    org = await db.get(Organization, org_id)
+    if not _crm_enabled(org):
+        raise HTTPException(402, "CRM IA upsell")
+    return await month_progress(db, org_id, year_month or None, team_id or None)
+
 
 @router.get("/admin/all")
 async def admin_all(q: str = "", limit: int = 50, db: DatabaseBackend = Depends(get_db_backend), user=Depends(get_current_user)):

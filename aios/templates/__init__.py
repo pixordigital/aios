@@ -12,6 +12,10 @@ from aios.templates.pricing_guardian import PRICING_GUARDIAN_TEMPLATE
 from aios.templates.evidence_compiler import EVIDENCE_COMPILER_TEMPLATE
 from aios.templates.performance_watcher import PERFORMANCE_WATCHER_TEMPLATE
 from aios.templates.human_auditor import HUMAN_AUDITOR_TEMPLATE
+from aios.templates.frontend import FRONTEND_TEMPLATE
+from aios.templates.backend import BACKEND_TEMPLATE
+from aios.templates.red import RED_TEMPLATE
+from aios.templates.blue import BLUE_TEMPLATE
 
 TEMPLATES = {
     "orchestrator": ORCHESTRATOR_TEMPLATE,
@@ -26,6 +30,10 @@ TEMPLATES = {
     "evidence_compiler": EVIDENCE_COMPILER_TEMPLATE,
     "performance_watcher": PERFORMANCE_WATCHER_TEMPLATE,
     "human_auditor": HUMAN_AUDITOR_TEMPLATE,
+    "frontend": FRONTEND_TEMPLATE,
+    "backend": BACKEND_TEMPLATE,
+    "red": RED_TEMPLATE,
+    "blue": BLUE_TEMPLATE,
 }
 
 

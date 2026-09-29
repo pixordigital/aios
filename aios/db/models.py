@@ -537,6 +537,18 @@ class CrmDealVersion(Base, TimestampMixin):
     deal = relationship("CrmDeal")
 
 
+class SalesGoal(Base, TimestampMixin, OrgScopedMixin):
+    """Monthly sales target per org (optionally per team). Internal tool."""
+    __tablename__ = "sales_goals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    year_month: Mapped[str] = mapped_column(String(7), index=True)  # YYYY-MM
+    target_brl: Mapped[float] = mapped_column(default=0.0)
+    team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True, index=True)  # None = org-wide
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+    team = relationship("Team")
+
+
 class VoiceRecording(Base, TimestampMixin, OrgScopedMixin):
     """Voice call recording with transcript for search and compliance."""
     __tablename__ = "voice_recordings"

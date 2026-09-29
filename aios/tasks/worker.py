@@ -13,7 +13,7 @@ import os
 from arq import cron
 from arq.connections import RedisSettings
 from aios.config import settings
-from .jobs import FUNCTIONS
+from .jobs import FUNCTIONS, biweekly_1on1_job, weekly_standup_job
 
 
 def _parse_redis(redis_url: str) -> RedisSettings:
@@ -196,6 +196,8 @@ class WorkerSettings:
         cron(_optimization_review_cron, minute=15),
         cron(_eval_review_cron, minute=25),
         cron(integration_outbox_cron, second=30),
+        cron(weekly_standup_job, hour=9, minute=0),  # daily trigger, self-skips unless Monday
+        cron(biweekly_1on1_job, hour=9, minute=30),  # daily trigger, self-skips unless 1:1 week
     ]
     redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379"))
     max_jobs = 20

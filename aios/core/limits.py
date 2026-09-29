@@ -38,6 +38,10 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     if not org.is_active:
         return False, "Organization is suspended"
 
+    from aios.config import settings as _settings
+    if _settings.internal_mode:
+        return True, ""  # ferramenta interna: quotas SaaS desligadas, tracking continua
+
     if (org.extra_data or {}).get("unlimited"):
         return True, ""
 

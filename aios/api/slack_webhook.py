@@ -38,6 +38,31 @@ def _verify_slack_signature(request: Request, body: bytes) -> bool:
     return hmac.compare_digest(expected, sig)
 
 
+async def _find_connection(db, slack_channel_id: str = ""):
+    """Route by Slack channel: prefer connection whose config matches.
+
+    Each team/manager 1:1 channel gets its own ChannelConnection with
+    config.slack_channel_id set. Falls back to first active slack conn.
+    """
+    from sqlalchemy import select
+
+    from aios.db.models import ChannelConnection
+
+    result = await db.execute(
+        select(ChannelConnection).where(
+            ChannelConnection.channel_type == "slack",
+            ChannelConnection.is_active == True,
+        )
+    )
+    conns = result.scalars().all()
+    if slack_channel_id:
+        for c in conns:
+            cfg = c.config or {}
+            if isinstance(cfg, dict) and cfg.get("slack_channel_id") == slack_channel_id:
+                return c
+    return conns[0] if conns else None
+
+
 @router.post("/webhook")
 async def slack_webhook(request: Request):
     """Receive Slack events → dispatch to agent."""
@@ -72,16 +97,7 @@ async def slack_webhook(request: Request):
             from aios.core.dispatch import dispatch_inbound
 
             async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
-                from aios.db.models import ChannelConnection
-                from sqlalchemy import select
-
-                result = await db.execute(
-                    select(ChannelConnection).where(
-                        ChannelConnection.channel_type == "slack",
-                        ChannelConnection.is_active == True,
-                    )
-                )
-                conn = result.scalars().first()
+                conn = await _find_connection(db, channel_id)
 
                 if conn:
                     await dispatch_inbound(
@@ -109,16 +125,7 @@ async def slack_webhook(request: Request):
             from aios.core.dispatch import dispatch_inbound
 
             async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
-                from aios.db.models import ChannelConnection
-                from sqlalchemy import select
-
-                result = await db.execute(
-                    select(ChannelConnection).where(
-                        ChannelConnection.channel_type == "slack",
-                        ChannelConnection.is_active == True,
-                    )
-                )
-                conn = result.scalars().first()
+                conn = await _find_connection(db, channel_id)
 
                 if conn:
                     await dispatch_inbound(
@@ -145,16 +152,7 @@ async def slack_webhook(request: Request):
             from aios.core.dispatch import dispatch_inbound
 
             async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
-                from aios.db.models import ChannelConnection
-                from sqlalchemy import select
-
-                result = await db.execute(
-                    select(ChannelConnection).where(
-                        ChannelConnection.channel_type == "slack",
-                        ChannelConnection.is_active == True,
-                    )
-                )
-                conn = result.scalars().first()
+                conn = await _find_connection(db, channel_id)
 
                 if conn:
                     await dispatch_inbound(

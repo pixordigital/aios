@@ -482,6 +482,98 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
     return {"finding_id": str(finding_id), "business_trace_id": str(business_trace_id), "output": result_text[:500]}
 
 
+async def weekly_standup_job(ctx):
+    """Monday 9h (cron daily, self-skips): post team progress to Slack team channels."""
+    from datetime import date
+
+    from sqlalchemy import select
+
+    if date.today().weekday() != 0:
+        return {"skipped": True, "reason": "not-monday"}
+    from aios.core.meetings import post_to_slack, standup_text, team_week_stats
+    from aios.core.sales_goals import month_progress
+    from aios.db.backend import db_session
+    from aios.db.models import Agent, ChannelConnection, Organization, Team
+
+    posted, failed = 0, 0
+    async with db_session() as db:
+        orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
+        for org in orgs:
+            conns = (await db.execute(select(ChannelConnection).where(
+                ChannelConnection.org_id == org.id,
+                ChannelConnection.channel_type == "slack",
+                ChannelConnection.is_active == True,  # noqa: E712
+                ChannelConnection.team_id != None,  # noqa: E711
+            ))).scalars().all()
+            for conn in conns:
+                cfg = conn.config or {}
+                if not isinstance(cfg, dict) or cfg.get("slack_1on1"):
+                    continue  # 1:1 handled by biweekly job
+                channel = cfg.get("slack_channel_id", "")
+                token = cfg.get("bot_token", "")
+                team = await db.get(Team, conn.team_id)
+                if not team or not channel or not token:
+                    continue
+                manager = await db.get(Agent, team.manager_agent_id) if team.manager_agent_id else None
+                stats = await team_week_stats(db, org.id, team.id)
+                try:
+                    goal = await month_progress(db, org.id, team_id=team.id)
+                except Exception:
+                    goal = None
+                text = standup_text(team.name, manager.name if manager else "-", stats, goal)
+                if post_to_slack(token, channel, text):
+                    posted += 1
+                else:
+                    failed += 1
+    return {"posted": posted, "failed": failed}
+
+
+async def biweekly_1on1_job(ctx):
+    """Monday 9h even ISO weeks (cron daily, self-skips): 1:1 prompts to manager DM channels."""
+    from datetime import date
+
+    from sqlalchemy import select
+
+    today = date.today()
+    if today.weekday() != 0 or today.isocalendar()[1] % 2:
+        return {"skipped": True, "reason": "not-1on1-week"}
+    from aios.core.meetings import one_on_one_text, post_to_slack, team_week_stats
+    from aios.core.sales_goals import month_progress
+    from aios.db.backend import db_session
+    from aios.db.models import Agent, ChannelConnection, Organization, Team
+
+    posted, failed = 0, 0
+    async with db_session() as db:
+        orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
+        for org in orgs:
+            conns = (await db.execute(select(ChannelConnection).where(
+                ChannelConnection.org_id == org.id,
+                ChannelConnection.channel_type == "slack",
+                ChannelConnection.is_active == True,  # noqa: E712
+            ))).scalars().all()
+            for conn in conns:
+                cfg = conn.config or {}
+                if not isinstance(cfg, dict) or not cfg.get("slack_1on1"):
+                    continue
+                channel = cfg.get("slack_channel_id", "")
+                token = cfg.get("bot_token", "")
+                team = await db.get(Team, conn.team_id) if conn.team_id else None
+                if not team or not channel or not token:
+                    continue
+                manager = await db.get(Agent, team.manager_agent_id) if team.manager_agent_id else None
+                stats = await team_week_stats(db, org.id, team.id)
+                try:
+                    goal = await month_progress(db, org.id, team_id=team.id)
+                except Exception:
+                    goal = None
+                text = one_on_one_text(team.name, manager.name if manager else "-", stats, goal)
+                if post_to_slack(token, channel, text):
+                    posted += 1
+                else:
+                    failed += 1
+    return {"posted": posted, "failed": failed}
+
+
 # ARQ worker function registry
 FUNCTIONS = [
     process_inbound,
@@ -492,4 +584,6 @@ FUNCTIONS = [
     transcribe_voice_recording,
     download_voice_recording,
     process_commitment_at_risk,
+    weekly_standup_job,
+    biweekly_1on1_job,
 ]
