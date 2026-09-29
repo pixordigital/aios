@@ -257,11 +257,29 @@ class EvolutionChannel(Channel):
         return payload
 
     async def _validate_url(self) -> bool:
+        """Validate the configured Evolution server_url.
+
+        Deliberately does NOT apply the SSRF private-IP block. Evolution is a
+        first-party service on the internal Docker network
+        (http://evolution:8080), so that guard made every send fail:
+        _is_private("evolution") is True and both send paths bailed out before
+        sending anything.
+
+        server_url is operator config, not agent- or user-supplied input, so the
+        SSRF threat model does not apply here. We still require a sane http(s)
+        URL and reject embedded credentials.
+        """
         from urllib.parse import urlparse
-        from aios.tools.http_get import _is_private
-        host = urlparse(self.base_url).hostname
-        if not host or _is_private(host):
-            logger.warning("Evolution send blocked: private server_url (%s)", host)
+
+        parsed = urlparse(self.base_url)
+        if parsed.scheme not in ("http", "https"):
+            logger.warning("Evolution send blocked: bad scheme %r", parsed.scheme)
+            return False
+        if not parsed.hostname:
+            logger.warning("Evolution send blocked: server_url has no host")
+            return False
+        if parsed.username or parsed.password:
+            logger.warning("Evolution send blocked: credentials in server_url")
             return False
         return True
 
@@ -332,7 +350,11 @@ class EvolutionChannel(Channel):
             from aios.config import PLANS, settings
             if settings.internal_mode:
                 return {"ok": True}  # ferramenta interna: sem limite de instâncias
-            plan = PLANS.get(org.plan, PLANS["free"])
+            # Organization has no .plan column — the plan lives in extra_data.
+            # Reading org.plan raised AttributeError, was swallowed, and the
+            # limit check fail-opened for every org.
+            plan_name = (org.extra_data or {}).get("plan", "free")
+            plan = PLANS.get(plan_name, PLANS["free"])
             max_instances = plan.get("max_evolution_instances", 0)
 
             if max_instances > 0 and current_count >= max_instances:

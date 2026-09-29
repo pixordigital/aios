@@ -32,20 +32,26 @@ async def evolution_webhook(instance: str, request: Request):
     """
     body = await request.json()
 
-    # verify signature — fail closed
-    sig = request.headers.get("x-evolution-signature", "")
-    if not sig:
-        logger.warning("Evolution webhook missing signature for instance %s", instance)
-        return {"status": "ignored"}
-
+    # Authenticate the caller — fail closed, and say so loudly.
+    #
+    # Evolution API does NOT sign request bodies. Its `webhookAuth` config sends
+    # a static shared secret in a request header. The previous code required an
+    # x-evolution-signature header and compared it to HMAC(api_key, canonical_json),
+    # which no Evolution version produces — so every inbound message was dropped
+    # with a log line nobody was watching.
     instance_key = await _get_evolution_api_key(instance)
     if not instance_key:
-        logger.warning("Evolution webhook: no API key for instance %s — rejecting", instance)
-        return {"status": "ignored"}
+        logger.error(
+            "Evolution webhook: no configured instance %r (is the channel active?) — rejecting", instance
+        )
+        return {"status": "ignored", "reason": "unknown_instance"}
 
-    if not _verify_evolution_sig(sig, body, instance_key):
-        logger.warning("Evolution webhook signature mismatch for instance %s", instance)
-        return {"status": "ignored"}
+    request.state.aios_body = body
+    if not _verify_request(request, instance_key):
+        logger.error(
+            "Evolution webhook: auth failed for instance %r — rejecting", instance
+        )
+        return {"status": "ignored", "reason": "auth_failed"}
 
     # normalize event (Baileys and Meta have different event names)
     event = body.get("event", "")
@@ -193,8 +199,36 @@ async def _get_evolution_api_key(instance_name: str) -> str:
         return ""
 
 
+# Header Evolution's `webhookAuth` uses to send the shared secret.
+_AUTH_HEADERS = ("x-webhook-auth", "x-evolution-auth", "x-evolution-signature")
+
+
+def _verify_request(request, api_key: str) -> bool:
+    """Authenticate an Evolution webhook call.
+
+    Primary path is the shared secret Evolution actually sends in a header
+    (`webhookAuth`). The HMAC-of-body path is kept for deployments that front
+    Evolution with a proxy that does sign, but it is no longer the only option.
+    """
+    if not api_key:
+        return False
+
+    for header in _AUTH_HEADERS:
+        got = request.headers.get(header, "")
+        if got and hmac.compare_digest(got, api_key):
+            return True
+
+    sig = request.headers.get("x-evolution-signature", "")
+    if sig and isinstance(getattr(request, "state", None), object):
+        body = getattr(request.state, "aios_body", None)
+        if isinstance(body, dict):
+            return _verify_evolution_sig(sig, body, api_key)
+
+    return False
+
+
 def _verify_evolution_sig(signature: str, body: dict, api_key: str) -> bool:
-    """Verify Evolution webhook HMAC-SHA256 signature."""
+    """Verify HMAC-SHA256 over the canonical body (proxy-fronted deployments)."""
     raw = json.dumps(body, separators=(",", ":"), sort_keys=True)
     expected = hmac.new(api_key.encode(), raw.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature, expected)
