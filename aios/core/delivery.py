@@ -63,7 +63,7 @@ async def deliver_message(
                         text,
                         extra_data,
                         attempt,
-                        _defer_seconds=30,
+                        _defer_by=30,
                     )
                     return
             except Exception:
@@ -116,7 +116,7 @@ async def deliver_message(
                 text,
                 extra_data,
                 attempt + 1,
-                _defer_seconds=delay,
+                _defer_by=delay,
             )
         else:
             # max retries exceeded — DLQ

@@ -46,7 +46,7 @@ async def process_inbound(
                 "aios.tasks.jobs.process_inbound",
                 channel_type, channel_connection_id, conversation_id, text, user_id, extra_data,
                 attempt + 1,
-                _defer_seconds=_INBOUND_BASE_DELAY_S * (2 ** (attempt - 1)),
+                _defer_by=_INBOUND_BASE_DELAY_S * (2 ** (attempt - 1)),
             )
         else:
             from aios.core.dead_letter import write_dlq
@@ -64,6 +64,20 @@ async def process_inbound(
             )
             logger.error("DLQ: inbound %s/%s failed after %d attempts",
                          channel_type, conversation_id[:8], _INBOUND_MAX_RETRIES)
+
+
+def _reply_meta(agent_or_team) -> dict:
+    """Message insert fields for a reply.
+
+    messages.agent_id is a FK to agents.id, so a Team must not be written there
+    — that raised ForeignKeyViolationError on every team-bound channel. The team
+    id goes in extra_data instead.
+    """
+    from aios.db.models import Team as _Team
+
+    if isinstance(agent_or_team, _Team):
+        return {"agent_id": None, "extra_data": {"team_id": agent_or_team.id}}
+    return {"agent_id": agent_or_team.id, "extra_data": {}}
 
 
 async def _process_inbound_once(
@@ -189,7 +203,7 @@ async def _process_inbound_once(
                         org_id=conn.org_id,
                         role="assistant",
                         content=reply_text,
-                        agent_id=agent_or_team.id,
+                        **_reply_meta(agent_or_team),
                     ))
                     await db.commit()
                     # Ainda deliver para que humano veja no canal que precisa aprovar
@@ -207,7 +221,7 @@ async def _process_inbound_once(
                 org_id=conn.org_id,
                 role="assistant",
                 content=reply_text,
-                agent_id=getattr(agent_or_team, "id", None),
+                **_reply_meta(agent_or_team),
             ))
             await db.commit()
             await track_usage(conn.org_id, db, messages=1, tokens=len(reply_text))
