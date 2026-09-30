@@ -42,31 +42,10 @@ services:
       - "4318:4318"
     restart: unless-stopped
 
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    command: ["--config", "/app/litellm.yaml", "--port", "4000", "--num_workers", "1"]
-    volumes:
-      - ./deploy/litellm.yaml:/app/litellm.yaml:ro
-    environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      MUSE_API_KEY: ${MUSE_API_KEY:-}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      QWEN_API_KEY: ${QWEN_API_KEY:-}
-    ports:
-      - "4000:4000"
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=5).read()\""]
-      interval: 15s
-      timeout: 10s
-      start_period: 30s
-      retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "1", memory: 1G }
-        reservations: { cpus: "0.5", memory: 512M }
+  # litellm removed: active provider is openrouter (direct, see
+  # aios/core/providers.py) and the proxy never started — no master key,
+  # 90+ crash-loop restarts burning a full core plus 512M reserved, for
+  # nothing. Config kept at deploy/litellm.yaml if ever needed again.
 
   evolution:
     image: evoapicloud/evolution-api:v2.3.7
@@ -315,7 +294,7 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        # host real: 4 vCPU / 7.6GB RAM — 1.5 CPU acelera warmup/gen sem matar app/worker/litellm
+        # host real: 4 vCPU / 7.6GB RAM — 1.5 CPU acelera warmup/gen sem matar app/worker
         limits: { cpus: "1.5", memory: 2G }
   # voice-tts-stream:
   #   build:
