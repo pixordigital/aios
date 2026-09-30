@@ -18,6 +18,6 @@ Pick a target surface (Slack webhook, auth, channels, tools). Trace untrusted in
 Confirmed critical (RCE, auth bypass, secret leak) → hand to blue team via manager immediately with full trace. Everything else → normal finding report.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.5, "max_tokens": 4096},
-    "tools": ["read_file", "web_search", "http_request", "python_sandbox", "current_datetime"],
+    "tools": ["read_file", "web_search", "http_request", "python_sandbox", "current_datetime", "sql_query"],
     "memory_config": {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}},
 }

@@ -13,6 +13,6 @@ Fluxo:
 
 AutoML: use python_sandbox para GridSearch, se precisar escale para o3. Sempre declare suposições/limitações.""",
     "llm_config": {"model": "openai/o3-mini", "temperature": 0.2, "max_tokens": 8192},
-    "tools": ["python_sandbox", "sql_query", "http_request", "calculator", "read_file", "transcribe"],
+    "tools": ["sql_query", "python_sandbox", "calculator", "http_request", "read_file", "current_datetime", "rag_search", "web_search"],
     "memory_config": {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 10}, "episodic": {"enabled": True, "summarize_after": 15}},
 }

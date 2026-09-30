@@ -118,3 +118,93 @@ class TestManagerToolsMatchTeam:
             needed |= set(apply_template(w)["tools"])
         missing = needed - self._tools(key)
         assert not missing, f"{key} cannot inspect worker tools: {sorted(missing)}"
+
+
+WORKER_TEAMS = {
+    "manager_sales": ["sdr", "closer"],
+    "manager_dev": ["frontend", "backend"],
+    "manager_red": ["red"],
+    "manager_blue": ["blue"],
+    "manager_data": ["data_analyst", "data_scientist"],
+}
+
+
+class TestPerAgentTools:
+    """Tool sets must match what each agent does, and differ between peers."""
+
+    @pytest.mark.parametrize("key", [
+        "sdr", "closer", "frontend", "backend", "red", "blue",
+        "data_analyst", "data_scientist",
+    ])
+    def test_worker_tools_all_exist_and_load(self, key):
+        tools = apply_template(key)["tools"]
+        missing = [t for t in tools if t not in TOOL_REGISTRY]
+        assert not missing, f"{key}: {missing}"
+        assert ToolEngine(tools, org_id="o").missing == []
+
+    @pytest.mark.parametrize("mgr,workers", list(WORKER_TEAMS.items()))
+    def test_manager_is_superset_of_its_workers(self, mgr, workers):
+        needed = set()
+        for w in workers:
+            needed |= set(apply_template(w)["tools"])
+        missing = needed - set(apply_template(mgr)["tools"])
+        assert not missing, f"{mgr} cannot inspect {sorted(missing)}"
+
+    # --- differentiation between peers doing different jobs ---
+
+    def test_sdr_and_closer_differ(self):
+        """SDR researches and qualifies; closer prices and consolidates."""
+        sdr, closer = set(apply_template("sdr")["tools"]), set(apply_template("closer")["tools"])
+        assert sdr != closer, "SDR and closer had byte-identical tool sets"
+        assert {"lead_score", "web_search"} <= sdr
+        assert "calculator" not in sdr
+        assert {"calculator", "crm_merge_deals"} <= closer
+        assert "lead_score" not in closer
+
+    def test_analyst_and_scientist_differ(self):
+        """Analyst reads call/voice data; scientist works the model."""
+        a, s = set(apply_template("data_analyst")["tools"]), set(apply_template("data_scientist")["tools"])
+        assert "transcribe" in a
+        assert "transcribe" not in s
+
+    def test_frontend_never_touches_the_database(self):
+        assert "sql_query" not in apply_template("frontend")["tools"]
+
+    def test_backend_can_verify_its_own_routes(self):
+        """dev-backend owns the FastAPI layer; without http_request it could
+        not check a route fix. dev-frontend had it, which was backwards."""
+        assert "http_request" in apply_template("backend")["tools"]
+
+    def test_red_stays_read_only(self):
+        assert "code" not in apply_template("red")["tools"]
+        assert "code" not in apply_template("manager_red")["tools"]
+
+    def test_blue_can_write_and_prove(self):
+        t = apply_template("blue")["tools"]
+        assert "code" in t
+        assert "sql_query" in t  # must show the query now filters org
+
+    def test_sales_agents_know_the_date(self):
+        """Follow-up scheduling is date-relative; both needed current_datetime."""
+        for k in ("sdr", "closer", "manager_sales"):
+            assert "current_datetime" in apply_template(k)["tools"], k
+
+    def test_data_agents_can_reach_the_knowledge_base(self):
+        """rag_search was reachable from 1 of 21 templates."""
+        for k in ("data_analyst", "data_scientist", "manager_data",
+                  "sdr", "closer", "manager_sales"):
+            assert "rag_search" in apply_template(k)["tools"], k
+
+    def test_no_sales_tools_outside_sales(self):
+        for k in ("frontend", "backend", "red", "blue",
+                  "data_analyst", "data_scientist",
+                  "manager_dev", "manager_red", "manager_blue", "manager_data"):
+            crm = {t for t in apply_template(k)["tools"] if t.startswith("crm_")}
+            assert not crm, f"{k} holds sales-domain tools: {crm}"
+
+    def test_no_writing_tools_for_read_only_roles(self):
+        """send_email reaches real people; only sales may send it."""
+        for k in ("frontend", "backend", "red", "blue",
+                  "data_analyst", "data_scientist",
+                  "manager_dev", "manager_red", "manager_blue", "manager_data"):
+            assert "send_email" not in apply_template(k)["tools"], k

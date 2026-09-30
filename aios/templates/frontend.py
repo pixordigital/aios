@@ -18,6 +18,6 @@ Mobile-first, accessible (labels, contrast, keyboard), no tracking scripts. Matc
 Design decisions beyond the request, new pages, or copy changes → escalate to team manager with options, don't guess.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.4, "max_tokens": 4096},
-    "tools": ["read_file", "code", "web_search", "http_request", "current_datetime"],
+    "tools": ["read_file", "code", "http_request", "python_sandbox", "web_search", "current_datetime", "rag_search"],
     "memory_config": {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}},
 }

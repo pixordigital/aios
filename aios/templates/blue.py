@@ -18,6 +18,6 @@ Reproduce the finding first (test or trace). Smallest patch that closes the hole
 Fix needs product tradeoff (breaking change, downtime, cost) → escalate to manager with risk statement. Disputed finding → ask red for reproduction, don't dismiss.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["read_file", "code", "python_sandbox", "web_search", "current_datetime"],
+    "tools": ["read_file", "code", "sql_query", "python_sandbox", "http_request", "web_search", "current_datetime", "rag_search"],
     "memory_config": {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}},
 }

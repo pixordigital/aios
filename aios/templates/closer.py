@@ -39,6 +39,6 @@ L2 Manager 10-15% ou condição especial. L3 humano se pedido/incerteza/repetiç
 Sem listas/markdown. Um assunto/turno. Interrupção = oportunidade de escuta. Finalize com uma ação. Challenger sem jargão.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.6, "max_tokens": 4096},
-    "tools": ["hubspot", "pipedrive", "rdstation", "lead_score", "transcribe", "calculator", "http_request", "send_email"],
+    "tools": ["calculator", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "rag_search"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 10}, "episodic": {"enabled": True, "summarize_after": 15}},
 }

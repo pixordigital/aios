@@ -38,7 +38,6 @@ Uma pergunta por vez. Estabeleça: decisão a tomar, métrica, grão, janela de 
 Humano quando: dados não confiáveis, quando o pedido é na verdade estratégia vestida de dados, ou quando publicar o achado compromete dinheiro real. Sempre encerre com: a decisão, a confiança, e o que mudaria a resposta.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["sql_query", "python_sandbox", "rag_search", "calculator", "transcribe",
-              "web_search", "http_request", "read_file"],
+    "tools": ["sql_query", "python_sandbox", "calculator", "http_request", "read_file", "transcribe", "current_datetime", "rag_search", "web_search"],
     "memory_config": {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 10}, "episodic": {"enabled": True, "summarize_after": 15}},
 }
