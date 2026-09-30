@@ -1,33 +1,21 @@
+"""Google Calendar tools: create, availability, list.
+
+All three need the same thing: a service-account JSON with Calendar scope,
+via GOOGLE_CALENDAR_CREDENTIALS / AIOS_GOOGLE_CALENDAR_CREDENTIALS
+(inline JSON or path) or settings.google_calendar_credentials.
+
+Without it every tool fails closed with "not configured". An earlier version
+returned ok:true with a fake calendar.mock link when unconfigured — the agent
+told users a meeting was booked and nothing happened. That path is deleted,
+including the mock persistence that wrote to whichever org sorted first.
 """
-aios/tools/calendar.py — CalendarTool (P3 agendamento real)
 
-CalendarTool: name="calendar_create_event"
-Inputs: title, datetime_iso (string ISO-8601), attendee_email, description, duration_min
-
-Fluxo em run():
-  1) Tenta Google Calendar API se GOOGLE_CALENDAR_CREDENTIALS configurado.
-     - GOOGLE_CALENDAR_CREDENTIALS: JSON da service account (conteúdo JSON inline ou path para arquivo)
-       via env GOOGLE_CALENDAR_CREDENTIALS / AIOS_GOOGLE_CALENDAR_CREDENTIALS ou settings.google_calendar_credentials
-       Opcional: GOOGLE_CALENDAR_ID / AIOS_GOOGLE_CALENDAR_ID (default "primary")
-     - Requer libs opcionais: `google-api-python-client` + `google-auth` (import com try; se ausente, cai para próximo)
-     - Cria evento via `googleapiclient.discovery.build("calendar","v3", credentials=creds)`
-       com summary, description, start/end (ISO), attendees=[attendee_email].
-  2) Senão tenta webhook Calendly/Zapier/n8n se CALENDAR_WEBHOOK_URL configurado
-     - CALENDAR_WEBHOOK_URL / AIOS_CALENDAR_WEBHOOK_URL ou settings.calendar_webhook_url
-     - POST JSON via httpx: {"event":"calendar_create","payload":{title,start_time,end_time,attendee_email,description}}
-  3) Fallback mock: persiste em Organization.extra_data["calendar_mock_events"] (últimos 50)
-     e também tenta criar Memory(type="calendar_event") se houver Agent/Org.
-     Retorna ok + link mock `https://calendar.mock/<uuid>` (ou /mock/calendar/<id>).
-
-Não implementa OAuth flow completo — apenas service account JSON via env e webhook simples.
-"""
+import asyncio
 import json
 import logging
 import os
-import uuid
 from datetime import datetime, timedelta, timezone
 
-import httpx
 from pydantic import BaseModel, Field
 
 from aios.tools.base import BaseTool
@@ -35,39 +23,83 @@ from aios.tools.registry import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 
+NOT_CONFIGURED = (
+    "Google Calendar não configurado: defina GOOGLE_CALENDAR_CREDENTIALS "
+    "(service account JSON) e compartilhe o calendário com o email da conta."
+)
 
-class CalendarCreateEventInput(BaseModel):
-    title: str = Field(description="Título do evento")
-    datetime_iso: str = Field(description="Data/hora ISO-8601 ex: 2026-09-15T14:00:00-03:00 ou 2026-09-15T17:00:00Z")
-    attendee_email: str = Field(default="", description="Email do convidado/lead")
-    description: str = Field(default="", description="Descrição / agenda do evento")
-    duration_min: int = Field(default=30, ge=5, le=480, description="Duração em minutos (5-480)")
+
+def _resolve_google() -> tuple[dict | None, str, str]:
+    """Return (creds_info, calendar_id, error). Error is "" on success."""
+    raw = (
+        os.getenv("GOOGLE_CALENDAR_CREDENTIALS")
+        or os.getenv("AIOS_GOOGLE_CALENDAR_CREDENTIALS")
+        or ""
+    )
+    calendar_id = (
+        os.getenv("GOOGLE_CALENDAR_ID")
+        or os.getenv("AIOS_GOOGLE_CALENDAR_ID")
+        or "primary"
+    )
+    if not raw:
+        try:
+            from aios.config import settings
+
+            raw = getattr(settings, "google_calendar_credentials", "") or ""
+            calendar_id = getattr(settings, "google_calendar_id", "") or calendar_id
+        except Exception:
+            pass
+    raw = (raw or "").strip()
+    if not raw:
+        return None, calendar_id, NOT_CONFIGURED
+    try:
+        info = json.loads(raw) if raw.startswith("{") else None
+        if info is None and os.path.isfile(raw):
+            with open(raw, "r", encoding="utf-8") as f:
+                info = json.load(f)
+        if not info or "client_email" not in info:
+            return None, calendar_id, "credencial inválida: JSON sem client_email"
+        return info, calendar_id, ""
+    except Exception as e:
+        return None, calendar_id, f"credencial inválida: {e}"
+
+
+def _service(creds_info: dict):
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
+
+    creds = Credentials.from_service_account_info(
+        creds_info, scopes=["https://www.googleapis.com/auth/calendar"]
+    )
+    return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
 def _parse_iso(dt_str: str) -> datetime:
-    """Parse ISO-8601 robusto; fallback para fromisoformat com Z handling."""
     s = dt_str.strip()
-    # normaliza Z -> +00:00
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
     try:
         dt = datetime.fromisoformat(s)
     except ValueError:
-        # tenta dateutil se disponível
-        try:
-            from dateutil.parser import isoparse  # type: ignore
+        from dateutil.parser import isoparse  # type: ignore
 
-            dt = isoparse(dt_str)
-        except Exception as e:
-            raise ValueError(f"datetime_iso inválido: {dt_str}: {e}") from e
+        dt = isoparse(dt_str)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
 
 
+class CalendarCreateEventInput(BaseModel):
+    title: str = Field(description="Título do evento")
+    datetime_iso: str = Field(description="Início ISO-8601 ex: 2026-09-15T14:00:00-03:00")
+    attendee_email: str = Field(default="", description="Email do convidado")
+    description: str = Field(default="", description="Agenda do evento")
+    duration_min: int = Field(default=30, ge=5, le=480, description="Duração em minutos")
+
+
 class CalendarTool(BaseTool):
     name = "calendar_create_event"
-    description = "Cria evento no Google Calendar (service account) ou webhook Calendly; fallback mock em Organization.extra_data"
+    description = "Cria evento no Google Calendar. Exige credencial configurada."
     input_model = CalendarCreateEventInput
 
     async def run(
@@ -78,243 +110,188 @@ class CalendarTool(BaseTool):
         description: str = "",
         duration_min: int = 30,
     ) -> dict:
-        # --- validação e cálculo de start/end ---
-        if not title or not title.strip():
+        if not (title or "").strip():
             return {"ok": False, "error": "title obrigatório"}
-        if not datetime_iso or not datetime_iso.strip():
-            return {"ok": False, "error": "datetime_iso obrigatório"}
         try:
             start_dt = _parse_iso(datetime_iso)
-        except ValueError as e:
-            return {"ok": False, "error": str(e)}
-        try:
-            duration_min = int(duration_min) if duration_min else 30
         except Exception:
-            duration_min = 30
-        duration_min = max(5, min(480, duration_min))
+            return {"ok": False, "error": f"datetime_iso inválido: {datetime_iso}"}
+        duration_min = max(5, min(480, int(duration_min or 30)))
         end_dt = start_dt + timedelta(minutes=duration_min)
 
-        # normaliza para ISO com offset
-        start_iso = start_dt.isoformat()
-        end_iso = end_dt.isoformat()
-
-        # --- resolve settings/env ---
-        google_creds_raw = ""
-        webhook_url = ""
-        calendar_id = "primary"
+        creds_info, calendar_id, err = _resolve_google()
+        if err:
+            return {"ok": False, "error": err}
         try:
-            from aios.config import settings
-
-            google_creds_raw = getattr(settings, "google_calendar_credentials", "") or ""
-            webhook_url = getattr(settings, "calendar_webhook_url", "") or ""
-            # calendar_id opcional se alguém adicionar no futuro
-            calendar_id = getattr(settings, "google_calendar_id", "") or calendar_id
-        except Exception:
-            pass
-
-        # env overrides (permite AIOS_ prefix e puro)
-        google_creds_raw = (
-            os.getenv("GOOGLE_CALENDAR_CREDENTIALS")
-            or os.getenv("AIOS_GOOGLE_CALENDAR_CREDENTIALS")
-            or google_creds_raw
-        ) or ""
-        webhook_url = (
-            os.getenv("CALENDAR_WEBHOOK_URL")
-            or os.getenv("AIOS_CALENDAR_WEBHOOK_URL")
-            or webhook_url
-        ) or ""
-        calendar_id = (
-            os.getenv("GOOGLE_CALENDAR_ID")
-            or os.getenv("AIOS_GOOGLE_CALENDAR_ID")
-            or calendar_id
-        ) or "primary"
-
-        # --- 1) Google Calendar via service account ---
-        if google_creds_raw and google_creds_raw.strip():
-            try:
-                # import opcional com fallback
-                try:
-                    from google.oauth2.service_account import Credentials  # type: ignore
-                    from googleapiclient.discovery import build  # type: ignore
-                except ImportError as ie:
-                    logger.warning("google-api-python-client não instalado, skip Google Calendar: %s", ie)
-                    raise ImportError("google libs ausentes") from ie
-
-                # resolve creds: JSON inline ou path
-                creds_info: dict | None = None
-                raw = google_creds_raw.strip()
-                if raw.startswith("{"):
-                    creds_info = json.loads(raw)
-                elif os.path.isfile(raw):
-                    with open(raw, "r", encoding="utf-8") as f:
-                        creds_info = json.load(f)
-                else:
-                    # tenta decodificar mesmo se não começa com { (ex: base64?)
-                    try:
-                        creds_info = json.loads(raw)
-                    except Exception:
-                        logger.warning("GOOGLE_CALENDAR_CREDENTIALS não é JSON nem path válido")
-                        raise
-
-                if not creds_info:
-                    raise ValueError("creds vazias")
-
-                scopes = ["https://www.googleapis.com/auth/calendar"]
-                creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
-
-                event_body: dict = {
-                    "summary": title.strip(),
-                    "description": (description or "")[:2000],
-                    "start": {"dateTime": start_iso},
-                    "end": {"dateTime": end_iso},
-                }
-                if attendee_email and "@" in attendee_email:
-                    event_body["attendees"] = [{"email": attendee_email.strip()}]
-
-                # googleapiclient é blocking — roda em thread se possível
-                import asyncio
-
-                def _insert():
-                    svc = build("calendar", "v3", credentials=creds, cache_discovery=False)
-                    return svc.events().insert(calendarId=calendar_id, body=event_body, sendUpdates="all").execute()
-
-                try:
-                    created = await asyncio.to_thread(_insert)
-                except TypeError:
-                    # fallback se to_thread não disponível (py <3.9) ou sync
-                    created = _insert()
-
-                html_link = created.get("htmlLink") or f"https://calendar.google.com/calendar/event?eid={created.get('id','')}"
-                return {
-                    "ok": True,
-                    "provider": "google_calendar",
-                    "event_id": created.get("id"),
-                    "event_link": html_link,
-                    "title": title,
-                    "start": start_iso,
-                    "end": end_iso,
-                    "attendee_email": attendee_email,
-                    "calendar_id": calendar_id,
-                    "raw": created,
-                }
-            except ImportError:
-                # libs ausentes — cai para webhook/mock sem erro fatal
-                pass
-            except Exception as e:
-                logger.warning("Google Calendar create falhou, tentando webhook/mock: %s", e)
-                # se erro foi de creds/libs, tenta próximos; se for erro de API com webhook configurado, ainda tenta webhook
-                # não retorna erro ainda — continua
-
-        # --- 2) Webhook Calendly genérico via httpx ---
-        if webhook_url and webhook_url.strip():
-            payload = {
-                "event": "calendar_create",
-                "payload": {
-                    "title": title.strip(),
-                    "start_time": start_iso,
-                    "end_time": end_iso,
-                    "attendee_email": attendee_email.strip() if attendee_email else "",
-                    "description": (description or "")[:2000],
-                    "duration_min": duration_min,
-                },
+            body: dict = {
+                "summary": title.strip(),
+                "description": (description or "")[:2000],
+                "start": {"dateTime": start_dt.isoformat()},
+                "end": {"dateTime": end_dt.isoformat()},
             }
-            try:
-                async with httpx.AsyncClient(timeout=15) as c:
-                    r = await c.post(webhook_url.strip(), json=payload)
-                    if r.status_code < 300:
-                        try:
-                            j = r.json()
-                        except Exception:
-                            j = None
-                        # tenta extrair link do webhook response
-                        link = None
-                        if isinstance(j, dict):
-                            link = j.get("event_link") or j.get("htmlLink") or j.get("url") or j.get("link")
-                        return {
-                            "ok": True,
-                            "provider": "webhook",
-                            "status": r.status_code,
-                            "event_link": link or f"{webhook_url.strip()}#mock_{uuid.uuid4().hex[:8]}",
-                            "title": title,
-                            "start": start_iso,
-                            "end": end_iso,
-                            "attendee_email": attendee_email,
-                            "response": j if isinstance(j, dict) else r.text[:2000],
+            if attendee_email and "@" in attendee_email:
+                body["attendees"] = [{"email": attendee_email.strip()}]
+
+            def _insert():
+                return (
+                    _service(creds_info)
+                    .events()
+                    .insert(calendarId=calendar_id, body=body, sendUpdates="all")
+                    .execute()
+                )
+
+            created = await asyncio.to_thread(_insert)
+            return {
+                "ok": True,
+                "provider": "google_calendar",
+                "event_id": created.get("id"),
+                "event_link": created.get("htmlLink", ""),
+                "title": title.strip(),
+                "start": start_dt.isoformat(),
+                "end": end_dt.isoformat(),
+                "attendee_email": attendee_email,
+            }
+        except Exception as e:
+            logger.warning("Google Calendar create falhou: %s", e)
+            return {"ok": False, "error": f"falha ao criar evento: {e}"}
+
+
+class CalendarAvailabilityInput(BaseModel):
+    date: str = Field(description="Dia YYYY-MM-DD no fuso informado")
+    timezone: str = Field(default="America/Sao_Paulo", description="IANA timezone")
+    work_start: str = Field(default="08:00", description="Início do expediente HH:MM")
+    work_end: str = Field(default="18:00", description="Fim do expediente HH:MM")
+
+
+class CalendarAvailabilityTool(BaseTool):
+    name = "calendar_check_availability"
+    description = "Retorna horários ocupados (freebusy) e janelas livres num dia."
+    input_model = CalendarAvailabilityInput
+
+    async def run(
+        self,
+        date: str,
+        timezone: str = "America/Sao_Paulo",
+        work_start: str = "08:00",
+        work_end: str = "18:00",
+    ) -> dict:
+        creds_info, calendar_id, err = _resolve_google()
+        if err:
+            return {"ok": False, "error": err}
+        try:
+            from zoneinfo import ZoneInfo
+
+            tz = ZoneInfo(timezone)
+            day = datetime.strptime(date.strip(), "%Y-%m-%d").date()
+            hs, ms = (work_start or "08:00").split(":")[:2]
+            he, me = (work_end or "18:00").split(":")[:2]
+            day_start = datetime(day.year, day.month, day.day, int(hs), int(ms), tzinfo=tz)
+            day_end = datetime(day.year, day.month, day.day, int(he), int(me), tzinfo=tz)
+        except Exception:
+            return {"ok": False, "error": f"data/horário inválidos: {date} {work_start}-{work_end}"}
+        try:
+            def _query():
+                return (
+                    _service(creds_info)
+                    .freebusy()
+                    .query(
+                        body={
+                            "timeMin": day_start.isoformat(),
+                            "timeMax": day_end.isoformat(),
+                            "timeZone": timezone,
+                            "items": [{"id": calendar_id}],
                         }
-                    logger.warning("Calendar webhook falhou %s %s", r.status_code, r.text[:500])
-                    # se webhook configurado mas falhou, ainda cai para mock em vez de erro duro
-            except Exception as e:
-                logger.warning("Calendar webhook error %s", e)
-
-        # --- 3) Fallback mock: persiste em Organization.extra_data + Memory ---
-        event_id = f"mock_{uuid.uuid4().hex[:12]}"
-        event_link = f"https://calendar.mock/{event_id}"
-        mock_event = {
-            "id": event_id,
-            "title": title.strip(),
-            "start": start_iso,
-            "end": end_iso,
-            "attendee_email": attendee_email.strip() if attendee_email else "",
-            "description": (description or "")[:2000],
-            "duration_min": duration_min,
-            "provider": "mock",
-            "event_link": event_link,
-            "calendar_id": calendar_id,
-        }
-
-        # tenta persistir em Organization.extra_data["calendar_mock_events"]
-        try:
-            from aios.db.engine import async_session
-            from sqlalchemy import select
-            from aios.db.models import Organization
-
-            async with async_session() as s:
-                org = (await s.execute(select(Organization).limit(1))).scalars().first()
-                if org is not None:
-                    extra = dict(org.extra_data or {})
-                    events = list(extra.get("calendar_mock_events") or [])
-                    events.append(mock_event)
-                    # mantém últimos 50
-                    extra["calendar_mock_events"] = events[-50:]
-                    org.extra_data = extra
-                    await s.commit()
-        except Exception as e:
-            logger.debug("mock persist Organization falhou (ok, segue): %s", e)
-
-        # tenta também criar Memory se houver Agent (best-effort)
-        try:
-            from aios.db.engine import async_session as _sess2
-            from sqlalchemy import select as _sel
-            from aios.db.models import Agent, Memory
-
-            async with _sess2() as s2:
-                ag = (await s2.execute(_sel(Agent).limit(1))).scalars().first()
-                if ag is not None:
-                    mem = Memory(
-                        agent_id=ag.id,
-                        org_id=ag.org_id,
-                        type="calendar_event",
-                        content=f"[calendar mock] {title} @ {start_iso} -> {end_iso} attendee={attendee_email}",
-                        extra_data=mock_event,
                     )
-                    s2.add(mem)
-                    await s2.commit()
-        except Exception as e:
-            logger.debug("mock Memory persist falhou (ok): %s", e)
+                    .execute()
+                )
 
-        return {
-            "ok": True,
-            "provider": "mock",
-            "event_id": event_id,
-            "event_link": event_link,
-            "title": title,
-            "start": start_iso,
-            "end": end_iso,
-            "attendee_email": attendee_email,
-            "duration_min": duration_min,
-            "description": description,
-            "mock_event": mock_event,
-        }
+            res = await asyncio.to_thread(_query)
+            busy = res.get("calendars", {}).get(calendar_id, {}).get("busy", [])
+            slots = [
+                {"start": b.get("start", ""), "end": b.get("end", "")} for b in busy
+            ]
+            # free gaps between busy slots inside the work window
+            free = []
+            cursor = day_start
+            for b in sorted(slots, key=lambda s: s["start"]):
+                try:
+                    bs = _parse_iso(b["start"])
+                    if bs > cursor:
+                        free.append({"start": cursor.isoformat(), "end": bs.isoformat()})
+                    be = _parse_iso(b["end"])
+                    cursor = max(cursor, be)
+                except Exception:
+                    continue
+            if cursor < day_end:
+                free.append({"start": cursor.isoformat(), "end": day_end.isoformat()})
+            return {"ok": True, "date": date, "busy": slots, "free": free}
+        except Exception as e:
+            logger.warning("Google Calendar freebusy falhou: %s", e)
+            return {"ok": False, "error": f"falha ao consultar disponibilidade: {e}"}
+
+
+class CalendarListInput(BaseModel):
+    time_min: str = Field(default="", description="De (ISO-8601, default agora)")
+    time_max: str = Field(default="", description="Até (ISO-8601, default +7 dias)")
+    max_results: int = Field(default=20, ge=1, le=100)
+
+
+class CalendarListTool(BaseTool):
+    name = "calendar_list_events"
+    description = "Lista eventos do Google Calendar num intervalo."
+    input_model = CalendarListInput
+
+    async def run(self, time_min: str = "", time_max: str = "", max_results: int = 20) -> dict:
+        creds_info, calendar_id, err = _resolve_google()
+        if err:
+            return {"ok": False, "error": err}
+        try:
+            now = datetime.now(timezone.utc)
+            tmin = _parse_iso(time_min) if (time_min or "").strip() else now
+            tmax = (
+                _parse_iso(time_max)
+                if (time_max or "").strip()
+                else now + timedelta(days=7)
+            )
+            max_results = max(1, min(100, int(max_results or 20)))
+        except Exception:
+            return {"ok": False, "error": "intervalo inválido"}
+        try:
+            def _list():
+                return (
+                    _service(creds_info)
+                    .events()
+                    .list(
+                        calendarId=calendar_id,
+                        timeMin=tmin.isoformat(),
+                        timeMax=tmax.isoformat(),
+                        maxResults=max_results,
+                        singleEvents=True,
+                        orderBy="startTime",
+                    )
+                    .execute()
+                )
+
+            res = await asyncio.to_thread(_list)
+            events = [
+                {
+                    "id": e.get("id", ""),
+                    "title": e.get("summary", ""),
+                    "start": (e.get("start") or {}).get("dateTime", ""),
+                    "end": (e.get("end") or {}).get("dateTime", ""),
+                    "link": e.get("htmlLink", ""),
+                    "attendees": [a.get("email", "") for a in e.get("attendees", [])],
+                }
+                for e in res.get("items", [])
+            ]
+            return {"ok": True, "events": events, "count": len(events)}
+        except Exception as e:
+            logger.warning("Google Calendar list falhou: %s", e)
+            return {"ok": False, "error": f"falha ao listar eventos: {e}"}
 
 
 TOOL_REGISTRY["calendar_create_event"] = {"code_reference": "aios.tools.calendar.CalendarTool"}
+TOOL_REGISTRY["calendar_check_availability"] = {
+    "code_reference": "aios.tools.calendar.CalendarAvailabilityTool"
+}
+TOOL_REGISTRY["calendar_list_events"] = {"code_reference": "aios.tools.calendar.CalendarListTool"}
