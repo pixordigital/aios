@@ -62,21 +62,6 @@ async def evolution_webhook(instance: str, request: Request):
     if not msg_text or not msg_from:
         return {"status": "ok"}
 
-    try:
-        from aios.core.whatsapp_guard import human_handover_needed, is_opt_in, is_opt_out, record_opt_in, record_opt_out
-
-        low = msg_text.strip().lower()
-        if is_opt_out(low):
-            record_opt_out(msg_from)
-            logger.info("Evolution opt-out %s", msg_from)
-            return {"status": "opt-out"}
-        if is_opt_in(low):
-            record_opt_in(msg_from)
-        if human_handover_needed(msg_text):
-            logger.info("Evolution handover %s", msg_from)
-    except Exception:
-        pass
-
     async with db_session() as db:
         result = await db.execute(
             select(ChannelConnection).where(
@@ -93,6 +78,36 @@ async def evolution_webhook(instance: str, request: Request):
         if not conn:
             logger.warning("No active Evolution channel for instance %s", instance)
             return {"status": "ok"}
+
+    # Resolve the org before handling consent: an opt-out that lives only in
+    # process memory is forgotten on the next deploy, and then the number gets
+    # messaged again. Persistence needs the org id, so it happens here.
+    org_id = conn.org_id
+
+    try:
+        from aios.core.whatsapp_guard import (
+            human_handover_needed,
+            is_opt_in,
+            is_opt_out,
+            persist_opt_in,
+            persist_opt_out,
+            record_opt_in,
+            record_opt_out,
+        )
+
+        low = msg_text.strip().lower()
+        if is_opt_out(low):
+            record_opt_out(msg_from)
+            await persist_opt_out(org_id, msg_from)
+            logger.info("Evolution opt-out %s (persisted)", msg_from)
+            return {"status": "opt-out"}
+        if is_opt_in(low):
+            record_opt_in(msg_from)
+            await persist_opt_in(org_id, msg_from)
+        if human_handover_needed(msg_text):
+            logger.info("Evolution handover %s", msg_from)
+    except Exception:
+        logger.exception("Evolution consent handling failed for %s", msg_from)
 
     # dispatch to ARQ worker
     from aios.core.dispatch import dispatch_inbound

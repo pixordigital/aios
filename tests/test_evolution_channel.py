@@ -280,3 +280,28 @@ class TestProviderSwitch:
         res = await _ch(provider="baileys").reconcile_provider()
         assert res["ok"] is False
         assert "webhook" in res["message"]
+
+
+class TestBanSignalWiring:
+    def test_humanize_delay_is_not_awaited(self):
+        """Regression: every Baileys send was failing silently.
+
+        `await humanize_delay(...)` on a sync function raises TypeError, and the
+        surrounding `except Exception` turned it into `return None`. No message
+        was ever sent, and no error was ever logged as a failure.
+        """
+        import inspect
+
+        from aios.core.whatsapp_guard import humanize_delay
+
+        assert not inspect.iscoroutinefunction(humanize_delay)
+        assert isinstance(humanize_delay("oi"), float)
+
+    def test_no_awaited_sync_guard_helpers_remain(self):
+        from pathlib import Path
+
+        src = Path("aios/channels/evolution.py").read_text()
+        # strip the comment that documents the old bug
+        body = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+        for helper in ("humanize_delay", "vary_text", "record_ban_signal"):
+            assert f"await {helper}(" not in body, f"{helper} is sync but awaited"

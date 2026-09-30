@@ -916,3 +916,32 @@ class Budget(Base, TimestampMixin, OrgScopedMixin):
     country: Mapped[str] = mapped_column(String(5), default="BR")
     block_on_exceed: Mapped[bool] = mapped_column(default=True)
     alert_at: Mapped[list] = mapped_column(JSON, default=list)  # [80,90,100]
+
+
+# --- WhatsApp guard state ---
+
+class WhatsappContact(Base, TimestampMixin, OrgScopedMixin):
+    """Durable per-number guard state.
+
+    The in-memory guard in whatsapp_guard.py lost opt-outs and cooldowns on
+    every deploy: someone who sent STOP could be messaged again as soon as the
+    container restarted. Opt-out is a legal obligation (LGPD), not just a
+    deliverability concern.
+    """
+    __tablename__ = "whatsapp_contacts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    number: Mapped[str] = mapped_column(String(20), index=True)
+    state: Mapped[str] = mapped_column(String(20), default="active")  # active|opted_out|cooldown
+    reason: Mapped[str] = mapped_column(String(64), default="")
+    until: Mapped[datetime | None] = mapped_column(nullable=True)
+    __table_args__ = (UniqueConstraint("org_id", "number", name="uq_whatsapp_contact_org_number"),)
+
+
+class WhatsappEvent(Base, OrgScopedMixin):
+    """Append-only signal feed the risk score is computed from."""
+    __tablename__ = "whatsapp_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    instance: Mapped[str] = mapped_column(String(80), default="", index=True)
+    kind: Mapped[str] = mapped_column(String(30), index=True)  # sent|blocked|ban_signal|http_403|http_429|disconnect|opted_out
+    detail: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(default=_now, index=True)

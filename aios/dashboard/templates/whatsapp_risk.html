@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div>
+        <h1>Risco de ban</h1>
+        <p class="text-sm text-secondary mt-1">Só se aplica à rota não-oficial (Baileys). Meta Cloud API é canal oficial e não carrega este risco.</p>
+    </div>
+    <a href="/dashboard/evolution" class="btn btn-ghost">Painel Evolution</a>
+</div>
+
+{% set colors = {'green': 'var(--green)', 'yellow': 'var(--amber)', 'red': 'var(--red)'} %}
+{% set labels = {'green': 'Baixo', 'yellow': 'Atenção', 'red': 'Crítico'} %}
+
+{% if not cards %}
+<div class="card">
+    <div class="text-secondary" style="font-size:0.875rem">
+        Nenhuma instância Baileys ativa. Ative um canal WhatsApp com provedor <b>Baileys</b> para o acompanhamento de risco aparecer aqui.
+    </div>
+</div>
+{% else %}
+
+<div class="card mb-4" style="border-color:{{ colors.get(level, 'var(--text)') }}">
+    <div class="flex-center" style="gap:1rem;flex-wrap:wrap">
+        <div>
+            <div style="font-size:0.6875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em">Risco atual (pior instância)</div>
+            <div style="font-size:1.75rem;font-weight:600;color:{{ colors.get(level, 'var(--text)') }}">{{ worst }}/100 — {{ labels.get(level, level) }}</div>
+        </div>
+        <div style="flex:1;min-width:200px">
+            <div style="height:6px;background:var(--bg-hover);border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:{{ worst }}%;background:{{ colors.get(level, 'var(--text)') }}"></div>
+            </div>
+            <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.375rem">
+                Baseado em sinais reais das últimas 24h: bloqueios, rate limits, quedas e velocidade de envio.
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="flex-col gap-3 mb-4">
+{% for c in cards %}
+    <div class="card">
+        <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem">
+            <div>
+                <div style="font-weight:500;font-size:0.9375rem">{{ c.label }} <span style="color:var(--text-tertiary);font-family:var(--font-mono);font-size:0.75rem">{{ c.instance }}</span></div>
+                <div style="font-size:0.75rem;color:var(--text-tertiary);margin-top:0.125rem">
+                    {{ c.sent_today }} enviados hoje · teto do aquecimento {{ c.daily_cap }}/dia
+                    {% if c.velocity_ratio > 1.0 %} · <span style="color:var(--red)">acima do teto</span>{% endif %}
+                    {% if c.blocked_today %} · {{ c.blocked_today }} bloqueados{% endif %}
+                </div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:1.125rem;font-weight:600;color:{{ colors.get(c.level, 'var(--text)') }}">{{ c.score }}/100</div>
+                <div style="font-size:0.6875rem;color:{{ colors.get(c.level, 'var(--text)') }}">{{ labels.get(c.level, c.level) }}</div>
+            </div>
+        </div>
+
+        {% if c.advice %}
+        <div style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border)">
+            <div style="font-size:0.6875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.375rem">O que fazer</div>
+            {% for a in c.advice %}
+            <div style="font-size:0.8125rem;color:var(--text-secondary);margin-bottom:0.25rem">• {{ a }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div style="margin-top:0.75rem;display:flex;gap:1rem;flex-wrap:wrap;font-size:0.6875rem;color:var(--text-tertiary)">
+            <span>bans: {{ c.counts.get('ban_signal', 0) }}</span>
+            <span>403: {{ c.counts.get('http_403', 0) }}</span>
+            <span>429: {{ c.counts.get('http_429', 0) }}</span>
+            <span>quedas: {{ c.counts.get('disconnect', 0) }}</span>
+            <span>opt-out: {{ c.counts.get('opted_out', 0) }}</span>
+        </div>
+    </div>
+{% endfor %}
+</div>
+{% endif %}
+
+{% if contacts %}
+<div class="card">
+    <div style="font-weight:500;font-size:0.875rem;margin-bottom:0.5rem">Números bloqueados (persistentes)</div>
+    <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.75rem">
+        Sobrevive a restart. Opt-out é obrigação legal (LGPD) — estes números não serão contatados de novo.
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:0.375rem">
+        {% for c in contacts %}
+        <span class="badge" style="border-color:{{ 'var(--red)' if c.state == 'opted_out' else 'var(--amber)' }};color:{{ 'var(--red)' if c.state == 'opted_out' else 'var(--amber)' }};padding:0.25rem 0.5rem;font-size:0.6875rem">
+            {{ c.number }} · {{ 'opt-out' if c.state == 'opted_out' else 'cooldown' }}
+        </span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card mt-3">
+    <div style="font-size:0.8125rem;color:var(--text-secondary);line-height:1.6">
+        <b style="color:var(--amber)">O que este painel não sabe.</b>
+        O WhatsApp não publica como classifica abuso. Ele enxerga device, conta, padrões de interação e
+        histórico — tudo invisível aqui. Este número reduz as causas de ban que dá para medir; não é um
+        índice oficial e não substitui o julgamento de usar a rota oficial.
+    </div>
+</div>
+{% endblock %}

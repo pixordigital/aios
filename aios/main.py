@@ -60,6 +60,31 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("pgvector init failed: %s", e)
 
+    # Restore opt-outs and cooldowns before serving traffic. Without this a
+    # restart silently clears every "STOP" a contact ever sent, and the next
+    # deploy starts messaging them again.
+    try:
+        from sqlalchemy import select as sql_select
+
+        from aios.db.backend import db_session
+        from aios.db.models import Organization
+        from aios.core.whatsapp_guard import load_durable_state
+
+        async with db_session() as db:
+            org_ids = [r[0] for r in (await db.execute(sql_select(Organization.id))).all()]
+        total = {"opted_out": 0, "cooldown": 0}
+        for oid in org_ids:
+            c = await load_durable_state(oid)
+            total["opted_out"] += c["opted_out"]
+            total["cooldown"] += c["cooldown"]
+        if total["opted_out"] or total["cooldown"]:
+            logger.info(
+                "WhatsApp guard restored %d opt-outs and %d cooldowns across %d org(s)",
+                total["opted_out"], total["cooldown"], len(org_ids),
+            )
+    except Exception as e:
+        logger.warning("WhatsApp guard state restore failed: %s", e)
+
     # Sentry — only if DSN configured
     if settings.sentry_dsn:
         import sentry_sdk

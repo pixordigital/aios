@@ -33,6 +33,10 @@ class EvolutionChannel(Channel):
         self._config = connection.config if connection else {}
 
     @property
+    def org_id(self) -> str:
+        return getattr(self.connection, "org_id", "") or ""
+
+    @property
     def provider(self) -> str:
         """Provider mode: 'baileys' (default) or 'meta'."""
         return self._config.get("provider", "baileys")
@@ -68,8 +72,10 @@ class EvolutionChannel(Channel):
             logger.warning("No recipient number for Evolution Baileys send")
             return None
 
+        from aios.core.whatsapp_guard import guard_send, humanize_delay, vary_text, record_ban_signal, persist_cooldown
+        from aios.core.whatsapp.anti_ban.signals import record_event, record_response, is_quarantined
+
         try:
-            from aios.core.whatsapp_guard import guard_send, humanize_delay, vary_text, record_ban_signal
             varied = vary_text(message.text)
             if varied != message.text:
                 message.text = varied
@@ -79,11 +85,23 @@ class EvolutionChannel(Channel):
                 if "global" in reason or "warmup" in reason:
                     record_ban_signal(to, 30)
                 return None
+            # Corroborated ban evidence (not one noisy error) blocks the whole
+            # instance. The signal survives restart because it lives in the DB.
+            if await is_quarantined(self.org_id, self.instance):
+                logger.error(
+                    "Evolution send blocked: instance %s quarantined (ban-risk critical)",
+                    self.instance,
+                )
+                await record_event(self.org_id, self.instance, "blocked", "quarantined")
+                return None
         except Exception:
             pass
 
         try:
-            delay = (await humanize_delay(message.text)) if callable(humanize_delay) else 0
+            # humanize_delay is a plain sync function. The old `await humanize_delay(...)`
+            # raised TypeError on every send, and the surrounding `except Exception`
+            # swallowed it into `return None` — so no Baileys message ever left the box.
+            delay = humanize_delay(message.text)
             await asyncio.sleep(delay + random.uniform(0.5, 1.5))
 
             async with httpx.AsyncClient(timeout=30) as client:
@@ -118,18 +136,27 @@ class EvolutionChannel(Channel):
                 if resp.status_code in (200, 201):
                     data = resp.json()
                     msg_key = data.get("key", {})
+                    await record_event(self.org_id, self.instance, "sent")
                     return msg_key.get("id") or msg_key.get("remoteJid")
 
-                if resp.status_code in (401, 403, 429):
+                # A non-2xx here is the only real evidence of a ban risk we get.
+                signal = await record_response(self.org_id, self.instance, resp.status_code, resp.text[:500])
+                if signal:
                     txt = resp.text[:500].lower()
-                    if any(k in txt for k in ["ban", "blocked", "forbidden", "rate"]):
-                        record_ban_signal(to, 120)
-                        logger.warning("Evolution Baileys ban signal %s: %d %s", to, resp.status_code, txt[:200])
+                    if signal in ("ban_signal", "http_429"):
+                        await persist_cooldown(self.org_id, to, 120, signal)
+                    logger.warning("Evolution Baileys %s %s: %d %s", signal, to, resp.status_code, txt[:200])
 
                 logger.warning("Evolution Baileys send failed: %d %s", resp.status_code, resp.text[:500])
                 return None
         except Exception:
             logger.exception("Evolution Baileys send error")
+            # Could not even reach Evolution — the route is down. One blip is
+            # below threshold and scores nothing; repetition is a real signal.
+            try:
+                await record_event(self.org_id, self.instance, "disconnect", "send exception")
+            except Exception:
+                pass
             return None
 
     async def _send_meta(self, message: OutboundMessage) -> str | None:

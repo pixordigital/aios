@@ -36,6 +36,102 @@ def record_opt_in(contact: str):
     _opt_out.discard(contact)
 
 
+# --- durable state ---
+# The in-memory sets above are the fast path. These mirror them into the
+# database so a deploy does not resurrect contacts that already opted out.
+# Everything degrades to no-op when there is no DB session (unit tests, CLI).
+
+async def persist_opt_out(org_id: str, contact: str, reason: str = "user request"):
+    _opt_out.add(contact)
+    _opt_in.discard(contact)
+    await _store_contact(org_id, contact, "opted_out", reason, None)
+
+
+async def persist_opt_in(org_id: str, contact: str):
+    _opt_in.add(contact)
+    _opt_out.discard(contact)
+    await _store_contact(org_id, contact, "active", "", None)
+
+
+async def persist_cooldown(org_id: str, contact: str, minutes: int, reason: str = "ban signal"):
+    until = time.time() + minutes * 60
+    _blocked_until[contact] = until
+    import datetime
+
+    await _store_contact(
+        org_id, contact, "cooldown", reason,
+        datetime.datetime.utcfromtimestamp(until),
+    )
+
+
+async def _store_contact(org_id: str, contact: str, state: str, reason: str, until):
+    if not org_id:
+        return
+    try:
+        from sqlalchemy import select as sql_select
+
+        from aios.db.backend import db_session
+        from aios.db.models import WhatsappContact
+
+        async with db_session() as db:
+            row = (await db.execute(
+                sql_select(WhatsappContact).where(
+                    WhatsappContact.org_id == org_id,
+                    WhatsappContact.number == contact,
+                )
+            )).scalar_one_or_none()
+            if row is None:
+                row = WhatsappContact(org_id=org_id, number=contact)
+                db.add(row)
+            row.state = state
+            row.reason = reason[:64]
+            row.until = until
+            await db.commit()
+    except Exception:
+        logger.debug("whatsapp guard: could not persist %s for %s", state, contact)
+
+
+async def load_durable_state(org_id: str):
+    """Rehydrate opt-outs and live cooldowns at startup.
+
+    Called once per process boot. Without this every restart forgets who opted
+    out, which is both a ban risk and an LGPD problem.
+    """
+    if not org_id:
+        return {"opted_out": 0, "cooldown": 0}
+    try:
+        from sqlalchemy import select as sql_select
+
+        from aios.db.backend import db_session
+        from aios.db.models import WhatsappContact
+
+        counts = {"opted_out": 0, "cooldown": 0}
+        now = time.time()
+        async with db_session() as db:
+            rows = (await db.execute(
+                sql_select(WhatsappContact).where(WhatsappContact.org_id == org_id)
+            )).scalars().all()
+        for r in rows:
+            if r.state == "opted_out":
+                _opt_out.add(r.number)
+                counts["opted_out"] += 1
+            elif r.state == "cooldown" and r.until is not None:
+                # coerce naive/aware datetimes without dragging in a tz lib
+                ts = r.until.replace(tzinfo=__import__("datetime").timezone.utc).timestamp()
+                if ts > now:
+                    _blocked_until[r.number] = ts
+                    counts["cooldown"] += 1
+        if counts["opted_out"] or counts["cooldown"]:
+            logger.info(
+                "whatsapp guard: rehydrated %d opt-outs, %d cooldowns",
+                counts["opted_out"], counts["cooldown"],
+            )
+        return counts
+    except Exception:
+        logger.debug("whatsapp guard: could not load durable state")
+        return {"opted_out": 0, "cooldown": 0}
+
+
 _global_daily: dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
 _instance_created: dict[str, float] = {}
 _blocked_until: dict[str, float] = {}

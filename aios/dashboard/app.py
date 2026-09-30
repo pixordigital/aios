@@ -3157,6 +3157,82 @@ async def whatsapp_gateway_page(request: Request):
 
 # ─── Evolution Instances (legado: redirect p/ WhatsApp unificado) ───
 
+@router.get("/whatsapp/risco", response_class=HTMLResponse)
+async def whatsapp_risk_page(request: Request):
+    """Ban-risk overview for unofficial (Baileys) WhatsApp.
+
+    Only reports risk for instances this org actually owns, and only for the
+    unofficial route — Meta Cloud API is an official channel and does not carry
+    this class of risk.
+    """
+    from aios.core.whatsapp.anti_ban.dashboard_data import org_report
+    from aios.core.whatsapp.anti_ban.signals import gather_counts
+
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        rows = (await db.execute(
+            select(ChannelConnection).where(
+                ChannelConnection.org_id == org_id,
+                ChannelConnection.channel_type == "evolution",
+                ChannelConnection.is_active == True,
+            )
+        )).scalars().all()
+
+    cards = []
+    for ch in rows:
+        cfg = ch.config or {}
+        if cfg.get("provider", "baileys") != "baileys":
+            continue  # Meta Cloud API is not exposed to unofficial-route risk
+        instance = cfg.get("instance") or ch.id
+        card = await _risk_card(org_id, instance)
+        card["label"] = ch.label
+        card["channel_id"] = ch.id
+        cards.append(card)
+
+    cards.sort(key=lambda c: c["score"], reverse=True)
+
+    contacts = []
+    try:
+        from aios.db.models import WhatsappContact
+
+        async with db_session() as db:
+            contacts = (await db.execute(
+                select(WhatsappContact)
+                .where(WhatsappContact.org_id == org_id)
+                .order_by(WhatsappContact.updated_at.desc())
+                .limit(25)
+            )).scalars().all()
+    except Exception:
+        contacts = []
+
+    totals = await gather_counts(org_id, None, days=7)
+
+    worst = max((c["score"] for c in cards), default=0)
+    level = "green" if worst < 40 else "yellow" if worst < 70 else "red"
+    return await _render(
+        "whatsapp_risk.html", request, title="Risco de ban",
+        cards=cards, contacts=contacts, totals=totals,
+        worst=worst, level=level,
+    )
+
+
+async def _risk_card(org_id: str, instance: str) -> dict:
+    from aios.core.whatsapp.anti_ban.dashboard_data import instance_report
+
+    connected = True
+    try:
+        from aios.core.evolution_api import evo_fetch_instances
+
+        for inst in await evo_fetch_instances():
+            name = inst.get("name") or inst.get("instanceName")
+            if name == instance:
+                connected = inst.get("connectionStatus") == "open"
+                break
+    except Exception:
+        connected = True
+    return await instance_report(org_id, instance, connected=connected)
+
+
 @router.get("/evolution", response_class=HTMLResponse)
 async def evolution_page(request: Request):
     from aios.core.evolution_api import evo_fetch_instances
