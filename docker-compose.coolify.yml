@@ -169,7 +169,7 @@ services:
       # AIOS_LIVEKIT_URL: ${AIOS_LIVEKIT_URL:-ws://livekit:7880}  # DESABILITADO - VPS 8GB sem GPU
       # AIOS_LIVEKIT_API_KEY: ${AIOS_LIVEKIT_API_KEY:-devkey}  # DESABILITADO
       # AIOS_LIVEKIT_API_SECRET: ${AIOS_LIVEKIT_API_SECRET:-change-me-livekit-secret}  # DESABILITADO
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318"
       AIOS_LOG_FORMAT: "json"
       AIOS_HTTPS_ONLY: "true"
       AIOS_DASHBOARD_ENABLED: "true"
@@ -210,7 +210,7 @@ services:
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0"
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
       AIOS_LOG_FORMAT: "json"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4317"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318"
     volumes:
       - app-data:/data
     depends_on:
