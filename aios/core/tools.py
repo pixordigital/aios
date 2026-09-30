@@ -38,6 +38,7 @@ _ALLOWED_MODULES = {
     "aios.tools.load_skills",
     "aios.tools.proactive_alerts",
     "aios.tools.voice_call",
+    "aios.tools.whatsapp_template",
 }
 
 # Safety limits

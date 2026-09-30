@@ -144,3 +144,30 @@ class TestRegistryConsistency:
             if mod not in _ALLOWED_MODULES:
                 missing.add(f"{name} ({mod})")
         assert not missing, f"registered but not allow-listed: {missing}"
+
+
+def test_registry_consistent_after_importing_every_tool_module():
+    """Order-dependent gap: whatsapp_template registered on import but was not
+    allow-listed, so it only failed when another test imported it first."""
+    import importlib
+    import pkgutil
+
+    import aios.tools as tools_pkg
+    from aios.core.tools import ToolEngine
+    from aios.tools.registry import TOOL_REGISTRY
+
+    for m in pkgutil.iter_modules(tools_pkg.__path__):
+        if not m.name.startswith("_"):
+            try:
+                importlib.import_module(f"aios.tools.{m.name}")
+            except Exception:
+                pass  # optional deps (calendar) — unrelated to the allow-list
+
+    eng = ToolEngine([])
+    broken = []
+    for name in TOOL_REGISTRY:
+        try:
+            eng._load(name)
+        except Exception as e:
+            broken.append(f"{name}: {e}")
+    assert not broken, broken
