@@ -135,15 +135,42 @@ async def _process_inbound_once(
             await db.refresh(conv)
 
         # save inbound message
+        # Provider message id -> idempotency key. Webhook retries (Slack sends
+        # event retries, Evolution redelivers) used to insert a duplicate row
+        # every time because channel_message_id was never populated.
+        provider_msg_id = extra.get("msg_id") or None
+        if not provider_msg_id and channel_type == "slack" and extra.get("ts"):
+            provider_msg_id = f"slack:{extra.get('channel_id', '')}:{extra.get('ts')}"
+        if provider_msg_id:
+            dup = (await db.execute(
+                select(Message).where(
+                    Message.org_id == conn.org_id,
+                    Message.channel_message_id == provider_msg_id,
+                )
+            )).scalars().first()
+            if dup:
+                logger.info("process_inbound: duplicate %s ignored", provider_msg_id)
+                return
         msg = Message(
             conversation_id=conv.id,
             org_id=conn.org_id,
             role="user",
             content=text,
+            channel_message_id=provider_msg_id,
             extra_data=extra,
         )
         db.add(msg)
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception as e:
+            # Lost a race with another worker on the same redelivery. The
+            # unique constraint on (org_id, channel_message_id) makes the
+            # second insert fail; that IS the dedup working, not an error.
+            # Anything else is real and must propagate.
+            if "duplicate key" in str(e).lower() or "unique" in str(type(e).__name__).lower():
+                logger.info("process_inbound: duplicate %s ignored (race)", provider_msg_id)
+                return
+            raise
 
         # check org limits
         allowed, reason = await check_org_limits(conn.org_id, db)
@@ -313,6 +340,22 @@ async def quota_alert_job(ctx, payload: dict):
     await _send_quota_alert(payload.get("org_id"), payload.get("pct", 0), payload.get("plan", ""))
 
 
+async def budget_alert_job(ctx, payload: dict):
+    """Delivered by limits.py when a budget crosses 80/90/100%.
+
+    This job did not exist: enqueue_job to a missing ARQ function fails at
+    runtime, so no budget alert ever fired. Registered in FUNCTIONS below.
+    """
+    from aios.core.limits import _send_budget_alert
+
+    await _send_budget_alert(
+        payload.get("org_id"),
+        payload.get("budget_id", ""),
+        payload.get("pct", 0),
+        payload.get("spent_brl", 0.0),
+    )
+
+
 async def transcribe_voice_recording(ctx, recording_id: str, language: str = "pt"):
     """Transcribe a voice recording using Whisper."""
     from aios.db.backend import db_session
@@ -384,8 +427,25 @@ async def download_voice_recording(ctx, recording_id: str, recording_url: str):
     from aios.core.storage import save_artifact
     import httpx
     
-    logger.info("Downloading voice recording %s from %s", recording_id, recording_url)
-    
+    # Log the host only: provider recording URLs carry auth query params.
+    from urllib.parse import urlparse as _urlparse
+
+    try:
+        _host = _urlparse(recording_url or "").hostname or "?"
+    except Exception:
+        _host = "?"
+    logger.info("Downloading voice recording %s from %s", recording_id, _host)
+
+    # recording_url arrives in the voice webhook body. The webhook is secret-
+    # gated, but the URL itself is caller-controlled — fetch it through the
+    # same SSRF guard as every other agent-fetched URL.
+    from aios.tools.ssrf import check_url
+
+    blocked = check_url(recording_url or "")
+    if blocked:
+        logger.warning("Recording download blocked (SSRF): %s", blocked)
+        return {"error": f"URL bloqueada: {blocked}"}
+
     try:
         async with db_session() as db:
             recording = await db.get(VoiceRecording, recording_id)
@@ -511,6 +571,8 @@ async def weekly_standup_job(ctx):
 
     posted, failed = 0, 0
     async with db_session() as db:
+        import asyncio as _aio
+
         orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
         for org in orgs:
             conns = (await db.execute(select(ChannelConnection).where(
@@ -519,23 +581,36 @@ async def weekly_standup_job(ctx):
                 ChannelConnection.is_active == True,  # noqa: E712
                 ChannelConnection.team_id != None,  # noqa: E711
             ))).scalars().all()
-            for conn in conns:
+            # Batch the per-connection lookups: one query for teams, one for
+            # managers, instead of 2N round-trips inside the loop.
+            wanted = [c for c in conns
+                      if isinstance(c.config or {}, dict) and not (c.config or {}).get("slack_1on1")]
+            team_ids = {c.team_id for c in wanted if c.team_id}
+            teams = {}
+            if team_ids:
+                teams = {t.id: t for t in (await db.execute(
+                    select(Team).where(Team.id.in_(team_ids)))).scalars().all()}
+            mgr_ids = {t.manager_agent_id for t in teams.values() if t.manager_agent_id}
+            managers = {}
+            if mgr_ids:
+                managers = {a.id: a for a in (await db.execute(
+                    select(Agent).where(Agent.id.in_(mgr_ids)))).scalars().all()}
+            for conn in wanted:
                 cfg = conn.config or {}
-                if not isinstance(cfg, dict) or cfg.get("slack_1on1"):
-                    continue  # 1:1 handled by biweekly job
                 channel = cfg.get("slack_channel_id", "")
                 token = cfg.get("bot_token", "")
-                team = await db.get(Team, conn.team_id)
+                team = teams.get(conn.team_id)
                 if not team or not channel or not token:
                     continue
-                manager = await db.get(Agent, team.manager_agent_id) if team.manager_agent_id else None
+                manager = managers.get(team.manager_agent_id) if team.manager_agent_id else None
                 stats = await team_week_stats(db, org.id, team.id)
                 try:
                     goal = await month_progress(db, org.id, team_id=team.id)
                 except Exception:
                     goal = None
                 text = standup_text(team.name, manager.name if manager else "-", stats, goal)
-                if post_to_slack(token, channel, text):
+                # post_to_slack is sync urllib: keep it off the event loop.
+                if await _aio.to_thread(post_to_slack, token, channel, text):
                     posted += 1
                 else:
                     failed += 1
@@ -558,6 +633,8 @@ async def biweekly_1on1_job(ctx):
 
     posted, failed = 0, 0
     async with db_session() as db:
+        import asyncio as _aio
+
         orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
         for org in orgs:
             conns = (await db.execute(select(ChannelConnection).where(
@@ -565,23 +642,34 @@ async def biweekly_1on1_job(ctx):
                 ChannelConnection.channel_type == "slack",
                 ChannelConnection.is_active == True,  # noqa: E712
             ))).scalars().all()
-            for conn in conns:
+            wanted = [c for c in conns
+                      if isinstance(c.config or {}, dict) and (c.config or {}).get("slack_1on1")]
+            team_ids = {c.team_id for c in wanted if c.team_id}
+            teams = {}
+            if team_ids:
+                teams = {t.id: t for t in (await db.execute(
+                    select(Team).where(Team.id.in_(team_ids)))).scalars().all()}
+            mgr_ids = {t.manager_agent_id for t in teams.values() if t.manager_agent_id}
+            managers = {}
+            if mgr_ids:
+                managers = {a.id: a for a in (await db.execute(
+                    select(Agent).where(Agent.id.in_(mgr_ids)))).scalars().all()}
+            for conn in wanted:
                 cfg = conn.config or {}
-                if not isinstance(cfg, dict) or not cfg.get("slack_1on1"):
-                    continue
                 channel = cfg.get("slack_channel_id", "")
                 token = cfg.get("bot_token", "")
-                team = await db.get(Team, conn.team_id) if conn.team_id else None
+                team = teams.get(conn.team_id) if conn.team_id else None
                 if not team or not channel or not token:
                     continue
-                manager = await db.get(Agent, team.manager_agent_id) if team.manager_agent_id else None
+                manager = managers.get(team.manager_agent_id) if team.manager_agent_id else None
                 stats = await team_week_stats(db, org.id, team.id)
                 try:
                     goal = await month_progress(db, org.id, team_id=team.id)
                 except Exception:
                     goal = None
                 text = one_on_one_text(team.name, manager.name if manager else "-", stats, goal)
-                if post_to_slack(token, channel, text):
+                # post_to_slack is sync urllib: keep it off the event loop.
+                if await _aio.to_thread(post_to_slack, token, channel, text):
                     posted += 1
                 else:
                     failed += 1
@@ -595,6 +683,7 @@ FUNCTIONS = [
     agent_run,
     workflow_run_job,
     quota_alert_job,
+    budget_alert_job,
     transcribe_voice_recording,
     download_voice_recording,
     process_commitment_at_risk,

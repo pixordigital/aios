@@ -40,6 +40,20 @@ class SQLQueryTool(BaseTool):
         re.IGNORECASE
     )
 
+    # App tables carrying secrets or cross-org PII. The tool runs without an
+    # org context, so it cannot scope rows — these tables are off-limits
+    # entirely. An agent (or a prompt-injected inbound message) could otherwise
+    # SELECT api keys, tokens and other orgs' contacts with one query.
+    _DENY_APP_TABLES = (
+        "users", "credentials", "channel_connections", "oauth_accounts",
+        "invitations", "organizations", "whatsapp_contacts", "pending_approvals",
+    )
+
+    _DENY_APP_PATTERN = re.compile(
+        r"(?:FROM|JOIN|UPDATE|INTO)\s+(" + "|".join(_DENY_APP_TABLES) + r")\b",
+        re.IGNORECASE,
+    )
+
     async def run(self, query: str, limit: int = 50) -> dict:
         q = query.strip()
         if not re.match(r"^\s*SELECT\b", q, re.I):
@@ -52,6 +66,9 @@ class SQLQueryTool(BaseTool):
         # deny pg_* table references in FROM/JOIN
         if re.search(r"(?:FROM|JOIN)\s+pg_\w+", q, re.I):
             return {"error": "tabelas pg_* bloqueadas"}
+        # deny credential/PII tables: no org context, so no safe way to scope rows
+        if self._DENY_APP_PATTERN.search(q):
+            return {"error": "tabela com segredos/PII bloqueada para SQL direto; use a ferramenta do canal"}
         q = q.rstrip(";") + f" LIMIT {min(limit, 100)}"
         try:
             from aios.db.engine import async_session

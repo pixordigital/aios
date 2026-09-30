@@ -22,7 +22,10 @@ def _verify_email_signature(request: Request, body: bytes, provider: str) -> boo
     }
     secret = secret_map.get(provider)
     if not secret:
-        return True  # No secret configured, skip
+        # Fail closed: without a configured secret there is nothing to verify
+        # against, so any caller would be accepted. No provider is configured
+        # in production today, so rejecting breaks nothing.
+        return False
 
     sig = request.headers.get("x-twilio-email-event-webhook-signature", "")  # SendGrid
     if not sig:

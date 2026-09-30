@@ -22,7 +22,7 @@ ENQUEUED_QUALIFIED = [
 
 # budget_alert_job is enqueued in aios/core/limits.py:148 but never defined
 # anywhere in the codebase — a phantom job. Tracked so it stays visible.
-KNOWN_PHANTOM_JOBS = ["aios.tasks.jobs.budget_alert_job"]
+KNOWN_PHANTOM_JOBS: list = []  # budget_alert_job was phantom; created + registered, see test_budget_alert_job_registered
 
 # A couple of sites use the bare name.
 ENQUEUED_BARE = [
@@ -92,3 +92,21 @@ def test_phantom_jobs_still_unregistered():
     """
     names = _registered_names()
     assert not [n for n in KNOWN_PHANTOM_JOBS if n in names]
+
+
+def test_budget_alert_job_registered():
+    """Regression: limits.py enqueued budget_alert_job for months while no such
+    function existed, so ARQ dropped every budget alert silently."""
+    names = _registered_names()
+    assert "aios.tasks.jobs.budget_alert_job" in names
+
+
+def test_budget_alert_job_noops_without_org():
+    """A malformed payload must not raise out of the worker."""
+    import asyncio
+
+    from aios.tasks.jobs import budget_alert_job
+
+    asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
+        budget_alert_job(None, {"org_id": None, "budget_id": "nope", "pct": 90})
+    )

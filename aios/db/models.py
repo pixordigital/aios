@@ -190,6 +190,13 @@ class Message(Base, TimestampMixin):
 
     conversation = relationship("Conversation", back_populates="messages")
 
+    # Provider redeliveries (Slack retries, Evolution redelivery) must not
+    # duplicate rows. NULLs never conflict in Postgres, so pre-existing rows
+    # without an id are unaffected.
+    __table_args__ = (
+        UniqueConstraint("org_id", "channel_message_id", name="uq_messages_org_provider_msg"),
+    )
+
 
 # --- Channel Connection ---
 

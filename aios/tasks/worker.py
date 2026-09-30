@@ -9,6 +9,7 @@ Usage:
     aios-worker
 """
 
+import logging
 import os
 from arq import cron
 from arq.connections import RedisSettings
@@ -40,7 +41,7 @@ async def backup_job(ctx):
     try:
         subprocess.run(f"pg_dump {shlex.quote(pg)} | gzip > {shlex.quote(out)}", shell=True, check=True, timeout=600)
     except Exception:
-        pass
+        logging.getLogger(__name__).exception('cron job failed')
 
 
 async def approval_expire_job(ctx):
@@ -49,11 +50,9 @@ async def approval_expire_job(ctx):
 
         n = approval_manager.cancel_expired()
         if n:
-            import logging
-
             logging.getLogger(__name__).info("Expired %d approvals", n)
     except Exception:
-        pass
+        logging.getLogger(__name__).exception('cron job failed')
 
 
 async def autoscale_job(ctx):
@@ -66,10 +65,13 @@ async def autoscale_job(ctx):
 
         async with async_session() as sess:
             orgs = (await sess.execute(select(Organization))).scalars().all()
-            for org in orgs[:20]:
+            # No slicing: silently skipping orgs past 20 would leave them
+            # without autoscaling and without any signal. One org today, but
+            # the loop is cheap and correctness shouldn't depend on count.
+            for org in orgs:
                 await check_autoscale(org.id)
     except Exception:
-        pass
+        logging.getLogger(__name__).exception('cron job failed')
 
 
 async def canary_rollback_job(ctx):
@@ -125,13 +127,11 @@ async def canary_rollback_job(ctx):
                     if prev and prev.id != inst.id:
                         prev.status = "running"
                     await sess.commit()
-                    import logging
-
                     logging.getLogger(__name__).warning(
                         "Canary auto-rollback agent %s err=%.1f%%", inst.agent_id, err_rate * 100
                     )
     except Exception:
-        pass
+        logging.getLogger(__name__).exception('cron job failed')
 
 
 async def _learning_job_wrapper(ctx, job_fn_name: str):

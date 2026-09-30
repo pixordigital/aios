@@ -19,7 +19,11 @@ async def discord_webhook(request: Request):
     raw_body = await request.body()
 
     # Verify signature (Discord uses Ed25519, but we check public key)
-    # For simplicity, use shared secret if configured
+    # For simplicity, use shared secret if configured.
+    # Fail closed when unset: no Discord integration is configured in
+    # production, so rejecting breaks nothing and accepts nothing.
+    if not settings.discord_webhook_secret:
+        raise HTTPException(401, "webhook not configured")
     if settings.discord_webhook_secret:
         sig = request.headers.get("x-signature-ed25519", "")
         timestamp = request.headers.get("x-signature-timestamp", "")

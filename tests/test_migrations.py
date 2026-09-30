@@ -71,3 +71,33 @@ def test_model_declares_the_constraint():
 def test_every_migration_parses():
     for p in VERSIONS.glob("*.py"):
         ast.parse(p.read_text())  # raises on syntax error
+
+
+def test_messages_dedup_migration_exists():
+    p = VERSIONS / "x4y5z6a7b8c9_messages_dedup.py"
+    assert p.exists()
+    src = p.read_text()
+    assert "uq_messages_org_provider_msg" in src
+    assert "create_unique_constraint" in src
+
+
+def test_message_model_declares_dedup_constraint():
+    from sqlalchemy import UniqueConstraint
+
+    from aios.db.models import Message
+
+    names = {c.name for c in Message.__table__.constraints if isinstance(c, UniqueConstraint)}
+    assert "uq_messages_org_provider_msg" in names
+
+
+def test_inbound_populates_provider_message_id():
+    """Redeliveries duplicated Message rows because channel_message_id stayed NULL.
+
+    The worker must derive it from provider data (Evolution msg_id, Slack ts).
+    """
+    from pathlib import Path
+
+    src = Path("aios/tasks/jobs.py").read_text()
+    assert 'extra.get("msg_id")' in src
+    assert "channel_message_id=provider_msg_id" in src
+    assert "duplicate" in src

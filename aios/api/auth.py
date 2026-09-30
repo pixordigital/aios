@@ -591,7 +591,7 @@ async def _oauth_redirect(provider: str, authorize_url: str, client_id: str, sco
 async def _oauth_exchange(provider: str, code: str, token_url: str, client_id: str, client_secret: str) -> str:
     """Exchange authorization code for access token. Returns access token."""
     import httpx
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(
             token_url,
             data={
@@ -634,7 +634,7 @@ async def google_callback(code: str, state: str, db: DatabaseBackend = Depends(g
                                    settings.google_client_id, settings.google_client_secret)
 
     import httpx
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",
             headers={"Authorization": f"Bearer {token}"},
@@ -696,7 +696,7 @@ async def google_calendar_callback(code: str, state: str, request: Request, db: 
     org_id = stored["org_id"]
     redirect_uri = stored.get("redirect_uri") or f"{settings.app_url.rstrip('/')}/api/auth/google/calendar/callback"
     import httpx
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
@@ -817,7 +817,7 @@ async def github_callback(code: str, state: str, db: DatabaseBackend = Depends(g
                                    settings.github_client_id, settings.github_client_secret)
 
     import httpx
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
@@ -828,7 +828,7 @@ async def github_callback(code: str, state: str, db: DatabaseBackend = Depends(g
 
     # GitHub may not return email in user scope — fetch emails separately
     if not email:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             emails_resp = await client.get(
                 "https://api.github.com/user/emails",
                 headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},

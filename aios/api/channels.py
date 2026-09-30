@@ -23,6 +23,18 @@ async def create_channel(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
+    from aios.db.models import Agent, Team
+
+    # A channel bound to another org's agent/team would let this org spend
+    # their budget and read their runs. Verify ownership on both ids.
+    if body.agent_id:
+        ag = await db.get(Agent, body.agent_id)
+        if not ag or ag.org_id != org_id:
+            raise HTTPException(400, "agent_id inválido")
+    if body.team_id:
+        t = await db.get(Team, body.team_id)
+        if not t or t.org_id != org_id:
+            raise HTTPException(400, "team_id inválido")
     channel = ChannelConnection(
         org_id=org_id,
         channel_type=body.channel_type,

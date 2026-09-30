@@ -68,7 +68,10 @@ async def enqueue_task(task_name: str, payload: dict):
         pool = await get_redis_pool()
         await pool.enqueue_job(task_name, payload)
     except Exception:
-        logger.debug("enqueue_task fallback (no redis): %s", task_name)
+        # Dropped task. debug hid this completely; a down Redis means lost
+        # work and the only signal was silence. Warning, not error: the
+        # fallback to no-op is deliberate when Redis is unavailable.
+        logger.warning("enqueue_task fallback (no redis): %s", task_name)
 
 
 async def close_pool():

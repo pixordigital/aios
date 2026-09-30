@@ -7,7 +7,13 @@ from aios.config import settings
 logger = logging.getLogger(__name__)
 
 def _evo_headers():
-    return {"apikey": settings.evolution_api_key or "evolution_secret_change_me", "Content-Type": "application/json"}
+    # Fail closed: the old fallback to the public repo default meant any
+    # install without a configured key authenticated as everyone else.
+    # Empty key -> Evolution answers 401 -> every caller already handles that.
+    key = settings.evolution_api_key or ""
+    if not key:
+        logger.error("EVOLUTION_API_KEY unset; Evolution calls will be rejected")
+    return {"apikey": key, "Content-Type": "application/json"}
 
 def _base() -> str:
     return (settings.evolution_server_url or "http://evolution:8080").rstrip("/")

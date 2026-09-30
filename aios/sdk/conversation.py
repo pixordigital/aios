@@ -35,7 +35,7 @@ class ConversationHandle:
         form = {"conversation_id": self.id, "description": description}
         headers = await self._c._headers()
         headers.pop("Content-Type", None)
-        async with httpx.AsyncClient(base_url=self._c.base_url) as client:
+        async with httpx.AsyncClient(base_url=self._c.base_url, timeout=30) as client:
             resp = await client.post("/api/files/upload", headers=headers, data=form, files=files)
             resp.raise_for_status()
             return resp.json()

@@ -31,10 +31,22 @@ async def oauth_start(provider: str, request: Request, org_id: str = Depends(get
     return RedirectResponse(url)
 
 @router.get("/{provider}/callback")
-async def oauth_callback(provider: str, code: str = "", state: str = "", db: DatabaseBackend = Depends(get_db_backend)):
+async def oauth_callback(
+    provider: str,
+    code: str = "",
+    state: str = "",
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    # The provider redirects through the user's browser, so the dashboard
+    # cookie is present and these deps resolve. Without them anyone could mint
+    # credentials into any org by guessing its id in `state`.
     if not state or ":" not in state:
         return {"error": "state inválido"}
-    org_id = state.split(":")[0]
+    state_org, _, nonce = state.partition(":")
+    if not nonce or state_org != org_id:
+        return {"error": "state inválido"}
     # troca code por token (mock se sem config)
     token = f"oauth_{provider}_{code[:12] if code else uuid.uuid4().hex[:12]}"
     # salva como credential

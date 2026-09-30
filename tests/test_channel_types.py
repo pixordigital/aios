@@ -292,3 +292,44 @@ class TestChannelQuotas:
             )
             # May allow or limit based on plan implementation
             assert resp.status_code in (200, 403)
+
+class TestWhatsappGatewayAuth:
+    """Regression: /api/whatsapp/* was mounted with no auth at all.
+
+    Anyone who could reach the API could send WhatsApp messages and trigger
+    voice calls from any instance. Every route here now requires a user.
+    """
+
+    async def test_send_requires_auth(self, async_client: AsyncClient):
+        r = await async_client.post(
+            "/api/whatsapp/send",
+            json={"instance": "x", "to": "5511999999999", "text": "hi"},
+        )
+        assert r.status_code in (401, 403)
+
+    async def test_call_requires_auth(self, async_client: AsyncClient):
+        r = await async_client.post(
+            "/api/whatsapp/call",
+            json={"instance": "x", "to": "5511999999999"},
+        )
+        assert r.status_code in (401, 403)
+
+    async def test_health_requires_auth(self, async_client: AsyncClient):
+        r = await async_client.get("/api/whatsapp/health/x")
+        assert r.status_code in (401, 403)
+
+    async def test_legacy_webhook_fails_closed_without_secret(
+        self, async_client: AsyncClient, monkeypatch
+    ):
+        """The legacy Evolution webhook validated with an empty secret.
+
+        With no secret configured the old code accepted anything; now it 401s.
+        (Production instances point at /api/evolution/webhook/* instead.)
+        """
+        from aios.config import settings
+
+        monkeypatch.setattr(settings, "evolution_webhook_secret", "")
+        r = await async_client.post(
+            "/api/whatsapp/webhook/evolution/x", json={"event": "x"}
+        )
+        assert r.status_code == 401

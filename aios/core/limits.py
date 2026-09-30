@@ -229,6 +229,54 @@ async def _send_quota_alert(org_id: str, pct: float, plan: str):
         pass
 
 
+async def _send_budget_alert(org_id: str, budget_id: str, pct: float, spent_brl: float):
+    """Mirror of _send_quota_alert for monetary budgets.
+
+    Dedups once per day per threshold in org.extra_data; emails the owner
+    when SMTP is configured. Never raises — telemetry must not break billing.
+    """
+    try:
+        from aios.db.backend import db_session
+        from aios.db.models import Budget, Organization
+
+        async with db_session() as db:
+            org = await db.get(Organization, org_id)
+            budget = await db.get(Budget, budget_id)
+            if not org or not budget:
+                return
+            extra = dict(org.extra_data or {})
+            last = extra.get("_budget_alert", {})
+            import datetime as _dt
+
+            today = _dt.date.today().isoformat()
+            if last.get("date") == today and last.get("pct") == pct and last.get("budget_id") == budget_id:
+                return
+            extra["_budget_alert"] = {"pct": pct, "date": today, "budget_id": budget_id}
+            org.extra_data = extra
+            await db.commit()
+            from aios.config import settings
+
+            if settings.smtp_host:
+                try:
+                    from aios.tools.send_email import SendEmailTool
+
+                    from sqlalchemy import select as _sel
+                    from aios.db.models import User
+
+                    owner = (await db.execute(_sel(User).where(User.org_id == org_id).order_by(User.created_at))).scalars().first()
+                    if owner and owner.email:
+                        tool = SendEmailTool()
+                        await tool.run(
+                            to=owner.email,
+                            subject=f"AIOS orçamento '{budget.name}' em {pct}%",
+                            body=f"O orçamento '{budget.name}' atingiu {pct}% (R${spent_brl:.2f} de R${budget.amount_brl:.0f}).",
+                        )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
 async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_calls: int = 1, cost_usd: float = 0.0):
     """Atomically increment usage counters — prevents double-counting on concurrent runs."""
     today = date.today().isoformat()
