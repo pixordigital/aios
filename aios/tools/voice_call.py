@@ -22,29 +22,33 @@ class VoiceCallTool(BaseTool):
                 from aios.db.models import ChannelConnection
                 async with db_session() as db:
                     ch = await db.get(ChannelConnection, channel_id)
-                    if ch and ch.channel_type == "voice":
+                    mine = getattr(self, "_org_id", "") or ""
+                    if ch and ch.channel_type == "voice" and (not mine or ch.org_id == mine):
                         try:
                             from aios.core.secrets import decrypt_channel_config
                             c = ch.config or {}
                             if any(str(v).startswith("enc:") for v in c.values() if isinstance(v, str)):
                                 c = decrypt_channel_config(c)
                             cfg = voice_config(c)
+                            cfg["_org_id"] = ch.org_id
                         except Exception:
                             cfg = voice_config(ch.config or {})
+                            cfg["_org_id"] = ch.org_id
+            except Exception:
+                pass
             except Exception:
                 pass
         res = await place_call(to, script, cfg, {"via": "tool"})
         try:
             cost = 0.02 if res.get("status") == "dialing" else 0.0
-            if cost:
+            # Bill the org that owns the channel used, not whatever voice
+            # channel happens to sort first globally.
+            bill_org = (cfg or {}).get("_org_id") or getattr(self, "_org_id", "") or ""
+            if cost and bill_org:
                 from aios.db.backend import db_session as _dbs
                 from aios.core.limits import track_usage
                 async with _dbs() as _db:
-                    from sqlalchemy import select
-                    from aios.db.models import ChannelConnection as CC
-                    row = (await _db.execute(select(CC.org_id).where(CC.channel_type == "voice").limit(1))).first()
-                    if row:
-                        await track_usage(row[0], _db, messages=1, tokens=len(script) // 4, cost_usd=cost)
+                    await track_usage(bill_org, _db, messages=1, tokens=len(script) // 4, cost_usd=cost)
         except Exception:
             pass
         return res

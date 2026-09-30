@@ -114,3 +114,33 @@ def test_no_x_api_key_param():
     from aios.api.deps import get_current_user
 
     assert "x_api_key" not in inspect.signature(get_current_user).parameters
+
+
+class TestRegistryConsistency:
+    """Every registered tool must load. Four modules sat in the registry for
+    months while the allow-list rejected them — no agent could call them and
+    nothing said so."""
+
+    def test_all_registered_tools_load(self):
+        from aios.core.tools import ToolEngine
+        from aios.tools.registry import TOOL_REGISTRY
+
+        eng = ToolEngine([])
+        broken = []
+        for name in TOOL_REGISTRY:
+            try:
+                eng._load(name)
+            except Exception as e:
+                broken.append(f"{name}: {e}")
+        assert not broken, f"tools that cannot load: {broken}"
+
+    def test_allow_list_covers_registry(self):
+        from aios.core.tools import _ALLOWED_MODULES
+        from aios.tools.registry import TOOL_REGISTRY
+
+        missing = set()
+        for name, entry in TOOL_REGISTRY.items():
+            mod = entry["code_reference"].rsplit(".", 1)[0]
+            if mod not in _ALLOWED_MODULES:
+                missing.add(f"{name} ({mod})")
+        assert not missing, f"registered but not allow-listed: {missing}"

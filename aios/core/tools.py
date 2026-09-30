@@ -34,6 +34,10 @@ _ALLOWED_MODULES = {
     "aios.tools.python_sandbox",
     "aios.tools.rag_search",
     "aios.tools.etl_url",
+    "aios.tools.calendar",
+    "aios.tools.load_skills",
+    "aios.tools.proactive_alerts",
+    "aios.tools.voice_call",
 }
 
 # Safety limits
