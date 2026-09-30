@@ -58,8 +58,17 @@ class ToolEngine:
     def __init__(self, tool_names: list[str], org_id: str = ""):
         self.tools: dict[str, Any] = {}
         self.org_id = org_id or ""
+        self.missing: list[str] = []
         for name in tool_names:
-            self.tools[name] = self._load(name)
+            # A tool name that no longer exists must not take the whole agent
+            # down: ToolEngine is built in AgentRuntime.__init__, so raising
+            # here meant one stale name made the agent unrunnable. Skip and
+            # record it; the agent keeps the tools it can actually use.
+            try:
+                self.tools[name] = self._load(name)
+            except Exception as e:
+                self.missing.append(name)
+                logger.warning("Tool '%s' unavailable: %s", name, e)
 
     def schemas(self) -> list[dict]:
         return [tool.openai_schema() for tool in self.tools.values()]

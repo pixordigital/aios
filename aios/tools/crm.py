@@ -129,18 +129,13 @@ class CRMTool(BaseTool):
             import uuid
             from sqlalchemy import select as _sel
             async with async_session() as s:
-                # tenta achar org via agent ou usa default
-                org_id = None
-                try:
-                    from sqlalchemy import select
-                    from aios.db.models import Agent
-                    from aios.db.models import Organization
-                    org = (await s.execute(select(Organization).limit(1))).scalars().first()
-                    if org:
-                        org_id = org.id
-                except Exception:
-                    pass
-                if org_id:
+                # Org comes from the tool engine (the calling agent's org).
+                # Falling back to Organization.limit(1) wrote every agent's
+                # deals into whichever org sorted first.
+                org_id = getattr(self, "_org_id", "") or ""
+                if not org_id:
+                    return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+                if True:
                     # Deduplicação: verifica deal ativo para mesmo email (org_id lock)
                     existing = (await s.execute(_sel(CrmDeal).where(CrmDeal.org_id == org_id, CrmDeal.lead_email == lead_email, CrmDeal.stage.notin_(["closed_won", "closed_lost"])))).scalars().first()
                     if existing:
@@ -310,8 +305,16 @@ class CRMUpdateTool(BaseTool):
             from aios.db.models import CrmDeal, CrmDealVersion
             from sqlalchemy import text as _text2
             async with async_session() as s:
-                # Lock por org_id
-                deal = await s.get(CrmDeal, deal_id)
+                # Scope the deal by the calling agent's org. Without this any
+                # agent could move any other org's deal by guessing its id.
+                mine = getattr(self, "_org_id", "") or ""
+                if not mine:
+                    return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+                from sqlalchemy import select as _sel2
+
+                deal = (await s.execute(
+                    _sel2(CrmDeal).where(CrmDeal.id == deal_id, CrmDeal.org_id == mine)
+                )).scalars().first()
                 if deal:
                     try:
                         await s.execute(_text2("SELECT pg_advisory_xact_lock(:k)"), {"k": abs(hash(deal.org_id)) % 2147483647})
@@ -392,15 +395,16 @@ class CRMMergeTool(BaseTool):
             return {"ok": False, "error": "lead_email inválido"}
         try:
             from aios.db.engine import async_session
-            from aios.db.models import CrmDeal, CrmDealVersion, Organization
+            from aios.db.models import CrmDeal, CrmDealVersion
             from sqlalchemy import select as _sel
             import uuid
             async with async_session() as s:
-                org = (await s.execute(_sel(Organization).limit(1))).scalars().first()
-                if not org:
-                    return {"ok": False, "error": "Org não encontrada"}
-                org_id = org.id
-                
+                # Engine org, not Organization.limit(1): merging by email must
+                # never touch another org's deals.
+                org_id = getattr(self, "_org_id", "") or ""
+                if not org_id:
+                    return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+
                 # Find all deals with same email
                 deals = (await s.execute(_sel(CrmDeal).where(
                     CrmDeal.org_id == org_id, 
@@ -459,6 +463,185 @@ class CRMMergeTool(BaseTool):
             return {"ok": False, "error": str(e)}
 
 
+OPEN_STAGES = ("prospection", "mql", "sql", "opportunity")
+CLOSED_STAGES = ("closed_won", "closed_lost")
+
+
+class CRMListDealsInput(BaseModel):
+    stage: str = Field(default="", description="Filtra por stage (vazio = todos abertos)")
+    limit: int = Field(default=25, ge=1, le=100)
+
+
+class CRMListDealsTool(BaseTool):
+    name = "crm_list_deals"
+    description = "Lista deals do CRM com stage, valor, próximo follow-up e dias sem contato."
+    input_model = CRMListDealsInput
+
+    async def run(self, stage: str = "", limit: int = 25) -> dict:
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal
+            from sqlalchemy import select as _sel
+
+            async with async_session() as s:
+                q = _sel(CrmDeal).where(CrmDeal.org_id == org_id)
+                stage = (stage or "").strip()
+                if stage:
+                    q = q.where(CrmDeal.stage == stage)
+                else:
+                    q = q.where(CrmDeal.stage.notin_(CLOSED_STAGES))
+                deals = (await s.execute(q.order_by(CrmDeal.updated_at.desc()).limit(max(1, min(100, limit))))).scalars().all()
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                out = []
+                for d in deals:
+                    last = (d.extra_data or {}).get("last_contacted_at")
+                    stale_days = None
+                    if last:
+                        try:
+                            stale_days = (now - datetime.fromisoformat(last)).days
+                        except Exception:
+                            stale_days = None
+                    out.append({
+                        "deal_id": d.id,
+                        "lead_name": d.lead_name,
+                        "lead_email": d.lead_email,
+                        "stage": d.stage,
+                        "value": d.value,
+                        "score": d.score,
+                        "next_follow_up": (d.extra_data or {}).get("next_follow_up", ""),
+                        "days_since_contact": stale_days,
+                        "notes": ((d.extra_data or {}).get("last_ai_notes") or "")[:300],
+                    })
+                return {"ok": True, "count": len(out), "deals": out}
+        except Exception as e:
+            logger.warning("CRM list deals failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+
+class CRMSetFollowUpInput(BaseModel):
+    deal_id: str = Field(description="ID do deal")
+    days_from_now: int = Field(description="Dias até o follow-up (0 = hoje)")
+    note: str = Field(default="", description="Lembrete do que fazer")
+
+
+class CRMSetFollowUpTool(BaseTool):
+    name = "crm_set_follow_up"
+    description = "Agenda follow-up num deal (vira lembrete consultável em crm_stale_deals)."
+    input_model = CRMSetFollowUpInput
+
+    async def run(self, deal_id: str, days_from_now: int = 1, note: str = "") -> dict:
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal, CrmDealVersion
+            from sqlalchemy import select as _sel
+
+            when = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=int(days_from_now or 0))
+            async with async_session() as s:
+                deal = (await s.execute(
+                    _sel(CrmDeal).where(CrmDeal.id == deal_id, CrmDeal.org_id == org_id)
+                )).scalars().first()
+                if not deal:
+                    return {"ok": False, "error": "deal não encontrado"}
+                prev = (deal.extra_data or {}).get("next_follow_up", "")
+                deal.extra_data = {**(deal.extra_data or {}), "next_follow_up": when.isoformat()}
+                if note:
+                    deal.extra_data["follow_up_note"] = note[:300]
+                s.add(CrmDealVersion(
+                    deal_id=deal.id, org_id=org_id, changed_by_type="agent",
+                    field="next_follow_up", old_value=str(prev), new_value=when.isoformat(),
+                    extra_data={"note": note[:300]},
+                ))
+                await s.commit()
+                return {"ok": True, "deal_id": deal.id, "next_follow_up": when.isoformat(), "note": note}
+        except Exception as e:
+            logger.warning("CRM set follow-up failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+
+class CRMStaleDealsInput(BaseModel):
+    stale_days: int = Field(default=7, ge=1, le=180, description="Dias sem contato para considerar parado")
+    include_overdue: bool = Field(default=True, description="Incluir follow-up vencido")
+
+
+class CRMStaleDealsTool(BaseTool):
+    name = "crm_stale_deals"
+    description = "Leads sem contato há N dias e follow-ups vencidos — a fila de trabalho do dia."
+    input_model = CRMStaleDealsInput
+
+    async def run(self, stale_days: int = 7, include_overdue: bool = True) -> dict:
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal
+            from sqlalchemy import select as _sel
+
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            cutoff = now - timedelta(days=max(1, int(stale_days or 7)))
+            async with async_session() as s:
+                deals = (await s.execute(
+                    _sel(CrmDeal).where(
+                        CrmDeal.org_id == org_id,
+                        CrmDeal.stage.notin_(CLOSED_STAGES),
+                    )
+                )).scalars().all()
+
+            unengaged, overdue = [], []
+            for d in deals:
+                ex = d.extra_data or {}
+                last = ex.get("last_contacted_at")
+                nfu = ex.get("next_follow_up")
+                age = None
+                if last:
+                    try:
+                        age = (now - datetime.fromisoformat(last)).days
+                    except Exception:
+                        age = None
+                # Never contacted, or not touched within the window.
+                if age is None or age >= stale_days:
+                    unengaged.append({
+                        "deal_id": d.id, "lead_name": d.lead_name,
+                        "lead_email": d.lead_email, "lead_phone": d.lead_phone,
+                        "stage": d.stage,
+                        "value": d.value, "days_since_contact": age,
+                    })
+                if include_overdue and nfu:
+                    try:
+                        due = datetime.fromisoformat(nfu)
+                        if due < now:
+                            overdue.append({
+                                "deal_id": d.id, "lead_name": d.lead_name,
+                                "lead_email": d.lead_email, "lead_phone": d.lead_phone,
+                                "stage": d.stage, "value": d.value,
+                                "follow_up_due": nfu,
+                                "note": (ex.get("follow_up_note") or "")[:200],
+                                "days_overdue": (now - due).days,
+                            })
+                    except Exception:
+                        continue
+            return {
+                "ok": True,
+                "stale_days": stale_days,
+                "unengaged": unengaged,
+                "unengaged_count": len(unengaged),
+                "overdue": overdue,
+                "overdue_count": len(overdue),
+            }
+        except Exception as e:
+            logger.warning("CRM stale deals failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
+
 TOOL_REGISTRY["crm_create_deal"] = {"code_reference": "aios.tools.crm.CRMTool"}
 TOOL_REGISTRY["crm_update_deal"] = {"code_reference": "aios.tools.crm.CRMUpdateTool"}
 TOOL_REGISTRY["crm_merge_deals"] = {"code_reference": "aios.tools.crm.CRMMergeTool"}
+TOOL_REGISTRY["crm_list_deals"] = {"code_reference": "aios.tools.crm.CRMListDealsTool"}
+TOOL_REGISTRY["crm_set_follow_up"] = {"code_reference": "aios.tools.crm.CRMSetFollowUpTool"}
+TOOL_REGISTRY["crm_stale_deals"] = {"code_reference": "aios.tools.crm.CRMStaleDealsTool"}
