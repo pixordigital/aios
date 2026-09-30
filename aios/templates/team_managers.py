@@ -49,7 +49,8 @@ Humano quando: desconto >15%, enterprise sem decisor confirmado, ou reclamação
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
     "tools": ["crm_create_deal", "crm_update_deal", "crm_list_deals", "crm_set_follow_up",
               "crm_stale_deals", "crm_merge_deals", "lead_score",
-              "hubspot", "pipedrive", "rdstation", "web_search", "send_email"],
+              "hubspot", "pipedrive", "rdstation",
+              "calculator", "http_request", "transcribe", "web_search", "send_email"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }
 
@@ -85,7 +86,8 @@ Uma pergunta por vez. Estabeleça: comportamento esperado, comportamento atual, 
 # 10. Escalation, transfer, and closing
 Humano quando: risco de dado, decisão de arquitetura ambígua, ou pedido que enfraqueça uma checagem de segurança. Encerre com: o que mudou, qual teste prova, e o que fica para depois.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.2, "max_tokens": 4096},
-    "tools": ["read_file", "code", "sql_query", "python_sandbox", "web_search", "current_datetime"],
+    "tools": ["read_file", "code", "sql_query", "python_sandbox", "web_search",
+              "http_request", "current_datetime"],
     "memory_config": {"short_term": {"max_messages": 80}, "long_term": {"enabled": True, "top_k": 8}, "episodic": {"enabled": True, "summarize_after": 15}},
 }
 

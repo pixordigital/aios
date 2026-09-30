@@ -23,6 +23,8 @@ from aios.templates.team_managers import (
     BLUE_MANAGER_TEMPLATE,
 )
 
+from aios.templates.manager_data import DATA_MANAGER_TEMPLATE
+
 TEMPLATES = {
     "orchestrator": ORCHESTRATOR_TEMPLATE,
     "manager": MANAGER_TEMPLATE,
@@ -30,6 +32,7 @@ TEMPLATES = {
     "manager_dev": DEV_MANAGER_TEMPLATE,
     "manager_red": RED_MANAGER_TEMPLATE,
     "manager_blue": BLUE_MANAGER_TEMPLATE,
+    "manager_data": DATA_MANAGER_TEMPLATE,
     "sdr": SDR_TEMPLATE,
     "closer": CLOSER_TEMPLATE,
     "support": SUPPORT_TEMPLATE,

@@ -14,7 +14,8 @@ from aios.core.tools import ToolEngine
 from aios.templates import TEMPLATES, apply_template
 from aios.tools.registry import TOOL_REGISTRY
 
-MANAGERS = ["manager_sales", "manager_dev", "manager_red", "manager_blue"]
+MANAGERS = ["manager_sales", "manager_dev", "manager_red", "manager_blue",
+            "manager_data"]
 
 
 class TestManagerTemplates:
@@ -97,3 +98,23 @@ class TestManagerToolsMatchTeam:
         assert {"crm_list_deals", "crm_stale_deals", "crm_update_deal"} <= t
         # workers push to HubSpot/Pipedrive/RDStation; the manager needs to see them
         assert {"hubspot", "pipedrive", "rdstation"} <= t
+
+    @pytest.mark.parametrize("key", MANAGERS)
+    def test_manager_is_superset_of_its_workers(self, key):
+        """A manager that cannot run its workers' tools cannot check their work.
+
+        Checked against the live team definitions in the template set: every
+        worker tool must be reachable from the manager.
+        """
+        workers = {
+            "manager_sales": ["sdr", "closer"],
+            "manager_dev": ["frontend", "backend"],
+            "manager_red": ["red"],
+            "manager_blue": ["blue"],
+            "manager_data": ["data_analyst", "data_scientist"],
+        }[key]
+        needed = set()
+        for w in workers:
+            needed |= set(apply_template(w)["tools"])
+        missing = needed - self._tools(key)
+        assert not missing, f"{key} cannot inspect worker tools: {sorted(missing)}"

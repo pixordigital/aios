@@ -466,7 +466,7 @@ async def control_center(request: Request):
 
 # ─── Agent CRUD ───
 
-AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"]
+AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"]
 ROUTING_STRATEGIES = ["supervisor", "round_robin", "broadcast", "semantic"]
 
 
