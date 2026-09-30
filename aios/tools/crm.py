@@ -10,6 +10,17 @@ from aios.tools.registry import TOOL_REGISTRY
 logger = logging.getLogger(__name__)
 
 
+def _now_utc() -> datetime:
+    """Naive UTC.
+
+    crm_deals datetime columns are TIMESTAMP WITHOUT TIME ZONE (models use
+    naive UTC everywhere). asyncpg refuses a tz-aware datetime for those —
+    "can't subtract offset-naive and offset-aware datetimes" — which made
+    every crm_create_deal fail on Postgres.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class CRMCreateDealInput(BaseModel):
     lead_email: str = Field(description="Email do lead")
     lead_name: str = Field(description="Nome do lead")
@@ -152,22 +163,22 @@ class CRMTool(BaseTool):
                     close_dt = None
                     if deal_stage == "closed_won":
                         prob = 100.0
-                        close_dt = datetime.now(timezone.utc)
+                        close_dt = _now_utc()
                     elif deal_stage == "closed_lost":
                         prob = 0.0
-                        close_dt = datetime.now(timezone.utc)
+                        close_dt = _now_utc()
                     elif deal_stage == "opportunity":
                         prob = min(80 + (sc / 5), 95)
-                        close_dt = datetime.now(timezone.utc) + timedelta(days=14)
+                        close_dt = _now_utc() + timedelta(days=14)
                     elif deal_stage == "sql":
                         prob = min(50 + (sc / 3), 75)
-                        close_dt = datetime.now(timezone.utc) + timedelta(days=30)
+                        close_dt = _now_utc() + timedelta(days=30)
                     elif deal_stage == "mql":
                         prob = min(20 + (sc / 4), 45)
-                        close_dt = datetime.now(timezone.utc) + timedelta(days=60)
+                        close_dt = _now_utc() + timedelta(days=60)
                     else:  # prospection
                         prob = min(sc / 5, 15)
-                        close_dt = datetime.now(timezone.utc) + timedelta(days=90)
+                        close_dt = _now_utc() + timedelta(days=90)
                     
                     deal = CrmDeal(
                         org_id=org_id,
@@ -243,10 +254,20 @@ class CRMTool(BaseTool):
             except Exception as e:
                 return {"ok": False, "error": str(e), "payload": payload, "internal_id": internal_id}
 
+        # No silent fallback. An internal write that fails must surface as a
+        # failure: the previous path returned ok:true with deal_id
+        # "mock_<email>", so agents reported created deals that did not exist.
+        if not internal_id:
+            return {
+                "ok": False,
+                "error": "deal não criado no CRM interno",
+                "payload": payload,
+            }
+
         return {
             "ok": True,
-            "provider": "internal" if internal_id else "mock",
-            "deal_id": internal_id or f"mock_{lead_email}",
+            "provider": "internal",
+            "deal_id": internal_id,
             "internal_id": internal_id,
             "payload": payload,
         }
@@ -330,22 +351,22 @@ class CRMUpdateTool(BaseTool):
                     sc = deal.score or 0
                     if stage == "closed_won":
                         deal.probability = 100.0
-                        deal.close_date = datetime.now(timezone.utc)
+                        deal.close_date = _now_utc()
                     elif stage == "closed_lost":
                         deal.probability = 0.0
-                        deal.close_date = datetime.now(timezone.utc)
+                        deal.close_date = _now_utc()
                     elif stage == "opportunity":
                         deal.probability = min(80 + (sc / 5), 95)
-                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=14)
+                        deal.close_date = _now_utc() + timedelta(days=14)
                     elif stage == "sql":
                         deal.probability = min(50 + (sc / 3), 75)
-                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=30)
+                        deal.close_date = _now_utc() + timedelta(days=30)
                     elif stage == "mql":
                         deal.probability = min(20 + (sc / 4), 45)
-                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=60)
+                        deal.close_date = _now_utc() + timedelta(days=60)
                     else:  # prospection
                         deal.probability = min(sc / 5, 15)
-                        deal.close_date = datetime.now(timezone.utc) + timedelta(days=90)
+                        deal.close_date = _now_utc() + timedelta(days=90)
                     deal.probability = round(deal.probability, 1)
                     # Versionamento
                     try:
@@ -494,7 +515,7 @@ class CRMListDealsTool(BaseTool):
                 else:
                     q = q.where(CrmDeal.stage.notin_(CLOSED_STAGES))
                 deals = (await s.execute(q.order_by(CrmDeal.updated_at.desc()).limit(max(1, min(100, limit))))).scalars().all()
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                now = _now_utc()
                 out = []
                 for d in deals:
                     last = (d.extra_data or {}).get("last_contacted_at")
@@ -541,7 +562,7 @@ class CRMSetFollowUpTool(BaseTool):
             from aios.db.models import CrmDeal, CrmDealVersion
             from sqlalchemy import select as _sel
 
-            when = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=int(days_from_now or 0))
+            when = _now_utc() + timedelta(days=int(days_from_now or 0))
             async with async_session() as s:
                 deal = (await s.execute(
                     _sel(CrmDeal).where(CrmDeal.id == deal_id, CrmDeal.org_id == org_id)
@@ -583,7 +604,7 @@ class CRMStaleDealsTool(BaseTool):
             from aios.db.models import CrmDeal
             from sqlalchemy import select as _sel
 
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            now = _now_utc()
             cutoff = now - timedelta(days=max(1, int(stale_days or 7)))
             async with async_session() as s:
                 deals = (await s.execute(

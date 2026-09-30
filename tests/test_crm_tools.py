@@ -202,3 +202,55 @@ class TestToolEngineResilience:
         rt = AgentRuntime(agent)  # must not raise
         assert "sql_query" in rt.tool_engine.tools
         assert rt.tool_engine.missing == ["gone_tool"]
+
+
+class TestNaiveUtcAndNoFakeSuccess:
+    """Live round-trip found: crm_create_deal failed on Postgres (tz-aware
+    datetime into a naive column) and returned ok:true with a mock id."""
+
+    def test_now_utc_is_naive(self):
+        from aios.tools.crm import _now_utc
+
+        assert _now_utc().tzinfo is None
+
+    def test_no_aware_datetime_left(self):
+        from pathlib import Path
+
+        src = Path("aios/tools/crm.py").read_text()
+        # The only permitted occurrence is inside _now_utc(), which strips tz.
+        body = src.replace(
+            "return datetime.now(timezone.utc).replace(tzinfo=None)", ""
+        )
+        assert "datetime.now(timezone.utc)" not in body
+
+    def test_no_mock_deal_id(self):
+        from pathlib import Path
+
+        src = Path("aios/tools/crm.py").read_text()
+        assert 'f"mock_{lead_email}"' not in src
+
+    async def test_create_fails_honestly_when_db_write_fails(self, monkeypatch):
+        """A failed internal insert must surface, never fabricate an id.
+
+        The live bug: Postgres rejected the tz-aware close_date, the insert
+        failed, and the tool still returned ok:true with deal_id
+        "mock_<email>" — agents reported deals that did not exist.
+        """
+        import contextlib
+
+        import aios.db.engine as engine_mod
+        from aios.tools.crm import CRMTool
+
+        @contextlib.asynccontextmanager
+        async def boom():
+            raise RuntimeError("db down")
+            yield  # pragma: no cover
+
+        monkeypatch.setattr(engine_mod, "async_session", boom)
+        tool = CRMTool()
+        tool._org_id = "org-x"
+        res = await tool.run(lead_email="fail@x.com", lead_name="Fail")
+
+        assert res["ok"] is False
+        assert "CRM interno" in res["error"]
+        assert not str(res.get("deal_id") or "").startswith("mock_")
