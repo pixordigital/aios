@@ -15,6 +15,7 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -1134,11 +1135,11 @@ async def conversation_detail(request: Request, conv_id: str):
 
 
 @router.get("/channels", response_class=HTMLResponse)
-async def channel_list(request: Request):
+async def channel_list(request: Request, msg: str = ""):
     org_id = await _org_filter(request)
     async with db_session() as db:
         channels = (await db.execute(select(ChannelConnection).where(ChannelConnection.org_id == org_id).order_by(ChannelConnection.created_at.desc()))).scalars().all()
-    return await _render("channels.html", request, title="Canais", channels=channels)
+    return await _render("channels.html", request, title="Canais", channels=channels, msg=msg)
 
 
 @router.get("/channels/new", response_class=HTMLResponse)
@@ -1237,6 +1238,35 @@ async def channel_save(
             "from_number": config_voice_from,
         }
 
+    evo_note = None
+    if channel_type == "evolution" and config.get("api_key") and config.get("instance"):
+        # Flipping the provider selector only changed which send path ran — the
+        # Evolution instance kept its old integration. Reconcile before saving,
+        # so the two sides cannot disagree.
+        try:
+            from aios.channels.evolution import EvolutionChannel
+
+            class _C:
+                pass
+
+            _c = _C()
+            _c.config = config
+            _c.channel_type = "evolution"
+            res = await EvolutionChannel(connection=_c).reconcile_provider()
+            if res.get("ok"):
+                config["instance"] = res["instance"]
+                evo_note = res["message"]
+            else:
+                return await _render(
+                    "channel_form.html", request, title="Canal",
+                    error=f"Evolution: {res.get('message')}", channel=None,
+                )
+        except Exception as e:
+            return await _render(
+                "channel_form.html", request, title="Canal",
+                error=f"Evolution: {e}", channel=None,
+            )
+
     from aios.core.secrets import encrypt_channel_config
     config = encrypt_channel_config(config)
     async with db_session() as db:
@@ -1253,6 +1283,8 @@ async def channel_save(
             )
             db.add(ch)
         await db.commit()
+    if evo_note:
+        return RedirectResponse(f"/dashboard/channels?msg={quote(evo_note)}", status_code=303)
     return RedirectResponse("/dashboard/channels", status_code=303)
 
 

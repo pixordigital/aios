@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     sentry_dsn: str = ""
     evolution_server_url: str = "http://evolution:8080"
     evolution_api_key: str = ""
+    # Where Evolution POSTs inbound events. Default is the internal Docker network
+    # address so signed payloads never cross the internet. Override when Evolution
+    # runs on a different host.
+    evolution_webhook_base: str = "http://app:8777/api/evolution/webhook"
     evolution_ip_allowlist: str = ""  # comma-separated IPs/CIDRs allowed to access Evolution API (e.g. "10.0.0.0/8,192.168.1.0/24")
     evolution_api_key_rotation_days: int = 30  # days before API key rotation recommended
     codex_model: str = "gpt-5.4"

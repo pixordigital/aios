@@ -5,6 +5,10 @@
     <button class="btn btn-primary" onclick="document.getElementById('quick-channel').showModal()">+ Conectar</button>
 </div>
 
+{% if msg %}
+<div class="card mb-4" style="border-color:var(--accent-border);color:var(--accent);font-size:0.8125rem">{{ msg }}</div>
+{% endif %}
+
 {% if channels %}
 <div class="flex-col gap-2">
     {% for c in channels %}

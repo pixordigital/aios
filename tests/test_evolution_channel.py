@@ -14,6 +14,7 @@ Two production-blocking bugs:
    message was dropped with a log line nobody watched.
 """
 
+import httpx
 import pytest
 
 from aios.api.evolution_webhook import _AUTH_HEADERS, _verify_evolution_sig, _verify_request
@@ -136,3 +137,146 @@ class TestEvolutionInstanceLimit:
             code = code.decode()
         assert "org.plan" not in code, "must read plan from extra_data"
         assert "extra_data" in code
+
+
+class _FakeResp:
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = str(payload)[:200]
+
+    def json(self):
+        return self._payload
+
+
+class _FakeClient:
+    """Records calls; returns queued responses keyed by URL substring."""
+
+    def __init__(self, responses):
+        self.responses = responses
+        self.calls = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def _match(self, url):
+        for frag, resp in self.responses:
+            if frag in url:
+                return resp
+        return _FakeResp(404, {"error": f"no stub for {url}"})
+
+    async def get(self, url, **kw):
+        self.calls.append(("GET", url, kw.get("json")))
+        return self._match(url)
+
+    async def post(self, url, **kw):
+        self.calls.append(("POST", url, kw.get("json")))
+        return self._match(url)
+
+
+class TestProviderSwitch:
+    """The channel form writes config['provider'] but never told Evolution.
+
+    Flipping the selector changed the outbound send path while the instance
+    kept WHATSAPP-BAILEYS, so Meta payloads went to a Baileys instance.
+    """
+
+    def _patch(self, monkeypatch, responses):
+        client = _FakeClient(responses)
+        monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: client)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_meta_requires_credentials(self, monkeypatch):
+        ch = _ch(provider="meta")
+        res = await ch.reconcile_provider()
+        assert res["ok"] is False
+        assert res["action"] == "add_credentials"
+        assert "WABA ID" in res["message"]
+
+    @pytest.mark.asyncio
+    async def test_meta_creates_separate_instance_with_credentials(self, monkeypatch):
+        client = self._patch(monkeypatch, [
+            ("fetchInstances", _FakeResp(200, [])),
+            ("/instance/create", _FakeResp(201, {"instance": {}})),
+            ("/webhook/set/", _FakeResp(201, {"ok": True})),
+        ])
+        ch = _ch(provider="meta", meta_token="T", meta_phone_id="1555", meta_waba_id="999")
+        res = await ch.reconcile_provider()
+        assert res["ok"] is True
+        # must not clobber the paired baileys instance
+        assert res["instance"] == "i1-meta"
+        create = [c for c in client.calls if c[0] == "POST" and "/instance/create" in c[1]][0]
+        assert create[2]["integration"] == "WHATSAPP-BUSINESS"
+        assert create[2]["token"] == "T"
+        assert create[2]["number"] == "1555"
+        assert create[2]["instanceId"] == "999"
+
+    @pytest.mark.asyncio
+    async def test_switch_back_reuses_paired_baileys_instance(self, monkeypatch):
+        client = self._patch(monkeypatch, [
+            ("fetchInstances", _FakeResp(200, [
+                {"name": "i1", "integration": "WHATSAPP-BAILEYS", "connectionStatus": "open"},
+            ])),
+            ("/webhook/set/", _FakeResp(201, {"ok": True})),
+        ])
+        ch = _ch(provider="baileys")
+        res = await ch.reconcile_provider()
+        assert res["ok"] is True
+        assert res["action"] == "ready"
+        assert res["instance"] == "i1"
+        assert not [c for c in client.calls if "/instance/create" in c[1]]
+
+    @pytest.mark.asyncio
+    async def test_asks_for_qr_when_baileys_not_connected(self, monkeypatch):
+        self._patch(monkeypatch, [
+            ("fetchInstances", _FakeResp(200, [
+                {"name": "i1", "integration": "WHATSAPP-BAILEYS", "connectionStatus": "close"},
+            ])),
+            ("/webhook/set/", _FakeResp(201, {"ok": True})),
+        ])
+        res = await _ch(provider="baileys").reconcile_provider()
+        assert res["action"] == "scan_qr"
+
+    @pytest.mark.asyncio
+    async def test_recreates_when_name_exists_with_wrong_integration(self, monkeypatch):
+        client = self._patch(monkeypatch, [
+            ("fetchInstances", _FakeResp(200, [
+                {"name": "i1-meta", "integration": "WHATSAPP-BAILEYS", "connectionStatus": "open"},
+            ])),
+            ("/instance/create", _FakeResp(201, {"instance": {}})),
+            ("/webhook/set/", _FakeResp(201, {"ok": True})),
+        ])
+        ch = _ch(provider="meta", meta_token="T", meta_phone_id="1", meta_waba_id="2")
+        res = await ch.reconcile_provider()
+        assert res["ok"] is True
+        assert [c for c in client.calls if "/instance/create" in c[1]]
+
+    @pytest.mark.asyncio
+    async def test_webhook_secret_goes_in_headers_not_webhookauth(self, monkeypatch):
+        client = self._patch(monkeypatch, [
+            ("fetchInstances", _FakeResp(200, [])),
+            ("/instance/create", _FakeResp(201, {"instance": {}})),
+            ("/webhook/set/", _FakeResp(201, {"ok": True})),
+        ])
+        await _ch(provider="baileys").reconcile_provider()
+        hook = [c for c in client.calls if "/webhook/set/" in c[1]][0]
+        wh = hook[2]["webhook"]
+        # Evolution drops webhookAuth silently; only headers survive.
+        assert "webhookAuth" not in wh
+        assert wh["headers"]["x-webhook-auth"] == "k"
+        assert wh["url"].endswith("/i1")
+
+    @pytest.mark.asyncio
+    async def test_reports_webhook_failure_even_when_instance_ok(self, monkeypatch):
+        self._patch(monkeypatch, [
+            ("fetchInstances", _FakeResp(200, [])),
+            ("/instance/create", _FakeResp(201, {"instance": {}})),
+            ("/webhook/set/", _FakeResp(500, {"error": "boom"})),
+        ])
+        res = await _ch(provider="baileys").reconcile_provider()
+        assert res["ok"] is False
+        assert "webhook" in res["message"]

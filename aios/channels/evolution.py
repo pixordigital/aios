@@ -318,6 +318,149 @@ class EvolutionChannel(Channel):
             logger.exception("Evolution create_instance error")
             return {"ok": False, "message": str(e)}
 
+    # provider -> Evolution integration. Verified against Evolution API v2.3.7:
+    # WHATSAPP-CLOUD and BIZ_WEBHOOK are rejected as "Invalid integration".
+    _INTEGRATION = {"baileys": "WHATSAPP-BAILEYS", "meta": "WHATSAPP-BUSINESS"}
+
+    def meta_credentials(self) -> dict:
+        """Meta Cloud API credentials as collected by the channel form."""
+        return {
+            "token": self._config.get("meta_token", ""),
+            "number": self._config.get("meta_phone_id", ""),
+            "instanceId": self._config.get("meta_waba_id", ""),
+        }
+
+    def missing_meta_credentials(self) -> list:
+        return [f for f, v in self.meta_credentials().items() if not v]
+
+    async def reconcile_provider(self) -> dict:
+        """Make the Evolution side match config['provider'].
+
+        The channel form only writes config, so flipping the provider selector
+        changed which send path ran while the Evolution instance kept its
+        original integration. A Meta payload sent to a WHATSAPP-BAILEYS instance
+        fails. This reconciles the two.
+
+        Provider-specific instances are kept side by side (`<name>-meta`) so
+        switching back and forth does not destroy a WhatsApp pairing.
+
+        Returns {"ok", "instance", "action", "message"} where action is one of
+        ready | scan_qr | add_credentials | error.
+        """
+        provider = self.provider
+        integration = self._INTEGRATION.get(provider)
+        if not integration:
+            return {"ok": False, "action": "error", "message": f"provider desconhecido: {provider!r}"}
+
+        base = self.instance
+        if not base:
+            return {"ok": False, "action": "error", "message": "instance não configurado"}
+
+        missing = self.missing_meta_credentials() if provider == "meta" else []
+        if missing:
+            names = {"token": "Meta access token", "number": "Phone number ID", "instanceId": "WABA ID"}
+            return {
+                "ok": False,
+                "action": "add_credentials",
+                "message": "Meta Cloud API precisa de: " + ", ".join(names[m] for m in missing),
+            }
+
+        # Reuse the base name for baileys so an existing pairing is never
+        # disturbed; give meta its own name.
+        target = base if provider == "baileys" else f"{base}-{provider}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(
+                    f"{self.base_url}/instance/fetchInstances",
+                    headers={"apikey": self.api_key},
+                )
+                if resp.status_code != 200:
+                    return {"ok": False, "action": "error", "message": f"Evolution API {resp.status_code}"}
+                instances = resp.json() if isinstance(resp.json(), list) else []
+        except Exception as e:
+            logger.exception("Evolution reconcile: list failed")
+            return {"ok": False, "action": "error", "message": str(e)}
+
+        existing = next((i for i in instances if i.get("name") == target), None)
+        if existing and existing.get("integration") != integration:
+            # Right name, wrong transport — cannot be changed in place.
+            existing = None
+
+        if existing is None:
+            payload = {
+                "instanceName": target,
+                "integration": integration,
+                "qrcode": provider == "baileys",
+                "options": {"deleteOnLogout": False, "delayOnStart": False, "trustQrCode": False},
+            }
+            if provider == "meta":
+                payload.update(self.meta_credentials())
+            try:
+                async with httpx.AsyncClient(timeout=45) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/instance/create",
+                        headers={"apikey": self.api_key, "Content-Type": "application/json"},
+                        json=payload,
+                    )
+            except Exception as e:
+                logger.exception("Evolution reconcile: create failed")
+                return {"ok": False, "action": "error", "message": str(e)}
+            if resp.status_code not in (200, 201):
+                return {"ok": False, "action": "error", "message": f"criação falhou: {resp.text[:200]}"}
+            action = "scan_qr" if provider == "baileys" else "ready"
+            msg = (
+                f"Instância '{target}' criada — escaneie o QR no painel."
+                if provider == "baileys"
+                else f"Instância '{target}' criada com credenciais Meta."
+            )
+        else:
+            state = existing.get("connectionStatus")
+            if provider == "baileys" and state != "open":
+                action, msg = "scan_qr", f"Instância '{target}' sem pareamento — escaneie o QR para conectar."
+            else:
+                action, msg = "ready", f"Instância '{target}' pronta ({state or 'ok'})."
+
+        hooked = await self._set_webhook(target)
+        if not hooked.get("ok"):
+            return {"ok": False, "action": "error", "instance": target,
+                    "message": f"instância ok, mas webhook falhou: {hooked.get('message')}"}
+
+        return {"ok": True, "instance": target, "action": action, "message": msg}
+
+    async def _set_webhook(self, instance_name: str) -> dict:
+        """Point an instance's webhook at us, with the shared secret.
+
+        Evolution silently drops a `webhookAuth` field — it accepts it and
+        never persists it. The secret has to go in the custom `headers` map
+        under the name our own webhook reader checks.
+        """
+        from aios.config import settings
+
+        url = f"{settings.evolution_webhook_base.rstrip('/')}/{instance_name}"
+        body = {
+            "webhook": {
+                "url": url,
+                "enabled": True,
+                "events": ["MESSAGES_UPSERT"],
+                "headers": {"x-webhook-auth": self.api_key},
+                "webhookBase64": False,
+            }
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{self.base_url}/webhook/set/{instance_name}",
+                    headers={"apikey": self.api_key, "Content-Type": "application/json"},
+                    json=body,
+                )
+            if resp.status_code in (200, 201):
+                return {"ok": True, "message": url}
+            return {"ok": False, "message": f"{resp.status_code}: {resp.text[:200]}"}
+        except Exception as e:
+            logger.exception("Evolution webhook set failed")
+            return {"ok": False, "message": str(e)}
+
     async def _check_instance_limit(self) -> dict:
         """Check if org has reached max Evolution instances for their plan."""
         if not self.db or not self.connection:
