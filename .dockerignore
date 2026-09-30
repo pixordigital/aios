@@ -7,3 +7,7 @@ __pycache__
 *.md
 tests
 .claude
+
+# graphify docs are repo documentation, not runtime assets — keep the
+# production image small and let graphify-out/ live in git only.
+graphify-out/
