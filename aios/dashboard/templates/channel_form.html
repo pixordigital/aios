@@ -90,6 +90,7 @@
                         <option value="baileys" {% if channel and channel.config and channel.config.get('provider', 'baileys') == 'baileys' %}selected{% endif %}>Baileys (WhatsApp Web — self-hosted)</option>
                         <option value="meta" {% if channel and channel.config and channel.config.get('provider') == 'meta' %}selected{% endif %}>Meta Cloud API (WhatsApp Business oficial)</option>
                     </select>
+                    <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem">Ao salvar, a instância Evolution é criada/reaproveitada conforme o provedor. Cada provedor tem sua própria instância — alternar não desassocia o WhatsApp já pareado.</div>
                 </div>
                 <div id="evo-baileys" style="display:flex;flex-direction:column;gap:0.75rem">
                     <div style="padding:0.5rem;background:var(--amber-subtle);border:1px solid var(--amber);border-radius:4px;font-size:0.75rem;color:var(--amber)">⚠️ Baileys = WhatsApp Web (instável, risco de ban). Para produção, use <b>Meta Cloud API</b>.</div>
