@@ -16,10 +16,20 @@ from aios.templates.frontend import FRONTEND_TEMPLATE
 from aios.templates.backend import BACKEND_TEMPLATE
 from aios.templates.red import RED_TEMPLATE
 from aios.templates.blue import BLUE_TEMPLATE
+from aios.templates.team_managers import (
+    SALES_MANAGER_TEMPLATE,
+    DEV_MANAGER_TEMPLATE,
+    RED_MANAGER_TEMPLATE,
+    BLUE_MANAGER_TEMPLATE,
+)
 
 TEMPLATES = {
     "orchestrator": ORCHESTRATOR_TEMPLATE,
     "manager": MANAGER_TEMPLATE,
+    "manager_sales": SALES_MANAGER_TEMPLATE,
+    "manager_dev": DEV_MANAGER_TEMPLATE,
+    "manager_red": RED_MANAGER_TEMPLATE,
+    "manager_blue": BLUE_MANAGER_TEMPLATE,
     "sdr": SDR_TEMPLATE,
     "closer": CLOSER_TEMPLATE,
     "support": SUPPORT_TEMPLATE,
