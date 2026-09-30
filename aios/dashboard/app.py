@@ -2036,7 +2036,7 @@ async def lab_tool_run(request: Request):
     from aios.tools.registry import TOOL_REGISTRY
     if tool_name not in TOOL_REGISTRY:
         return JSONResponse({"error": f"tool '{tool_name}' not registered"}, status_code=404)
-    eng = ToolEngine([tool_name])
+    eng = ToolEngine([tool_name], org_id=await _resolve_org_id(request))
     try:
         out = await eng.execute(tool_name, raw_args if isinstance(raw_args, str) else _json.dumps(raw_args))
         return JSONResponse({"ok": True, "tool": tool_name, "output": out})

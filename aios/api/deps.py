@@ -1,4 +1,4 @@
-"""Auth deps: JWT validation, API key, dashboard cookie auth."""
+"""Auth deps: JWT validation, dashboard cookie auth."""
 
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -14,15 +14,10 @@ from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import User
 
 
-def _constant_time_compare(a: str, b: str) -> bool:
-    return secrets.compare_digest(a, b)
-
-
 async def get_current_user(
     request: FastAPIRequest = None,
     db: DatabaseBackend = Depends(get_db_backend),
     authorization: str = Header(None),
-    x_api_key: str = Header(None),
 ) -> User:
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
@@ -39,13 +34,9 @@ async def get_current_user(
             raise HTTPException(401, "Token inválido")
         return user
 
-    if x_api_key:
-        result = await db.execute(select(User).where(User.api_key_hash.isnot(None)))
-        for user in result.scalars():
-            if user.api_key_hash and _constant_time_compare(
-                user.api_key_hash, x_api_key
-            ):
-                return user
+    # x-api-key header support was removed: api_key_hash was never populated
+    # and nothing ever sent the header, so the branch could never
+    # authenticate anyone. Bearer JWT and dashboard cookie remain.
 
     # Fall back to dashboard cookie so the browser's fetch() calls to /api/*
     # work without embedding the JWT in client-side JS.
@@ -59,6 +50,18 @@ async def get_current_user(
 
 async def get_org_id(user: User = Depends(get_current_user)) -> str:
     return user.org_id
+
+
+async def get_superadmin(user: User = Depends(get_current_user)) -> User:
+    """Restrict to workspace administrators.
+
+    /api/dev/* runs prompts and builds with repo-wide file and shell access.
+    Any authenticated member is too broad; org owners and platform
+    superadmins only.
+    """
+    if user.role not in ("superadmin", "owner"):
+        raise HTTPException(403, "requer administrador")
+    return user
 
 
 def verify_org_access(org_id: str, resource) -> None:

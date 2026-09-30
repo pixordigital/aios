@@ -26,7 +26,9 @@ class ReadFileTool(BaseTool):
         db = getattr(self, "_db", None)
         if not db:
             return {"error": "File reading requires a database session", "content": ""}
-        content = await get_artifact_content(artifact_id, db)
+        # Org set by ToolEngine. Without it any artifact UUID is readable
+        # across orgs; with it, foreign rows return "not found" (no oracle).
+        content = await get_artifact_content(artifact_id, db, org_id=getattr(self, "_org_id", None))
         if content is None:
             return {"error": "File not found", "content": ""}
         try:

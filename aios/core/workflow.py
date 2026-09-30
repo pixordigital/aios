@@ -485,7 +485,7 @@ class WorkflowEngine:
                 except Exception:
                     pass
                 return result
-            engine = ToolEngine([node.tool_name])
+            engine = ToolEngine([node.tool_name], org_id=org or "")
             args_json = json.dumps(rendered_args if isinstance(rendered_args, dict) else (node.tool_args or {}))
             org = shared.get("org_id") or shared.get("initial_input_org") or ""
             sem = _get_org_semaphore(org or "global")

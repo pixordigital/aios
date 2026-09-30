@@ -63,7 +63,7 @@ async def mcp_call(
         register_dynamic_tool(
             tool.name, tool.description, tool.code_reference[5:], tool.input_schema
         )
-    eng = ToolEngine([name])
+    eng = ToolEngine([name], org_id=org_id)
     try:
         out = await eng.execute(name, json.dumps(args))
         return {"ok": True, "output": out}

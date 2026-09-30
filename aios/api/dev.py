@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from aios.api.deps import get_current_user
+from aios.api.deps import get_current_user, get_superadmin
 from aios.core.dev_cli import run_claude, run_codex, dual_review, dual_build, run_codex_review
 
 router = APIRouter(prefix="/api/dev", tags=["dev"])
@@ -31,7 +31,7 @@ class ReviewIn(BaseModel):
     cwd: str = ""
 
 @router.get("/status")
-async def status(user=Depends(get_current_user)):
+async def status(user=Depends(get_superadmin)):
     import shutil
     return {
         "claude": {"path": shutil.which("claude"), "version": await _ver("claude")},
@@ -49,7 +49,7 @@ async def _ver(cmd: str) -> str:
         return ""
 
 @router.post("/claude")
-async def claude_run(body: PromptIn, user=Depends(get_current_user)):
+async def claude_run(body: PromptIn, user=Depends(get_superadmin)):
     if not body.prompt.strip():
         raise HTTPException(400, "prompt vazio")
     try:
@@ -60,7 +60,7 @@ async def claude_run(body: PromptIn, user=Depends(get_current_user)):
     return res
 
 @router.post("/codex")
-async def codex_run(body: PromptIn, user=Depends(get_current_user)):
+async def codex_run(body: PromptIn, user=Depends(get_superadmin)):
     if not body.prompt.strip():
         raise HTTPException(400, "prompt vazio")
     try:
@@ -71,7 +71,7 @@ async def codex_run(body: PromptIn, user=Depends(get_current_user)):
     return res
 
 @router.post("/review")
-async def review(body: ReviewIn, user=Depends(get_current_user)):
+async def review(body: ReviewIn, user=Depends(get_superadmin)):
     try:
         cwd = _validate_cwd(body.cwd)
     except ValueError as e:
@@ -89,12 +89,12 @@ async def review(body: ReviewIn, user=Depends(get_current_user)):
     return res
 
 @router.post("/review/codex")
-async def codex_review_only(user=Depends(get_current_user)):
+async def codex_review_only(user=Depends(get_superadmin)):
     res = await run_codex_review()
     return res
 
 @router.post("/build")
-async def build(body: PromptIn, user=Depends(get_current_user)):
+async def build(body: PromptIn, user=Depends(get_superadmin)):
     if not body.prompt.strip():
         raise HTTPException(400, "prompt vazio")
     try:

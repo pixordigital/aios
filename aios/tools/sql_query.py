@@ -54,6 +54,21 @@ class SQLQueryTool(BaseTool):
         re.IGNORECASE,
     )
 
+    # Tables whose rows belong to one org. When the engine knows the caller's
+    # org, a query touching these must filter to exactly that org — an
+    # unscoped SELECT would otherwise return every org's rows.
+    _ORG_SCOPED_TABLES = (
+        "agents", "conversations", "messages", "teams", "budgets",
+        "workflows", "crm_deals", "memories", "artifacts", "skills",
+        "voice_recordings", "usage_records",
+    )
+
+    _ORG_SCOPED_PATTERN = re.compile(
+        r"(?:FROM|JOIN)\s+(" + "|".join(_ORG_SCOPED_TABLES) + r")\b",
+        re.IGNORECASE,
+    )
+    _ORG_LITERAL_PATTERN = re.compile(r"org_id\s*=\s*'([^']+)'", re.IGNORECASE)
+
     async def run(self, query: str, limit: int = 50) -> dict:
         q = query.strip()
         if not re.match(r"^\s*SELECT\b", q, re.I):
@@ -69,6 +84,14 @@ class SQLQueryTool(BaseTool):
         # deny credential/PII tables: no org context, so no safe way to scope rows
         if self._DENY_APP_PATTERN.search(q):
             return {"error": "tabela com segredos/PII bloqueada para SQL direto; use a ferramenta do canal"}
+        # org scoping: a query touching org-owned tables must filter to the
+        # caller's org and no other. This is a guardrail, not a SQL parser —
+        # it kills unscoped whole-table reads, the realistic exfil path.
+        if self._ORG_SCOPED_PATTERN.search(q):
+            mine = getattr(self, "_org_id", "") or ""
+            lits = self._ORG_LITERAL_PATTERN.findall(q)
+            if not mine or not lits or any(o != mine for o in lits):
+                return {"error": "adicione WHERE org_id = '<sua org>' à consulta"}
         q = q.rstrip(";") + f" LIMIT {min(limit, 100)}"
         try:
             from aios.db.engine import async_session

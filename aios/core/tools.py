@@ -51,8 +51,9 @@ class ToolExecutionError(Exception):
 
 
 class ToolEngine:
-    def __init__(self, tool_names: list[str]):
+    def __init__(self, tool_names: list[str], org_id: str = ""):
         self.tools: dict[str, Any] = {}
+        self.org_id = org_id or ""
         for name in tool_names:
             self.tools[name] = self._load(name)
 
@@ -106,6 +107,13 @@ class ToolEngine:
                 sb.get("stderr") or sb.get("error") or "sandbox failed"
             )
         last_err = None
+        # Org context for tools that touch org-scoped rows (sql_query, read_file).
+        # Without this every tool ran with a god-view session: an agent could
+        # SELECT another org's rows and nothing recorded whose data it was.
+        try:
+            tool._org_id = self.org_id
+        except Exception:
+            pass
         for attempt in range(_TOOL_MAX_RETRIES + 1):
             try:
                 result = await asyncio.wait_for(

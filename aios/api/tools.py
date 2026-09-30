@@ -113,7 +113,7 @@ async def test_tool(
     if tool.code_reference and tool.code_reference.startswith("code:"):
         from aios.tools.dynamic import register_dynamic_tool
         register_dynamic_tool(tool.name, tool.description, tool.code_reference[5:], tool.input_schema)
-    eng = ToolEngine([tool.name])
+    eng = ToolEngine([tool.name], org_id=org_id)
     try:
         out = await eng.execute(tool.name, json.dumps(args))
         return {"ok": True, "output": out}

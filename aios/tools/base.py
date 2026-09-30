@@ -10,6 +10,10 @@ class BaseTool(ABC):
     name: str = ""
     description: str = ""
     input_model: type[BaseModel] | None = None
+    # Set by ToolEngine before run(). Tools that touch org-scoped rows must
+    # read it and refuse cross-org access. Empty = unknown caller (defense in
+    # depth still applies, but scoping cannot).
+    _org_id: str = ""
 
     @abstractmethod
     async def run(self, **kwargs) -> Any:

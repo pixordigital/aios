@@ -67,7 +67,7 @@ class AgentRuntime:
         self.agent = agent
         model = agent.llm_config.get("model", "openai/gpt-4o")
         self.llm = get_provider(model)
-        self.tool_engine = ToolEngine(agent.tools or [])
+        self.tool_engine = ToolEngine(agent.tools or [], org_id=getattr(agent, "org_id", "") or "")
         self.memory = MemoryManager(agent.id, llm_provider=self.llm)
         self._db_factory = db_session_factory
         # governance

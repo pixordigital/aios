@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Credential
-from aios.core.secrets import encrypt_secret
 from .deps import get_current_user, get_org_id
-import json, uuid
+import uuid
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
 
@@ -47,13 +46,12 @@ async def oauth_callback(
     state_org, _, nonce = state.partition(":")
     if not nonce or state_org != org_id:
         return {"error": "state inválido"}
-    # troca code por token (mock se sem config)
-    token = f"oauth_{provider}_{code[:12] if code else uuid.uuid4().hex[:12]}"
-    # salva como credential
-    cred = Credential(org_id=org_id, name=f"{provider} oauth", cred_type="bearer", data_enc=encrypt_secret(json.dumps({"token": token, "provider": provider})), extra_data={"oauth": True, "provider": provider})
-    db.add(cred)
-    await db.commit()
-    return RedirectResponse(f"/dashboard/automations?oauth={provider}_ok", status_code=303)
+    # No provider OAuth credentials exist in settings (no HUBSPOT_/PIPEDRIVE_
+    # client id/secret), so a real code exchange is impossible. The old code
+    # minted a mock token here and stored it as a working credential — a row
+    # that looked connected and failed at first use. Refuse instead; manual
+    # credential creation remains available.
+    return {"error": "OAuth não configurado: crie a credential manualmente em /dashboard/automations"}
 
 @router.get("/status")
 async def oauth_status(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
