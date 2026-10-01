@@ -1,5 +1,8 @@
 import base64
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
 
 from aios.config import settings
 
@@ -40,10 +43,21 @@ def encrypt_channel_config(config: dict) -> dict:
     out = {}
     for k,v in (config or {}).items():
         if k in _SENSITIVE_KEYS or any(s in k.lower() for s in ["token","key","secret","password"]):
-            try:
-                out[k] = "enc:" + encrypt_secret(str(v)) if v else v
-            except Exception:
+            if not v:
                 out[k] = v
+                continue
+            try:
+                out[k] = "enc:" + encrypt_secret(str(v))
+            except Exception:
+                # Fail CLOSED. Storing the plaintext on error meant a misconfigured
+                # or missing encryption key silently persisted API tokens and SMTP
+                # passwords in cleartext -- a key problem would look like success.
+                # Losing a channel credential is recoverable; leaking it is not.
+                logger.error(
+                    "channel secret %r failed to encrypt -- refusing to store in "
+                    "plaintext; set AIOS_ENCRYPTION_KEY", k,
+                )
+                raise
         elif isinstance(v, dict):
             out[k] = encrypt_channel_config(v)
         else:

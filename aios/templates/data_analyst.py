@@ -13,6 +13,6 @@ Fluxo:
 
 Regras: nunca SELECT * sem limit, explique limitações, gere gráfico se ajuda.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.2, "max_tokens": 4096},
-    "tools": ["sql_query", "python_sandbox", "calculator", "http_request", "read_file", "transcribe", "current_datetime", "rag_search", "web_search"],
+    "tools": ["sql_query", "python_sandbox", "calculator", "http_request", "read_file", "transcribe", "current_datetime", "rag_search", "web_search", "crm_pipeline_stats"],
     "memory_config": {"short_term": {"max_messages": 30}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}},
 }

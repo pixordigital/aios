@@ -135,7 +135,7 @@ class TestChannelTypes:
             "web": {"platform": "WebSocket", "theme": "light"},
             "whatsapp": {"phone_number_id": "123456789", "business_account_id": "987654321"},
             "evolution": {"server_url": "https://evolution.example.com", "api_key": "test_key", "instance_name": "test"},
-            "voice": {"provider": "livekit", "livekit_url": "wss://livekit.example.com", "livekit_api_key": "test", "livekit_api_secret": "test"},
+            "voice": {"provider": "selfhosted", "tts_url": "http://voice-tts-kokoro:8880/v1", "stt_url": "http://voice-stt:9000/v1"},
             "discord": {"bot_token": "test_token", "guild_id": "123456789"},
             "slack": {"bot_token": "xoxb-test", "signing_secret": "test_secret"},
             "email": {"smtp_server": "smtp.example.com", "email": "test@example.com", "password": "test_pass", "imap_server": "imap.example.com"},
@@ -209,13 +209,12 @@ class TestChannelWebhookEndpoints:
     """Test webhook endpoints for channels that have them."""
 
     async def test_whatsapp_webhook_verify(self, auth_client: AsyncClient):
-        """Test WhatsApp webhook verification endpoint."""
-        # This tests the GET /api/whatsapp/webhook endpoint
-        response = await auth_client.get(
-            "/api/whatsapp/webhook",
-            params={"hub.mode": "subscribe", "hub.verify_token": "test", "hub.challenge": "123"},
-        )
-        # Without proper secret configured, should fail or return challenge
+        """WhatsApp webhook verification endpoint.
+
+        Was GET /api/whatsapp/webhook, removed in 397a0d7 when WhatsApp was
+        consolidated onto the Evolution API. Evolution verifies per instance.
+        """
+        response = await auth_client.get("/api/evolution/webhook/test_instance")
         assert response.status_code in (200, 403, 401)
 
     async def test_evolution_webhook_endpoint(self, auth_client: AsyncClient):

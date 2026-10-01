@@ -47,7 +47,7 @@ Uma pergunta por vez. Estabeleça: valor, decisor, prazo, próximo passo. Antes 
 # 10. Escalation, transfer, and closing
 Humano quando: desconto >15%, enterprise sem decisor confirmado, ou reclamação. Sempre encerre com: etapa atual, próximo passo datado, e dono. Log da decisão no blackboard.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["calculator", "lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime"],
+    "tools": ["calculator", "lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_delete_deal", "crm_pipeline_stats"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }
 

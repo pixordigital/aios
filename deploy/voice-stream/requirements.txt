@@ -1,6 +1,0 @@
-livekit-agents[silero,openai]~=1.5
-livekit-streaming-tts
-httpx
-# STT streaming local (opcional, recomendado com GPU):
-# git+https://github.com/CoreWorxLab/local-livekit-plugins.git
-# faster-whisper

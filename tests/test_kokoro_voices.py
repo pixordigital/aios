@@ -3,8 +3,11 @@ import os
 import time
 import pytest
 
-KOKORO_URL = os.environ.get("KOKORO_URL", "http://voice-tts-kokoro:8880")
-# when running inside app container, use internal DNS; when running locally, skip if not reachable
+# Loopback by default. The container publishes no ports, so "voice-tts-kokoro"
+# is Docker-internal DNS that never resolves from a host shell -- that mismatch
+# is what silently skipped all 7 tests. Inside the app container KOKORO_URL can
+# still be set to the internal name; scripts/kokoro-host-forward.sh bridges it.
+KOKORO_URL = os.environ.get("KOKORO_URL", "http://127.0.0.1:8880")
 import httpx
 
 def _is_kokoro_reachable() -> bool:
@@ -74,9 +77,16 @@ class TestKokoro:
         assert r.status_code == 200
         assert len(r.content) > 5000
 
-    def test_no_livekit_required(self):
-        # app should not require livekit for voice — kokoro is primary
+    def test_kokoro_is_the_configured_tts(self):
+        """Kokoro is the only TTS engine; there is no streaming transport left."""
         from aios.config import settings
 
-        # even with empty livekit, voice TTS URL should be kokoro
-        assert settings.voice_tts_url.startswith("http://voice-tts-kokoro:8880") or "kokoro" in settings.voice_tts_url.lower() or True  # skip if not set in test env
+        assert "kokoro" in settings.kokoro_url.lower()
+        assert settings.voice_provider in ("selfhosted", "elevenlabs", "vapi", "retell")
+
+    def test_no_livekit_settings_remain(self):
+        """LiveKit was removed: config must not expose a livekit_* knob again."""
+        from aios.config import settings
+
+        leaked = [k for k in dir(settings) if "livekit" in k.lower()]
+        assert not leaked, f"livekit settings came back: {leaked}"

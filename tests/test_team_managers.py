@@ -129,6 +129,87 @@ WORKER_TEAMS = {
 }
 
 
+class TestScientistIsAnalysisNotModeling:
+    """The scientist was an AutoML agent (sklearn/GridSearch/AUC/SHAP). It was
+    redefined as deep CRM analysis producing business actions, so the prompts
+    must not sell model building again. Pinned because the dashboard template,
+    the Python template and the manager routing are three separate copies that
+    drift.
+    """
+
+    PROMPTS = [
+        TEMPLATES["data_scientist"]["system_prompt"],
+        TEMPLATES["manager_data"]["system_prompt"],
+    ]
+
+    def _dashboard_prompt(self):
+        import pathlib
+        html = (pathlib.Path(__file__).resolve().parents[1]
+                / "aios/dashboard/templates/agent_form.html").read_text("utf-8")
+        i = html.index("'scientist':")
+        import json
+        return json.JSONDecoder().raw_decode(html[i + len("'scientist':"):])[0]
+
+    # Terms the scientist must never be sold as. They may appear, but only in a
+    # passage that refuses them -- naming the tool is how a prohibition reads.
+    ML_TERMS = ("trein", "modelo preditivo", "GridSearch", "AUC", "SHAP",
+                "forecast", "sklearn", "xgboost")
+    NEGATION = re.compile(r"\bNÃO\b|\bNao\b|\bnão\b|\bNenhum\b|\bNunca\b|\bsem\b|fora do escopo",
+                          re.IGNORECASE)
+
+    def test_ml_terms_only_ever_appear_inside_a_prohibition(self):
+        prompts = [("template", TEMPLATES["data_scientist"]["system_prompt"]),
+                   ("manager", TEMPLATES["manager_data"]["system_prompt"]),
+                   ("dashboard", self._dashboard_prompt())]
+        for name, prompt in prompts:
+            # paragraph granularity: a prohibition wraps across several lines
+            for para in re.split(r"\n\s*\n", prompt):
+                hit = [t for t in self.ML_TERMS if t.lower() in para.lower()]
+                if not hit:
+                    continue
+                assert self.NEGATION.search(para), \
+                    f"{name}: {hit} asserted as a capability, not refused: {para[:120]}"
+
+    def test_scientist_is_proactive_and_names_an_action(self):
+        prompt = TEMPLATES["data_scientist"]["system_prompt"]
+        assert "R$" in prompt, "scientist must quantify impact in reais"
+        assert "dono" in prompt.lower() or "responsável" in prompt.lower(), \
+            "scientist must end in a recommendation with an owner"
+
+    def test_manager_routes_by_reactive_vs_proactive(self):
+        """Manager used to route 'modelagem, previsão' to the scientist."""
+        prompt = TEMPLATES["manager_data"]["system_prompt"]
+        assert "Cientista" in prompt
+        assert "causa raiz" in prompt, "scientist must own root-cause questions"
+        assert re.search(r"forecast[^.]*escale", prompt), \
+            "forecast requests must be refused, not routed to the scientist"
+
+
+class TestNoPhantomToolNames:
+    """A tool name absent from TOOL_REGISTRY is not a warning, it is an agent
+    that silently cannot do the thing it was sold as. Two shipped this way:
+    a literal "tools" placeholder in six templates, and a "crm" that was never
+    a tool name at all in the three lojista solution packs.
+    """
+
+    def test_every_template_tool_is_registered(self):
+        import aios.tools  # noqa: F401  (populates TOOL_REGISTRY)
+        for key, tpl in TEMPLATES.items():
+            missing = [t for t in tpl["tools"] if t not in TOOL_REGISTRY]
+            assert not missing, f"{key} lists tools that do not exist: {missing}"
+
+    def test_every_template_tool_loads(self):
+        for key, tpl in TEMPLATES.items():
+            assert ToolEngine(tpl["tools"], org_id="o").missing == [], key
+
+    def test_solution_pack_tools_are_registered(self):
+        import aios.tools  # noqa: F401
+        from aios.templates.solutions import SOLUTIONS
+        for key, sol in SOLUTIONS.items():
+            missing = [t for t in sol["tools"] if t not in TOOL_REGISTRY]
+            assert not missing, f"solution '{key}' lists tools that do not exist: {missing}"
+
+
 class TestPerAgentTools:
     """Tool sets must match what each agent does, and differ between peers."""
 
@@ -162,7 +243,7 @@ class TestPerAgentTools:
         assert "lead_score" not in closer
 
     def test_analyst_and_scientist_differ(self):
-        """Analyst reads call/voice data; scientist works the model."""
+        """Analyst reads call/voice data; scientist stays out of ML tooling."""
         a, s = set(apply_template("data_analyst")["tools"]), set(apply_template("data_scientist")["tools"])
         assert "transcribe" in a
         assert "transcribe" not in s
@@ -195,12 +276,15 @@ class TestPerAgentTools:
                   "sdr", "closer", "manager_sales"):
             assert "rag_search" in apply_template(k)["tools"], k
 
-    def test_no_sales_tools_outside_sales(self):
+    def test_no_sales_write_tools_outside_sales(self):
+        """crm_pipeline_stats is read-only and shared with the data team on
+        purpose; anything else under crm_* writes customer records."""
         for k in ("frontend", "backend", "red", "blue",
                   "data_analyst", "data_scientist",
                   "manager_dev", "manager_red", "manager_blue", "manager_data"):
-            crm = {t for t in apply_template(k)["tools"] if t.startswith("crm_")}
-            assert not crm, f"{k} holds sales-domain tools: {crm}"
+            writes = {t for t in apply_template(k)["tools"]
+                      if t.startswith("crm_") and t != "crm_pipeline_stats"}
+            assert not writes, f"{k} holds sales write tools: {writes}"
 
     def test_no_writing_tools_for_read_only_roles(self):
         """send_email reaches real people; only sales may send it."""

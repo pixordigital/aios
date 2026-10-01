@@ -101,20 +101,6 @@ class VoiceChannel(Channel):
                     return {"ok": False, "message": f"Retell {r.status_code}: {r.text[:120]}"}
             except Exception as e:
                 return {"ok": False, "message": str(e)}
-        if cfg["provider"] == "livekit":
-            from aios.config import settings as _s
-            if not _s.livekit_url:
-                return {"ok": False, "message": "Missing LIVEKIT_URL (suba serviço livekit no Coolify)"}
-            try:
-                import socket as _sock
-                from urllib.parse import urlparse as _up
-                host = _up(_s.livekit_url.replace("wss://", "https://").replace("ws://", "http://")).hostname
-                port = _up(_s.livekit_url.replace("wss://", "https://").replace("ws://", "http://")).port or 7880
-                with _sock.create_connection((host, port), timeout=5):
-                    pass
-                return {"ok": True, "message": f"LiveKit ok ({_s.livekit_tts_engine} primário, kokoro fallback)"}
-            except Exception as e:
-                return {"ok": False, "message": f"LiveKit inalcançável: {e}"}
         if not cfg["tts_url"]:
             return {"ok": False, "message": "Missing tts_url (VOICE_TTS_URL, ex. http://voice-tts:8000)"}
         try:

@@ -81,3 +81,38 @@ async def test_wizard_org_id_fix_303(async_client: AsyncClient, test_session, te
     from aios.db.models import Agent
     rows = (await test_session.execute(select(Agent).where(Agent.org_id == test_org.id))).scalars().all()
     assert any(a.name == "Smoke OK" for a in rows)
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_wizard_saves_hitl_discount_threshold(async_client: AsyncClient, test_session, test_org, test_user):
+    """agent_save read request.form.get(...) directly, but Starlette's
+    request.form is a coroutine -- every valid save raised AttributeError and
+    500'd, so the discount threshold never reached governance_config at all."""
+    async_client.cookies.set("aios_token", _cookie_for(test_user))
+    r = await async_client.post("/dashboard/agents/save", headers=REF, data={
+        "name": "Smoke Threshold", "agent_type": "custom", "system_prompt": "hi",
+        "model": "openai/gpt-4o-mini", "temperature": "0.7", "max_tokens": "1024",
+        "tools": "", "hitl_discount_threshold": "25",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    from sqlalchemy import select
+    from aios.db.models import Agent
+    agent = (await test_session.execute(
+        select(Agent).where(Agent.name == "Smoke Threshold"))).scalars().first()
+    assert agent is not None
+    assert agent.governance_config["hitl_discount_threshold"] == 25
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_wizard_clamps_hitl_discount_threshold(async_client: AsyncClient, test_session, test_org, test_user):
+    async_client.cookies.set("aios_token", _cookie_for(test_user))
+    await async_client.post("/dashboard/agents/save", headers=REF, data={
+        "name": "Smoke Clamp", "agent_type": "custom", "system_prompt": "hi",
+        "model": "openai/gpt-4o-mini", "temperature": "0.7", "max_tokens": "1024",
+        "tools": "", "hitl_discount_threshold": "999",
+    }, follow_redirects=False)
+    from sqlalchemy import select
+    from aios.db.models import Agent
+    agent = (await test_session.execute(
+        select(Agent).where(Agent.name == "Smoke Clamp"))).scalars().first()
+    assert agent.governance_config["hitl_discount_threshold"] == 100

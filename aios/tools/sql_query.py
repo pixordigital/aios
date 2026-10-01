@@ -69,6 +69,86 @@ class SQLQueryTool(BaseTool):
     )
     _ORG_LITERAL_PATTERN = re.compile(r"org_id\s*=\s*'([^']+)'", re.IGNORECASE)
 
+    # Guards below run against a sanitised copy of the query. A naive regex over
+    # the raw text is defeated by comments ("1=1 /* org_id='mine' */"), string
+    # literals, and quoted identifiers -- so masking them first is what makes the
+    # org-scope check meaningful.
+    _COMMENT_RE = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
+    _STRING_RE = re.compile(r"'(?:[^']|'')*'")
+
+    @classmethod
+    def _mask(cls, q: str) -> str:
+        """Hide comments AND string bodies, preserving length so offsets line up.
+
+        Used for keyword analysis (FROM/JOIN/OR/UNION), where a keyword quoted
+        inside a string must not be counted as structure.
+        """
+        return cls._STRING_RE.sub(
+            lambda m: "'" + "_" * max(0, len(m.group(0)) - 2) + "'" if len(m.group(0)) >= 2 else "''",
+            cls._COMMENT_RE.sub(lambda m: " " * len(m.group(0)), q),
+        )
+
+    @classmethod
+    def _strip_comments(cls, q: str) -> str:
+        """Hide comments only, keeping string literals intact.
+
+        org_id literal extraction needs this: a commented-out ``org_id='x'`` is
+        not part of the query, so it must not be read as "references another org"
+        and must not be mistaken for the real predicate.
+        """
+        return cls._COMMENT_RE.sub(lambda m: " " * len(m.group(0)), q)
+
+    # A WHERE clause that can only ever narrow: it must constrain org_id with a
+    # literal comparison, and must not contain OR / UNION / OR-with-true, any of
+    # which would let the org_id predicate be bypassed by a sibling condition.
+    _UNION_RE = re.compile(r"\bUNION\b", re.IGNORECASE)
+    _OR_RE = re.compile(r"\bOR\b", re.IGNORECASE)
+    # bare true / 1=1 style always-true predicates
+    _ALWAYS_TRUE_RE = re.compile(r"\btrue\b|\b1\s*=\s*1\b", re.IGNORECASE)
+    _SUBQUERY_RE = re.compile(r"\(\s*\s*SELECT\b", re.IGNORECASE)
+    _NOT_EQUALS_RE = re.compile(r"org_id\s*(<>|!=)", re.IGNORECASE)
+    _IN_LIKE_RE = re.compile(r"org_id\s+(IN|LIKE|ILIKE|BETWEEN)\b", re.IGNORECASE)
+
+    def _check_org_scope(self, q: str) -> str | None:
+        """Return an error string when `q` could return another org's rows.
+
+        The previous check only asserted that a literal org_id equal to the
+        caller's appeared *somewhere*. That is trivially defeated -- every one of
+        these passed while returning every org's data:
+
+            WHERE org_id = 'mine' OR 1=1
+            WHERE org_id = 'mine' OR true
+            SELECT ... WHERE org_id='mine' UNION ALL SELECT ... FROM agents
+
+        A predicate only constrains the result if nothing can widen it again, so
+        this rejects OR, UNION, subqueries, always-true predicates and any
+        org_id test that is not a plain equality against the caller's org.
+        """
+        mine = getattr(self, "_org_id", "") or ""
+        if not mine:
+            return "org_id do chamador desconhecido; consulta a dados de outra org bloqueada"
+        masked = self._mask(q)
+        # Literals are read from the comment-stripped query, so a commented-out
+        # org_id is neither trusted as the predicate nor flagged as a foreign org.
+        code = self._strip_comments(q)
+        lits = self._ORG_LITERAL_PATTERN.findall(code)
+        if not lits:
+            return "adicione WHERE org_id = '<sua org>' à consulta"
+        if any(o != mine for o in lits):
+            return "consulta referencia org_id de outra organizacao"
+        # Equalities are fine; every other org_id test shape is not.
+        if self._IN_LIKE_RE.search(masked) or self._NOT_EQUALS_RE.search(masked):
+            return "org_id deve ser comparado por igualdade com sua propria org"
+        if self._UNION_RE.search(masked):
+            return "UNION nao permitido em consultas com dados de org"
+        if self._OR_RE.search(masked):
+            return "OR nao permitido junto do filtro de org (permite escapar do escopo)"
+        if self._ALWAYS_TRUE_RE.search(masked):
+            return "predicado sempre-verdadeiro nao permitido no filtro de org"
+        if self._SUBQUERY_RE.search(masked):
+            return "subquery nao permitida com filtro de org"
+        return None
+
     async def run(self, query: str, limit: int = 50) -> dict:
         q = query.strip()
         if not re.match(r"^\s*SELECT\b", q, re.I):
@@ -88,10 +168,9 @@ class SQLQueryTool(BaseTool):
         # caller's org and no other. This is a guardrail, not a SQL parser —
         # it kills unscoped whole-table reads, the realistic exfil path.
         if self._ORG_SCOPED_PATTERN.search(q):
-            mine = getattr(self, "_org_id", "") or ""
-            lits = self._ORG_LITERAL_PATTERN.findall(q)
-            if not mine or not lits or any(o != mine for o in lits):
-                return {"error": "adicione WHERE org_id = '<sua org>' à consulta"}
+            err = self._check_org_scope(q)
+            if err:
+                return {"error": err}
         q = q.rstrip(";") + f" LIMIT {min(limit, 100)}"
         try:
             from aios.db.engine import async_session

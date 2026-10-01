@@ -4,7 +4,7 @@ Self-hosted = endpoints OpenAI-compatible:
 - TTS: openedai-speech (POST /v1/audio/speech)
 - STT: whisper-asr-webservice (POST /v1/audio/transcriptions, fallback /asr)
 
-PSTN/SIP discagem via bridge HTTP genérico (Twilio/LiveKit SIP/Asterisk).
+PSTN/SIP discagem via bridge HTTP genérico (Twilio/Asterisk).
 Sem bridge configurado, chamada fica `queued` com áudio TTS pronto.
 """
 
@@ -186,10 +186,7 @@ async def place_call(to: str, script: str, channel_config: dict | None = None, e
         return await _retell_call(call, to, script, cfg, extra)
     bridge = cfg["bridge_url"]
     if not bridge:
-        if cfg["provider"] == "livekit" and settings.livekit_url:
-            call["hint"] = "realtime via POST /api/voice/room (browser entra na sala); PSTN precisa SIP trunk no LiveKit"
-        else:
-            call["hint"] = "sem bridge SIP configurado — use VOICE_BRIDGE_URL (Twilio/LiveKit/Asterisk)"
+        call["hint"] = "sem bridge SIP configurado — use VOICE_BRIDGE_URL (Twilio/Asterisk)"
         return call
     try:
         async with httpx.AsyncClient(timeout=30) as client:

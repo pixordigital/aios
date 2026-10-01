@@ -30,6 +30,22 @@ class TestSolutions:
         with _p.raises(ValueError):
             get_solution("nada")
 
+    def test_pack_tools_exist_and_load(self):
+        """The packs wrote their tool list straight to the DB, so a name that
+        is not a real tool shipped an agent that could not do its job."""
+        import aios.tools  # noqa: F401
+        from aios.templates import apply_template
+        from aios.templates.solutions import SOLUTIONS
+        from aios.tools.registry import TOOL_REGISTRY
+        from aios.core.tools import ToolEngine
+        for key, s in SOLUTIONS.items():
+            missing = [t for t in s["tools"] if t not in TOOL_REGISTRY]
+            assert not missing, f"{key}: {missing}"
+            # the pack overlays the template, so the agent ends up with both
+            merged = list(dict.fromkeys([*apply_template(s["agent_type"])["tools"],
+                                         *s["tools"]]))
+            assert ToolEngine(merged, org_id="o").missing == [], key
+
 
 class TestSignals:
     def test_hot_inbound_scores_high(self):
@@ -101,6 +117,16 @@ async def test_lojista_create_303(async_client: AsyncClient, test_session, test_
     assert any("pizzaria" in a.name for a in agents)
     chans = (await test_session.execute(select(ChannelConnection).where(ChannelConnection.org_id == test_org.id))).scalars().all()
     assert any(c.channel_type == "evolution" for c in chans)
+
+    agent = next(a for a in agents if "pizzaria" in a.name)
+    import aios.tools  # noqa: F401
+    from aios.tools.registry import TOOL_REGISTRY
+    from aios.core.tools import ToolEngine
+    # the pack must not have replaced the template's own tools
+    assert "transcribe" in agent.tools
+    assert "crm_update_deal" in agent.tools
+    assert [t for t in agent.tools if t not in TOOL_REGISTRY] == []
+    assert ToolEngine(agent.tools, org_id=test_org.id).missing == []
 
 
 class TestQueueApi:

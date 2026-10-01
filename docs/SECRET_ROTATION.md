@@ -1,13 +1,12 @@
 # Rotação de Secrets — AIOS
 
-Sempre que `AIOS_JWT_SECRET`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `LIVEKIT_API_SECRET` estiverem como `changeme` ou vazios, rotacione **imediatamente** no Coolify.
+Sempre que `AIOS_JWT_SECRET`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD` estiverem como `changeme` ou vazios, rotacione **imediatamente** no Coolify.
 
 ## Coolify (produção 178.105.181.38)
 
-1. Coolify → `pixor-aios` → Environment (JWT/LIVEKIT sem downtime)
+1. Coolify → `pixor-aios` → Environment (JWT sem downtime)
    ```
    AIOS_JWT_SECRET=$(openssl rand -hex 32)
-   AIOS_LIVEKIT_API_SECRET=$(openssl rand -hex 32)
    AIOS_ADMIN_MASTER_KEY=$(openssl rand -hex 32)
    ```
    Save → Redeploy (sem cache) — app/worker reiniciam, JWT antigos invalidam (avisar usuários re-login)
@@ -40,4 +39,4 @@ git push --force origin main
 - [ ] `/health` → `rag.fallback==false` (pgvector ok)
 - [ ] Invite `POST /dashboard/members/invite` → 403 após 10/dia (rate-limit)
 - [ ] Login sem `email_verified` → 403 "Verifique seu e-mail" quando `AIOS_REGISTRATION_ENABLED=false`
-- [ ] LiveKit — `wss://...` com secret novo, voice `profiles: ["voice"]` só quando necessário
+- [ ] Voice — `voice-tts-kokoro` no perfil `voice` responde 200 em `/health`

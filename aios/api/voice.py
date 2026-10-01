@@ -52,7 +52,7 @@ async def _channel_config(db: DatabaseBackend, org_id: str, channel_id: str) -> 
 @router.get("/providers")
 async def providers(user=Depends(get_current_user)):
     return {
-        "providers": ["elevenlabs", "vapi", "retell", "selfhosted", "livekit"],
+        "providers": ["elevenlabs", "vapi", "retell", "selfhosted"],
         "default": settings.voice_provider,
         "selfhosted": {"tts_url": settings.voice_tts_url, "stt_url": settings.voice_stt_url},
         "bridge_configured": bool(settings.voice_bridge_url),
@@ -114,54 +114,6 @@ async def call(
     except Exception:
         pass
     return res
-
-
-class RoomRequest(BaseModel):
-    agent_id: str = ""
-    team_id: str = ""
-    channel_id: str = ""
-    identity: str = ""
-
-
-@router.post("/room")
-async def room(
-    body: RoomRequest,
-    db: DatabaseBackend = Depends(get_db_backend),
-    org_id: str = Depends(get_org_id),
-    user=Depends(get_current_user),
-):
-    """Sala voz realtime (LiveKit streaming). Retorna wss + token pro browser/telefone entrar."""
-    import time as _t
-
-    import jwt as _jwt
-
-    if not (settings.livekit_url and settings.livekit_api_key and settings.livekit_api_secret):
-        raise HTTPException(409, "streaming voz desligado (LIVEKIT_URL/KEY/SECRET)")
-    if body.agent_id:
-        ag = await db.get(Agent, body.agent_id)
-        if not ag or ag.org_id != org_id or ag.agent_type not in ("sdr", "support", "closer", "manager"):
-            raise HTTPException(400, "agent_id inválido (use sdr/support/closer)")
-    conv = Conversation(
-        org_id=org_id, channel="voice", external_id=body.identity or "livekit-room",
-        agent_id=body.agent_id or None, team_id=body.team_id or None,
-        extra_data={"mode": "stream", "engine": settings.livekit_tts_engine},
-    )
-    db.add(conv)
-    await db.commit()
-    await db.refresh(conv)
-    now = int(_t.time())
-    token = _jwt.encode(
-        {
-            "iss": settings.livekit_api_key,
-            "sub": body.identity or user.id,
-            "nbf": now - 5,
-            "exp": now + 3600,
-            "video": {"roomJoin": True, "room": conv.id, "canPublish": True, "canSubscribe": True, "canPublishData": True},
-            "metadata": f'{{"agent_id": "{body.agent_id}", "org_id": "{org_id}"}}',
-        },
-        settings.livekit_api_secret, algorithm="HS256",
-    )
-    return {"ok": True, "url": settings.livekit_url, "room": conv.id, "token": token, "conversation_id": conv.id, "engine": settings.livekit_tts_engine}
 
 
 @router.post("/webhook")

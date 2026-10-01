@@ -559,6 +559,60 @@ class SalesGoal(Base, TimestampMixin, OrgScopedMixin):
     team = relationship("Team")
 
 
+class SalesFunnel(Base, TimestampMixin, OrgScopedMixin):
+    """Named deal pipeline shared by the Sales and Data teams.
+
+    Sales owns the stage ladder and moves deals through it; the Data team reads
+    the funnel and posts findings on it. Both work the same object — the split is
+    about who may change what, enforced at the dashboard routes.
+
+    Stages live in `extra_data["stages"]` as ordered slugs. A funnel is attached
+    to CRM deals through CrmDeal.pipeline, so an existing pipeline can be adopted
+    as a funnel without moving any deal.
+    """
+
+    __tablename__ = "sales_funnels"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    # Slug stored on CrmDeal.pipeline, so a funnel and a pipeline are the same key.
+    pipeline: Mapped[str] = mapped_column(String(50), default="default", index=True)
+    # Which agent types staff this funnel — drives routing, not permissions.
+    sales_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    data_agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    sales_agent = relationship("Agent", foreign_keys=[sales_agent_id])
+    data_agent = relationship("Agent", foreign_keys=[data_agent_id])
+
+
+class FunnelInsight(Base, TimestampMixin, OrgScopedMixin):
+    """A Data-team finding posted on a funnel. Read-only to Sales.
+
+    Kept separate from the funnel row so an insight has its own author, timestamp
+    and lifecycle — the audit trail is the point of the Data domain here.
+    """
+
+    __tablename__ = "funnel_insights"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    funnel_id: Mapped[str] = mapped_column(ForeignKey("sales_funnels.id"), index=True)
+    # Free-form finding, rendered as text. Deliberately not structured: the Data
+    # team writes prose findings, the app does not second-guess them.
+    finding: Mapped[str] = mapped_column(Text)
+    # Which stage the finding is about ("" = funnel-wide).
+    stage: Mapped[str] = mapped_column(String(30), default="")
+    # Recommended action Sales can act on — the whole point of posting.
+    recommendation: Mapped[str] = mapped_column(Text, default="")
+    # Author: user_id or agent_id, plus which side wrote it.
+    author_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    author_type: Mapped[str] = mapped_column(String(20), default="agent")  # data|sales|human
+    # Sales acknowledging a finding does not edit its text.
+    resolved: Mapped[bool] = mapped_column(default=False)
+
+    funnel = relationship("SalesFunnel")
+
+
 class VoiceRecording(Base, TimestampMixin, OrgScopedMixin):
     """Voice call recording with transcript for search and compliance."""
     __tablename__ = "voice_recordings"

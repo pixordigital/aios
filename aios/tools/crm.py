@@ -273,27 +273,59 @@ class CRMTool(BaseTool):
         }
 
 
+class CRMUpdateDealInput(BaseModel):
+    deal_id: str = Field(description="ID do deal")
+    stage: str = Field(default="", description="Nova etapa (vazio = não muda)")
+    notes: str = Field(default="", description="Notas do agente")
+    value: float | None = Field(default=None, description="Novo valor em BRL")
+    score: int | None = Field(default=None, description="Novo score 0-100")
+    lead_name: str = Field(default="", description="Corrigir nome do lead")
+    lead_email: str = Field(default="", description="Corrigir email do lead")
+    lead_phone: str = Field(default="", description="Corrigir telefone do lead")
+    agent_id: str = Field(default="", description="Reatribuir dono (agent_id)")
+    team_id: str = Field(default="", description="Reatribuir time (team_id)")
+
+
 class CRMUpdateTool(BaseTool):
     name = "crm_update_deal"
-    description = "Atualiza stage do deal no CRM. 100% IA com HITL: mudanças críticas (closed_won > R$5k, closed_lost, desconto) vão pra aprovação humana."
+    description = ("Atualiza deal no CRM: etapa, valor, score, dados do lead e dono. "
+                   "HITL: closed_won/closed_lost, >R$5k ganho, e desconto acima da "
+                   "política do Deal Desk vão para aprovação humana.")
+    input_model = CRMUpdateDealInput
 
-    async def run(self, deal_id: str, stage: str, notes: str = "") -> dict:
+    async def run(self, deal_id: str, stage: str = "", notes: str = "",
+                  value: float | None = None, score: int | None = None,
+                  lead_name: str = "", lead_email: str = "",
+                  lead_phone: str = "", agent_id: str = "",
+                  team_id: str = "") -> dict:
         from aios.config import settings
         import os
 
-        # HITL: check if this update needs human approval
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+
         needs_hitl = False
         hitl_reason = ""
         if stage in ("closed_won", "closed_lost"):
             needs_hitl = True
             hitl_reason = f"Movendo para {stage} requer aprovação"
-        # Also check deal value if available
+
+        # Read the deal scoped to the caller's org. The previous lookup had no
+        # org filter, so any org's deal value could be read by guessing an id.
+        deal = None
         try:
             from aios.db.engine import async_session
             from aios.db.models import CrmDeal
+            from sqlalchemy import select as _sel0
+
             async with async_session() as s:
-                deal = await s.get(CrmDeal, deal_id)
-                if deal and deal.value and deal.value > 5000 and stage == "closed_won":
+                deal = (await s.execute(
+                    _sel0(CrmDeal).where(CrmDeal.id == deal_id, CrmDeal.org_id == org_id)
+                )).scalars().first()
+                if not deal:
+                    return {"ok": False, "error": "deal não encontrado"}
+                if deal.value and deal.value > 5000 and stage == "closed_won":
                     needs_hitl = True
                     hitl_reason = f"Deal R${deal.value:.2f} > R$5k em {stage} — aprovação necessária"
         except Exception:
@@ -320,64 +352,101 @@ class CRMUpdateTool(BaseTool):
             except Exception as e:
                 logger.warning("HITL create failed %s", e)
 
-        # Auto-apply for non-critical stages: also update internal CrmDeal com lock + versionamento
+        # Auto-apply for non-critical changes: internal CrmDeal + lock + versioning
         try:
             from aios.db.engine import async_session
             from aios.db.models import CrmDeal, CrmDealVersion
             from sqlalchemy import text as _text2
+            from sqlalchemy import select as _sel2
+
             async with async_session() as s:
-                # Scope the deal by the calling agent's org. Without this any
-                # agent could move any other org's deal by guessing its id.
                 mine = getattr(self, "_org_id", "") or ""
                 if not mine:
                     return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
-                from sqlalchemy import select as _sel2
 
                 deal = (await s.execute(
                     _sel2(CrmDeal).where(CrmDeal.id == deal_id, CrmDeal.org_id == mine)
                 )).scalars().first()
-                if deal:
-                    try:
-                        await s.execute(_text2("SELECT pg_advisory_xact_lock(:k)"), {"k": abs(hash(deal.org_id)) % 2147483647})
-                    except Exception:
-                        pass
-                if deal and stage in ("prospection","mql","sql","opportunity","closed_won","closed_lost"):
-                    old_stage = deal.stage
-                    old_value = deal.value
+                if not deal:
+                    return {"ok": False, "error": "deal não encontrado"}
+                try:
+                    await s.execute(_text2("SELECT pg_advisory_xact_lock(:k)"),
+                                    {"k": abs(hash(deal.org_id)) % 2147483647})
+                except Exception:
+                    pass
+
+                VALID_STAGES = ("prospection", "mql", "sql", "opportunity",
+                                "closed_won", "closed_lost")
+                # Only touch the stage when one was actually supplied. The old
+                # code assigned deal.stage = stage unconditionally, so a
+                # value-only update blanked the stage.
+                if stage and stage in VALID_STAGES:
                     deal.stage = stage
-                    if notes:
-                        deal.extra_data = {**(deal.extra_data or {}), "last_ai_notes": notes[:500]}
-                    # C10: Update probability and close_date based on new stage
+
+                old_stage = deal.stage
+                old_value = deal.value
+                changed = []
+
+                if value is not None and float(value) != (deal.value or 0):
+                    deal.value = float(value)
+                    changed.append(("value", str(old_value), str(deal.value)))
+                if score is not None:
+                    deal.score = max(0, min(100, int(score)))
+                    changed.append(("score", "", str(deal.score)))
+                if lead_name:
+                    deal.lead_name = lead_name[:255]
+                    changed.append(("lead_name", "", deal.lead_name))
+                if lead_email:
+                    deal.lead_email = lead_email[:255]
+                    changed.append(("lead_email", "", deal.lead_email))
+                if lead_phone:
+                    deal.lead_phone = lead_phone[:50]
+                    changed.append(("lead_phone", "", deal.lead_phone))
+                if agent_id:
+                    deal.agent_id = agent_id
+                    changed.append(("agent_id", "", agent_id))
+                if team_id:
+                    deal.team_id = team_id
+                    changed.append(("team_id", "", team_id))
+                if notes:
+                    deal.extra_data = {**(deal.extra_data or {}),
+                                       "last_ai_notes": notes[:500]}
+
+                # probability/close_date only move when the stage actually changed
+                if stage and stage in VALID_STAGES:
                     sc = deal.score or 0
                     if stage == "closed_won":
-                        deal.probability = 100.0
-                        deal.close_date = _now_utc()
+                        deal.probability, offset = 100.0, 0
                     elif stage == "closed_lost":
-                        deal.probability = 0.0
-                        deal.close_date = _now_utc()
+                        deal.probability, offset = 0.0, 0
                     elif stage == "opportunity":
-                        deal.probability = min(80 + (sc / 5), 95)
-                        deal.close_date = _now_utc() + timedelta(days=14)
+                        deal.probability, offset = min(80 + (sc / 5), 95), 14
                     elif stage == "sql":
-                        deal.probability = min(50 + (sc / 3), 75)
-                        deal.close_date = _now_utc() + timedelta(days=30)
+                        deal.probability, offset = min(50 + (sc / 3), 75), 30
                     elif stage == "mql":
-                        deal.probability = min(20 + (sc / 4), 45)
-                        deal.close_date = _now_utc() + timedelta(days=60)
-                    else:  # prospection
-                        deal.probability = min(sc / 5, 15)
-                        deal.close_date = _now_utc() + timedelta(days=90)
+                        deal.probability, offset = min(20 + (sc / 4), 45), 60
+                    else:
+                        deal.probability, offset = min(sc / 5, 15), 90
                     deal.probability = round(deal.probability, 1)
-                    # Versionamento
+                    deal.close_date = _now_utc() + timedelta(days=offset)
+                    changed.append(("stage", old_stage, stage))
+
+                for field, old, new in changed:
                     try:
-                        ver = CrmDealVersion(deal_id=deal.id, org_id=deal.org_id, changed_by=None, changed_by_type="agent", field="stage", old_value=str(old_stage), new_value=str(stage), extra_data={"old_value": str(old_value), "new_value": str(deal.value)})
-                        s.add(ver)
-                        if old_value != deal.value:
-                            ver2 = CrmDealVersion(deal_id=deal.id, org_id=deal.org_id, changed_by=None, changed_by_type="agent", field="value", old_value=str(old_value), new_value=str(deal.value))
-                            s.add(ver2)
+                        s.add(CrmDealVersion(
+                            deal_id=deal.id, org_id=deal.org_id, changed_by=None,
+                            changed_by_type="agent", field=field,
+                            old_value=str(old), new_value=str(new)))
                     except Exception:
                         pass
-                    await s.commit()
+
+                await s.commit()
+                return {
+                    "ok": True, "provider": "internal", "deal_id": deal.id,
+                    "stage": deal.stage, "value": deal.value,
+                    "updated_fields": [f for f, _, _ in changed] or [],
+                    "message": "nada a alterar" if not changed else "ok",
+                }
         except Exception as e:
             logger.warning("Internal CRM update failed %s", e)
 
@@ -666,3 +735,109 @@ TOOL_REGISTRY["crm_merge_deals"] = {"code_reference": "aios.tools.crm.CRMMergeTo
 TOOL_REGISTRY["crm_list_deals"] = {"code_reference": "aios.tools.crm.CRMListDealsTool"}
 TOOL_REGISTRY["crm_set_follow_up"] = {"code_reference": "aios.tools.crm.CRMSetFollowUpTool"}
 TOOL_REGISTRY["crm_stale_deals"] = {"code_reference": "aios.tools.crm.CRMStaleDealsTool"}
+TOOL_REGISTRY["crm_delete_deal"] = {"code_reference": "aios.tools.crm.CRMDeleteDealTool"}
+TOOL_REGISTRY["crm_pipeline_stats"] = {"code_reference": "aios.tools.crm.CRMPipelineStatsTool"}
+
+class CRMDeleteDealInput(BaseModel):
+    deal_id: str = Field(description="ID do deal a remover")
+    confirm: bool = Field(default=False, description="Tem que ser true — remoção é irreversível")
+
+
+class CRMDeleteDealTool(BaseTool):
+    name = "crm_delete_deal"
+    description = ("Remove um deal do CRM. Irreversível — só o gerente de vendas tem esta "
+                   "ferramenta. Exige confirm=true.")
+    input_model = CRMDeleteDealInput
+
+    async def run(self, deal_id: str, confirm: bool = False) -> dict:
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+        if not confirm:
+            return {"ok": False, "error": "remoção exige confirm=true"}
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal, CrmDealVersion
+            from sqlalchemy import select as _sel
+
+            async with async_session() as s:
+                deal = (await s.execute(
+                    _sel(CrmDeal).where(CrmDeal.id == deal_id, CrmDeal.org_id == org_id)
+                )).scalars().first()
+                if not deal:
+                    return {"ok": False, "error": "deal não encontrado"}
+                label = "%s / %s" % (deal.lead_name, deal.stage)
+                # versions first: they carry a FK to the deal
+                for v in (await s.execute(
+                    _sel(CrmDealVersion).where(CrmDealVersion.deal_id == deal.id)
+                )).scalars().all():
+                    await s.delete(v)
+                await s.delete(deal)
+                await s.commit()
+                return {"ok": True, "deleted": deal_id, "was": label}
+        except Exception as e:
+            logger.warning("CRM delete failed %s", e)
+            return {"ok": False, "error": str(e)}
+
+
+class CRMPipelineStatsInput(BaseModel):
+    pipeline: str = Field(default="", description="Filtra por pipeline (vazio = todos)")
+
+
+class CRMPipelineStatsTool(BaseTool):
+    name = "crm_pipeline_stats"
+    description = ("Resumo do pipeline do CRM: contagem e valor por etapa, taxa de conversão, "
+                   "ticket médio, won/lost e custo. Somente leitura, já escopado na sua org — "
+                   "não precisa passar org_id.")
+    input_model = CRMPipelineStatsInput
+
+    async def run(self, pipeline: str = "") -> dict:
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {"ok": False, "error": "sem org no contexto (agente sem org_id)"}
+        try:
+            from aios.db.engine import async_session
+            from aios.db.models import CrmDeal
+            from sqlalchemy import select as _sel
+
+            async with async_session() as s:
+                q = _sel(CrmDeal).where(CrmDeal.org_id == org_id)
+                if pipeline:
+                    q = q.where(CrmDeal.pipeline == pipeline)
+                rows = (await s.execute(q)).scalars().all()
+
+            by_stage, value_by_stage, source_mix = {}, {}, {}
+            won = lost = 0
+            won_value = 0.0
+            total_cost = 0.0
+            for r in rows:
+                by_stage[r.stage] = by_stage.get(r.stage, 0) + 1
+                value_by_stage[r.stage] = round(
+                    value_by_stage.get(r.stage, 0.0) + (r.value or 0.0), 2)
+                source_mix[r.source] = source_mix.get(r.source, 0) + 1
+                total_cost += r.cost_usd or 0.0
+                if r.stage == "closed_won":
+                    won += 1
+                    won_value += r.value or 0.0
+                elif r.stage == "closed_lost":
+                    lost += 1
+
+            closed = won + lost
+            open_n = len(rows) - closed
+            return {
+                "ok": True,
+                "total_deals": len(rows),
+                "by_stage": by_stage,
+                "value_by_stage": value_by_stage,
+                "open_deals": open_n,
+                "won": won,
+                "lost": lost,
+                "win_rate": round(won / closed, 3) if closed else None,
+                "avg_deal_value": round(won_value / won, 2) if won else None,
+                "won_value": round(won_value, 2),
+                "by_source": source_mix,
+                "total_cost_usd": round(total_cost, 4),
+            }
+        except Exception as e:
+            logger.warning("CRM pipeline stats failed %s", e)
+            return {"ok": False, "error": str(e)}

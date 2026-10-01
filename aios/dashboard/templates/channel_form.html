@@ -58,7 +58,6 @@
                         <option value="elevenlabs" {% if channel and channel.config and channel.config.get('provider') == 'elevenlabs' %}selected{% endif %}>ElevenLabs (melhor voz)</option>
                         <option value="vapi" {% if channel and channel.config and channel.config.get('provider') == 'vapi' %}selected{% endif %}>Vapi (controle total, ~$0.15–0.31/min)</option>
                         <option value="retell" {% if channel and channel.config and channel.config.get('provider') == 'retell' %}selected{% endif %}>Retell (barato/rápido, ~$0.07/min)</option>
-                        <option value="livekit" {% if channel and channel.config and channel.config.get('provider') == 'livekit' %}selected{% endif %}>LiveKit streaming (self-hosted realtime, XTTS+kokoro)</option>
                     </select>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem">

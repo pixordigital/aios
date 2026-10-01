@@ -158,7 +158,7 @@ services:
             CACHE_LOCAL_ENABLED: 'true'
             S3_ENABLED: 'false'
             LANGUAGE: pt-BR
-            EVOLUTION_API_KEY: evolution_secret_change_me
+            EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:-change-me-in-production}'
             COOLIFY_BRANCH: '"main"'
             COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
             COOLIFY_CONTAINER_NAME: evolution-38908ddf-a875-4105-a93f-a4570513911f-222816239942
@@ -213,17 +213,17 @@ services:
         environment:
             REDIS_HOST: redis
             REDIS_PORT: '6379'
-            REDIS_PASSWORD: changeme
+            REDIS_PASSWORD: '${REDIS_PASSWORD:-changeme}'
             AIOS_DEBUG: 'false'
             AIOS_APP_URL: '${AIOS_APP_URL}'
-            AIOS_DATABASE_URL: 'postgresql+asyncpg://supabase_admin:sSpCePJGfhQlE0J6LhFu03pqa01MLwyU@supabase-db:5432/aios'
+            AIOS_DATABASE_URL: '${AIOS_DATABASE_URL}'
             AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0'
             AIOS_JWT_SECRET: '${AIOS_JWT_SECRET}'
-            AIOS_ADMIN_MASTER_KEY: c14f4fd66c39770232de0a1f1714add00e2d87d1c4ee76861daaa27142c4aed1
+            AIOS_ADMIN_MASTER_KEY: '${AIOS_ADMIN_MASTER_KEY}'
             AIOS_LLM_PROVIDER: openrouter
             AIOS_LITELLM_BASE_URL: 'http://litellm:4000'
             AIOS_LITELLM_API_KEY: sk-litellm
-            EVOLUTION_API_KEY: evolution_secret_change_me
+            EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:-change-me-in-production}'
             EVOLUTION_SERVER_URL: 'http://evolution:8080'
             AIOS_OPENROUTER_API_KEY: ''
             AIOS_OPENAI_API_KEY: ''
@@ -260,7 +260,6 @@ services:
             COOLIFY_CONTAINER_NAME: app-38908ddf-a875-4105-a93f-a4570513911f-222816270975
             SERVICE_NAME_APP: app
             SERVICE_NAME_WORKER: worker
-            SERVICE_NAME_VOICE_AGENT: voice-agent
             SERVICE_NAME_VOICE_TTS_KOKORO: voice-tts-kokoro
         volumes:
             - '38908ddf-a875-4105-a93f-a4570513911f_app-data:/data'
@@ -315,12 +314,12 @@ services:
         environment:
             REDIS_HOST: redis
             REDIS_PORT: '6379'
-            REDIS_PASSWORD: changeme
+            REDIS_PASSWORD: '${REDIS_PASSWORD:-changeme}'
             AIOS_DEBUG: 'false'
             AIOS_LLM_PROVIDER: openrouter
             AIOS_LITELLM_BASE_URL: 'http://litellm:4000'
             AIOS_LITELLM_API_KEY: sk-litellm
-            AIOS_DATABASE_URL: 'postgresql+asyncpg://supabase_admin:sSpCePJGfhQlE0J6LhFu03pqa01MLwyU@supabase-db:5432/aios'
+            AIOS_DATABASE_URL: '${AIOS_DATABASE_URL}'
             AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0'
             AIOS_JWT_SECRET: '${AIOS_JWT_SECRET}'
             AIOS_LOG_FORMAT: json
@@ -330,7 +329,6 @@ services:
             COOLIFY_CONTAINER_NAME: worker-38908ddf-a875-4105-a93f-a4570513911f-222816369141
             SERVICE_NAME_APP: app
             SERVICE_NAME_WORKER: worker
-            SERVICE_NAME_VOICE_AGENT: voice-agent
             SERVICE_NAME_VOICE_TTS_KOKORO: voice-tts-kokoro
         volumes:
             - '38908ddf-a875-4105-a93f-a4570513911f_app-data:/data'
@@ -370,56 +368,6 @@ services:
             - .env
         image: '38908ddf-a875-4105-a93f-a4570513911f_worker:9fc14b2efc7924acf368097fd4387dc5cd7d5d29'
 
-    voice-agent:
-        profiles:
-            - voice
-        build: ./deploy/voice-stream
-        environment:
-            AIOS_URL: 'http://app:8777'
-            AIOS_ADMIN_MASTER_KEY: c14f4fd66c39770232de0a1f1714add00e2d87d1c4ee76861daaa27142c4aed1
-            OLLAMA_URL: 'http://ollama:11434/v1'
-            OLLAMA_MODEL: 'qwen3:8b'
-            OPENROUTER_API_KEY: '${AIOS_OPENROUTER_API_KEY:-}'
-            VOICE_LLM_MODEL: openai/gpt-4o-mini
-            AIOS_VOICE_LLM_MODEL: openai/gpt-4o-mini
-            TTS_WS_URL: 'ws://voice-tts-stream:8001/tts/ws'
-            VOICE_TTS_ENGINE: kokoro
-            VOICE_TTS_VOICE: ptbr
-            KOKORO_URL: 'http://voice-tts-kokoro:8880/v1'
-            PIPER_URL: 'http://voice-tts:8000/v1'
-            STT_URL: 'http://voice-stt:9000/v1'
-            AIOS_OPENROUTER_API_KEY: ''
-            COOLIFY_BRANCH: '"main"'
-            COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
-            COOLIFY_CONTAINER_NAME: voice-agent-38908ddf-a875-4105-a93f-a4570513911f-222816400696
-            SERVICE_NAME_VOICE_AGENT: voice-agent
-            SERVICE_NAME_VOICE_TTS_KOKORO: voice-tts-kokoro
-        depends_on:
-            redis:
-                condition: service_healthy
-        restart: unless-stopped
-        deploy:
-            resources:
-                limits:
-                    cpus: '1'
-                    memory: 2G
-        container_name: voice-agent-38908ddf-a875-4105-a93f-a4570513911f-222816400696
-        labels:
-            - coolify.managed=true
-            - coolify.version=4.1.2
-            - coolify.applicationId=4
-            - coolify.type=application
-            - coolify.name=voice-agent-38908ddf-a875-4105-a93f-a4570513911f-222816400696
-            - coolify.resourceName=pixor-aios
-            - coolify.projectName=pixor
-            - coolify.serviceName=pixor-aios
-            - coolify.environmentName=production
-            - coolify.pullRequestId=0
-        networks:
-            - pixor-aios
-        env_file:
-            - .env
-        image: '38908ddf-a875-4105-a93f-a4570513911f_voice-agent:9fc14b2efc7924acf368097fd4387dc5cd7d5d29'
 
     voice-tts-kokoro:
         image: 'ghcr.io/remsky/kokoro-fastapi-cpu:latest'

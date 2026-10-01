@@ -103,7 +103,6 @@
         <div><label>GitHub Client ID</label><input class="input" name="github_client_id" value="{{ secrets.github_client_id or '' }}"></div>
         <div><label>GitHub Secret <span class="text-tertiary">{{ masked.github_client_secret or '' }}</span></label><input class="input input-mono" name="github_client_secret" type="password" placeholder="{{ masked.github_client_secret or '' }}"></div>
         <div><label>WhatsApp App Secret <span class="text-tertiary">{{ masked.whatsapp_app_secret or '' }}</span></label><input class="input input-mono" name="whatsapp_app_secret" type="password" placeholder="{{ masked.whatsapp_app_secret or '' }}"></div>
-        <div><label>Zernio Webhook Secret <span class="text-tertiary">{{ masked.zernio_webhook_secret or '' }}</span></label><input class="input input-mono" name="zernio_webhook_secret" type="password" placeholder="{{ masked.zernio_webhook_secret or '' }}"></div>
       </div>
     </div>
 

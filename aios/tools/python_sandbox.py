@@ -20,9 +20,10 @@ class PythonSandboxTool(BaseTool):
     async def run(self, code: str) -> dict:
         if len(code) > 8000:
             return {"error": "code too large"}
-        blocked = ["os.system", "subprocess", "socket", "open(", "__import__('os"]
-        if any(b in code for b in blocked):
-            return {"error": "blocked import"}
+        # Security validation lives in aios.core.sandbox.validate_code (an AST
+        # check) so every run_isolated() caller is covered. The substring block
+        # that used to live here was bypassed by `import os`, importlib and
+        # ctypes, which turned this tool into remote code execution.
         try:
             from aios.core.sandbox import run_isolated
 

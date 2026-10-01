@@ -24,6 +24,11 @@ def _month_bounds(year_month: str) -> tuple[datetime, datetime]:
     return start, end
 
 
+# Below this many days into the month, a straight-line projection is noise:
+# one large win on day 1 would extrapolate to a full month of it.
+_MIN_DAYS_TO_PROJECT = 7
+
+
 async def set_goal(db, org_id: str, year_month: str, target_brl: float,
                    team_id: str | None = None, created_by: str | None = None):
     """Upsert goal for (org, month, team)."""
@@ -91,8 +96,23 @@ async def month_progress(db, org_id: str, year_month: str | None = None,
     else:
         day = 0
     expected = target * day / days_in_month if target and day else 0.0
-    projected = won / day * days_in_month if day else 0.0
+    # Straight-line projection from day 1 is wildly optimistic (one early win
+    # projects to a full month of it), so only extrapolate once there is enough
+    # of the month to mean anything. Before then, project nothing rather than
+    # publish a number Sales would plan against.
+    projected = (won / day * days_in_month) if (day and (day >= _MIN_DAYS_TO_PROJECT)) else 0.0
     pct = round(won / target * 100, 1) if target else 0.0
+
+    if not target:
+        status = "no_goal"
+    elif day == 0:
+        # A month that has not started: expected is 0, so the old
+        # `won >= expected` test called an untouched future month "ahead".
+        status = "not_started"
+    elif (won or 0) >= expected:
+        status = "ahead"
+    else:
+        status = "behind"
 
     return {
         "year_month": year_month,
@@ -105,5 +125,5 @@ async def month_progress(db, org_id: str, year_month: str | None = None,
         "pct": pct,
         "projected_brl": round(projected, 2),
         "remaining_brl": round(target - (won or 0), 2) if target else 0.0,
-        "status": "ahead" if (won or 0) >= expected and target else ("behind" if target else "no_goal"),
+        "status": status,
     }

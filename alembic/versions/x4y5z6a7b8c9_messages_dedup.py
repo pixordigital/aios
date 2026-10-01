@@ -34,7 +34,11 @@ def _has_constraint(bind) -> bool:
 
 def upgrade():
     if not _has_constraint(op.get_bind()):
-        op.create_unique_constraint(CONSTRAINT, TABLE, ["org_id", "channel_message_id"])
+        # batch mode: SQLite cannot ALTER a constraint, so alembic needs the
+        # copy-and-move strategy. Without it the whole chain aborts here on any
+        # SQLite-backed deployment (dev/test) before reaching later migrations.
+        with op.batch_alter_table(TABLE) as batch:
+            batch.create_unique_constraint(CONSTRAINT, ["org_id", "channel_message_id"])
 
 
 def downgrade():

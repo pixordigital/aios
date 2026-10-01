@@ -7,7 +7,7 @@ SOLUTIONS = {
         "desc": "Prospecção ativa: aborda leads, qualifica e agenda. Liga + WhatsApp.",
         "agent_type": "sdr",
         "agent_name": "SDR Vendedor",
-        "tools": ["voice_call", "lead_score", "crm"],
+        "tools": ["voice_call", "lead_score", "crm_create_deal", "crm_update_deal", "crm_list_deals", "crm_set_follow_up"],
         "channel": "voice",
         "addon": (
             "Você é o SDR da empresa. Missão: contatar cada lead em até 5 minutos, "
@@ -21,7 +21,7 @@ SOLUTIONS = {
         "desc": "Responde clientes 24/7: dúvidas, status pedido, troca. Humano assume se travar.",
         "agent_type": "support",
         "agent_name": "Atendente",
-        "tools": ["transcribe", "crm"],
+        "tools": ["transcribe", "crm_list_deals", "crm_update_deal"],
         "channel": "evolution",
         "addon": (
             "Você é o atendente da empresa. Missão: resolver dúvidas rápido (produto, preço, prazo, status, troca). "
@@ -34,7 +34,7 @@ SOLUTIONS = {
         "desc": "Chama quem desistiu: 1h, 24h e 72h depois. Oferta, não desconto automático.",
         "agent_type": "sdr",
         "agent_name": "Recuperador",
-        "tools": ["voice_call", "crm"],
+        "tools": ["voice_call", "crm_list_deals", "crm_update_deal"],
         "channel": "voice",
         "addon": (
             "Você recupera vendas perdidas. Missão: contatar em 1h / 24h / 72h após abandono, "

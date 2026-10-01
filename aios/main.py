@@ -607,11 +607,6 @@ def _validate_security_config():
         )
     if not settings.https_only and not settings.debug:
         logger.warning("HTTPS is not enforced. Set AIOS_HTTPS_ONLY=true in production.")
-    # LiveKit secret must not be default in production
-    if not settings.debug and settings.livekit_api_secret in ("", "change-me-livekit-secret", "change_me"):
-        logger.warning("LIVEKIT_API_SECRET is default/empty — voice will be insecure. Set AIOS_LIVEKIT_API_SECRET")
-    if not settings.debug and len(settings.livekit_api_secret) < 16 and settings.livekit_api_secret:
-        logger.warning("LIVEKIT_API_SECRET too short (<16) — rotate")
 
 
 async def _register_syscall_handlers():

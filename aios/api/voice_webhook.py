@@ -1,4 +1,4 @@
-"""Voice webhook — LiveKit / Twilio inbound call events."""
+"""Voice webhook — Twilio inbound call events."""
 
 import hashlib
 import hmac
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/voice", tags=["voice"])
 
 @router.post("/webhook")
 async def voice_webhook(request: Request):
-    """Receive voice events from LiveKit/Twilio → dispatch to agent."""
+    """Receive voice events from Twilio → dispatch to agent."""
     raw_body = await request.body()
 
     # Verify signature if configured
@@ -119,7 +119,7 @@ async def voice_webhook(request: Request):
                     )
 
     elif event == "recording.completed":
-        # Twilio/ LiveKit recording completed event
+        # Twilio recording completed event
         recording_url = body.get("recording_url") or body.get("recording", {}).get("url")
         duration = body.get("duration", 0)
         

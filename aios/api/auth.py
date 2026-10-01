@@ -311,6 +311,12 @@ except ImportError:
 _PASSWORD_RE = re.compile(r"^[\x20-\x7E]+$")  # printable ASCII
 
 
+# A real bcrypt hash of a random string, used only to burn the same CPU on a
+# failed login for an unknown email as for a wrong password. Regenerated at
+# import; its plaintext is discarded and never matches a real credential.
+_DUMMY_HASH = _hash_password(secrets.token_urlsafe(32))
+
+
 def _validate_password(password: str):
     if len(password) < _PASSWORD_MIN:
         raise HTTPException(422, f"A senha deve ter pelo menos {_PASSWORD_MIN} caracteres")
@@ -411,10 +417,18 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depends(get_db_backend)):
-    await _rate_limit(body.email.lower())
+    # Key on email AND client IP. Keying on email alone meant anyone who knew a
+    # customer's address could lock that account out for the whole window, and a
+    # distributed attack on one account was never throttled.
+    _ip = request.client.host if request and request.client else "unknown"
+    await _rate_limit(f"{body.email.lower().strip()}|{_ip}")
 
     result = await db.execute(select(User).where(User.email == body.email.lower().strip()))
     user = result.scalar_one_or_none()
+    # Always spend the bcrypt cost, even for an unknown email. Skipping it made
+    # "no such user" measurably faster than "wrong password", which enumerates
+    # registered addresses by response time despite the generic message.
+    _verify_password(body.password, user.hashed_password if user else _DUMMY_HASH)
     if not user or not _verify_password(body.password, user.hashed_password):
         raise HTTPException(401, "E-mail ou senha inválidos")
     if not user.email_verified and user.role != "superadmin" and not settings.registration_enabled:

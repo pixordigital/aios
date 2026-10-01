@@ -73,27 +73,6 @@ class TestVoice:
         assert r["ok"] is True
         assert r["status"] in ("queued", "bridge_error")
 
-    async def test_room_requires_auth(self, async_client: AsyncClient):
-        r = await async_client.post("/api/voice/room", json={})
-        assert r.status_code == 401
-
-    async def test_room_409_without_livekit(self, auth_client: AsyncClient):
-        r = await auth_client.post("/api/voice/room", json={})
-        assert r.status_code == 409
-
-    async def test_room_rejects_bad_agent(self, auth_client: AsyncClient):
-        from aios.config import settings
-        settings.livekit_url = "ws://livekit:7880"
-        settings.livekit_api_key = "devkey"
-        settings.livekit_api_secret = "test-secret"
-        try:
-            r = await auth_client.post("/api/voice/room", json={"agent_id": "nope"})
-            assert r.status_code == 400
-        finally:
-            settings.livekit_url = ""
-            settings.livekit_api_key = ""
-            settings.livekit_api_secret = ""
-
     async def test_tool_registered(self):
         from aios.tools.registry import TOOL_REGISTRY
         import aios.tools  # noqa: F401 — triggers registration

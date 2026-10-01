@@ -98,7 +98,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
 
         # Now lock the row for update. FOR UPDATE is Postgres/MySQL only —
         # SQLite rejects it outright, and it serialises writers anyway.
-        for_update = "" if _is_sqlite(db) else " FOR UPDATE"
+        for_update = "" if await _is_sqlite(db) else " FOR UPDATE"
         usage_row = (await db.execute(
             text(
                 "SELECT * FROM usage_records WHERE org_id = :org_id AND date = :date"

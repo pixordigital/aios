@@ -222,37 +222,6 @@ services:
         limits: { cpus: "1.5", memory: 2G }
         reservations: { cpus: "0.5", memory: 1G }
 
-  voice-agent:
-    profiles: ["voice"]
-    build: ./deploy/voice-stream
-    environment:
-      AIOS_URL: http://app:8777
-      AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
-      OLLAMA_URL: http://ollama:11434/v1
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
-      OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
-      VOICE_LLM_MODEL: ${VOICE_LLM_MODEL:-openai/gpt-4o-mini}
-      AIOS_VOICE_LLM_MODEL: ${AIOS_VOICE_LLM_MODEL:-openai/gpt-4o-mini}
-      TTS_WS_URL: ws://voice-tts-stream:8001/tts/ws
-      VOICE_TTS_ENGINE: ${VOICE_TTS_ENGINE:-kokoro}
-      VOICE_TTS_VOICE: ${VOICE_TTS_VOICE:-ptbr}
-      KOKORO_URL: http://voice-tts-kokoro:8880/v1
-      PIPER_URL: http://voice-tts:8000/v1
-      STT_URL: http://voice-stt:9000/v1
-      VOICE_VAD_ENABLED: ${VOICE_VAD_ENABLED:-true}
-      VOICE_VAD_THRESHOLD: ${VOICE_VAD_THRESHOLD:-0.02}
-      VOICE_SILENCE_MS: ${VOICE_SILENCE_MS:-800}
-      VOICE_BARGE_IN: ${VOICE_BARGE_IN:-true}
-      VOICE_BARGE_IN_MIN_MS: ${VOICE_BARGE_IN_MIN_MS:-120}
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-      voice-tts-kokoro: { condition: service_started }
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "1", memory: 2G }
-        reservations: { cpus: "0.5", memory: 1G }
 
   # ─── Optional: Whisper STT (CPU) — enable with --profile voice-stt ───
   # Requires ~4GB RAM. Use model=small for 8GB VPS.

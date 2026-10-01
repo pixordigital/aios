@@ -254,3 +254,156 @@ class TestNaiveUtcAndNoFakeSuccess:
         assert res["ok"] is False
         assert "CRM interno" in res["error"]
         assert not str(res.get("deal_id") or "").startswith("mock_")
+
+
+class TestCrmControl:
+    """Sales must be able to operate the CRM, not just read and advance stages."""
+
+    @pytest.mark.asyncio
+    async def test_update_fields_without_stage(self, test_session):
+        """Regression: a value-only update did nothing.
+
+        The old apply block required `stage in VALID_STAGES` before touching
+        anything, so passing only value/lead_email silently no-op'd.
+        """
+        org = await _org(test_session)
+        deal = await _deal(test_session, org)
+        deal.value = 100.0
+        await test_session.commit()
+
+        res = await _tool("crm_update_deal", org.id).run(
+            deal_id=deal.id, value=2500.0, lead_phone="5511999999999")
+        assert res["ok"] is True
+        assert "value" in res["updated_fields"]
+        async with db_session() as s:
+            fresh = (await s.execute(select(CrmDeal).where(CrmDeal.id == deal.id))).scalar_one()
+            assert fresh.value == 2500.0
+            assert fresh.lead_phone == "5511999999999"
+            assert fresh.stage == "mql", "empty stage must not blank the stage"
+
+    @pytest.mark.asyncio
+    async def test_reassign_owner(self, test_session):
+        from aios.db.models import Agent
+
+        org = await _org(test_session)
+        deal = await _deal(test_session, org)
+        ag = Agent(org_id=org.id, name="NewOwner", agent_type="sdr",
+                   system_prompt="", llm_config={}, tools=[], memory_config={})
+        test_session.add(ag)
+        await test_session.flush()
+        await test_session.commit()
+
+        res = await _tool("crm_update_deal", org.id).run(deal_id=deal.id, agent_id=ag.id)
+        assert res["ok"] is True
+        async with db_session() as s:
+            fresh = (await s.execute(select(CrmDeal).where(CrmDeal.id == deal.id))).scalar_one()
+            assert fresh.agent_id == ag.id
+
+    @pytest.mark.asyncio
+    async def test_update_foreign_deal_refused_with_value(self, test_session):
+        org_a, org_b = await _org(test_session, "A"), await _org(test_session, "B")
+        deal_b = await _deal(test_session, org_b, "b@x.com")
+        deal_b.value = 900.0
+        await test_session.commit()
+        res = await _tool("crm_update_deal", org_a.id).run(
+            deal_id=deal_b.id, value=1.0)
+        assert res["ok"] is False
+        async with db_session() as s:
+            fresh = (await s.execute(select(CrmDeal).where(CrmDeal.id == deal_b.id))).scalar_one()
+            assert fresh.value == 900.0, "cross-org write must not land"
+
+
+class TestCrmDelete:
+    @pytest.mark.asyncio
+    async def test_requires_confirm(self, test_session):
+        org = await _org(test_session)
+        deal = await _deal(test_session, org)
+        await test_session.commit()
+        res = await _tool("crm_delete_deal", org.id).run(deal_id=deal.id)
+        assert res["ok"] is False and "confirm" in res["error"]
+
+    @pytest.mark.asyncio
+    async def test_deletes_with_confirm(self, test_session):
+        org = await _org(test_session)
+        deal = await _deal(test_session, org)
+        await test_session.commit()
+        res = await _tool("crm_delete_deal", org.id).run(deal_id=deal.id, confirm=True)
+        assert res["ok"] is True
+        async with db_session() as s:
+            gone = (await s.execute(select(CrmDeal).where(CrmDeal.id == deal.id))).scalar_one_or_none()
+            assert gone is None
+
+    @pytest.mark.asyncio
+    async def test_cannot_delete_other_org_deal(self, test_session):
+        org_a, org_b = await _org(test_session, "A"), await _org(test_session, "B")
+        deal_b = await _deal(test_session, org_b, "b@x.com")
+        await test_session.commit()
+        res = await _tool("crm_delete_deal", org_a.id).run(deal_id=deal_b.id, confirm=True)
+        assert res["ok"] is False
+
+    def test_only_manager_may_delete(self):
+        from aios.templates import apply_template
+
+        assert "crm_delete_deal" in apply_template("manager_sales")["tools"]
+        for k in ("sdr", "closer", "manager_dev", "manager_red",
+                  "manager_blue", "manager_data", "data_analyst"):
+            assert "crm_delete_deal" not in apply_template(k)["tools"], k
+
+
+class TestCrmPipelineStats:
+    @pytest.mark.asyncio
+    async def test_funnel_and_rates(self, test_session):
+        org = await _org(test_session)
+        await _deal(test_session, org, "w@x.com", stage="closed_won")
+        await _deal(test_session, org, "l@x.com", stage="closed_lost")
+        await _deal(test_session, org, "o@x.com", stage="sql")
+        await test_session.commit()
+
+        res = await _tool("crm_pipeline_stats", org.id).run()
+        assert res["ok"] is True
+        assert res["total_deals"] == 3
+        assert res["by_stage"]["closed_won"] == 1
+        assert res["open_deals"] == 1
+        assert res["win_rate"] == 0.5
+
+    @pytest.mark.asyncio
+    async def test_only_own_org(self, test_session):
+        org_a, org_b = await _org(test_session, "A"), await _org(test_session, "B")
+        await _deal(test_session, org_b, "b@x.com")
+        await test_session.commit()
+        res = await _tool("crm_pipeline_stats", org_a.id).run()
+        assert res["total_deals"] == 0
+
+    @pytest.mark.asyncio
+    async def test_data_team_can_read_stats_without_org_literal(self, test_session):
+        """The point: analysts do not know their org_id, so the tool must not
+        make them supply it. It resolves from the engine, like every other tool.
+        """
+        org = await _org(test_session)
+        await _deal(test_session, org, "a@x.com", stage="mql")
+        await test_session.commit()
+        res = await _tool("crm_pipeline_stats", org.id).run()
+        assert res["ok"] is True
+        assert res["total_deals"] == 1
+
+    def test_both_teams_have_read_access(self):
+        from aios.templates import apply_template
+
+        for k in ("sdr", "closer", "manager_sales",
+                  "data_analyst", "data_scientist", "manager_data"):
+            assert "crm_pipeline_stats" in apply_template(k)["tools"], k
+
+    def test_no_write_tools_leak_to_data_team(self):
+        from aios.templates import apply_template
+
+        for k in ("data_analyst", "data_scientist", "manager_data"):
+            writes = {t for t in apply_template(k)["tools"]
+                      if t.startswith("crm_") and t != "crm_pipeline_stats"}
+            assert not writes, f"{k} can write the CRM: {writes}"
+
+    @pytest.mark.asyncio
+    async def test_stats_refuses_without_org(self):
+        from aios.tools.crm import CRMPipelineStatsTool
+
+        res = await CRMPipelineStatsTool().run()
+        assert res["ok"] is False

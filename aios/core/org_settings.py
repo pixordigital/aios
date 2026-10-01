@@ -25,7 +25,6 @@ ALLOWED_KEYS = {
     "stripe_secret_key",
     "stripe_webhook_secret",
     "whatsapp_app_secret",
-    "zernio_webhook_secret",
     "google_calendar_credentials",
     "google_calendar_id",
     "calendar_webhook_url",

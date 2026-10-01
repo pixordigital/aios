@@ -92,17 +92,18 @@ class Settings(BaseSettings):
     vapi_phone_number_id: str = ""
     retell_api_key: str = ""
     retell_agent_id: str = ""
-    voice_tts_url: str = "http://voice-tts:8000"  # openedai-speech (Coolify)
-    voice_stt_url: str = "http://voice-stt:9000"  # whisper-asr-webservice (Coolify)
-    voice_bridge_url: str = ""  # SIP dial bridge (Twilio/LiveKit/Asterisk gateway)
+    # Deployed TTS is Kokoro (docker-compose service voice-tts-kokoro). The old
+    # default pointed at "http://voice-tts:8000", a service that is not deployed
+    # anywhere, so an unset VOICE_TTS_URL produced a connection error against a
+    # host that could never exist.
+    voice_tts_url: str = "http://voice-tts-kokoro:8880/v1"
+    # No STT image is currently deployable (ghcr.io/onyx-dot-app/whisper-api is
+    # unavailable), so this default is a placeholder. Empty is handled: callers
+    # report "sem stt_url nem openai key" instead of hanging.
+    voice_stt_url: str = "http://voice-stt:9000"
+    voice_bridge_url: str = ""  # SIP dial bridge (Twilio/Asterisk gateway)
     voice_from_number: str = ""
-    livekit_url: str = ""  # wss://... (self-hosted livekit:8080 via compose)
-    livekit_api_key: str = ""
-    livekit_api_secret: str = ""
-    livekit_tts_ws_url: str = "ws://voice-tts-stream:8001/tts/ws"  # livekit-streaming-tts server
-    livekit_tts_engine: str = "xtts"  # xtts (primário) | kokoro (fallback)
-    livekit_tts_voice: str = "ptbr"
-    kokoro_url: str = "http://voice-tts-kokoro:8880"  # Kokoro-FastAPI fallback
+    kokoro_url: str = "http://voice-tts-kokoro:8880"  # Kokoro-FastAPI TTS
     ollama_model: str = "qwen3:8b"
     voice_llm_model: str = "openai/gpt-4o-mini"  # voice agent LLM: openai/gpt-4o-mini | anthropic/claude-sonnet-4.5 | qwen/qwen-3-235b | ollama/qwen3:8b
 

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div>
+    <h1>Funis de Vendas</h1>
+    <p class="text-sm text-secondary">Funil compartilhado — Vendas opera os estágios, Dados posta achados no mesmo funil</p>
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="document.getElementById('new-funnel').showModal()">+ Novo Funil</button>
+</div>
+
+{% if not funnels %}
+<div class="card">
+  <h2>Nenhum funil ainda</h2>
+  <p class="text-sm text-secondary">Crie um funil para o time comercial e o time de dados trabalharem juntos. Vendas define os estágios e move os negócios; Dados lê o funil e posta achados.</p>
+</div>
+{% else %}
+<div class="grid-4 mb-4">
+  <div class="stat-card"><p class="stat-label">Funis ativos</p><p class="stat-value">{{ funnels|length }}</p></div>
+  <div class="stat-card"><p class="stat-label">Negócios em funil</p><p class="stat-value">{{ total_deals }}</p><span class="text-xs text-tertiary">R$ {{ "%.0f"|format(total_value) }}</span></div>
+  <div class="stat-card"><p class="stat-label">Achados abertos</p><p class="stat-value">{{ open_insights }}</p><span class="text-xs text-tertiary">do time de dados</span></div>
+  <div class="stat-card"><p class="stat-label">Taxa de ganho</p><p class="stat-value">{{ "%.0f"|format(win_rate) }}%</p><span class="text-xs text-tertiary">fechados / total</span></div>
+</div>
+
+<div class="grid-3">
+  {% for f in funnels %}
+  <div class="card">
+    <div class="flex-between mb-2">
+      <h2><a href="/dashboard/funnels/{{ f.id }}" style="color:inherit;text-decoration:none">{{ f.name }}</a></h2>
+      {% if not f.is_active %}<span class="text-xs" style="color:var(--amber)">inativo</span>{% endif %}
+    </div>
+    {% if f.description %}<p class="text-sm text-secondary mb-2">{{ f.description }}</p>{% endif %}
+    <div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-bottom:0.5rem">
+      {% for s in f.stage_list %}<span class="text-xs" style="background:var(--bg-hover);padding:0.15rem 0.4rem;border-radius:var(--radius-xs)">{{ s }}</span>{% endfor %}
+    </div>
+    <div class="flex-between text-xs text-tertiary">
+      <span>{{ f.deal_count }} negócios • R$ {{ "%.0f"|format(f.deal_value) }}</span>
+      {% if f.open_insight_count %}<span style="color:var(--amber)">{{ f.open_insight_count }} achado(s)</span>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<dialog id="new-funnel" class="modal">
+  <form method="POST" action="/dashboard/funnels/create" class="modal-body">
+    <h2 class="mb-3">Novo funil de vendas</h2>
+    <div class="mb-3"><label class="text-sm">Nome</label><input class="input" name="name" required maxlength="255" placeholder="Ex: Enterprise BR"></div>
+    <div class="mb-3"><label class="text-sm">Descrição</label><textarea class="input" name="description" rows="2" maxlength="2000" placeholder="Para quem é este funil"></textarea></div>
+    <div class="mb-3">
+      <label class="text-sm">Estágios (um por linha, na ordem)</label>
+      <textarea class="input" name="stages" rows="5" required>prospection
+qualification
+proposal
+negotiation
+closed_won</textarea>
+      <p class="text-xs text-tertiary mt-1">O primeiro é onde todo negócio entra. Vendas é quem edita esta lista.</p>
+    </div>
+    <div class="mb-3"><label class="text-sm">Pipeline (slug)</label><input class="input" name="pipeline" value="default" maxlength="50"><p class="text-xs text-tertiary mt-1">Negócios com este valor em <code>stage/pipeline</code> aparecem neste funil.</p></div>
+    <div class="flex" style="justify-content:flex-end;gap:0.5rem">
+      <button type="button" class="btn btn-ghost" onclick="document.getElementById('new-funnel').close()">Cancelar</button>
+      <button class="btn btn-primary">Criar funil</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}

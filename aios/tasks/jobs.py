@@ -386,7 +386,14 @@ async def transcribe_voice_recording(ctx, recording_id: str, language: str = "pt
             
             # Call Whisper API
             import httpx
-            whisper_url = getattr(ctx.get("settings", {}), "voice_stt_url", "http://voice-stt:9000")
+            # ctx["settings"] is a plain dict, so getattr() always returned the
+            # default and any configured voice_stt_url was silently ignored --
+            # transcription always went to http://voice-stt:9000 even when the
+            # operator pointed it somewhere else.
+            from aios.config import settings as _cfg
+            _s = ctx.get("settings") or {}
+            _stt = _s.get("voice_stt_url") if isinstance(_s, dict) else getattr(_s, "voice_stt_url", None)
+            whisper_url = _stt or _cfg.voice_stt_url or "http://voice-stt:9000"
             
             async with httpx.AsyncClient(timeout=300) as client:
                 files = {"file": (f"recording-{recording.call_sid}.mp3", audio_content, "audio/mpeg")}

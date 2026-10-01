@@ -448,7 +448,7 @@ async def control_center(request: Request):
         from sqlalchemy import select, desc
         from aios.db.models import AgentMetric, AuditLog, CrmDeal, CrmDealVersion, PendingAction
         # HITL queue
-        pending = (await db.execute(select(PendingAction).where(PendingAction.status == "pending").order_by(desc(PendingAction.created_at)).limit(20))).scalars().all()
+        pending = (await db.execute(select(PendingAction).where(PendingAction.org_id == org_id, PendingAction.status == "pending").order_by(desc(PendingAction.created_at)).limit(20))).scalars().all()
         # metrics 7d
         metrics = (await db.execute(select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(desc(AgentMetric.hour)).limit(24))).scalars().all()
         # deals com versionamento recente (human deviation)
@@ -526,7 +526,9 @@ async def agent_edit_form(request: Request, aid: str):
     async with db_session() as db:
         agent = await db.get(Agent, aid)
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
-        if not agent:
+        # org check: the form renders system_prompt/tools/llm_config, so without
+        # this another org's agent definition would be editable and readable.
+        if not agent or agent.org_id != org_id:
             return RedirectResponse("/dashboard/agents", status_code=303)
     return await _render("agent_form.html", request, title="Editar Agente",
                    agent=agent, agent_types=AGENT_TYPES, agents=agents)
@@ -588,6 +590,7 @@ async def agent_save(
     autonomous: str = Form(None),
     max_trials: int = Form(3),
     hitl_threshold: int = Form(5000),
+    hitl_discount_threshold: int = Form(10),
 ):
     if agent_type not in AGENT_TYPES:
         return HTMLResponse(f"<h2>Tipo inválido: {agent_type}</h2><a href='/dashboard/agents'>Voltar</a>", status_code=422)
@@ -621,7 +624,7 @@ async def agent_save(
             "max_trials": max(1, min(5, int(max_trials or 3))),
             "hitl_enabled": True,
             "hitl_value_threshold": max(0, int(hitl_threshold or 5000)),
-            "hitl_discount_threshold": max(0, min(100, int(request.form.get("hitl_discount_threshold", 10) or 10))),
+            "hitl_discount_threshold": max(0, min(100, hitl_discount_threshold)),
             "max_tokens_per_run": 500_000,
             "allowed_tools": "__all__",
             "denied_tools": [],
@@ -784,7 +787,7 @@ async def voice_create(request: Request, name: str = Form(...), agent_type: str 
     llm_config = {"model": model, "temperature": 0.6 if agent_type != "support" else 0.4, "max_tokens": 4096}
     tools = tpl.get("tools", []) if tpl else []
     memory_config = tpl.get("memory_config", {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}})
-    # store voice choice in governance_config for voice-stream to fetch (Agent has no extra_data)
+    # store voice choice in governance_config (Agent has no extra_data)
     # tts_model: kokoro | tts-1 | tts-1-hd | gpt-4o-mini-tts | eleven_turbo_v2 | eleven_multilingual_v2 | cartesia/sonic-3
     tts_engine = "kokoro" if tts_model in ("kokoro","kokoro-int8","piper","xtts","tts-1","tts-1-hd","gpt-4o-mini-tts","gpt-4o-tts","gpt-4o-tts-mini") else ("elevenlabs" if "eleven" in tts_model else "cartesia" if "cartesia" in tts_model else "kokoro")
     voice_cfg = {"voice": {"voice_id": voice, "tts_engine": tts_engine, "tts_model": tts_model, "kokoro_url": "http://voice-tts-kokoro:8880/v1", "llm_model": model}}
@@ -860,9 +863,15 @@ async def team_edit_form(request: Request, tid: str):
 
 
 @router.get("/teams/{tid}/recommend-orchestrator")
-async def recommend_orchestrator(tid: str):
+async def recommend_orchestrator(request: Request, tid: str):
+    """Org-scoped: this renders another org's team and agent names. Previously it
+    took no request/user at all, relying only on middleware authentication, and
+    returned agent names for any team id."""
+    org_id = await _org_filter(request)
     async with db_session() as db:
         team = await db.get(Team, tid)
+        if team and team.org_id != org_id:
+            team = None
         if team and team.agents:
             rec = _orchestrator_recommendation(team.agents)
             agents_list = [a for a in team.agents]
@@ -1091,7 +1100,7 @@ async def conversation_handover_status(request: Request, conv_id: str):
         try:
             from aios.db.models import PendingAction
 
-            pending_q = (await db.execute(select(PendingAction).where(PendingAction.conversation_id == conv_id, PendingAction.status == "pending"))).scalars().all()
+            pending_q = (await db.execute(select(PendingAction).where(PendingAction.org_id == org_id, PendingAction.conversation_id == conv_id, PendingAction.status == "pending"))).scalars().all()
             pending = [{"id": p.id, "tool_name": p.tool_name, "tool_args": p.tool_args, "context_summary": p.context_summary} for p in pending_q]
         except Exception:
             pass
@@ -1158,7 +1167,9 @@ async def channel_edit_form(request: Request, cid: str):
         channel = await db.get(ChannelConnection, cid)
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         teams = (await db.execute(select(Team).where(Team.org_id == org_id).order_by(Team.name))).scalars().all()
-        if not channel:
+        # org check: channel.config holds provider tokens/passwords. The form
+        # echoes those values back, so another org's channel must never render.
+        if not channel or channel.org_id != org_id:
             return RedirectResponse("/dashboard/channels", status_code=303)
     return await _render("channel_form.html", request, title="Editar Canal", channel=channel, agents=agents, teams=teams)
 
@@ -1417,13 +1428,35 @@ async def admin_dashboard(request: Request):
     async with db_session() as db:
         org_rows = (await db.execute(select(Organization).order_by(Organization.created_at.desc()))).scalars().all()
         from aios.core.limits import get_usage_summary
+        # Grouped counts instead of three COUNT queries per org: the old loop was
+        # 3 round-trips per row, so this page degraded linearly with tenant count.
+        org_ids = [o.id for o in org_rows]
+        user_counts: dict = {}
+        agent_counts: dict = {}
+        team_counts: dict = {}
+        if org_ids:
+            for oid, n in (await db.execute(
+                select(User.org_id, func.count(User.id)).where(User.org_id.in_(org_ids)).group_by(User.org_id)
+            )).all():
+                user_counts[oid] = n
+            for oid, n in (await db.execute(
+                select(Agent.org_id, func.count(Agent.id)).where(Agent.org_id.in_(org_ids)).group_by(Agent.org_id)
+            )).all():
+                agent_counts[oid] = n
+            for oid, n in (await db.execute(
+                select(Team.org_id, func.count(Team.id)).where(Team.org_id.in_(org_ids)).group_by(Team.org_id)
+            )).all():
+                team_counts[oid] = n
         orgs_data = []
         for org in org_rows:
-            uc = (await db.execute(select(func.count(User.id)).where(User.org_id == org.id))).scalar() or 0
-            ac = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org.id))).scalar() or 0
-            tc = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org.id))).scalar() or 0
             usage = await get_usage_summary(org.id, db)
-            orgs_data.append({"org": org, "user_count": uc, "agent_count": ac, "team_count": tc, "usage": usage})
+            orgs_data.append({
+                "org": org,
+                "user_count": user_counts.get(org.id, 0),
+                "agent_count": agent_counts.get(org.id, 0),
+                "team_count": team_counts.get(org.id, 0),
+                "usage": usage,
+            })
     return await _render("admin/orgs.html", request, title="Administração", orgs=orgs_data)
 
 
@@ -2246,11 +2279,24 @@ async def automations_list(request: Request, filter: str = "all"):
             elif filter == "failed":
                 failed_ids = set((await db.execute(select(WorkflowRun.workflow_id).where(WorkflowRun.org_id==org_id, WorkflowRun.status=="failed"))).scalars().all())
                 wfs = [w for w in wfs if w.id in failed_ids]
+        # Last run per workflow in two queries instead of one query per workflow.
         runs_map = {}
-        for w in wfs:
-            last = (await db.execute(select(WorkflowRun).where(WorkflowRun.workflow_id==w.id).order_by(WorkflowRun.created_at.desc()).limit(1))).scalars().first()
-            if last:
-                runs_map[w.id] = last
+        if wfs:
+            wf_ids = [w.id for w in wfs]
+            latest = dict((await db.execute(
+                select(WorkflowRun.workflow_id, func.max(WorkflowRun.created_at))
+                .where(WorkflowRun.workflow_id.in_(wf_ids))
+                .group_by(WorkflowRun.workflow_id)
+            )).all())
+            if latest:
+                for r in (await db.execute(
+                    select(WorkflowRun)
+                    .where(
+                        WorkflowRun.workflow_id.in_(list(latest)),
+                        WorkflowRun.created_at.in_(list(latest.values())),
+                    )
+                )).scalars().all():
+                    runs_map.setdefault(r.workflow_id, r)
         recent_runs = (await db.execute(select(WorkflowRun).where(WorkflowRun.org_id==org_id).order_by(WorkflowRun.created_at.desc()).limit(20))).scalars().all()
         creds = (await db.execute(select(Credential).where(Credential.org_id==org_id))).scalars().all()
         runs_today = sum(1 for r in recent_runs if r.created_at and (datetime.now(timezone.utc).replace(tzinfo=None) - r.created_at).days == 0)
@@ -2720,7 +2766,10 @@ async def lojista_create(request: Request, phone: str = Form(...), solution: str
     business = business.strip()[:500] or "negócio local"
     tpl = apply_template(sol["agent_type"])
     prompt = f"Negócio: {business}.\n\n{sol['addon']}\n\n{tpl.get('system_prompt','')}"
-    tools = [t for t in sol["tools"]]
+    # The pack is an overlay on the template, not a replacement: taking it
+    # verbatim stripped the agent of web_search/send_email/http_request that
+    # its own agent_type ships with.
+    tools = list(dict.fromkeys([*tpl.get("tools", []), *sol["tools"]]))
     async with db_session() as db:
         ag = Agent(org_id=org_id, name=f"{sol['agent_name']} — {business[:30]}", agent_type=sol["agent_type"], system_prompt=prompt, llm_config=tpl.get("llm_config",{}), tools=tools, memory_config=tpl.get("memory_config",{}))
         db.add(ag)
@@ -2735,6 +2784,257 @@ async def lojista_create(request: Request, phone: str = Form(...), solution: str
         db.add(ch)
         await db.commit()
     return RedirectResponse(f"/dashboard/evolution", status_code=303)
+
+# ─── Funis de Vendas (Vendas opera, Dados analisa) ───
+#
+# A funnel is a named pipeline both teams work on the same object: Sales owns the
+# stage ladder and moves deals, the Data team reads and posts findings it cannot
+# later have edited by Sales. The split is enforced here, not in the template, so
+# it holds for browser and API alike.
+
+_DEFAULT_STAGES = ["prospection", "qualification", "proposal", "negotiation", "closed_won"]
+_SALES_STAGES_KEY = "stages"
+
+
+def _stage_list(funnel) -> list[str]:
+    stages = (funnel.extra_data or {}).get(_SALES_STAGES_KEY) or []
+    return [s for s in stages if isinstance(s, str) and s.strip()] or list(_DEFAULT_STAGES)
+
+
+def _funnel_stats(deals: list) -> dict:
+    total = len(deals)
+    won = [d for d in deals if d.stage == "closed_won"]
+    return {
+        "total": total,
+        "value": sum(float(d.value or 0) for d in deals),
+        "won": len(won),
+        "won_value": sum(float(d.value or 0) for d in won),
+        "win_rate": (len(won) / total * 100) if total else 0.0,
+    }
+
+
+# Below this many deals ever occupying a stage, a percentage is noise that Sales
+# would read as a trend. Such stages report "n insufficient" instead of a number,
+# because "1 of 1 advanced = 100%" is a false positive waiting to mislead.
+_MIN_STAGE_N = 5
+
+
+async def _stage_transitions(db, org_id: str, stages: list[str], deal_ids: set[str]) -> dict:
+    """stage slug -> set of deal_ids recorded as having moved out of it.
+
+    Reads CrmDealVersion (field="stage") -- the audit trail written on every stage
+    change. Missing history is a normal state, not an error: it simply yields no
+    rate rather than a fabricated one.
+    """
+    from sqlalchemy import select
+    from aios.db.models import CrmDealVersion
+    if not deal_ids or not stages:
+        return {}
+    known = set(stages)
+    out: dict[str, set] = {}
+    rows = (await db.execute(
+        select(CrmDealVersion.deal_id, CrmDealVersion.old_value)
+        .where(CrmDealVersion.org_id == org_id, CrmDealVersion.field == "stage")
+    )).all()
+    for deal_id, old in rows:
+        if deal_id in deal_ids and old in known:
+            out.setdefault(old, set()).add(deal_id)
+    return out
+
+
+def _columns(stages: list[str], deals: list, transitions: dict | None = None) -> list[dict]:
+    """One column per stage, in order.
+
+    `transitions` maps a stage slug to the set of deal_ids that have MOVED OUT of
+    it, derived from CrmDealVersion rows where field="stage".
+
+    Why the event log and not `deal.stage`: a deal that advanced is no longer in
+    the old column, so a snapshot cannot see it. Computing "how many left this
+    stage" from current rows is structurally always zero, which renders every
+    stage as 100% stalled. The version table is the only source that can answer it.
+    """
+    transitions = transitions or {}
+    by_stage: dict[str, list] = {}
+    known = set(stages)
+    for d in deals:
+        by_stage.setdefault(d.stage or stages[0], []).append(d)
+    advancing = [s for s in stages if s not in ("closed_won", "closed_lost")]
+    cols = []
+    for i, s in enumerate(stages):
+        here = by_stage.get(s, [])
+        rate = None
+        n_rate = None
+        if s in advancing and i + 1 < len(stages):
+            nxt = stages[i + 1]
+            moved_ids = transitions.get(s)
+            # Absent history means "unknown who advanced", NOT "nobody advanced".
+            # Reporting 0% would tell Sales every deal is stalled when the truth
+            # is the audit trail predates the funnel. Stay silent instead.
+            if moved_ids is not None:
+                # Denominator is everyone who ever occupied the stage: current
+                # residents plus those recorded as having moved on. Using only
+                # residents would measure the survivors, not the stage.
+                entered = len(here) + len(moved_ids)
+                if entered >= _MIN_STAGE_N:
+                    rate = (len(moved_ids) / entered * 100)
+                    n_rate = entered
+        cols.append({
+            "stage": s,
+            "deals": here,
+            "value": sum(float(d.value or 0) for d in here),
+            "rate": rate,
+            "n_rate": n_rate,
+        })
+    # A stage the ladder no longer has (Sales renamed a rung) gets its own column
+    # at the end. Dropping those deals would silently change every rate above;
+    # guessing which rung they belong to would be inventing data.
+    for s, ds in by_stage.items():
+        if s not in known:
+            cols.append({
+                "stage": f"{s} (fora do funil)",
+                "deals": ds,
+                "value": sum(float(d.value or 0) for d in ds),
+                "rate": None,
+                "n_rate": None,
+            })
+    return cols
+
+
+@router.get("/funnels", response_class=HTMLResponse)
+async def funnels_page(request: Request):
+    org_id = await _org_filter(request)
+    from aios.db.models import SalesFunnel, FunnelInsight, CrmDeal
+    async with db_session() as db:
+        funnels = (await db.execute(
+            select(SalesFunnel).where(SalesFunnel.org_id == org_id)
+            .order_by(SalesFunnel.created_at.desc())
+        )).scalars().all()
+        deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id))).scalars().all()
+        open_insights = (await db.execute(
+            select(FunnelInsight).where(FunnelInsight.org_id == org_id, FunnelInsight.resolved.is_(False))
+        )).scalars().all()
+        open_by_funnel: dict[str, int] = {}
+        for i in open_insights:
+            open_by_funnel[i.funnel_id] = open_by_funnel.get(i.funnel_id, 0) + 1
+        rows = []
+        for f in funnels:
+            fd = [d for d in deals if (d.pipeline or "default") == f.pipeline]
+            st = _funnel_stats(fd)
+            rows.append({
+                "id": f.id, "name": f.name, "description": f.description,
+                "pipeline": f.pipeline, "is_active": f.is_active,
+                "stage_list": _stage_list(f),
+                "deal_count": st["total"], "deal_value": st["value"],
+                "open_insight_count": open_by_funnel.get(f.id, 0),
+            })
+        agg = _funnel_stats(deals)
+        return await _render(
+            "funnels.html", request, title="Funis de Vendas", funnels=rows,
+            total_deals=agg["total"], total_value=agg["value"],
+            open_insights=len(open_insights), win_rate=agg["win_rate"],
+        )
+
+
+@router.post("/funnels/create")
+async def funnel_create(
+    request: Request,
+    name: str = Form(...),
+    description: str = Form(""),
+    stages: str = Form(...),
+    pipeline: str = Form("default"),
+):
+    org_id = await _org_filter(request)
+    name = name.strip()[:255]
+    if not name:
+        return RedirectResponse("/dashboard/funnels?error=name", status_code=303)
+    pipeline = (pipeline.strip() or "default")[:50]
+    ladder = [s.strip()[:30] for s in stages.splitlines() if s.strip()][:20]
+    if not ladder:
+        ladder = list(_DEFAULT_STAGES)
+    from aios.db.models import SalesFunnel
+    async with db_session() as db:
+        db.add(SalesFunnel(
+            org_id=org_id, name=name, description=description.strip()[:2000],
+            pipeline=pipeline, extra_data={_SALES_STAGES_KEY: ladder},
+        ))
+        await db.commit()
+    return RedirectResponse("/dashboard/funnels", status_code=303)
+
+
+@router.get("/funnels/{funnel_id}", response_class=HTMLResponse)
+async def funnel_detail(request: Request, funnel_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import SalesFunnel, FunnelInsight, CrmDeal
+    async with db_session() as db:
+        funnel = await db.get(SalesFunnel, funnel_id)
+        # 404 rather than 403 on another org's funnel: do not confirm it exists.
+        if not funnel or funnel.org_id != org_id:
+            return HTMLResponse("<h2>Funil não encontrado</h2>", status_code=404)
+        deals = (await db.execute(
+            select(CrmDeal).where(CrmDeal.org_id == org_id, CrmDeal.pipeline == funnel.pipeline)
+        )).scalars().all()
+        insights = (await db.execute(
+            select(FunnelInsight).where(FunnelInsight.funnel_id == funnel_id)
+            .order_by(FunnelInsight.created_at.desc())
+        )).scalars().all()
+        stages = _stage_list(funnel)
+        st = _funnel_stats(deals)
+        funnel.stage_list = stages
+        transitions = await _stage_transitions(db, org_id, stages, {d.id for d in deals})
+        columns = _columns(stages, deals, transitions)
+        orphan_count = sum(len(c["deals"]) for c in columns if "(fora do funil)" in c["stage"])
+        return await _render(
+            "funnel_detail.html", request, title=funnel.name, funnel=funnel,
+            columns=columns, insights=insights, orphan_count=orphan_count,
+            total_deals=st["total"], total_value=st["value"],
+            won=st["won"], won_value=st["won_value"], win_rate=st["win_rate"],
+            open_insights=sum(1 for i in insights if not i.resolved),
+        )
+
+
+@router.post("/funnels/{funnel_id}/insights")
+async def funnel_insight_create(
+    request: Request, funnel_id: str,
+    finding: str = Form(...), recommendation: str = Form(""), stage: str = Form(""),
+):
+    """Data domain: post a finding. Sales resolves insights rather than editing
+    them, so the finding text is only ever written from here."""
+    org_id = await _org_filter(request)
+    finding = finding.strip()[:4000]
+    if not finding:
+        return RedirectResponse(f"/dashboard/funnels/{funnel_id}?error=empty", status_code=303)
+    from aios.db.models import SalesFunnel, FunnelInsight
+    async with db_session() as db:
+        funnel = await db.get(SalesFunnel, funnel_id)
+        if not funnel or funnel.org_id != org_id:
+            return HTMLResponse("<h2>Funil não encontrado</h2>", status_code=404)
+        # Drop a stage the ladder does not contain rather than storing a dangling
+        # value the board can never render.
+        stage_s = stage.strip()[:30]
+        stage = stage_s if stage_s in _stage_list(funnel) else ""
+        db.add(FunnelInsight(
+            org_id=org_id, funnel_id=funnel_id, finding=finding,
+            recommendation=recommendation.strip()[:2000], stage=stage, author_type="data",
+        ))
+        await db.commit()
+    return RedirectResponse(f"/dashboard/funnels/{funnel_id}", status_code=303)
+
+
+@router.post("/funnels/insights/{insight_id}/resolve")
+async def funnel_insight_resolve(request: Request, insight_id: str):
+    """Sales domain: acknowledge. Marks resolved without touching the Data team's
+    text — the audit trail has to survive the reader acting on it."""
+    org_id = await _org_filter(request)
+    from aios.db.models import FunnelInsight
+    async with db_session() as db:
+        ins = await db.get(FunnelInsight, insight_id)
+        if not ins or ins.org_id != org_id:
+            return HTMLResponse("<h2>Achado não encontrado</h2>", status_code=404)
+        ins.resolved = True
+        await db.commit()
+        funnel_id = ins.funnel_id
+    return RedirectResponse(f"/dashboard/funnels/{funnel_id}", status_code=303)
+
 
 @router.get("/crm", response_class=HTMLResponse)
 async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: str = "", sort: str = ""):
@@ -2797,9 +3097,17 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
                 won = ps.get("closed_won",0)
                 lost = ps.get("closed_lost",0)
                 total_closed = won + lost
-                ps["conversion"] = round((won/total_closed*100) if total_closed else 0, 1)
-                ps["mql_to_won"] = round((won/mql*100) if mql else 0, 1)
-            pending = (await db.execute(select(PendingAction).where(PendingAction.status=="pending").order_by(PendingAction.created_at.desc()).limit(20))).scalars().all()
+                # None, not 0: with nothing closed yet, "0% win rate" reads as
+                # "every deal is failing" when the truth is "no data yet".
+                ps["conversion"] = round(won/total_closed*100, 1) if total_closed else None
+                # mql_to_won was `won / count(stage='mql' right now)`. Deals that
+                # passed MQL are no longer sitting in MQL, so that denominator
+                # shrinks as the pipeline progresses -- 10 through MQL, 5 won, 0
+                # left at MQL reported 0% instead of 50%. It needs the audit trail
+                # for "ever reached MQL"; without it, report nothing.
+                ps["mql_to_won"] = None
+                ps["mql_sample"] = mql
+            pending = (await db.execute(select(PendingAction).where(PendingAction.org_id==org_id, PendingAction.status=="pending").order_by(PendingAction.created_at.desc()).limit(20))).scalars().all()
             # enrich agent
             for d in deals:
                 if d.agent_id:
@@ -2884,11 +3192,12 @@ async def crm_approve_edit(request: Request, pid: str):
     from aios.db.backend import db_session
     from aios.db.models import PendingAction
     u = await get_dashboard_user(request)
+    org_id = await _org_filter(request)
     form = await request.form()
     async with db_session() as db:
         pa = await db.get(PendingAction, pid)
-        if pa and pa.status == "pending":
-            # update tool_args with edited values
+        # org check: a pending action from another org must be invisible here.
+        if pa and pa.org_id == org_id and pa.status == "pending":
             new_args = dict(pa.tool_args or {})
             if form.get("stage"):
                 new_args["stage"] = form.get("stage")
@@ -2896,13 +3205,24 @@ async def crm_approve_edit(request: Request, pid: str):
                 new_args["notes"] = form.get("notes")
             pa.tool_args = new_args
             await db.commit()
+        else:
+            # Do not fall through and approve it anyway.
+            return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
     approval_manager.approve(pid, decided_by=u.id if u else "dashboard")
     return RedirectResponse("/dashboard/crm", status_code=303)
+
 
 @router.get("/crm/reject/{pid}")
 async def crm_reject(request: Request, pid: str):
     from aios.core.approval import approval_manager
     from aios.api.deps import get_dashboard_user
+    org_id = await _org_filter(request)
+    from aios.db.backend import db_session
+    from aios.db.models import PendingAction
+    async with db_session() as db:
+        pa = await db.get(PendingAction, pid)
+        if not pa or pa.org_id != org_id:
+            return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
     u = await get_dashboard_user(request)
     approval_manager.reject(pid, decided_by=u.id if u else "dashboard")
     return RedirectResponse("/dashboard/crm", status_code=303)
@@ -2935,11 +3255,15 @@ async def crm_export(request: Request, q: str = "", agent_id: str = "", pipeline
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["id", "lead_name", "lead_email", "lead_phone", "stage", "value", "score", "probability", "close_date", "pipeline", "agent", "source", "created_at", "updated_at", "notes"])
+    # Resolve every agent in one query: db.get() per row made the export O(deals)
+    # round-trips, which is minutes of latency on a large pipeline.
+    agent_ids = {d.agent_id for d in deals if d.agent_id}
+    agent_names = {}
+    if agent_ids:
+        for ag in (await db.execute(select(Agent).where(Agent.id.in_(agent_ids)))).scalars().all():
+            agent_names[ag.id] = ag.name
     for d in deals:
-        agent_name = ""
-        if d.agent_id:
-            ag = await db.get(Agent, d.agent_id)
-            agent_name = ag.name if ag else ""
+        agent_name = agent_names.get(d.agent_id, "") if d.agent_id else ""
         writer.writerow([d.id, d.lead_name, d.lead_email, d.lead_phone, d.stage, d.value, d.score, d.probability, d.close_date.isoformat() if d.close_date else "", d.pipeline, agent_name, d.source, d.created_at.isoformat() if d.created_at else "", d.updated_at.isoformat() if d.updated_at else "", (d.extra_data or {}).get("notes","")])
     output.seek(0)
     filename = f"crm_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"

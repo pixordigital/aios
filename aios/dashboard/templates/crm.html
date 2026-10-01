@@ -53,8 +53,8 @@
         <td style="padding:0.5rem;color:var(--green)">{{ps.closed_won or 0}}</td>
         <td style="padding:0.5rem;color:var(--red)">{{ps.closed_lost or 0}}</td>
         <td style="padding:0.5rem">R$ {{ "%.0f"|format(ps.total_value or 0) }}</td>
-        <td style="padding:0.5rem">{{ps.conversion or 0}}%</td>
-        <td style="padding:0.5rem">{{ps.mql_to_won or 0}}%</td>
+        <td style="padding:0.5rem">{% if ps.conversion is not none %}{{ps.conversion}}%{% else %}<span class="text-tertiary">sem fechadas</span>{% endif %}</td>
+        <td style="padding:0.5rem">{% if ps.mql_to_won is not none %}{{ps.mql_to_won}}%{% else %}<span class="text-tertiary" title="Requer historico de transicao de estagio">n/d</span>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

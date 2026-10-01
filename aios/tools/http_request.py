@@ -38,6 +38,16 @@ def _is_private(host: str) -> bool:
     return False
 
 
+def _operator_allows_private(requested) -> bool:
+    """Only a server-side opt-in can permit fetching internal addresses.
+
+    Ignores any value the agent passed: the flag is only honoured when the
+    operator set AIOS_ALLOW_PRIVATE_HTTP=1 in the environment.
+    """
+    import os
+    return os.getenv("AIOS_ALLOW_PRIVATE_HTTP", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 class HttpRequestInput(BaseModel):
     url: str = Field(description="HTTPS URL")
     method: str = Field(default="GET", description="GET|POST|PUT|DELETE|PATCH|HEAD")
@@ -49,7 +59,6 @@ class HttpRequestInput(BaseModel):
     auth_header: str = Field(default="Authorization", description="header for api_key")
     credential_id: str | None = Field(default=None, description="Credential id to resolve auth")
     timeout: int = Field(default=30, ge=1, le=120)
-    allow_private: bool = Field(default=False)
 
 
 class HttpRequestTool(BaseTool):
@@ -57,7 +66,11 @@ class HttpRequestTool(BaseTool):
     description = "Generic HTTP request (GET/POST/PUT/DELETE/PATCH) with headers/query/body/auth"
     input_model = HttpRequestInput
 
-    async def run(self, url: str, method: str = "GET", headers: dict | None = None, query: dict | None = None, body=None, auth_type: str = "none", auth_value: str = "", auth_header: str = "Authorization", credential_id: str | None = None, timeout: int = 30, allow_private: bool = False) -> dict:
+    async def run(self, url: str, method: str = "GET", headers: dict | None = None, query: dict | None = None, body=None, auth_type: str = "none", auth_value: str = "", auth_header: str = "Authorization", credential_id: str | None = None, timeout: int = 30, allow_private: bool | None = None) -> dict:
+        # allow_private is NOT agent-settable. It used to be a tool input field,
+        # which meant a prompt-injected agent could turn the SSRF guard off and
+        # read cloud metadata (169.254.169.254). The operator opts in out-of-band.
+        allow_private = _operator_allows_private(allow_private)
         parsed = urlparse(url)
         if parsed.scheme not in ("https", "http"):
             return {"error": "Only http/https allowed", "status": 0}
