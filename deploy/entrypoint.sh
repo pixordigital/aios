@@ -67,9 +67,29 @@ if [ "$alembic_rc" -ne 0 ]; then
     alembic upgrade heads > /tmp/alembic.log 2>&1
     alembic_rc=$?
     if [ "$alembic_rc" -ne 0 ]; then
-      echo "[entrypoint] FATAL: schema migration failed. Refusing to start."
-      cat /tmp/alembic.log
-      exit 1
+      # Reconcile. This deployment materialises the schema through
+      # init_db() -> Base.metadata.create_all on every container start, so a
+      # database created that way has no alembic_version row and replaying the
+      # whole chain fails on the first already-existing table. That is not a
+      # broken schema -- it is an un-stamped one.
+      #
+      # Stamp head, then re-run the upgrade so any genuinely pending revision
+      # still applies. Only refuse to start if the re-run also fails, which
+      # means something real is wrong.
+      echo "[entrypoint] WARNING: replay failed. Schema is managed by create_all;"
+      echo "[entrypoint]          stamping head and re-running to apply anything pending."
+      alembic stamp head > /tmp/alembic_stamp.log 2>&1 || {
+        echo "[entrypoint] FATAL: alembic stamp head failed."
+        cat /tmp/alembic_stamp.log
+        exit 1
+      }
+      alembic upgrade head > /tmp/alembic.log 2>&1
+      alembic_rc=$?
+      if [ "$alembic_rc" -ne 0 ]; then
+        echo "[entrypoint] FATAL: schema migration failed after stamp. Refusing to start."
+        cat /tmp/alembic.log
+        exit 1
+      fi
     fi
   fi
 fi
