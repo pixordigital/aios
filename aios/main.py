@@ -384,7 +384,15 @@ app.add_middleware(
 
 
 # dashboard auth middleware
-AUTH_EXEMPT = {"/dashboard/login", "/dashboard/register", "/dashboard/logout", "/dashboard/"}
+# "/dashboard/" must NOT be exempt. The dashboard router serves both "" and "/",
+# so the trailing-slash form matched this set, skipped authentication entirely,
+# and _org_filter() then fell back to _default_org_id() -- which returns the
+# "pixor" operator org.
+#
+# Verified live against production: an unauthenticated GET /dashboard/ returned
+# 200 and ~165KB of that tenant's data (agent roster, teams, plan, tokens and
+# monthly spend). Every other /dashboard/* path redirects to login.
+AUTH_EXEMPT = {"/dashboard/login", "/dashboard/register", "/dashboard/logout"}
 
 # ponytail: referer check for dashboard state-changes — CSRF defense without token state
 # Covers POST (all) + GET mutations (delete/clone/toggle/revoke/remove/suspend/deploy).
