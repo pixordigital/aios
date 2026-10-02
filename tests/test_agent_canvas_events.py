@@ -69,16 +69,39 @@ async def test_deliver_drops_event_for_other_org():
 
 
 @pytest.mark.asyncio
-async def test_deliver_without_org_id_reaches_all_clients():
-    """Unscoped events (legacy approval fan-out) keep their old behaviour."""
+async def test_deliver_without_org_id_reaches_no_clients():
+    """Org-less events are dropped, not broadcast.
+
+    This used to assert the opposite ("reaches_all_clients") and document the
+    blanket fan-out as intended legacy behaviour. It was a cross-tenant leak:
+    every emitter degrades org_id to "" when the agent or hook context carries
+    none, and clients always register with a real user.org_id, so those events
+    reached every connected tenant. Delivery now fails closed.
+    """
     m = WSManager()
     a, b = FakeWS(), FakeWS()
     m.register(a, "org-1")
     m.register(b, "org-2")
 
     await m._deliver_local({"type": "approval_requested", "action_id": "x"})
+    await m._deliver_local({"type": "approval_requested", "action_id": "x", "org_id": ""})
 
-    assert len(a.sent) == 1 and len(b.sent) == 1
+    assert a.sent == [], "org-less event must not be broadcast"
+    assert b.sent == [], "org-less event must not be broadcast"
+
+
+@pytest.mark.asyncio
+async def test_approval_requested_is_org_scoped():
+    """approval.py now supplies org_id, so the approval fan-out still works."""
+    m = WSManager()
+    a, b = FakeWS(), FakeWS()
+    m.register(a, "org-1")
+    m.register(b, "org-2")
+
+    await m._deliver_local({"type": "approval_requested", "action_id": "x", "org_id": "org-1"})
+
+    assert len(a.sent) == 1
+    assert b.sent == []
 
 
 @pytest.mark.asyncio
