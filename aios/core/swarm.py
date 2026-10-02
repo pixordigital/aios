@@ -71,10 +71,11 @@ class SwarmCoordinator:
             await db.refresh(task)
             return task
 
-    async def claim(self, task_id: str, agent_id: str) -> SwarmTask | None:
+    async def claim(self, task_id: str, agent_id: str, org_id: str) -> SwarmTask | None:
         async with db_session() as db:
             task = await db.get(SwarmTask, task_id)
-            if not task or task.status not in ("queued", "assigned"):
+            if not task or task.org_id != org_id or task.status not in ("queued", "assigned"):
+                # Fail closed: a task id from another tenant reads as missing.
                 return None
             task.assigned_agent_id = agent_id
             task.status = "running"
@@ -84,10 +85,10 @@ class SwarmCoordinator:
             await db.refresh(task)
             return task
 
-    async def complete(self, task_id: str, result: dict | None = None, error: str = "") -> SwarmTask | None:
+    async def complete(self, task_id: str, result: dict | None = None, error: str = "", org_id: str = "") -> SwarmTask | None:
         async with db_session() as db:
             task = await db.get(SwarmTask, task_id)
-            if not task:
+            if not task or (org_id and task.org_id != org_id):
                 return None
             task.result = result or {}
             task.error = error
@@ -98,10 +99,14 @@ class SwarmCoordinator:
             return task
 
     async def list_tasks(
-        self, *, team_id: str, status: str = "", limit: int = 20,
+        self, *, team_id: str, status: str = "", limit: int = 20, org_id: str = "",
     ) -> list[SwarmTask]:
         async with db_session() as db:
-            stmt = select(SwarmTask).where(SwarmTask.team_id == team_id)
+            if not org_id:
+                # No org to scope by: refuse rather than dump another tenant's
+                # task payloads. All API routes supply org_id.
+                return []
+            stmt = select(SwarmTask).where(SwarmTask.team_id == team_id, SwarmTask.org_id == org_id)
             if status:
                 stmt = stmt.where(SwarmTask.status == status)
             stmt = stmt.order_by(desc(SwarmTask.priority), desc(SwarmTask.created_at)).limit(limit)
@@ -110,11 +115,11 @@ class SwarmCoordinator:
 
     # ── Consensus ──
 
-    async def vote(self, task_id: str, agent_id: str, vote: str) -> SwarmTask | None:
+    async def vote(self, task_id: str, agent_id: str, vote: str, org_id: str = "") -> SwarmTask | None:
         """Record a consensus vote (approve|reject|abstain). Check threshold if reached."""
         async with db_session() as db:
             task = await db.get(SwarmTask, task_id)
-            if not task:
+            if not task or (org_id and task.org_id != org_id):
                 return None
             votes = dict(task.consensus_votes or {})
             votes[agent_id] = vote
@@ -198,11 +203,14 @@ class SwarmCoordinator:
             )
             return list(result.scalars().all())
 
-    async def stats(self, team_id: str) -> dict:
+    async def stats(self, team_id: str, org_id: str = "") -> dict:
         async with db_session() as db:
-            q = await db.execute(select(func.count(SwarmTask.id)).where(SwarmTask.team_id == team_id))
+            if not org_id:
+                return {"total_tasks": 0, "queued": 0}
+            base = [SwarmTask.team_id == team_id, SwarmTask.org_id == org_id]
+            q = await db.execute(select(func.count(SwarmTask.id)).where(*base))
             total = q.scalar() or 0
-            q2 = await db.execute(select(func.count(SwarmTask.id)).where(SwarmTask.team_id == team_id, SwarmTask.status == "queued"))
+            q2 = await db.execute(select(func.count(SwarmTask.id)).where(*base, SwarmTask.status == "queued"))
             queued = q2.scalar() or 0
             return {"total_tasks": total, "queued": queued}
 

@@ -2741,8 +2741,15 @@ async def proposal_page(request: Request):
         from sqlalchemy import func as _func2
         from aios.db.models import Agent as _Ag2
         agent_count = (await db.execute(select(func.count(_Ag2.id)).where(_Ag2.org_id == org_id))).scalar() or 0
-        economia = int(monthly["total_messages"] * 1.25) or 1200
-        return await _render("proposal.html", request, title="Proposta", org=org, date=__import__("datetime").date.today().isoformat(), economia=economia, msgs=monthly["total_messages"], cost=monthly["total_cost"], roi="8", plan=monthly["plan"], agents=agent_count, channels="whatsapp")
+        # Honest projection from the numbers shown on the page: messages are
+        # measured, 3min @ R$25/h and USD->BRL 5.5 are stated estimates, and ROI
+        # is their ratio -- never a hardcoded constant, never floored: zero
+        # messages project zero savings.
+        msgs = monthly["total_messages"]
+        economia = int(msgs * 1.25)
+        cost_brl = (monthly["total_cost"] or 0) * 5.5
+        roi = round(economia / cost_brl, 1) if cost_brl > 0 else 0.0
+        return await _render("proposal.html", request, title="Proposta", org=org, date=__import__("datetime").date.today().isoformat(), economia=economia, msgs=msgs, cost=monthly["total_cost"], roi=str(roi), plan=monthly["plan"], agents=agent_count, channels="whatsapp")
 
 @router.post("/billing/trial")
 async def billing_trial(request: Request):

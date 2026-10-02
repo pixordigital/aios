@@ -14,13 +14,19 @@ class TranscribeTool(BaseTool):
     async def run(self, media_id: str, language: str = "pt", diarize: bool = False) -> dict:
         if not media_id:
             return {"error": "media_id vazio"}
+        mine = getattr(self, "_org_id", "") or ""
+        if not mine:
+            # Fail closed: without the caller org we cannot tell which tenant's
+            # Evolution credentials may be used, so refuse instead of trying
+            # every tenant's channel until one yields the media.
+            return {"error": "sem org_id"}
         # tenta baixar via WhatsAppChannel helper
         try:
             from aios.db.backend import db_session
             from aios.db.models import ChannelConnection
             from sqlalchemy import select
             async with db_session() as db:
-                chans = (await db.execute(select(ChannelConnection).where(ChannelConnection.channel_type=="whatsapp"))).scalars().all()
+                chans = (await db.execute(select(ChannelConnection).where(ChannelConnection.channel_type=="whatsapp", ChannelConnection.org_id==mine))).scalars().all()
                 for ch in chans:
                     try:
                         from aios.channels.whatsapp import WhatsAppChannel

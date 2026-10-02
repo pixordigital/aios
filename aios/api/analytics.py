@@ -196,10 +196,10 @@ async def pgvector_health(db: DatabaseBackend = Depends(get_db_backend)):
 @router.get("/health/evolution-rate/{instance}")
 async def evolution_rate(instance: str):
     try:
-        from aios.core.whatsapp_guard import _hour_key, _day_key
+        from aios.core.whatsapp_guard import _warmup_limits
         import time
-        # mock rate check
-        return {"instance": instance, "per_min": 15, "per_hour": 120, "per_day": 800, "status": "ok"}
+        per_min, per_hour, per_day = _warmup_limits(instance, time.time())
+        return {"instance": instance, "per_min": per_min, "per_hour": per_hour, "per_day": per_day, "status": "ok"}
     except Exception as e:
         return {"instance": instance, "error": str(e)}
 

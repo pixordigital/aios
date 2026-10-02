@@ -139,13 +139,25 @@ async def webhook(request: Request, db: DatabaseBackend = Depends(get_db_backend
     if not text:
         raise HTTPException(400, "sem texto nem áudio")
     from_number = str(body.get("from", ""))[:30]
+    # When the bridge names an agent, the channel must belong to that agent's
+    # org. Otherwise a caller holding only the shared bridge secret could name
+    # any tenant's channel_id, or land on the global first-active fallback.
+    agent_org = ""
+    if body.get("agent_id"):
+        from aios.db.models import Agent as _Agent
+        ag = await db.get(_Agent, body["agent_id"])
+        if ag:
+            agent_org = ag.org_id or ""
     channel_connection_id = ""
     if body.get("channel_id"):
         ch = await db.get(ChannelConnection, body["channel_id"])
-        if ch and ch.channel_type == "voice" and ch.is_active:
+        if ch and ch.channel_type == "voice" and ch.is_active and (not agent_org or ch.org_id == agent_org):
             channel_connection_id = ch.id
     if not channel_connection_id:
-        result = await db.execute(select(ChannelConnection).where(ChannelConnection.channel_type == "voice", ChannelConnection.is_active == True).limit(1))  # noqa: E712
+        q = select(ChannelConnection).where(ChannelConnection.channel_type == "voice", ChannelConnection.is_active == True)  # noqa: E712
+        if agent_org:
+            q = q.where(ChannelConnection.org_id == agent_org)
+        result = await db.execute(q.limit(1))
         first = result.scalars().first()
         if first:
             channel_connection_id = first.id

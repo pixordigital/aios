@@ -82,7 +82,7 @@ async def claim_task(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    task = await swarm.claim(task_id, agent_id)
+    task = await swarm.claim(task_id, agent_id, org_id)
     if not task:
         raise HTTPException(404, "task not found or not claimable")
     return task
@@ -95,7 +95,7 @@ async def complete_task(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    task = await swarm.complete(task_id, result=result, error=error)
+    task = await swarm.complete(task_id, result=result, error=error, org_id=org_id)
     if not task:
         raise HTTPException(404, "task not found")
     return task
@@ -110,7 +110,7 @@ async def consensus_vote(
 ):
     if vote not in ("approve", "reject", "abstain"):
         raise HTTPException(400, "vote must be approve|reject|abstain")
-    task = await swarm.vote(task_id, agent_id, vote)
+    task = await swarm.vote(task_id, agent_id, vote, org_id=org_id)
     if not task:
         raise HTTPException(404, "task not found")
     return task
@@ -122,7 +122,7 @@ async def list_swarm_tasks(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    rows = await swarm.list_tasks(team_id=team_id, status=status, limit=limit)
+    rows = await swarm.list_tasks(team_id=team_id, status=status, limit=limit, org_id=org_id)
     return {"items": rows, "total": len(rows)}
 
 
@@ -132,7 +132,7 @@ async def swarm_stats(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    return await swarm.stats(team_id)
+    return await swarm.stats(team_id, org_id=org_id)
 
 
 # ── Shared memory ──

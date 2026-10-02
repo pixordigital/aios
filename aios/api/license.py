@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 
+from aios.api.admin_api import require_admin_key
 from aios.config import settings
 from aios.db.backend import db_session
 from aios.db.models import Organization
@@ -18,7 +19,12 @@ EXPECTED_DIGEST = ""  # set via env AIOS_IMAGE_DIGEST no Control Plane build
 EXPECTED_FP = hashlib.sha256((settings.jwt_secret or "change-me").encode()).hexdigest()[:16]
 
 @router.post("/heartbeat")
-async def heartbeat(request: Request):
+async def heartbeat(request: Request, _: None = Depends(require_admin_key)):
+    """Fleet-only. The body carries an unauthenticated org_id and this
+    endpoint mutates license_status/tamper_score, so anonymous callers must
+    never reach it: without the gate, two curl calls suspend then ban any
+    tenant. Client instances authenticate with the fleet master key, same as
+    every /api/admin endpoint."""
     body = await request.json()
     org_id = (body.get("org_id") or "").strip()
     plan_claim = (body.get("plan_claim") or "").strip()
