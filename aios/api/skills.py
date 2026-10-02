@@ -38,7 +38,7 @@ async def list_skills(
     q: str = "",
     user: User = Depends(get_current_user),
 ):
-    skills = await skill_store.list(agent_id=agent_id, q=q)
+    skills = await skill_store.list(agent_id=agent_id, q=q, org_id=user.org_id)
     return {"skills": skills}
 
 
@@ -67,7 +67,7 @@ async def update_skill(
     user: User = Depends(get_current_user),
 ):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
-    skill = await skill_store.update(skill_id, **fields)
+    skill = await skill_store.update(skill_id, org_id=user.org_id, **fields)
     if not skill:
         raise HTTPException(404, "Skill not found")
     return skill
@@ -78,7 +78,7 @@ async def delete_skill(
     skill_id: str,
     user: User = Depends(get_current_user),
 ):
-    ok = await skill_store.delete(skill_id)
+    ok = await skill_store.delete(skill_id, org_id=user.org_id)
     if not ok:
         raise HTTPException(404, "Skill not found")
     return {"ok": True}
@@ -90,10 +90,10 @@ async def apply_skill(
     user: User = Depends(get_current_user),
 ):
     """Increment usage count and return skill content for injection."""
-    skill = await skill_store.get(skill_id)
+    skill = await skill_store.get(skill_id, org_id=user.org_id)
     if not skill:
         raise HTTPException(404, "Skill not found")
-    await skill_store.increment_usage(skill_id)
+    await skill_store.increment_usage(skill_id, org_id=user.org_id)
     return {
         "skill_id": skill.id,
         "name": skill.name,

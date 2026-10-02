@@ -161,33 +161,34 @@ class AgentTelemetry:
                 for key, m in list(self._metrics.items()):
                     avg_ms = m["total_response_ms"] // max(m["response_count"], 1)
 
-                    # upsert: update existing or create new
-                    existing = (await db.execute(
-                        select(AgentMetric).where(
-                            AgentMetric.agent_id == m["agent_id"],
-                            AgentMetric.hour == m["hour"],
+                    # Atomic upsert -- see the note in core/tracing.py. This was a
+                    # second, drifted copy of the same read-modify-write, and its
+                    # average treated avg_response_ms as a sum
+                    # (existing.avg_response_ms * (existing.messages - m["messages"])
+                    # + total_ms), which is wrong from the first flush onward.
+                    from aios.core.tracing import _metric_upsert_stmt
+                    _ins, AgentMetric = _metric_upsert_stmt()
+                    await db.execute(
+                        _ins(AgentMetric).values(
+                            agent_id=m["agent_id"], org_id=m["org_id"], hour=m["hour"],
+                            messages=m["messages"], tokens=m["tokens"],
+                            errors=m["errors"], tool_calls=m["tool_calls"],
+                            avg_response_ms=avg_ms, samples=m["response_count"],
+                        ).on_conflict_do_update(
+                            index_elements=["agent_id", "hour"],
+                            set_={
+                                "messages": AgentMetric.messages + m["messages"],
+                                "tokens": AgentMetric.tokens + m["tokens"],
+                                "errors": AgentMetric.errors + m["errors"],
+                                "tool_calls": AgentMetric.tool_calls + m["tool_calls"],
+                                "avg_response_ms": (
+                                    AgentMetric.__table__.c.avg_response_ms * AgentMetric.__table__.c.samples
+                                    + m["total_response_ms"]
+                                ) / (AgentMetric.__table__.c.samples + m["response_count"]),
+                                "samples": AgentMetric.__table__.c.samples + m["response_count"],
+                            },
                         )
-                    )).scalar_one_or_none()
-
-                    if existing:
-                        existing.messages += m["messages"]
-                        existing.tokens += m["tokens"]
-                        existing.errors += m["errors"]
-                        existing.tool_calls += m["tool_calls"]
-                        # recalculate avg
-                        total_ms = existing.avg_response_ms * (existing.messages - m["messages"]) + m["total_response_ms"]
-                        existing.avg_response_ms = total_ms // max(existing.messages, 1)
-                    else:
-                        db.add(AgentMetric(
-                            agent_id=m["agent_id"],
-                            org_id=m["org_id"],
-                            hour=m["hour"],
-                            messages=m["messages"],
-                            tokens=m["tokens"],
-                            errors=m["errors"],
-                            avg_response_ms=avg_ms,
-                            tool_calls=m["tool_calls"],
-                        ))
+                    )
 
                 await db.commit()
                 logger.info("Flushed %d metric entries to DB", len(self._metrics))

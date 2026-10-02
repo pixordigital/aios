@@ -50,9 +50,17 @@ def upgrade():
         cleaned = _clean(current)
         if cleaned is None:
             continue
+        # The read side above already handles `tools` coming back parsed (which
+        # is what Postgres does for a JSON column), but the write always sent
+        # json.dumps(...). asyncpg then encoded that string again, storing
+        # "[\"http_get\"]" -- a JSON *string* -- instead of the array. The agent
+        # runtime would iterate it character by character and the API would fail
+        # Pydantic validation. Bind the object itself on Postgres and the
+        # pre-serialised text on SQLite (which has no JSON bind codec).
+        payload = cleaned if bind.dialect.name == "postgresql" else json.dumps(cleaned)
         bind.execute(
             sa.text(f"UPDATE {TABLE} SET tools = :tools WHERE id = :id"),
-            {"tools": json.dumps(cleaned), "id": row.id},
+            {"tools": payload, "id": row.id},
         )
 
 

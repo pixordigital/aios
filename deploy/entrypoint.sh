@@ -47,14 +47,32 @@ fi
 wait_for_postgres
 wait_for_redis
 
+# NOTE: do NOT pipe alembic through `tee` here. In POSIX sh a pipeline's exit
+# status is that of its LAST command, and tee always succeeds, so the `if !`
+# guards below were unreachable: a failed migration was logged and then ignored,
+# gunicorn started against a half-migrated schema, and the deploy was reported
+# green. Capture the output to a file and check alembic's own status instead.
 echo "[entrypoint] alembic upgrade head..."
-if ! alembic upgrade head 2>&1 | tee /tmp/alembic.log; then
-  echo "[entrypoint] alembic head failed, trying heads..."
-  if ! alembic upgrade heads 2>&1 | tee -a /tmp/alembic.log; then
-    echo "[entrypoint] alembic failed, retrying once after 5s..."
+alembic upgrade head > /tmp/alembic.log 2>&1
+alembic_rc=$?
+if [ "$alembic_rc" -ne 0 ]; then
+  echo "[entrypoint] alembic upgrade head FAILED (rc=$alembic_rc), trying heads..."
+  cat /tmp/alembic.log
+  alembic upgrade heads > /tmp/alembic.log 2>&1
+  alembic_rc=$?
+  if [ "$alembic_rc" -ne 0 ]; then
+    echo "[entrypoint] alembic upgrade heads FAILED (rc=$alembic_rc), retrying once after 5s..."
+    cat /tmp/alembic.log
     sleep 5
-    alembic upgrade heads || echo "[entrypoint] alembic still failed, starting app anyway (DB may already be migrated)"
+    alembic upgrade heads > /tmp/alembic.log 2>&1
+    alembic_rc=$?
+    if [ "$alembic_rc" -ne 0 ]; then
+      echo "[entrypoint] FATAL: schema migration failed. Refusing to start."
+      cat /tmp/alembic.log
+      exit 1
+    fi
   fi
 fi
+cat /tmp/alembic.log
 
 exec "$@"

@@ -26,6 +26,15 @@ def _plan_limit(org: Organization, key: str):
     return limits.get(key)
 
 
+def _fx() -> float:
+    """USD -> BRL from settings, so one env var moves every cost figure."""
+    try:
+        from aios.config import settings as _s
+        return float(_s.usd_brl_rate)
+    except Exception:
+        return 5.5
+
+
 async def _is_sqlite(db) -> bool:
     """True when the backend is SQLite (tests, local dev). Postgres is the target."""
     try:
@@ -48,6 +57,13 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
 
     if not org.is_active:
         return False, "Organization is suspended"
+
+    # license_status was written by the anti-tamper control (aios/api/license.py
+    # sets "suspended"/"banned") but never read anywhere, so a banned org kept
+    # running on a full plan. Honour it here, next to the is_active gate.
+    status = (getattr(org, "license_status", None) or "active").lower()
+    if status not in ("active", "", "trial"):
+        return False, f"Organization is {status}"
 
     from aios.config import settings as _settings
     if _settings.internal_mode:
@@ -137,7 +153,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
             )).scalar() or 0
             # inclui WhatsApp se houver
             wa_cost = (await db.execute(select(func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month))).scalar() or 0
-            total_brl = (monthly_cost + wa_cost) * 5.5
+            total_brl = (monthly_cost + wa_cost) * _fx()
             if total_brl >= max_cost_brl:
                 return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${total_brl:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
 
@@ -155,7 +171,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
                 if b.scope and b.scope.get("agents"):
                     continue  # avançado filtrado em runtime
                 spent = (await db.execute(select(func.coalesce(func.sum(UsageRecord.cost_usd + UsageRecord.whatsapp_cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month))).scalar() or 0
-                spent_brl = spent * 5.5
+                spent_brl = spent * _fx()
                 pct = (spent_brl / b.amount_brl * 100) if b.amount_brl else 0
                 if pct >= 80:
                     logger.warning("Budget %s %s%% org %s (R$%.2f/R$%.0f)", b.name, round(pct), org_id, spent_brl, b.amount_brl)
@@ -340,6 +356,11 @@ async def get_monthly_usage(org_id: str, db) -> dict:
     total_messages = sum(r.messages for r in records)
     total_calls = sum(r.llm_calls for r in records)
     total_cost = sum(r.cost_usd or 0 for r in records)
+    # WhatsApp conversation charges are tracked separately. Leaving them out made
+    # the billing page's "Custo AIOS" show only the LLM share, so for a WhatsApp
+    # product the headline cost was understated.
+    whatsapp_messages = sum(getattr(r, "whatsapp_messages", 0) or 0 for r in records)
+    whatsapp_cost = sum(getattr(r, "whatsapp_cost_usd", 0) or 0 for r in records)
     avg_daily_cost = total_cost / max(day_of_month, 1)
     forecast_cost = avg_daily_cost * days_in_month_num
     forecast_tokens = (total_tokens / max(day_of_month, 1)) * days_in_month_num if day_of_month else 0
@@ -381,6 +402,11 @@ async def get_monthly_usage(org_id: str, db) -> dict:
         "total_messages": total_messages,
         "total_calls": total_calls,
         "total_cost": round(total_cost, 4),
+        "whatsapp_messages": whatsapp_messages,
+        "whatsapp_cost_usd": round(whatsapp_cost, 4),
+        # what the platform actually bills: LLM + WhatsApp. Both are already USD,
+        # so callers must apply FX exactly once.
+        "total_cost_all": round(total_cost + whatsapp_cost, 4),
         "avg_daily_cost": round(avg_daily_cost, 4),
         "avg_daily_tokens": int(total_tokens / max(day_of_month, 1)) if day_of_month else 0,
         "forecast_cost": round(forecast_cost, 4),

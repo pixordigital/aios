@@ -34,6 +34,33 @@ def _has_constraint(bind) -> bool:
 
 def upgrade():
     if not _has_constraint(op.get_bind()):
+        # This migration exists precisely because the database already holds
+        # duplicates of (org_id, channel_message_id) -- that is why dedup was
+        # added. Creating the constraint without collapsing them first fails
+        # with "Key (...) is duplicated", i.e. exactly on the databases that
+        # need the migration. Collapse first, keeping the newest row per key.
+        # NULL channel_message_id rows are untouched (Postgres treats NULLs as
+        # distinct in a unique index).
+        op.execute(
+            sa.text(
+                f"""
+                DELETE FROM {TABLE}
+                WHERE channel_message_id IS NOT NULL
+                  AND id NOT IN (
+                    SELECT id FROM (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY org_id, channel_message_id
+                                   ORDER BY created_at DESC, id DESC
+                               ) AS rn
+                        FROM {TABLE}
+                        WHERE channel_message_id IS NOT NULL
+                    ) ranked
+                    WHERE ranked.rn = 1
+                )
+                """
+            )
+        )
         # batch mode: SQLite cannot ALTER a constraint, so alembic needs the
         # copy-and-move strategy. Without it the whole chain aborts here on any
         # SQLite-backed deployment (dev/test) before reaching later migrations.
@@ -43,4 +70,9 @@ def upgrade():
 
 def downgrade():
     if _has_constraint(op.get_bind()):
-        op.drop_constraint(CONSTRAINT, TABLE, type_="unique")
+        # Symmetric with upgrade(): in SQLite batch mode alembic materialises the
+        # unique constraint as a unique INDEX, and SQLite has no
+        # ALTER TABLE ... DROP CONSTRAINT, so the bare form raised on any
+        # SQLite deployment.
+        with op.batch_alter_table(TABLE) as batch:
+            batch.drop_constraint(CONSTRAINT, type_="unique")

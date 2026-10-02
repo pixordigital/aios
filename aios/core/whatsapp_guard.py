@@ -1,6 +1,6 @@
 import logging
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 
 logger = logging.getLogger(__name__)
 
@@ -10,8 +10,20 @@ OPT_IN_KEYWORDS = {"sim", "aceito", "quero", "opt in"}
 _contact_queues: dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
 _opt_out: set[str] = set()
 _opt_in: set[str] = set()
-_last_text: dict[str, tuple[str, float]] = {}
-_last_numbers: dict[str, list[str]] = defaultdict(list)
+# These were unbounded: one permanent entry per unique phone number, plus a
+# plain list per number with no maxlen (unlike the sibling _contact_queues, which
+# correctly caps at 100). At tens of thousands of leads that is a slow leak in a
+# 1536MB container. Cap both.
+_GUARD_MAX_CONTACTS = 20000
+_last_text: "OrderedDict[str, tuple[str, float]]" = OrderedDict()
+_last_numbers: dict[str, deque] = defaultdict(lambda: deque(maxlen=50))
+
+
+def _remember_contact(key: str) -> None:
+    """Track LRU access and evict the oldest contact past the cap."""
+    _last_text[key] = _last_text.pop(key, (0.0, 0.0))
+    while len(_last_text) > _GUARD_MAX_CONTACTS:
+        _last_text.popitem(last=False)
 
 
 def is_opt_out(text: str) -> bool:
@@ -277,6 +289,7 @@ async def guard_send(
     record_send(contact)
     record_global_send(instance)
     _last_text[contact] = (text.strip(), time.time())
+    _remember_contact(contact)  # LRU touch + eviction past the cap
     return True, ""
 
 

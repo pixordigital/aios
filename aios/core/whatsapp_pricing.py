@@ -15,7 +15,15 @@ RATES_BR = {
     "service": 0.0042,
 }
 
-TWILIO_PER_MSG_BRL = 0.005 * 5.5  # USD*5.5 p/ BRL estimado
+def _fx() -> float:
+    try:
+        from aios.config import settings as _s
+        return float(_s.usd_brl_rate)
+    except Exception:
+        return 5.5
+
+
+TWILIO_PER_MSG_BRL = 0.005 * _fx()  # USD->BRL via AIOS_USD_BRL_RATE
 FREE_SERVICE_MONTHLY = 1000
 ENTRY_POINT_HOURS = 72
 OCT_2026_CUTOFF = "2026-10-01"
@@ -64,7 +72,7 @@ def whatsapp_cost_for_messages(messages: list[dict], after_oct: bool = False) ->
     # só cobra twilio se não foi entry_point free? Twilio cobra sempre $0.005 mesmo dentro janela, exceto entry_point?
     # Simplifica: entry_point já foi skipado, então twilio só para billable msgs
     billable_count = sum(split.values())
-    twilio_brl = billable_count * 0.005 * 5.5
+    twilio_brl = billable_count * 0.005 * _fx()
     total_brl = round(meta_brl + twilio_brl, 4)
     return {
         "total_brl": total_brl,
@@ -80,10 +88,10 @@ def estimate_creation_cost(agent_type: str, model: str = "openai/gpt-4o-mini", t
     """Custo criação agente: tokens de teste × modelo. Automático."""
     from aios.core.tracing import estimate_cost
 
-    return round(estimate_cost(model, trial_tokens) * 5.5, 2)  # BRL
+    return round(estimate_cost(model, trial_tokens) * _fx(), 2)  # BRL
 
 
 def get_rates(country: str = "BR") -> dict:
     if country == "BR":
-        return {"country": "BR", "currency": "BRL", "rates": RATES_BR, "twilio_per_msg_brl": round(0.005 * 5.5, 4), "free_service_monthly": FREE_SERVICE_MONTHLY, "entry_point_hours": ENTRY_POINT_HOURS, "oct_cutoff": OCT_2026_CUTOFF}
-    return {"country": country, "rates": RATES_BR, "twilio_per_msg_brl": round(0.005 * 5.5, 4)}
+        return {"country": "BR", "currency": "BRL", "rates": RATES_BR, "twilio_per_msg_brl": round(0.005 * _fx(), 4), "free_service_monthly": FREE_SERVICE_MONTHLY, "entry_point_hours": ENTRY_POINT_HOURS, "oct_cutoff": OCT_2026_CUTOFF}
+    return {"country": country, "rates": RATES_BR, "twilio_per_msg_brl": round(0.005 * _fx(), 4)}

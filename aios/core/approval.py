@@ -16,11 +16,15 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PendingAction:
+    # NOTE: this in-memory dataclass shadows the identically named SQLAlchemy
+    # model in aios/db/models.py. Both need org_id: the dataclass is what
+    # approve()/reject() gate on, the model is what the approvals API queries.
     id: str
-    agent_id: str
-    conversation_id: str
-    tool_name: str
-    tool_args: dict
+    org_id: str = ""
+    agent_id: str = ""
+    conversation_id: str = ""
+    tool_name: str = ""
+    tool_args: dict = field(default_factory=dict)
     context_summary: str = ""
     status: str = "pending"  # pending|approved|rejected|expired
     created_at: float = field(default_factory=time.time)
@@ -42,9 +46,11 @@ class ApprovalManager:
         tool_name: str,
         tool_args: dict,
         context_summary: str = "",
+        org_id: str = "",
     ) -> bool:
         pa = PendingAction(
             id=action_id,
+            org_id=org_id,
             agent_id=agent_id,
             conversation_id=conversation_id,
             tool_name=tool_name,
@@ -121,8 +127,17 @@ class ApprovalManager:
             pass
         return pa.status == "approved"
 
-    def approve(self, action_id: str, decided_by: str = "") -> bool:
+    def approve(self, action_id: str, decided_by: str = "", org_id: str = "") -> bool:
         pa = self._pending.get(action_id)
+        # Org gate. Without it the DB fallback below happily wrote
+        # status="approved" onto another tenant's row and then returned False,
+        # so the API reported 404 while the cross-tenant write had already landed.
+        if pa is not None and org_id and getattr(pa, "org_id", "") != org_id:
+            logger.warning(
+                "approve refused cross-org: action=%s want_org=%s actual_org=%s",
+                action_id, org_id, getattr(pa, "org_id", ""),
+            )
+            return False
         if not pa or pa.status != "pending":
             try:
                 import asyncio as _asyncio
@@ -132,7 +147,18 @@ class ApprovalManager:
 
                 async def _db_approve():
                     async with _sess() as sess:
-                        db_pa = await sess.get(DBAction, action_id)
+                        from sqlalchemy import select as _sel
+
+                        # Scope the fallback by org too: an unscoped get() here is
+                        # what made approve() a cross-tenant write.
+                        if org_id:
+                            db_pa = (await sess.execute(
+                                _sel(DBAction).where(
+                                    DBAction.id == action_id, DBAction.org_id == org_id
+                                )
+                            )).scalar_one_or_none()
+                        else:
+                            db_pa = await sess.get(DBAction, action_id)
                         if db_pa and db_pa.status == "pending":
                             db_pa.status = "approved"
                             db_pa.decided_by = decided_by
@@ -156,8 +182,14 @@ class ApprovalManager:
         logger.info("Approved: %s by %s", action_id, decided_by)
         return True
 
-    def reject(self, action_id: str, decided_by: str = "") -> bool:
+    def reject(self, action_id: str, decided_by: str = "", org_id: str = "") -> bool:
         pa = self._pending.get(action_id)
+        if pa is not None and org_id and getattr(pa, "org_id", "") != org_id:
+            logger.warning(
+                "reject refused cross-org: action=%s want_org=%s actual_org=%s",
+                action_id, org_id, getattr(pa, "org_id", ""),
+            )
+            return False
         if not pa or pa.status != "pending":
             return False
         pa.status = "rejected"
@@ -165,12 +197,14 @@ class ApprovalManager:
         logger.info("Rejected: %s by %s", action_id, decided_by)
         return True
 
-    def get_pending(self, agent_id: str = "") -> list[dict]:
+    def get_pending(self, agent_id: str = "", org_id: str = "") -> list[dict]:
         result = []
         for pa in self._pending.values():
             if pa.status != "pending":
                 continue
             if agent_id and pa.agent_id != agent_id:
+                continue
+            if org_id and getattr(pa, "org_id", "") != org_id:
                 continue
             result.append(
                 {

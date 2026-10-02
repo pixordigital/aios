@@ -103,10 +103,12 @@ async def lifespan(app: FastAPI):
     await _register_syscall_handlers()
     logger.info("Syscall handlers registered")
 
-    # Start event bus (processes inbound messages from channels)
-    from aios.core.event_bus import event_bus
-    await event_bus.start()
-    logger.info("Event bus started")
+    # NOTE: the event bus used to be started here. It has zero publishers and
+    # zero subscribers anywhere in the codebase -- real inbound traffic goes
+    # through core/dispatch.py to ARQ -- so it spawned 10 asyncio tasks per
+    # process (20 with --workers 2) that blocked on an always-empty queue, and its
+    # QueueFull/no-subscriber paths silently discarded anything ever sent.
+    # Removed rather than left running as dead weight.
 
     # Log scheduler stats periodically
     async def _log_scheduler():
@@ -239,8 +241,7 @@ async def lifespan(app: FastAPI):
         pass
 
     # Stop event bus
-    from aios.core.event_bus import event_bus
-    await event_bus.stop()
+    logger.info("event bus removed; shutdown cleanup complete")
 
     logger.info("Shutting down AIOS...")
 
@@ -384,7 +385,13 @@ app.add_middleware(
 
 
 # dashboard auth middleware
-AUTH_EXEMPT = {"/dashboard/login", "/dashboard/register", "/dashboard/logout", "/dashboard/"}
+# NOTE: do NOT exempt "/dashboard/" here. The dashboard router serves both
+# "" and "/", so the trailing-slash form matched this set, skipped auth entirely,
+# and _org_filter() then fell back to _default_org_id() -- which returns the
+# "pixor" operator org. An anonymous internet request to /dashboard/ rendered
+# that tenant's agent roster, team names and monthly spend. Exempt only the
+# genuine unauthenticated endpoints.
+AUTH_EXEMPT = {"/dashboard/login", "/dashboard/register", "/dashboard/logout"}
 
 # ponytail: referer check for dashboard state-changes — CSRF defense without token state
 # Covers POST (all) + GET mutations (delete/clone/toggle/revoke/remove/suspend/deploy).

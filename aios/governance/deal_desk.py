@@ -62,6 +62,7 @@ async def audit_deal_change(deal, new_value: float, new_extra: dict | None, org,
         # cria PendingAction alert-only, expira em X dias por org, regra genérica + disclaimer longo
         expiry_days = _expiry_days_for_org(org)
         pa = PendingAction(
+            org_id=deal.org_id or "",
             agent_id=agent_id or deal.agent_id or deal.id,
             conversation_id=deal.id,
             tool_name="deal_desk_approval",
@@ -86,7 +87,7 @@ async def check_human_deviation(deal, body: dict, org, db, user_id: str):
     """Detecta desvio humano: stage pulado, close_date 3×, valor fora SOP. Alert-only, expira em X dias."""
     if body.get("stage") == "opportunity" and deal.stage == "prospection":
         expiry_days = _expiry_days_for_org(org)
-        pa = PendingAction(agent_id=deal.agent_id or deal.id, conversation_id=deal.id, tool_name="human_deviation", tool_args={"deal_id": deal.id, "deviation": "stage_skip", "from": deal.stage, "to": body["stage"], "generic_rule": "SOP stage", "disclaimer_version": "v1-long", "human_decision_required": True, "alert_only": True}, context_summary=f"Alerta: possível desvio humano {user_id} pulou {deal.stage}→{body['stage']} fora SOP. Validação humana obrigatória. Expira em {expiry_days}d. Alerta informativo.", status="pending")
+        pa = PendingAction(org_id=deal.org_id or "", agent_id=deal.agent_id or deal.id, conversation_id=deal.id, tool_name="human_deviation", tool_args={"deal_id": deal.id, "deviation": "stage_skip", "from": deal.stage, "to": body["stage"], "generic_rule": "SOP stage", "disclaimer_version": "v1-long", "human_decision_required": True, "alert_only": True}, context_summary=f"Alerta: possível desvio humano {user_id} pulou {deal.stage}→{body['stage']} fora SOP. Validação humana obrigatória. Expira em {expiry_days}d. Alerta informativo.", status="pending")
         try:
             from datetime import datetime, timedelta, timezone
 

@@ -42,9 +42,12 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_budgets_org_id'), ['org_id'], unique=False)
 
     with op.batch_alter_table('usage_records', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('whatsapp_messages', sa.Integer(), nullable=False))
-        batch_op.add_column(sa.Column('whatsapp_cost_usd', sa.Float(), nullable=False))
-        batch_op.add_column(sa.Column('whatsapp_split', sa.JSON(), nullable=False))
+        # server_default is required: adding NOT NULL without one aborts on any
+        # table that already has rows ("contains null values" on Postgres). It
+        # only appeared to work because create_all had already added the columns.
+        batch_op.add_column(sa.Column('whatsapp_messages', sa.Integer(), nullable=False, server_default='0'))
+        batch_op.add_column(sa.Column('whatsapp_cost_usd', sa.Float(), nullable=False, server_default='0'))
+        batch_op.add_column(sa.Column('whatsapp_split', sa.JSON(), nullable=False, server_default='{}'))
 
     # ### end Alembic commands ###
 

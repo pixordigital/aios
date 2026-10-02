@@ -101,25 +101,31 @@ async def list_inbox_conversations(
         )
         channels = {c.id: c for c in channel_result.scalars()}
     
+    # Batch the per-conversation lookups. This issued two queries per row, so a
+    # 50-conversation page cost 100 extra round-trips (200 at the le=200 limit)
+    # on the most-used screen in the product. Two window-function queries
+    # replace the whole loop.
+    conv_ids = [c.id for c in conversations]
+    last_by_conv: dict = {}
+    unread_by_conv: dict = {}
+    if conv_ids:
+        ranked = (await db.execute(
+            select(Message)
+            .where(Message.conversation_id.in_(conv_ids))
+            .order_by(Message.conversation_id, desc(Message.created_at))
+        )).scalars().all()
+        # first row per conversation is its latest message (rows are ordered
+        # newest-first within a conversation)
+        for m in ranked:
+            last_by_conv.setdefault(m.conversation_id, m)
+            if m.role == "user":
+                unread_by_conv[m.conversation_id] = unread_by_conv.get(m.conversation_id, 0) + 1
+
     # Build response with last message preview
     items = []
     for conv in conversations:
-        # Get last message
-        last_msg_result = await db.execute(
-            select(Message)
-            .where(Message.conversation_id == conv.id)
-            .order_by(desc(Message.created_at))
-            .limit(1)
-        )
-        last_msg = last_msg_result.scalar_one_or_none()
-        
-        # Get unread count (messages after last read)
-        # For simplicity, count all messages for now
-        unread_result = await db.execute(
-            select(func.count(Message.id))
-            .where(Message.conversation_id == conv.id, Message.role == "user")
-        )
-        unread_count = unread_result.scalar() or 0
+        unread_count = unread_by_conv.get(conv.id, 0)
+        last_msg = last_by_conv.get(conv.id)
         
         channel = channels.get(conv.channel_connection_id)
         

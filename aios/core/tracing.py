@@ -17,7 +17,11 @@ trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "trace_id", default=""
 )
 
-TRACES: dict[str, "TraceSpan"] = {}
+# Bounded: spans were inserted on every start_span and only ever updated, never
+# removed, so the dict grew monotonically until the 1536MB container was OOM
+# killed. Keep the most recent N; callers already render only the tail.
+TRACES_MAX = 2000
+TRACES: "dict[str, TraceSpan]" = {}
 METRICS: dict = {"llm_calls": 0, "llm_tokens": 0, "tool_calls": 0, "errors": 0}
 
 # ─── Usage events for metered billing ───
@@ -63,6 +67,11 @@ def start_span(span_type: str, **kw) -> TraceSpan:
     s = TraceSpan(trace_id=tid, span_type=span_type, start=time.time(), **kw)
     key = f"{tid}_{span_type}_{int(s.start * 1000)}"
     TRACES[key] = s
+    # Evict oldest once over the cap. Insertion order is start order, so the
+    # first keys are the oldest.
+    if len(TRACES) > TRACES_MAX:
+        for _old in list(TRACES.keys())[: len(TRACES) - TRACES_MAX]:
+            TRACES.pop(_old, None)
     _log_span_event("start", s)
     return s
 
@@ -114,6 +123,23 @@ def end_span(span: TraceSpan, tokens: int = 0, error: str = ""):
     _maybe_flush_metrics()
 
 
+def _metric_upsert_stmt():
+    """INSERT .. ON CONFLICT for AgentMetric, dialect-aware.
+
+    SQLite supports ON CONFLICT from 3.24 but needs its own insert construct, and
+    the Postgres one is not portable. Pick from the live bind so tests and local
+    SQLite runs behave like production.
+    """
+    from aios.db.engine import engine
+    from aios.db.models import AgentMetric
+    name = engine.sync_engine.dialect.name if hasattr(engine, "sync_engine") else "postgresql"
+    if name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as _ins
+    else:
+        from sqlalchemy.dialects.postgresql import insert as _ins
+    return _ins, AgentMetric
+
+
 async def _persist_span(span: TraceSpan):
     try:
         from aios.db.engine import async_session
@@ -127,37 +153,46 @@ async def _persist_span(span: TraceSpan):
         async with async_session() as sess:
             from sqlalchemy import select
 
-            m = (
-                await sess.execute(
-                    select(AgentMetric).where(
-                        AgentMetric.agent_id == agent_id, AgentMetric.hour == hour
-                    )
-                )
-            ).scalar_one_or_none()
             dur = int((span.end - span.start) * 1000) if span.end else 0
-            if m:
-                m.tokens += tokens if (tokens := span.tokens) else 0
-                m.errors += 1 if span.error else 0
-                m.tool_calls += 1 if span.span_type == "tool" else 0
-                m.messages += 1 if span.span_type == "agent_run" else 0
-                m.avg_response_ms = (
-                    int((m.avg_response_ms + dur) / 2) if m.avg_response_ms else dur
+            tok = span.tokens or 0
+            err = 1 if span.error else 0
+            tc = 1 if span.span_type == "tool" else 0
+            msgs = 1 if span.span_type == "agent_run" else 0
+            _ins, AgentMetric = _metric_upsert_stmt()
+
+            # Atomic upsert. The old SELECT-then-INSERT had no unique constraint,
+            # so two concurrent spans for the same agent/hour both inserted, after
+            # which scalar_one_or_none() raised MultipleResultsFound and the bare
+            # `except Exception: pass` swallowed it -- telemetry for that agent/hour
+            # was then lost forever, silently, and the duplicate rows double-counted
+            # every dashboard total.
+            bind = AgentMetric.__table__
+            await sess.execute(
+                _ins(AgentMetric).values(
+                    agent_id=agent_id, org_id=org_id, hour=hour,
+                    tokens=tok, errors=err, tool_calls=tc, messages=msgs,
+                    avg_response_ms=dur, samples=1,
+                ).on_conflict_do_update(
+                    index_elements=["agent_id", "hour"],
+                    set_={
+                        "tokens": AgentMetric.tokens + tok,
+                        "errors": AgentMetric.errors + err,
+                        "tool_calls": AgentMetric.tool_calls + tc,
+                        "messages": AgentMetric.messages + msgs,
+                        # weighted running mean. (avg + dur) / 2 is the mean only
+                        # at n == 2, so the reported latency drifted toward the most
+                        # recent call.
+                        "avg_response_ms": (
+                            AgentMetric.__table__.c.avg_response_ms * AgentMetric.__table__.c.samples + dur
+                        ) / (AgentMetric.__table__.c.samples + 1),
+                        "samples": AgentMetric.__table__.c.samples + 1,
+                    },
                 )
-            else:
-                m = AgentMetric(
-                    agent_id=agent_id,
-                    org_id=org_id,
-                    hour=hour,
-                    tokens=span.tokens,
-                    errors=1 if span.error else 0,
-                    tool_calls=1 if span.span_type == "tool" else 0,
-                    messages=1 if span.span_type == "agent_run" else 0,
-                    avg_response_ms=dur,
-                )
-                sess.add(m)
+            )
             await sess.commit()
     except Exception:
-        pass
+        logger.exception("agent metric persist failed (agent=%s hour=%s)", agent_id, hour)
+
 
 
 _COST_PER_1K = {

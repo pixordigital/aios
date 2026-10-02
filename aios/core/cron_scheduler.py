@@ -13,6 +13,7 @@ _task: asyncio.Task | None = None
 _last_backup_day: str | None = None
 _last_proactive_alert_day: str | None = None
 _last_crm_mql_alert_day: str | None = None
+_lock_sess = None
 
 async def _tick():
     from aios.db.engine import async_session
@@ -40,6 +41,29 @@ async def _tick():
             if trig.next_run_at and trig.next_run_at <= now:
                 should_run = True
             if should_run:
+                # Claim the trigger FIRST with a conditional UPDATE. Reading
+                # next_run_at and advancing it afterwards let every worker that
+                # polled the same due trigger fire it: with --workers 2 each cron
+                # workflow ran twice and the customer got every automated message
+                # twice. A conditional UPDATE is the lock -- the loser sees
+                # rowcount 0 and skips.
+                try:
+                    from sqlalchemy import update as _update
+                    _claim = await sess.execute(
+                        _update(AutomationTrigger)
+                        .where(
+                            AutomationTrigger.id == trig.id,
+                            AutomationTrigger.next_run_at <= now,
+                        )
+                        .values(next_run_at=croniter(trig.cron_expr, now).get_next(datetime),
+                                last_run_at=now)
+                    )
+                    await sess.commit()
+                    if _claim.rowcount == 0:
+                        continue  # another worker already claimed this tick
+                except Exception:
+                    logger.exception("cron claim failed for trigger %s", trig.id)
+                    continue
                 wf = await sess.get(Workflow, trig.workflow_id, options=[selectinload(Workflow.nodes)])
                 if not wf:
                     continue
@@ -51,14 +75,7 @@ async def _tick():
                     from aios.tasks.queue import enqueue_job
                     await enqueue_job("aios.tasks.jobs.workflow_run_job", {"workflow_id": wf.id, "run_id": run.id})
                 except Exception:
-                    pass
-                try:
-                    nxt = croniter(trig.cron_expr, now).get_next(datetime)
-                    trig.next_run_at = nxt
-                    trig.last_run_at = now
-                    await sess.commit()
-                except Exception:
-                    pass
+                    logger.exception("cron enqueue failed for trigger %s", trig.id)
                 logger.info("cron triggered workflow %s run %s", wf.id, run.id)
 
 async def _backup_tick():
@@ -247,7 +264,39 @@ async def _expire_pending_tick():
         logger.exception("expire_pending tick failed")
 
 
+async def _try_singleton_lock():
+    """Hold a Postgres advisory lock for this process' scheduler lifetime.
+
+    start_cron_scheduler() is called from the app lifespan, and lifespan runs
+    once per gunicorn worker. With --workers 2 that meant two schedulers, and
+    the module-level _last_backup_day / _last_proactive_alert_day guards were
+    per-process, so the daily backup, the sales-drop alerts and the
+    "deal parado ha 7+ dias" WhatsApp all fired twice. The advisory lock makes
+    exactly one process the scheduler regardless of worker count.
+    """
+    from aios.db.engine import async_session
+    from sqlalchemy import text as _t
+    global _lock_sess
+    try:
+        _lock_sess = async_session()
+        got = (await _lock_sess.execute(
+            _t("SELECT pg_try_advisory_lock(:k)"), {"k": 0x41494F53}
+        )).scalar()
+        return bool(got)
+    except Exception:
+        # SQLite (tests/local) has no advisory locks. Fall back to allowing it;
+        # SQLite is single-process anyway.
+        _lock_sess = None
+        return True
+
+
 async def _loop():
+    if not await _try_singleton_lock():
+        logger.warning(
+            "cron scheduler: another process holds the scheduler lock; this "
+            "worker will not run cron ticks"
+        )
+        return
     while _running:
         try:
             await _tick()
@@ -282,5 +331,6 @@ def start_cron_scheduler():
 def stop_cron_scheduler():
     global _running, _task
     _running = False
+    # advisory lock is released when the session/connection closes
     if _task:
         _task.cancel()
