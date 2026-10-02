@@ -80,7 +80,11 @@ def upgrade():
         updated = _add(current)
         if updated is None:
             continue
-        payload = updated if bind.dialect.name == "postgresql" else json.dumps(updated)
+        # sa.text() carries no column type, so the driver receives the raw
+        # Python object. asyncpg cannot encode a list (the Postgres branch
+        # used to pass it through), while a JSON string is accepted by both
+        # SQLite TEXT and Postgres json columns. Always serialise here.
+        payload = json.dumps(updated)
         bind.execute(
             sa.text(f"UPDATE {TABLE} SET tools = :tools WHERE id = :id"),
             {"tools": payload, "id": row.id},

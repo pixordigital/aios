@@ -52,6 +52,11 @@ wait_for_redis
 # guards below were unreachable: a failed migration was logged and then ignored,
 # gunicorn started against a half-migrated schema, and the deploy was reported
 # green. Capture the output to a file and check alembic's own status instead.
+#
+# set +e for this block: with `set -e` a failing bare `alembic ...` kills the
+# shell instantly and the rc guards below never run -- the migration failure
+# is silent and the container restart-loops with no error in its logs.
+set +e
 echo "[entrypoint] alembic upgrade head..."
 alembic upgrade head > /tmp/alembic.log 2>&1
 alembic_rc=$?
@@ -94,5 +99,6 @@ if [ "$alembic_rc" -ne 0 ]; then
   fi
 fi
 cat /tmp/alembic.log
+set -e
 
 exec "$@"
