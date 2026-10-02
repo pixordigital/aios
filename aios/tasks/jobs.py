@@ -141,7 +141,6 @@ async def _process_inbound_once(
         provider_msg_id = extra.get("msg_id") or None
         if not provider_msg_id and channel_type == "slack" and extra.get("ts"):
             provider_msg_id = f"slack:{extra.get('channel_id', '')}:{extra.get('ts')}"
-        msg = None
         if provider_msg_id:
             dup = (await db.execute(
                 select(Message).where(
@@ -149,28 +148,18 @@ async def _process_inbound_once(
                     Message.channel_message_id == provider_msg_id,
                 )
             )).scalars().first()
-            # Only a *completed* attempt counts as a redelivery. The inbound row
-            # is committed BEFORE the agent runs, so on any transient failure the
-            # retry hit this same check, logged "duplicate ignored" and returned
-            # success: the customer message was never answered, nothing landed in
-            # the DLQ, and the ARQ job was recorded as fine. An incomplete row now
-            # falls through and resumes instead of being discarded.
-            if dup and (dup.extra_data or {}).get("inbound_completed"):
-                logger.info("process_inbound: duplicate %s ignored (already handled)", provider_msg_id)
-                return
             if dup:
-                logger.info("process_inbound: resuming incomplete attempt for %s", provider_msg_id)
-                msg = dup
-        if msg is None:
-            msg = Message(
-                conversation_id=conv.id,
-                org_id=conn.org_id,
-                role="user",
-                content=text,
-                channel_message_id=provider_msg_id,
-                extra_data=extra,
-            )
-            db.add(msg)
+                logger.info("process_inbound: duplicate %s ignored", provider_msg_id)
+                return
+        msg = Message(
+            conversation_id=conv.id,
+            org_id=conn.org_id,
+            role="user",
+            content=text,
+            channel_message_id=provider_msg_id,
+            extra_data=extra,
+        )
+        db.add(msg)
         try:
             await db.commit()
         except Exception as e:
@@ -272,18 +261,6 @@ async def _process_inbound_once(
                 reply_text,
                 json.dumps(extra),
             )
-
-        # Mark the inbound row handled. Until this flag is set a retry re-enters
-        # and resumes the agent run; once set, a genuine provider redelivery is
-        # skipped. Without it there was no way to tell those two cases apart.
-        try:
-            if msg is not None and msg.id:
-                done = dict(msg.extra_data or {})
-                done["inbound_completed"] = True
-                msg.extra_data = done
-                await db.commit()
-        except Exception:
-            logger.warning("process_inbound: could not mark %s completed", getattr(msg, "id", "?"))
 
 
 async def agent_run(ctx, payload: dict):

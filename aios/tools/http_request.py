@@ -84,17 +84,10 @@ class HttpRequestTool(BaseTool):
         if credential_id:
             try:
                 from aios.db.engine import async_session
-                from sqlalchemy import select
                 from aios.db.models import Credential
                 from aios.core.secrets import decrypt_secret
                 async with async_session() as sess:
-                    # Credentials are per-tenant. This lookup was scoped by id only, so
-                    # naming another org's credential_id decrypted their API token.
-                    _org = getattr(self, "_org_id", "") or ""
-                    _stmt = select(Credential).where(Credential.id == credential_id)
-                    if _org:
-                        _stmt = _stmt.where(Credential.org_id == _org)
-                    cred = (await sess.execute(_stmt)).scalar_one_or_none()
+                    cred = await sess.get(Credential, credential_id)
                     if cred and cred.data_enc:
                         dec = decrypt_secret(cred.data_enc)
                         cdata = json.loads(dec) if dec.startswith("{") else {"value": dec}

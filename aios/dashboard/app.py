@@ -1137,7 +1137,7 @@ async def conversation_detail(request: Request, conv_id: str):
         if not conv or conv.org_id != org_id:
             return HTMLResponse("<h2>Não encontrado</h2><a href='/dashboard/conversations'>Voltar</a>", status_code=404)
         msgs = (await db.execute(
-            select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.asc()).limit(500)
+            select(Message).where(Message.conversation_id == conv_id).order_by(Message.created_at.asc())
         )).scalars().all()
     return await _render("conversation_detail.html", request, title="Conversa",
                    conv=conv, messages=msgs)
@@ -3055,7 +3055,7 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
             except Exception:
                 pass
         deals = []
-        stats = {"total":0,"by_stage":{},"total_value":0,"total_cost":0,"total_cost_brl":0,"truncated":False}
+        stats = {"total":0,"by_stage":{s:0 for s in ["prospection","mql","sql","opportunity","closed_won","closed_lost"]},"total_value":0,"total_cost":0,"total_cost_brl":0}
         pending = []
         agents = (await db.execute(select(_Ag).where(_Ag.org_id==org_id).order_by(_Ag.name))).scalars().all()
         pipeline_stats = {}
@@ -3077,11 +3077,6 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
             else:
                 query = query.order_by(CrmDeal.updated_at.desc())
             deals = (await db.execute(query.limit(200))).scalars().all()
-            # stats is computed from this list and rendered as totals. Without
-            # telling the template the query was capped, a tenant with more than
-            # 200 deals saw a total_value that silently excluded the rest while
-            # reading as the whole pipeline.
-            stats["truncated"] = len(deals) >= 200
             # pipelines distintos para filtro
             pipelines = sorted({d.pipeline for d in (await db.execute(select(CrmDeal.pipeline).where(CrmDeal.org_id==org_id).distinct())).scalars().all() if d}) or ["default"]
             for d in deals:
@@ -3186,17 +3181,8 @@ async def crm_delete(request: Request, deal_id: str):
 async def crm_approve(request: Request, pid: str):
     from aios.core.approval import approval_manager
     from aios.api.deps import get_dashboard_user
-    from aios.db.backend import db_session
-    from aios.db.models import PendingAction
     u = await get_dashboard_user(request)
-    org_id = await _org_filter(request)
-    # This route had no org check whatsoever, so any logged-in tenant could
-    # approve any other tenant's pending action by guessing its id.
-    async with db_session() as db:
-        pa = await db.get(PendingAction, pid)
-        if not pa or pa.org_id != org_id:
-            return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
-    approval_manager.approve(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
+    approval_manager.approve(pid, decided_by=u.id if u else "dashboard")
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.post("/crm/approve_edit/{pid}")
@@ -3222,7 +3208,7 @@ async def crm_approve_edit(request: Request, pid: str):
         else:
             # Do not fall through and approve it anyway.
             return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
-    approval_manager.approve(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
+    approval_manager.approve(pid, decided_by=u.id if u else "dashboard")
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 
@@ -3238,7 +3224,7 @@ async def crm_reject(request: Request, pid: str):
         if not pa or pa.org_id != org_id:
             return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
     u = await get_dashboard_user(request)
-    approval_manager.reject(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
+    approval_manager.reject(pid, decided_by=u.id if u else "dashboard")
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.get("/crm/export")

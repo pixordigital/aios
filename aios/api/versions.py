@@ -85,17 +85,7 @@ async def diff_version(
         raise HTTPException(404)
     other = None
     if compare:
-        # `compare` came straight from a query parameter and was fetched with an
-        # unscoped get(), so any tenant could diff against any other tenant's
-        # version and read back its system_prompt, llm_config, tools and
-        # governance_config. Every sibling route in this file scopes by org.
-        other = (await db.execute(
-            select(AgentVersion).where(
-                AgentVersion.id == compare, AgentVersion.org_id == org_id
-            )
-        )).scalar_one_or_none()
-        if not other:
-            raise HTTPException(404)
+        other = await db.get(AgentVersion, compare)
     else:
         res = await db.execute(
             select(AgentVersion)

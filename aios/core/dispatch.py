@@ -25,12 +25,8 @@ async def dispatch_inbound(
     """
     from aios.tasks.queue import get_redis_pool
 
+    pool = await get_redis_pool()
     try:
-        # Inside the try on purpose: get_redis_pool() used to be called above it,
-        # so a Redis outage raised out of dispatch_inbound straight into the
-        # webhook handler. Evolution got a 500, retried, gave up, and the DLQ
-        # fallback written below never ran.
-        pool = await get_redis_pool()
         await pool.enqueue_job(
             "aios.tasks.jobs.process_inbound",
             channel_type,

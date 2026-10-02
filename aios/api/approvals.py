@@ -15,8 +15,7 @@ async def list_approvals(
     agent_id: str = "",
     user: User = Depends(get_current_user),
 ):
-    org_id = user.org_id
-    pending = approval_manager.get_pending(agent_id=agent_id, org_id=org_id)
+    pending = approval_manager.get_pending(agent_id=agent_id)
     if status != "pending":
         pending = [p for p in pending if p["status"] == status]
     if not pending:
@@ -27,11 +26,7 @@ async def list_approvals(
             from aios.db.models import PendingAction as DBAction
 
             async with db_session() as db:
-                # org_id was missing here, so the queue listed every tenant's
-                # tool_args and context_summary.
-                q = select(DBAction).where(
-                    DBAction.status == status, DBAction.org_id == org_id
-                )
+                q = select(DBAction).where(DBAction.status == status)
                 if agent_id:
                     q = q.where(DBAction.agent_id == agent_id)
                 q = q.order_by(DBAction.created_at.desc()).limit(50)
@@ -60,7 +55,7 @@ async def approve_action(
     user: User = Depends(get_current_user),
 ):
     """Approve a pending tool call."""
-    ok = approval_manager.approve(action_id, decided_by=user.id, org_id=user.org_id)
+    ok = approval_manager.approve(action_id, decided_by=user.id)
     if not ok:
         raise HTTPException(404, "Action not found or already decided")
     return {"status": "approved", "action_id": action_id}
@@ -72,7 +67,7 @@ async def reject_action(
     user: User = Depends(get_current_user),
 ):
     """Reject a pending tool call."""
-    ok = approval_manager.reject(action_id, decided_by=user.id, org_id=user.org_id)
+    ok = approval_manager.reject(action_id, decided_by=user.id)
     if not ok:
         raise HTTPException(404, "Action not found or already decided")
     return {"status": "rejected", "action_id": action_id}

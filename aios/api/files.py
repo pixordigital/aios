@@ -89,24 +89,7 @@ async def upload_file(
     user=Depends(get_current_user),
 ):
     """Upload a file as an artifact linked to a conversation."""
-    # Stream and count. `await file.read()` materialised the entire body before
-    # the size check, and the only pre-check anywhere trusted the client's
-    # Content-Length header -- which is absent under Transfer-Encoding: chunked.
-    # A single chunked upload of a few GB therefore OOM-killed the worker in the
-    # 1536MB container.
-    chunks: list[bytes] = []
-    total = 0
-    while True:
-        chunk = await file.read(1024 * 1024)
-        if not chunk:
-            break
-        total += len(chunk)
-        if total > MAX_UPLOAD_SIZE:
-            raise HTTPException(
-                413, f"Arquivo muito grande (máx. {MAX_UPLOAD_SIZE // (1024*1024)}MB)"
-            )
-        chunks.append(chunk)
-    content = b"".join(chunks)
+    content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(413, f"Arquivo muito grande (máx. {MAX_UPLOAD_SIZE // (1024*1024)}MB)")
 

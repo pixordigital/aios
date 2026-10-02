@@ -198,21 +198,16 @@ async def _get_evolution_api_key(instance_name: str) -> str:
     from sqlalchemy import select as sql_select
     try:
         async with async_session() as conn:
-            # Push the filter into SQL. This pulled every tenant's config blob
-            # into Python on every inbound WhatsApp message and looped over it,
-            # so it scanned all tenants' rows on the hot path -- and resolved the
-            # API key by first match, which meant two orgs using the same
-            # instance name silently used each other's key.
             result = await conn.execute(
-                sql_select(ChannelConnection.config).where(
+                sql_select(ChannelConnection.config, ChannelConnection.org_id).where(
                     ChannelConnection.channel_type == "evolution",
                     ChannelConnection.is_active == True,
-                    ChannelConnection.config["instance"].as_string() == instance_name,
-                ).limit(1)
+                )
             )
-            row = result.first()
-            if row and isinstance(row[0], dict):
-                return row[0].get("api_key", "")
+            for config, org_id in result.all():
+                if config.get("instance") == instance_name:
+                    # ensure instance name is namespaced or unique per org
+                    return config.get("api_key", "")
             return ""
     except Exception:
         logger.debug("Could not fetch Evolution API key for signature check")

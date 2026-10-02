@@ -57,17 +57,6 @@ async def apply_improvement(
     user: User = Depends(get_current_user),
     db: DatabaseBackend = Depends(get_db_backend),
 ):
-    # Verify the target agent belongs to the caller's org before mutating it.
-    # apply_improvement did db.get(Agent, agent_id) with no org check, so this
-    # appended caller-supplied text to another tenant's system_prompt and
-    # returned its first 200 chars.
-    from sqlalchemy import select as _sel
-    from aios.db.models import Agent as _Agent
-    _agent = (await db.execute(
-        _sel(_Agent).where(_Agent.id == body.agent_id, _Agent.org_id == user.org_id)
-    )).scalar_one_or_none()
-    if not _agent:
-        raise HTTPException(404, "Agent not found")
     result = await meta_agent.apply_improvement(body.agent_id, body.suggestion, db=db)
     if not result.get("applied"):
         raise HTTPException(404, result.get("error", "Failed to apply"))

@@ -339,7 +339,6 @@ class CRMUpdateTool(BaseTool):
                     # find agent/conversation from deal if available
                     deal = await s.get(CrmDeal, deal_id) if 'CrmDeal' in locals() else None
                     pa = PendingAction(
-                        org_id=(deal.org_id if deal else getattr(self, "_org_id", "")) or "",
                         agent_id=deal.agent_id if deal and deal.agent_id else deal_id,
                         conversation_id=deal_id,
                         tool_name="crm_update_deal",

@@ -24,52 +24,12 @@ async def deliver_message(
     text: str,
     extra_data: str = "{}",
     attempt: int = 1,
-    idempotency_key: str = "",
 ):
     """Send message via channel. Retries with backoff on failure.
 
     Called directly (non-streaming) or via ARQ worker.
-
-    idempotency_key makes retries safe. If Evolution accepts a message but the
-    HTTP response is lost (timeout or reset on the way back), ch.send() raises
-    and the retry sends the identical text again -- the customer got the same
-    reply up to three times, and Meta sees duplicate content. The key is derived
-    from conversation + text + attempt-1 so every retry of the same logical
-    send shares it while a genuinely new send gets a fresh one.
     """
     from aios.channels.manager import manager as channel_mgr
-
-    if not idempotency_key:
-        import hashlib as _h
-        from datetime import datetime as _dt, timezone as _tz
-        # NOTE: the attempt number is deliberately NOT part of the key. Including
-        # it gave every retry a different key, so the pre-check could never
-        # suppress the duplicate it existed to prevent. The hour bucket scopes the
-        # suppression to a retry window instead of permanently.
-        _bucket = _dt.now(_tz.utc).strftime("%Y%m%d%H")
-        idempotency_key = _h.sha256(
-            f"{conversation_id}|{text}|{_bucket}".encode("utf-8")
-        ).hexdigest()[:32]
-
-    # Skip if this exact logical send already completed. The key is a sha256 of
-    # conversation + text + attempt, so it is unique per logical send and shared
-    # by every retry of it.
-    try:
-        from aios.db.engine import async_session as _sess
-        from sqlalchemy import select as _sel
-        from aios.db.models import Message as _Msg
-        async with _sess() as _s:
-            _already = (await _s.execute(
-                _sel(_Msg.id).where(_Msg.channel_message_id == idempotency_key).limit(1)
-            )).first()
-            if _already:
-                logger.info(
-                    "deliver_message: already sent under key %s, skipping retry",
-                    idempotency_key,
-                )
-                return
-    except Exception:
-        logger.debug("deliver_message: idempotency pre-check unavailable")
 
     try:
         extra = json.loads(extra_data) if isinstance(extra_data, str) else extra_data
@@ -107,16 +67,7 @@ async def deliver_message(
                     )
                     return
             except Exception:
-                # Fail CLOSED. The guard is the opt-out (LGPD) and anti-ban
-                # check; swallowing its error fell through to the send below, so
-                # a Redis blip delivered messages to numbers that had sent STOP,
-                # into cooldowns, and outside the 24h window. Losing a message is
-                # recoverable; breaking an opt-out and the WhatsApp ban limit is not.
-                logger.exception(
-                    "Guard raised for contact=%s; refusing to send (fail-closed)",
-                    channel_connection_id,
-                )
-                return
+                pass
         async with db_session() as db:
             conn = await db.get(ChannelConnection, channel_connection_id)
             if not conn:
@@ -144,21 +95,6 @@ async def deliver_message(
             result = await ch.send(msg)
 
             if result is not None:
-                # Record the key so a retry after a lost response is suppressed.
-                try:
-                    from aios.db.engine import async_session as _sess
-                    from aios.db.models import Message as _Msg
-                    async with _sess() as _s:
-                        _s.add(_Msg(
-                            conversation_id=conversation_id,
-                            org_id=getattr(conn, "org_id", ""),
-                            role="assistant",
-                            content=text,
-                            channel_message_id=idempotency_key,
-                        ))
-                        await _s.commit()
-                except Exception:
-                    logger.debug("deliver_message: could not record idempotency key")
                 logger.info("Message delivered to channel %s", channel_connection_id)
                 return
 
@@ -180,7 +116,6 @@ async def deliver_message(
                 text,
                 extra_data,
                 attempt + 1,
-                idempotency_key,  # same logical send -> same key -> suppressed
                 _defer_by=delay,
             )
         else:

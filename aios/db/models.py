@@ -318,29 +318,12 @@ class AgentMetric(Base):
     errors: Mapped[int] = mapped_column(default=0)
     avg_response_ms: Mapped[int] = mapped_column(default=0)
     tool_calls: Mapped[int] = mapped_column(default=0)
-    # Sample count behind avg_response_ms. The writer used (avg + dur) / 2,
-    # which is the mean only when there are exactly two samples, so the
-    # reported latency drifted toward the most recent call. Without a counter
-    # a correct weighted mean is not computable in SQL.
-    samples: Mapped[int] = mapped_column(default=0, server_default="0")
-
-    # One row per agent per hour. Without this, two concurrent spans both saw
-    # "no row" and both inserted; every later read then hit MultipleResultsFound,
-    # which the writer swallowed -- permanently and silently killing telemetry.
-    __table_args__ = (
-        UniqueConstraint("agent_id", "hour", name="uq_agent_metrics_agent_hour"),
-    )
 
 
 class PendingAction(Base, TimestampMixin):
     """Human-in-the-loop approval queue for agent tool calls."""
     __tablename__ = "pending_actions"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    # org_id is what makes the approval queue tenant-safe. Without it every
-    # approvals query had no org predicate at all, so GET /api/approvals listed
-    # other tenants' tool_args and approve/reject mutated other tenants' rows
-    # (while reporting 404, because the in-memory lookup missed).
-    org_id: Mapped[str] = mapped_column(String(36), index=True, default="")
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
     tool_name: Mapped[str] = mapped_column(String(255))

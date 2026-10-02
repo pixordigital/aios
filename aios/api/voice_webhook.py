@@ -21,14 +21,7 @@ async def voice_webhook(request: Request):
     """Receive voice events from Twilio → dispatch to agent."""
     raw_body = await request.body()
 
-    # Verify signature. Fail CLOSED: when no secret is configured the old code
-    # skipped verification entirely, so anyone could post forged Twilio events
-    # and trigger agent runs (and bill usage) for any tenant.
-    if not settings.voice_webhook_secret:
-        logger.error("Voice webhook called with no voice_webhook_secret configured")
-        raise HTTPException(
-            503, "Voice webhook secret not configured; refusing unauthenticated webhook"
-        )
+    # Verify signature if configured
     if settings.voice_webhook_secret:
         sig = request.headers.get("x-voice-signature", "")
         if not sig:

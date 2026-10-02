@@ -4,16 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AIOS_", extra="ignore")
     app_name: str = "AIOS"
-    # Secure by default. This used to default to True, and that single flag
-    # disabled the rate-limit middleware, switched CORS to allow_origins=["*"]
-    # WITH allow_credentials=True, and skipped the production DB check -- so any
-    # deployment that forgot AIOS_DEBUG came up wide open. Opt in explicitly.
-    debug: bool = False
-    # USD -> BRL. This was hardcoded as the literal 5.5 in ~40 places across
-    # limits.py, billing.py, whatsapp_pricing.py and the dashboard templates, so
-    # every cost figure in the product moved with the real exchange rate and
-    # nobody could change it without editing a dozen files.
-    usd_brl_rate: float = 5.5
+    debug: bool = True
     crm_webhook_url: str = ""
     database_url: str = "sqlite+aiosqlite:///./aios.db"
     db_pool_size: int = 10

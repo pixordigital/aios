@@ -17,20 +17,13 @@ class HubSpotTool(BaseTool):
     async def run(self, action: str, email: str = "", name: str = "", properties: dict | None = None, credential_id: str = "", api_key: str = "") -> dict:
         import httpx, json
         from aios.db.engine import async_session
-        from sqlalchemy import select
         from aios.db.models import Credential
         from aios.core.secrets import decrypt_secret
         token = api_key
         if credential_id:
             try:
                 async with async_session() as sess:
-# Credentials are per-tenant. This lookup was scoped by id only, so naming
-                # another org's credential_id decrypted their API token and sent it out.
-                    _org = getattr(self, "_org_id", "") or ""
-                    _stmt = select(Credential).where(Credential.id == credential_id)
-                    if _org:
-                        _stmt = _stmt.where(Credential.org_id == _org)
-                    c = (await sess.execute(_stmt)).scalar_one_or_none()
+                    c = await sess.get(Credential, credential_id)
                     if c and c.data_enc:
                         d = json.loads(decrypt_secret(c.data_enc))
                         token = d.get("token") or d.get("value") or token

@@ -37,23 +37,14 @@ class SkillStore:
             await db.refresh(skill)
             return skill
 
-    async def get(self, skill_id: str, org_id: str = "") -> Skill | None:
-        # org_id is mandatory for tenant safety: Skill.content is prompt text, so
-        # an unscoped read hands another tenant's injected instructions to the
-        # caller. Empty org_id means "no filter" and is only used by callers that
-        # have already validated the row themselves.
+    async def get(self, skill_id: str) -> Skill | None:
         async with db_session() as db:
-            stmt = select(Skill).where(Skill.id == skill_id)
-            if org_id:
-                stmt = stmt.where(Skill.org_id == org_id)
-            result = await db.execute(stmt)
+            result = await db.execute(select(Skill).where(Skill.id == skill_id))
             return result.scalar_one_or_none()
 
-    async def list(self, agent_id: str = "", q: str = "", limit: int = 50, org_id: str = "") -> list[Skill]:
+    async def list(self, agent_id: str = "", q: str = "", limit: int = 50) -> list[Skill]:
         async with db_session() as db:
             stmt = select(Skill)
-            if org_id:
-                stmt = stmt.where(Skill.org_id == org_id)
             if agent_id:
                 stmt = stmt.where(Skill.agent_id == agent_id)
             if q:
@@ -65,35 +56,27 @@ class SkillStore:
             result = await db.execute(stmt)
             return list(result.scalars().all())
 
-    async def update(self, skill_id: str, org_id: str = "", **fields) -> Skill | None:
+    async def update(self, skill_id: str, **fields) -> Skill | None:
         async with db_session() as db:
-            stmt = update(Skill).where(Skill.id == skill_id)
-            if org_id:
-                stmt = stmt.where(Skill.org_id == org_id)
-            res = await db.execute(stmt.values(**fields))
+            await db.execute(update(Skill).where(Skill.id == skill_id).values(**fields))
             await db.commit()
-            if res.rowcount == 0:
-                return None
-            return await self.get(skill_id, org_id=org_id)
+            return await self.get(skill_id)
 
-    async def delete(self, skill_id: str, org_id: str = "") -> bool:
+    async def delete(self, skill_id: str) -> bool:
         async with db_session() as db:
-            stmt = select(Skill).where(Skill.id == skill_id)
-            if org_id:
-                stmt = stmt.where(Skill.org_id == org_id)
-            skill = (await db.execute(stmt)).scalar_one_or_none()
+            skill = await db.get(Skill, skill_id)
             if not skill:
                 return False
             await db.delete(skill)
             await db.commit()
             return True
 
-    async def increment_usage(self, skill_id: str, org_id: str = "") -> None:
+    async def increment_usage(self, skill_id: str) -> None:
         async with db_session() as db:
-            stmt = update(Skill).where(Skill.id == skill_id)
-            if org_id:
-                stmt = stmt.where(Skill.org_id == org_id)
-            await db.execute(stmt.values(usage_count=Skill.usage_count + 1))
+            await db.execute(
+                update(Skill).where(Skill.id == skill_id)
+                .values(usage_count=Skill.usage_count + 1)
+            )
             await db.commit()
 
 

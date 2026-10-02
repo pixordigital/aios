@@ -464,7 +464,7 @@ def upgrade() -> None:
 
     with op.batch_alter_table('crm_deals', schema=None) as batch_op:
         batch_op.add_column(sa.Column('close_date', sa.DateTime(), nullable=True))
-        batch_op.add_column(sa.Column('probability', sa.Float(), nullable=False, server_default='0'))
+        batch_op.add_column(sa.Column('probability', sa.Float(), nullable=False))
         batch_op.create_index(batch_op.f('ix_crm_deals_close_date'), ['close_date'], unique=False)
         batch_op.create_index(batch_op.f('ix_crm_deals_created_at'), ['created_at'], unique=False)
 
@@ -531,7 +531,7 @@ def upgrade() -> None:
         batch_op.create_index(batch_op.f('ix_skills_created_at'), ['created_at'], unique=False)
 
     with op.batch_alter_table('teams', schema=None) as batch_op:
-        batch_op.add_column(sa.Column('handoff_config', sa.JSON(), nullable=False, server_default='{}'))
+        batch_op.add_column(sa.Column('handoff_config', sa.JSON(), nullable=False))
         batch_op.alter_column('routing_strategy',
                existing_type=sa.VARCHAR(length=50),
                nullable=False)
