@@ -37,7 +37,7 @@ EXPOSE 8777
 ENTRYPOINT ["/entrypoint.sh"]
 
 HEALTHCHECK --interval=15s --timeout=10s --start-period=90s --retries=10 \
-    CMD curl -sf http://localhost:8777/health/ready || exit 1
+    CMD curl -sf http://localhost:8777/health/live || exit 1
 
 STOPSIGNAL SIGTERM
 
