@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block content %}
+{% include '_whatsapp_tabs.html' %}
+
+<div class="flex-between" style="flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem">
+  <div>
+    <h1 style="font-size:1.125rem;font-weight:600">{{ tpl.name if tpl else 'Novo template' }}</h1>
+    <p style="font-size:0.75rem;color:var(--text-tertiary)">
+      {% if tpl and tpl.status != 'DRAFT' %}
+        Status no Meta:
+        <span class="font-mono">{{ tpl.status }}</span>
+        {% if tpl.rejected_reason and tpl.rejected_reason != 'NONE' %}
+          · motivo: <span class="font-mono">{{ tpl.rejected_reason }}</span>
+        {% endif %}
+      {% else %}Rascunho local — nada foi enviado ao Meta ainda.{% endif %}
+    </p>
+  </div>
+  <a href="/dashboard/whatsapp/templates" class="btn btn-ghost btn-sm">← Templates</a>
+</div>
+
+{% if submitted %}<div class="alert alert-success mb-3">Enviado ao Meta. A revisão pode levar até 24h; o status ainda não é um veredicto.</div>{% endif %}
+{% if synced %}<div class="alert alert-success mb-3">Status sincronizado com o Meta.</div>{% endif %}
+{% if error == 'lint' %}
+  <div class="alert alert-danger mb-3">
+    O envio foi bloqueado: o linter encontrou erros conhecidos. Corrija abaixo e tente de novo.
+  </div>
+{% endif %}
+{% if error == 'meta' %}
+  <div class="alert alert-danger mb-3">
+    O Meta recusou o envio{% if code %} (código <span class="font-mono">{{ code }}</span>){% endif %}.
+    <div style="font-size:0.75rem;margin-top:0.25rem">
+      O código é o do Meta. Motivos comuns: nome duplicado nesta WABA/idioma, ou token sem
+      <code>whatsapp_business_management</code>.
+    </div>
+  </div>
+{% endif %}
+
+{% if tpl and quota_note %}
+  <div class="alert mb-3" style="font-size:0.8125rem">{{ quota_note }}</div>
+{% endif %}
+
+{% if tpl and tpl.status == 'REJECTED' and tpl.rejection_note %}
+  <div class="alert alert-warning mb-3" style="font-size:0.8125rem">
+    <strong>Rejeitado.</strong> {{ tpl.rejection_note }}
+  </div>
+{% endif %}
+{% if tpl and tpl.status in ['PAUSED','DISABLED','LIMIT_EXCEEDED'] %}
+  <div class="alert alert-warning mb-3" style="font-size:0.8125rem">
+    Este template <strong>não pode mais ser enviado</strong> (Meta pausou ou desabilitou por
+    qualidade/pacing). Automações que o referenciam pelo nome vão falhar silenciosamente.
+  </div>
+{% endif %}
+
+<div style="display:grid;grid-template-columns:1fr 340px;gap:1rem;align-items:start">
+  <div class="card">
+    <form method="POST" action="/dashboard/whatsapp/templates/save" id="tplForm" style="display:flex;flex-direction:column;gap:0.75rem">
+      {% if tpl %}<input type="hidden" name="tpl_id" value="{{ tpl.id }}">{% endif %}
+
+      <div class="flex" style="gap:0.75rem">
+        <div style="flex:1">
+          <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Nome</label>
+          <input name="name" id="f_name" class="input" required placeholder="lembrete_consulta"
+                 pattern="[a-z0-9_]+" value="{{ tpl.name if tpl else '' }}">
+          <span style="font-size:0.625rem;color:var(--text-tertiary)">apenas minúsculas, números e underscore</span>
+        </div>
+        <div style="width:130px">
+          <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Idioma</label>
+          <input name="language" id="f_lang" class="input" value="{{ tpl.language if tpl else 'pt_BR' }}">
+        </div>
+        <div style="width:180px">
+          <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Categoria</label>
+          <select name="category" id="f_cat" class="input">
+            {% for c in categories %}
+              <option value="{{ c }}" {{ 'selected' if tpl and tpl.category == c else '' }}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Cabeçalho (opcional)</label>
+        <input name="header_text" id="f_header" class="input" value="{{ tpl.header_text if tpl else '' }}">
+      </div>
+
+      <div>
+        <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Corpo</label>
+        <textarea name="body" id="f_body" rows="6" class="input"
+                  placeholder="Olá {{1}}, sua consulta de {{2}} está confirmada.">{{ tpl.body if tpl else '' }}</textarea>
+        <span style="font-size:0.625rem;color:var(--text-tertiary)">
+          variáveis sequenciais: <span class="font-mono">{{ '{{1}}' }}</span>, <span class="font-mono">{{ '{{2}}' }}</span>…
+          o corpo não pode começar nem terminar em variável
+        </span>
+      </div>
+
+      <div>
+        <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Rodapé (opcional)</label>
+        <input name="footer" id="f_footer" class="input" value="{{ tpl.footer if tpl else '' }}">
+        <span style="font-size:0.625rem;color:var(--text-tertiary)">sem variáveis, sem negrito, até 60 caracteres</span>
+      </div>
+
+      <div>
+        <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Exemplos das variáveis</label>
+        <input name="examples" id="f_examples" class="input font-mono"
+               placeholder='{"1":"João","2":"12/03"}'
+               value="{{ tpl.examples_json | tojson if tpl and tpl.examples_json else '' }}">
+        <span style="font-size:0.625rem;color:var(--text-tertiary)">o Meta exige um exemplo para cada variável na criação</span>
+      </div>
+
+      <div class="flex" style="gap:0.5rem">
+        <button class="btn btn-ghost" type="submit">Salvar rascunho</button>
+        {% if tpl and connection %}
+          {#- formaction overrides this button's target while keeping it inside the
+              form; formmethod is explicit because it is a GET by default otherwise.
+              No `form=` attribute — there is no second form, and pointing at one
+              that does not exist silently detaches the button. -#}
+          <button class="btn btn-primary" type="submit" formmethod="post"
+                  formaction="/dashboard/whatsapp/templates/{{ tpl.id }}/submit"
+                  onclick="return window.__lintCanSubmit !== false;">
+            {{ 'Reenviar ao Meta' if tpl.meta_template_id else 'Enviar ao Meta' }}
+          </button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  <div>
+    <div class="card" id="lintCard">
+      <h2 style="font-size:0.875rem;font-weight:600;margin-bottom:0.5rem">Verificação local</h2>
+      <p style="font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.5rem">
+        Regras determinísticas aplicadas antes do envio. A aprovação final é do Meta e
+        não pode ser prevista.
+      </p>
+      <div id="lintOut" style="font-size:0.75rem">{% if findings %}carregando…{% else %}edite os campos para validar{% endif %}</div>
+    </div>
+
+    {% if tpl and tpl.meta_template_id %}
+      <div class="card" style="margin-top:0.75rem">
+        <h2 style="font-size:0.875rem;font-weight:600;margin-bottom:0.5rem">Meta</h2>
+        <div class="font-mono" style="font-size:0.6875rem;color:var(--text-tertiary)">{{ tpl.meta_template_id }}</div>
+        <form method="POST" action="/dashboard/whatsapp/templates/{{ tpl.id }}/sync" style="margin-top:0.5rem">
+          <button class="btn btn-ghost btn-sm" type="submit">Atualizar status</button>
+        </form>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function () {
+  const fields = ['f_name','f_lang','f_cat','f_header','f_body','f_footer','f_examples'];
+  const out = document.getElementById('lintOut');
+  let timer = null;
+
+  function render(data) {
+    window.__lintCanSubmit = data.can_submit;
+    const errs = data.findings.filter(f => f.severity === 'error');
+    const warns = data.findings.filter(f => f.severity === 'warning');
+    let html = '<div style="margin-bottom:0.5rem">' + data.summary + '</div>';
+    if (errs.length) {
+      html += '<div style="color:var(--red);font-weight:600;margin-bottom:0.25rem">' + errs.length + ' erro(s)</div><ul style="margin:0;padding-left:1rem">';
+      html += errs.map(f => '<li style="margin-bottom:0.25rem">' + f.message +
+        ' <span class="font-mono" style="font-size:0.625rem;color:var(--text-tertiary)">[' + f.field + ']</span></li>').join('');
+      html += '</ul>';
+    }
+    if (warns.length) {
+      html += '<div style="color:var(--amber);font-weight:600;margin:0.5rem 0 0.25rem">' + warns.length + ' aviso(s)</div><ul style="margin:0;padding-left:1rem">';
+      html += warns.map(f => '<li style="margin-bottom:0.25rem">' + f.message + '</li>').join('');
+      html += '</ul>';
+    }
+    out.innerHTML = html;
+  }
+
+  async function run() {
+    const fd = new FormData(document.getElementById('tplForm'));
+    if (!fd.get('name')) { window.__lintCanSubmit = true; return; }
+    try {
+      const r = await fetch('/dashboard/whatsapp/templates/lint', { method: 'POST', body: fd });
+      render(await r.json());
+    } catch (e) { /* lint is advisory; never block the form on a network hiccup */ }
+  }
+
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 350); });
+    el.addEventListener('change', run);
+  });
+  run();
+})();
+</script>
+
+{% endblock %}

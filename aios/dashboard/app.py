@@ -3867,3 +3867,446 @@ async def clear_switch(request: Request):
     resp = RedirectResponse("/dashboard", status_code=303)
     resp.delete_cookie("aios_impersonate_org", path="/")
     return resp
+
+
+# ═══ WhatsApp Template Studio (Meta Cloud API) ═══
+#
+# Templates are assets of a WhatsApp Business Account, not of this app. Every
+# query below is scoped by org_id AND waba_id: there is deliberately no global
+# "the" WABA, because a template created under one tenant's WABA does not exist
+# under another's and reading it across would be both wrong and a data leak.
+
+def _wa_meta_client(conn):
+    from aios.config import settings
+    from aios.core.meta_api import MetaWhatsAppClient
+    return MetaWhatsAppClient.from_connection(
+        conn, app_secret=getattr(settings, "whatsapp_app_secret", "") or ""
+    )
+
+
+async def _wa_get_connection(db, org_id: str):
+    from aios.db.models import WhatsappConnection
+    res = await db.execute(
+        select(WhatsappConnection).where(WhatsappConnection.org_id == org_id)
+        .order_by(WhatsappConnection.created_at.desc())
+    )
+    return (res.scalars().all() or [None])[0]
+
+
+async def _wa_lint_for(tpl, db, org_id: str):
+    """Run the deterministic linter with the org's own bodies for the duplicate check."""
+    from aios.core.template_lint import TemplateDraft, lint_template
+    from aios.db.models import WhatsappTemplate
+    # Exclude the template being edited, otherwise a template is always a
+    # duplicate of itself and can never pass its own lint.
+    q = select(WhatsappTemplate.body).where(
+        WhatsappTemplate.org_id == org_id,
+        WhatsappTemplate.language == tpl.language,
+    )
+    if tpl.id:
+        q = q.where(WhatsappTemplate.id != tpl.id)
+    others = (await db.execute(q)).scalars().all()
+    return lint_template(TemplateDraft(
+        name=tpl.name, language=tpl.language, category=tpl.category,
+        header_text=tpl.header_text or "", body=tpl.body or "", footer=tpl.footer or "",
+        examples=dict(tpl.examples_json or {}), existing_bodies=[b for b in others if b],
+    ))
+
+
+@router.get("/whatsapp/templates", response_class=HTMLResponse)
+async def wa_templates_page(request: Request, status: str = ""):
+    """List this org's templates with Meta's full status set.
+
+    PAUSED / DISABLED / LIMIT_EXCEEDED are not rejections: they mean a template
+    that WAS approved stopped being sendable. Automations reference templates by
+    name, so collapsing these into "rejected" would hide broken sends.
+    """
+    org_id = await _org_filter(request)
+    from aios.db.models import WhatsappConnection, WhatsappTemplate
+    async with db_session() as db:
+        tpls = (await db.execute(
+            select(WhatsappTemplate).where(WhatsappTemplate.org_id == org_id)
+            .order_by(WhatsappTemplate.updated_at.desc())
+        )).scalars().all()
+        if status:
+            tpls = [t for t in tpls if (t.status or "") == status.upper()]
+        conns = (await db.execute(
+            select(WhatsappConnection).where(WhatsappConnection.org_id == org_id)
+        )).scalars().all()
+        conn = conns[0] if conns else None
+    counts = {}
+    for t in tpls:
+        counts[t.status] = counts.get(t.status, 0) + 1
+    from aios.db.models import TEMPLATE_STATUSES
+    return await _render(
+        "whatsapp_templates.html", request, title="Templates WhatsApp",
+        templates=tpls, connection=conn, connections=conns,
+        status=status, counts=counts, all_statuses=TEMPLATE_STATUSES,
+    )
+
+
+@router.get("/whatsapp/templates/connect", response_class=HTMLResponse)
+async def wa_templates_connect_page(request: Request):
+    """Manual WABA onboarding: the tenant pastes their own system-user token.
+
+    Deliberately not Embedded Signup — that would require registering as a Meta
+    Tech Provider with Advanced access and an App Review that can be rejected.
+    Per-tenant WABA + customer-generated token needs neither.
+    """
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        conn = await _wa_get_connection(db, org_id)
+    return await _render(
+        "whatsapp_template_connect.html", request, title="Conectar WABA",
+        connection=conn,
+    )
+
+
+@router.post("/whatsapp/templates/connect")
+async def wa_templates_connect_save(request: Request):
+    org_id = await _org_filter(request)
+    from aios.api.deps import get_dashboard_user
+    from aios.core.secrets import encrypt_secret
+    from aios.db.models import WhatsappConnection
+    form = await request.form()
+    waba_id = (form.get("waba_id") or "").strip()
+    token = (form.get("access_token") or "").strip()
+    phone = (form.get("phone_number_id") or "").strip()
+    display = (form.get("display_name") or "").strip()
+    if not waba_id or not token:
+        return RedirectResponse("/dashboard/whatsapp/templates/connect?error=missing", status_code=303)
+    import secrets as _secrets
+    async with db_session() as db:
+        existing = await _wa_get_connection(db, org_id)
+        # Encrypt the token. Never store it in a new plaintext column.
+        enc = encrypt_secret(token)
+        if existing and existing.waba_id == waba_id:
+            existing.access_token_enc = enc
+            if phone:
+                existing.phone_number_id = phone
+            if display:
+                existing.display_name = display
+            conn = existing
+        else:
+            conn = WhatsappConnection(
+                org_id=org_id, waba_id=waba_id, phone_number_id=phone or None,
+                display_name=display or waba_id, access_token_enc=enc, status="unverified",
+            )
+            db.add(conn)
+        # Per-connection webhook secret so one tenant cannot flip another's
+        # template state. The webhook fails closed when this is unset.
+        if not conn.webhook_secret_enc:
+            conn.webhook_secret_enc = encrypt_secret(_secrets.token_urlsafe(32))
+        await db.commit()
+    return RedirectResponse("/dashboard/whatsapp/templates/connect?saved=1", status_code=303)
+
+
+@router.post("/whatsapp/templates/connect/verify")
+async def wa_templates_connect_verify(request: Request):
+    """Validate pasted credentials against Meta before trusting them."""
+    from datetime import datetime, timezone
+    org_id = await _org_filter(request)
+    from aios.core.meta_api import MetaAPIError
+    async with db_session() as db:
+        conn = await _wa_get_connection(db, org_id)
+        if not conn:
+            return RedirectResponse("/dashboard/whatsapp/templates/connect?error=missing", status_code=303)
+        try:
+            info = await _wa_meta_client(conn).verify_connection()
+            conn.status = "verified"
+            conn.last_verified_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            conn.display_name = info.get("name") or conn.display_name
+            await db.commit()
+            return RedirectResponse("/dashboard/whatsapp/templates/connect?verified=1", status_code=303)
+        except MetaAPIError as e:
+            # Surface Meta's own code and message. Do not paraphrase.
+            conn.status = "error"
+            await db.commit()
+            logger.error("WABA verify failed org=%s code=%s msg=%s", org_id, e.code, e.raw_message)
+            return RedirectResponse(
+                f"/dashboard/whatsapp/templates/connect?error=meta&code={e.code}", status_code=303
+            )
+        except Exception:
+            logger.exception("WABA verify crashed org=%s", org_id)
+            return RedirectResponse("/dashboard/whatsapp/templates/connect?error=crash", status_code=303)
+
+
+@router.get("/whatsapp/templates/new", response_class=HTMLResponse)
+async def wa_template_new(request: Request):
+    org_id = await _org_filter(request)
+    from aios.db.models import TEMPLATE_CATEGORIES
+    async with db_session() as db:
+        conn = await _wa_get_connection(db, org_id)
+    if not conn:
+        return RedirectResponse("/dashboard/whatsapp/templates/connect?need=1", status_code=303)
+    return await _render(
+        "whatsapp_template_edit.html", request, title="Novo template",
+        tpl=None, connection=conn, findings=[], categories=TEMPLATE_CATEGORIES,
+    )
+
+
+@router.get("/whatsapp/templates/{tpl_id}/edit", response_class=HTMLResponse)
+async def wa_template_edit(request: Request, tpl_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import TEMPLATE_CATEGORIES, WhatsappTemplate
+    async with db_session() as db:
+        # org_id in the WHERE, not just a post-fetch check
+        tpl = (await db.execute(
+            select(WhatsappTemplate).where(
+                WhatsappTemplate.id == tpl_id, WhatsappTemplate.org_id == org_id
+            )
+        )).scalar_one_or_none()
+        if not tpl:
+            return HTMLResponse("<h2>Template não encontrado</h2>", status_code=404)
+        conn = await _wa_get_connection(db, org_id)
+        findings = await _wa_lint_for(tpl, db, org_id)
+    findings = [f.as_dict() for f in findings]
+    editable = tpl.status in ("DRAFT", "REJECTED", "PAUSED", "APPROVED")
+    quota_note = _wa_edit_quota_note(tpl)
+    return await _render(
+        "whatsapp_template_edit.html", request, title=f"Template {tpl.name}",
+        tpl=tpl, connection=conn, findings=findings, categories=TEMPLATE_CATEGORIES,
+        editable=editable, quota_note=quota_note,
+    )
+
+
+def _wa_edit_quota_note(tpl) -> str:
+    """Meta's edit quotas, stated before the attempt is wasted.
+
+    APPROVED templates: 1 edit per 24h, 10 per 30 days. REJECTED/PAUSED: unlimited.
+    Editing an APPROVED template re-enters review.
+    """
+    if tpl.status == "APPROVED":
+        return (f"Aprovado: Meta permite 1 edição a cada 24h e 10 em 30 dias. "
+                f"Edições usadas (registradas aqui): {tpl.edit_count}. Editar reenvia para revisão.")
+    if tpl.status in ("REJECTED", "PAUSED"):
+        return "Rejeitado/Pausado: Meta permite edições ilimitadas. Cada edição reenvia para revisão."
+    if tpl.status == "PENDING":
+        return "Em revisão no Meta (pode levar até 24h). Editar agora reinicia a revisão."
+    return "Rascunho local — ainda não enviado ao Meta."
+
+
+@router.post("/whatsapp/templates/save")
+async def wa_template_save(request: Request):
+    """Save a local draft. Never contacts Meta."""
+    org_id = await _org_filter(request)
+    from aios.api.deps import get_dashboard_user
+    from aios.db.models import WhatsappTemplate
+    form = await request.form()
+    name = (form.get("name") or "").strip()
+    language = (form.get("language") or "pt_BR").strip()
+    category = (form.get("category") or "UTILITY").strip().upper()
+    tpl_id = (form.get("tpl_id") or "").strip()
+    try:
+        examples = json.loads(form.get("examples") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        examples = {}
+    if not isinstance(examples, dict):
+        examples = {}
+    async with db_session() as db:
+        conn = await _wa_get_connection(db, org_id)
+        if not conn:
+            return RedirectResponse("/dashboard/whatsapp/templates/connect?need=1", status_code=303)
+        if tpl_id:
+            tpl = (await db.execute(
+                select(WhatsappTemplate).where(
+                    WhatsappTemplate.id == tpl_id, WhatsappTemplate.org_id == org_id
+                )
+            )).scalar_one_or_none()
+            if not tpl:
+                return HTMLResponse("<h2>Template não encontrado</h2>", status_code=404)
+            tpl.name = name; tpl.language = language; tpl.category = category
+            tpl.header_text = (form.get("header_text") or "").strip()
+            tpl.body = (form.get("body") or "").strip()
+            tpl.footer = (form.get("footer") or "").strip()
+            tpl.examples_json = examples
+            tpl.edit_count = (tpl.edit_count or 0) + 1
+        else:
+            tpl = WhatsappTemplate(
+                org_id=org_id, connection_id=conn.id, waba_id=conn.waba_id,
+                name=name, language=language, category=category,
+                header_text=(form.get("header_text") or "").strip(),
+                body=(form.get("body") or "").strip(),
+                footer=(form.get("footer") or "").strip(),
+                examples_json=examples, status="DRAFT",
+            )
+            db.add(tpl)
+        await db.commit()
+        new_id = tpl.id
+    return RedirectResponse(f"/dashboard/whatsapp/templates/{new_id}/edit", status_code=303)
+
+
+@router.post("/whatsapp/templates/lint")
+async def wa_template_lint_ajax(request: Request):
+    """Live lint for the editor. Pure computation, no DB writes, no Meta calls."""
+    form = await request.form()
+    org_id = await _org_filter(request)
+    from aios.core.template_lint import TemplateDraft, can_submit, lint_template, summarise
+    try:
+        examples = json.loads(form.get("examples") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        examples = {}
+    if not isinstance(examples, dict):
+        examples = {}
+    tpl_id = (form.get("tpl_id") or "").strip()
+    existing = []
+    if org_id:
+        async with db_session() as db:
+            from aios.db.models import WhatsappTemplate
+            q = select(WhatsappTemplate.body).where(WhatsappTemplate.org_id == org_id)
+            if tpl_id:
+                q = q.where(WhatsappTemplate.id != tpl_id)
+            existing = [b for b in (await db.execute(q)).scalars().all() if b]
+    findings = lint_template(TemplateDraft(
+        name=(form.get("name") or "").strip(),
+        language=(form.get("language") or "pt_BR").strip(),
+        category=(form.get("category") or "UTILITY").strip().upper(),
+        header_text=(form.get("header_text") or "").strip(),
+        body=(form.get("body") or "").strip(),
+        footer=(form.get("footer") or "").strip(),
+        examples=examples, existing_bodies=existing,
+    ))
+    return JSONResponse({
+        "findings": [f.as_dict() for f in findings],
+        "can_submit": can_submit(findings),
+        "summary": summarise(findings),
+    })
+
+
+@router.post("/whatsapp/templates/{tpl_id}/submit")
+async def wa_template_submit(request: Request, tpl_id: str):
+    """Human-only submission to Meta.
+
+    There is deliberately no agent-facing submit tool. Submitting consumes WABA
+    review quota and rejections degrade the tenant's quality rating, so it stays
+    behind an explicit click.
+    """
+    org_id = await _org_filter(request)
+    from aios.api.deps import get_dashboard_user
+    from aios.core.meta_api import MetaAPIError, TemplateComponents
+    from aios.core.template_lint import errors
+    from aios.db.models import AuditLog, WhatsappTemplate
+    from datetime import datetime, timezone
+
+    async with db_session() as db:
+        tpl = (await db.execute(
+            select(WhatsappTemplate).where(
+                WhatsappTemplate.id == tpl_id, WhatsappTemplate.org_id == org_id
+            )
+        )).scalar_one_or_none()
+        if not tpl:
+            return HTMLResponse("<h2>Template não encontrado</h2>", status_code=404)
+        findings = await _wa_lint_for(tpl, db, org_id)
+        blocking = errors(findings)
+        if blocking:
+            return RedirectResponse(
+                f"/dashboard/whatsapp/templates/{tpl_id}/edit?error=lint", status_code=303
+            )
+        conn = await _wa_get_connection(db, org_id)
+        if not conn:
+            return RedirectResponse("/dashboard/whatsapp/templates/connect?need=1", status_code=303)
+        comps = TemplateComponents(
+            header_text=tpl.header_text or "", body=tpl.body or "",
+            footer=tpl.footer or "", examples=dict(tpl.examples_json or {}),
+        )
+        client = _wa_meta_client(conn)
+        u = await get_dashboard_user(request)
+        try:
+            if tpl.meta_template_id:
+                res = await client.edit_template(tpl.meta_template_id, category=tpl.category, components=comps)
+            else:
+                res = await client.create_template(
+                    name=tpl.name, language=tpl.language, category=tpl.category, components=comps
+                )
+            tpl.meta_template_id = str(res.get("id") or tpl.meta_template_id or "")
+            # Meta returns PENDING; review takes up to 24h. Do not claim APPROVED.
+            tpl.status = (res.get("status") or "PENDING").upper()
+            tpl.rejected_reason = None
+            tpl.submitted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            tpl.submitted_by = u.id if u else None
+            db.add(AuditLog(
+                org_id=org_id, user_id=u.id if u else None,
+                action="whatsapp_template_submit", resource_type="whatsapp_template",
+                resource_id=tpl.id,
+                details={"name": tpl.name, "language": tpl.language, "status": tpl.status},
+            ))
+            await db.commit()
+        except MetaAPIError as e:
+            await db.rollback()
+            # Record the failure so the operator can see Meta's real reason.
+            db.add(AuditLog(
+                org_id=org_id, action="whatsapp_template_submit_failed",
+                resource_type="whatsapp_template", resource_id=tpl.id,
+                details={"code": e.code, "message": e.raw_message},
+            ))
+            await db.commit()
+            logger.error("template submit failed org=%s tpl=%s code=%s", org_id, tpl_id, e.code)
+            return RedirectResponse(
+                f"/dashboard/whatsapp/templates/{tpl_id}/edit?error=meta&code={e.code}", status_code=303
+            )
+    return RedirectResponse(f"/dashboard/whatsapp/templates/{tpl_id}/edit?submitted=1", status_code=303)
+
+
+@router.post("/whatsapp/templates/{tpl_id}/sync")
+async def wa_template_sync(request: Request, tpl_id: str):
+    """Pull this template's current status from Meta on demand."""
+    org_id = await _org_filter(request)
+    from datetime import datetime, timezone
+    from aios.core.meta_api import MetaAPIError
+    from aios.db.models import WhatsappTemplate
+    async with db_session() as db:
+        tpl = (await db.execute(
+            select(WhatsappTemplate).where(
+                WhatsappTemplate.id == tpl_id, WhatsappTemplate.org_id == org_id
+            )
+        )).scalar_one_or_none()
+        if not tpl:
+            return HTMLResponse("<h2>Template não encontrado</h2>", status_code=404)
+        conn = await _wa_get_connection(db, org_id)
+        if not conn or not tpl.meta_template_id:
+            return RedirectResponse(f"/dashboard/whatsapp/templates/{tpl_id}/edit", status_code=303)
+        try:
+            info = await _wa_meta_client(conn).get_template(tpl.meta_template_id)
+            await _wa_apply_meta_state(tpl, info)
+            tpl.last_synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            await db.commit()
+        except MetaAPIError as e:
+            await db.rollback()
+            logger.error("template sync failed org=%s code=%s", org_id, e.code)
+            return RedirectResponse(
+                f"/dashboard/whatsapp/templates/{tpl_id}/edit?error=meta&code={e.code}", status_code=303
+            )
+    return RedirectResponse(f"/dashboard/whatsapp/templates/{tpl_id}/edit?synced=1", status_code=303)
+
+
+def _wa_apply_meta_state(tpl, info: dict) -> None:
+    """Copy Meta's state onto our row. Never invent a rejection reason.
+
+    Meta's rejected_reason is a closed enum and NONE is a valid value; when it
+    is absent we leave rejection_note explaining that, rather than guessing.
+    """
+    st = (info.get("status") or "").upper()
+    if st:
+        tpl.status = st
+    reason = info.get("rejected_reason")
+    tpl.rejected_reason = reason or None
+    if reason and reason not in ("NONE", ""):
+        tpl.rejection_note = f"Meta informou: {reason}"
+    elif st == "REJECTED":
+        tpl.rejection_note = (
+            "Meta rejeitou sem informar um motivo específico (rejected_reason = NONE). "
+            "Motivos como duplicidade não aparecem nesse campo — confira se o corpo é "
+            "idêntico a um template já aprovado."
+        )
+    else:
+        tpl.rejection_note = ""
+    qs = (info.get("quality_score") or {})
+    if isinstance(qs, dict):
+        tpl.quality_score = qs.get("score")
+    elif isinstance(qs, str):
+        tpl.quality_score = qs
+
+
+@router.get("/whatsapp/templates/{tpl_id}", response_class=HTMLResponse)
+async def wa_template_detail(request: Request, tpl_id: str):
+    return RedirectResponse(f"/dashboard/whatsapp/templates/{tpl_id}/edit", status_code=303)

@@ -28,6 +28,9 @@ Pergunta descritiva "o que aconteceu / quantos / qual o valor" -> Analista. Inve
 # 7. Tool-use rules
 Use `sql_query` para conferir o número você mesmo em vez de confiar no resumo — sempre com filtro da sua org. `python_sandbox` para checar agregado ou gerar gráfico. `calculator` para validar a conta. `transcribe` quando a pergunta vier de uma ligação. `web_search` só para benchmark externo. Registre a decisão e a métrica no blackboard.
 
+# 11. Templates de WhatsApp
+Use `whatsapp_template_list` para ver o que já existe e em que status o Meta deixou. Use `whatsapp_template_lint` antes de propor qualquer texto novo: as regras são determinísticas e cobrem as causas de rejeição que o Meta publica. Use `whatsapp_template_draft` para deixar um rascunho. Você **não** submete nada ao Meta — envio consome cota de revisão e rejeição derruba a qualidade da conta do cliente, então isso é sempre clique humano. Descreva no rascunho qual decisão o template serve e por que esse texto, não outro. Se o Meta rejeitou sem informar motivo, diga isso ao humano em vez de inventar uma causa — duplicidade e categoria errada não aparecem em `rejected_reason`.
+
 # 8. Error handling and recovery
 Tool falhou → tente uma vez, depois diga qual número não conseguiu verificar. Incerteza → peça a definição que falta, não invente uma. Lacuna silenciosa nos dados → nomeie como lacuna em vez de contornar e reportar.
 
@@ -38,6 +41,6 @@ Uma pergunta por vez. Estabeleça: decisão a tomar, métrica, grão, janela de 
 Humano quando: dados não confiáveis, quando o pedido é na verdade estratégia vestida de dados, ou quando publicar o achado compromete dinheiro real. Sempre encerre com: a decisão, a confiança, e o que mudaria a resposta.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["sql_query", "python_sandbox", "calculator", "http_request", "read_file", "transcribe", "current_datetime", "rag_search", "web_search", "crm_pipeline_stats"],
+    "tools": ["sql_query", "python_sandbox", "calculator", "http_request", "read_file", "transcribe", "current_datetime", "rag_search", "web_search", "crm_pipeline_stats", "whatsapp_template_list", "whatsapp_template_lint", "whatsapp_template_draft"],
     "memory_config": {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 10}, "episodic": {"enabled": True, "summarize_after": 15}},
 }

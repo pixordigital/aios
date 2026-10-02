@@ -14,7 +14,13 @@ import os
 from arq import cron
 from arq.connections import RedisSettings
 from aios.config import settings
-from .jobs import FUNCTIONS, monthly_report_job, weekly_report_job, weekly_standup_job
+from .jobs import (
+    FUNCTIONS,
+    monthly_report_job,
+    template_status_reconcile_job,
+    weekly_report_job,
+    weekly_standup_job,
+)
 
 
 def _parse_redis(redis_url: str) -> RedisSettings:
@@ -220,6 +226,7 @@ class WorkerSettings:
         backup_job, approval_expire_job, autoscale_job, canary_rollback_job,
         _learning_job_wrapper,
         integration_outbox_flush_job,
+        template_status_reconcile_job,
     ])
     cron_jobs = [
         cron(backup_job, hour=3, minute=0),
@@ -230,6 +237,8 @@ class WorkerSettings:
         cron(_memory_consolidation_cron, minute=0),
         cron(_optimization_review_cron, minute=15),
         cron(_eval_review_cron, minute=25),
+        # Meta review runs up to 24h and drops webhooks; re-poll stale PENDING rows.
+        cron(template_status_reconcile_job, minute=23),
         cron(integration_outbox_cron, second=30),
         cron(weekly_standup_job, hour=9, minute=0),  # daily trigger, self-skips unless Monday
         cron(weekly_report_job, hour=9, minute=15),  # owner report + 1:1 agenda, Mondays

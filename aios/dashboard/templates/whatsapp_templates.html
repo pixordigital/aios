@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+{% include '_whatsapp_tabs.html' %}
+
+<div class="flex-between" style="flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem">
+  <div>
+    <h1 style="font-size:1.125rem;font-weight:600">Templates WhatsApp</h1>
+    <p style="font-size:0.75rem;color:var(--text-tertiary)">
+      Rascunhe, valide, envie ao Meta e acompanhe o status da revisão.
+      {% if connection %}WABA <span class="font-mono">{{ connection.waba_id }}</span>
+        <span class="badge" style="font-size:0.625rem">{{ connection.status }}</span>{% endif %}
+    </p>
+  </div>
+  <div class="flex" style="gap:0.375rem">
+    <a href="/dashboard/whatsapp/templates/connect" class="btn btn-ghost btn-sm">WABA</a>
+    <a href="/dashboard/whatsapp/templates/new" class="btn btn-primary btn-sm">+ Novo template</a>
+  </div>
+</div>
+
+{% if not connection %}
+  <div class="alert alert-warning mb-4">
+    <strong>Sem WABA conectada.</strong>
+    <p style="margin:0.25rem 0 0;font-size:0.8125rem">
+      Templates pertencem a uma WhatsApp Business Account. Conecte a sua para começar.
+    </p>
+    <a href="/dashboard/whatsapp/templates/connect" class="btn btn-primary btn-sm" style="margin-top:0.5rem">Conectar WABA</a>
+  </div>
+{% endif %}
+
+{#- Status filters. PAUSED / DISABLED / LIMIT_EXCEEDED are shown separately
+    because they mean an approved template stopped being sendable, which breaks
+    automations referencing it by name. -#}
+<div class="flex" style="gap:0.25rem;flex-wrap:wrap;margin-bottom:0.75rem">
+  <a href="/dashboard/whatsapp/templates" class="btn btn-ghost btn-sm"
+     style="{{ 'border-color:var(--accent);color:var(--accent)' if not status else '' }}">Todos</a>
+  {% for s in all_statuses %}
+    <a href="/dashboard/whatsapp/templates?status={{ s }}"
+       class="btn btn-ghost btn-sm"
+       style="{{ 'border-color:var(--accent);color:var(--accent)' if status == s else '' }}">
+      {{ s }}{% if counts.get(s) %} ({{ counts[s] }}){% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+<div class="card" style="padding:0;overflow:hidden">
+  <table style="width:100%;font-size:0.8125rem">
+    <thead>
+      <tr style="text-align:left;border-bottom:1px solid var(--border)">
+        <th style="padding:0.5rem 0.75rem">Nome</th>
+        <th style="padding:0.5rem 0.75rem">Idioma</th>
+        <th style="padding:0.5rem 0.75rem">Categoria</th>
+        <th style="padding:0.5rem 0.75rem">Status</th>
+        <th style="padding:0.5rem 0.75rem">Motivo (Meta)</th>
+        <th style="padding:0.5rem 0.75rem">Atualizado</th>
+        <th style="padding:0.5rem 0.75rem"></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in templates %}
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem 0.75rem">
+          <a href="/dashboard/whatsapp/templates/{{ t.id }}/edit" style="color:var(--accent)">{{ t.name }}</a>
+          {% if t.status == 'DRAFT' %}<span class="badge" style="font-size:0.625rem">local</span>{% endif %}
+        </td>
+        <td style="padding:0.5rem 0.75rem">{{ t.language }}</td>
+        <td style="padding:0.5rem 0.75rem">{{ t.category }}</td>
+        <td style="padding:0.5rem 0.75rem">
+          <span class="badge" style="font-size:0.625rem;
+            background:{{ 'var(--green-subtle)' if t.status in ['APPROVED','DRAFT'] else 'var(--amber-subtle)' if t.status in ['PENDING','IN_APPEAL'] else 'var(--red-subtle)' if t.status in ['REJECTED','DISABLED'] else 'var(--bg-elevated)' }};
+            color:{{ 'var(--green)' if t.status in ['APPROVED','DRAFT'] else 'var(--amber)' if t.status in ['PENDING','IN_APPEAL'] else 'var(--red)' if t.status in ['REJECTED','DISABLED'] else 'var(--text-secondary)' }}">
+            {{ t.status }}
+          </span>
+          {#- A paused/disabled approved template still breaks sends. Say so. -#}
+          {% if t.status in ['PAUSED','DISABLED','LIMIT_EXCEEDED'] %}
+            <div style="font-size:0.625rem;color:var(--red);margin-top:0.25rem">não pode mais ser enviado</div>
+          {% endif %}
+        </td>
+        <td style="padding:0.5rem 0.75rem;font-size:0.75rem">
+          {% if t.rejected_reason and t.rejected_reason != 'NONE' %}
+            <span class="font-mono">{{ t.rejected_reason }}</span>
+          {% elif t.status == 'REJECTED' %}
+            <span style="color:var(--text-tertiary)">Meta não informou</span>
+          {% else %}
+            <span style="color:var(--text-tertiary)">—</span>
+          {% endif %}
+        </td>
+        <td style="padding:0.5rem 0.75rem;font-size:0.75rem;color:var(--text-tertiary)">
+          {{ t.updated_at.strftime('%d/%m %H:%M') if t.updated_at else '—' }}
+        </td>
+        <td style="padding:0.5rem 0.75rem;text-align:right">
+          <a href="/dashboard/whatsapp/templates/{{ t.id }}/edit" class="btn btn-ghost btn-sm">Editar</a>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--text-tertiary)">
+        Nenhum template ainda{% if status %} com status {{ status }}{% endif %}.
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

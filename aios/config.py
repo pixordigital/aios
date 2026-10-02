@@ -116,6 +116,10 @@ class Settings(BaseSettings):
 
     whatsapp_coexistence_enabled: bool = True  # Coexistence (App + Cloud mesmo número)
     whatsapp_embedded_signup_app_id: str = ""  # Meta App ID para Embedded Signup coexistence
+    # Meta App credentials. app_secret is used only to compute appsecret_proof on
+    # Graph API calls; it is not a tenant credential.
+    whatsapp_app_id: str = ""
+    whatsapp_app_secret: str = ""
 
     registration_enabled: bool = False  # fechar cadastros — home buttons desabilitados
 

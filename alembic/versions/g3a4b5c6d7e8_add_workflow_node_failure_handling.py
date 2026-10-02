@@ -23,12 +23,14 @@ def _existing_columns(table: str) -> set:
 
 
 def upgrade() -> None:
-    # 9051a2b3c4d9 already created these two columns in the initial create_table,
+# 9051a2b3c4d9 already created these two columns in the initial create_table,
     # so the unguarded add_column aborted the entire chain with "duplicate column
-    # name: on_failure" at revision 15 of 30. The schema only ever existed because
-    # init_db() runs create_all(); everything after this revision -- including
-    # whatsapp_contacts, the LGPD opt-out store, plus sales_funnels, budgets and
-    # blacklist -- was never created. Guard each column independently.
+    # name: on_failure" at revision 15 of 30. Every later revision -- including
+    # whatsapp_contacts, the LGPD opt-out store, whatsapp_connections/
+    # whatsapp_templates, plus sales_funnels, budgets and blacklist -- was
+    # therefore never created on any database built through alembic. The schema
+    # only ever appeared because init_db() runs create_all() on every startup.
+    # Guard each column independently.
     present = _existing_columns("workflow_nodes")
     if not present:
         return
