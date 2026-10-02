@@ -94,16 +94,20 @@ class ApprovalManager:
         try:
             from aios.core.ws_manager import ws_manager
 
-            await ws_manager.broadcast(
+            # broadcast() is sync — it only enqueues. Awaiting it raised
+            # TypeError, which the except below swallowed, so this event
+            # never reached any dashboard.
+            ws_manager.broadcast(
                 {
                     "type": "approval_requested",
                     "action_id": action_id,
                     "agent_id": agent_id,
                     "tool_name": tool_name,
+                    "org_id": org_id,
                 }
             )
         except Exception:
-            pass
+            logger.debug("approval broadcast failed", exc_info=True)
 
         try:
             await self._wait(pa)

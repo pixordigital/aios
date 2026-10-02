@@ -1,9 +1,10 @@
 """In-process WebSocket fan-out for live agent activity.
 
 Clients are registered as ``(ws, org_id)`` pairs. Delivery is org-scoped: an
-event carrying ``org_id`` reaches only clients of that org. Events without
-``org_id`` (legacy broadcasts such as ``approval_requested``) still go to
-everyone, which preserves the pre-existing approval fan-out.
+event carrying ``org_id`` reaches only clients of that org. An event *without*
+``org_id`` is dropped rather than broadcast — it cannot be attributed to a
+tenant, and the old blanket fan-out was a cross-tenant leak. Every emitter
+therefore has to supply ``org_id``; ``approval_requested`` does so explicitly.
 
 ``broadcast()`` is synchronous and only enqueues, because the hook registry
 (``aios.core.hooks``) fires synchronously and the canvas hooks into it. The
@@ -70,9 +71,19 @@ class WSManager:
         bypass the tenant check.
         """
         org = data.get("org_id")
+        if not org:
+            # Fail closed. An event we cannot attribute to a tenant must not be
+            # guessed at: every emitter degrades to "" when the agent or hook
+            # context carries no org, and broadcasting those would hand one
+            # tenant's agent activity, streamed text and conversation ids to
+            # every other tenant's canvas.
+            logger.warning(
+                "ws: dropping org-less event %s — cannot scope to a tenant", data.get("type")
+            )
+            return
         dead: list[tuple[Any, str | None]] = []
         for ws, org_id in list(self._clients):
-            if org and org_id and org != org_id:
+            if org != org_id:
                 continue
             try:
                 await ws.send_json(data)
