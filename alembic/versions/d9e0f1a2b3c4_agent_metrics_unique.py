@@ -45,9 +45,11 @@ def upgrade() -> None:
             sa.Column("samples", sa.Integer(), nullable=False, server_default="0"),
         )
 
-    # Collapse any existing duplicates (keep the newest row per agent/hour)
-    # before adding the constraint, otherwise creation fails on exactly the
-    # databases that have the duplicates.
+    # Collapse any existing duplicates (keep one row per agent/hour) before
+    # adding the constraint, otherwise creation fails on exactly the
+    # databases that have the duplicates. Orders by the UUID pk, which is
+    # valid on both SQLite and Postgres -- the previous rowid was SQLite-only
+    # and crashed the migration on Postgres.
     op.execute(
         sa.text(
             f"""
@@ -56,7 +58,7 @@ def upgrade() -> None:
                 SELECT id FROM (
                     SELECT id,
                            ROW_NUMBER() OVER (
-                               PARTITION BY agent_id, hour ORDER BY rowid DESC
+                               PARTITION BY agent_id, hour ORDER BY id DESC
                            ) AS rn
                     FROM {TABLE}
                 ) ranked
