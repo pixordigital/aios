@@ -1,0 +1,28 @@
+{#- Shared sub-navigation for the WhatsApp section.
+
+  The sidebar is flat (no nesting anywhere in base.html), so section children
+  live behind these tabs. The main "WhatsApp" sidebar entry matches on
+  startswith('/dashboard/whatsapp'), so any child highlights it automatically.
+
+  "Risco de ban" used to have its own top-level sidebar entry as well, which
+  matched both its own startswith check and the WhatsApp one — lighting up two
+  nav items at once. It is a tab here now, with a single owner.
+-#}
+{% set _path = request.url.path %}
+{% set _wa = [
+    ("/dashboard/whatsapp", "Instâncias"),
+    ("/dashboard/whatsapp/templates", "Templates"),
+    ("/dashboard/whatsapp/risco", "Risco de ban"),
+] %}
+<div class="flex" style="gap:0.25rem;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:-1px;flex-wrap:wrap">
+  {% for href, label in _wa %}
+    {% set _active = (_path == href) or (_path.startswith(href ~ '/') and href != "/dashboard/whatsapp") or (href == "/dashboard/whatsapp" and _path == "/dashboard/whatsapp") %}
+    <a href="{{ href }}"
+       style="padding:0.5rem 0.75rem;font-size:0.8125rem;font-weight:{{ '600' if _active else '400' }};
+              color:{{ 'var(--accent)' if _active else 'var(--text-secondary)' }};
+              border-bottom:2px solid {{ 'var(--accent)' if _active else 'transparent' }};
+              text-decoration:none">
+      {{ label }}
+    </a>
+  {% endfor %}
+</div>

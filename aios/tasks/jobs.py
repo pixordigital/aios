@@ -697,3 +697,65 @@ FUNCTIONS = [
     weekly_standup_job,
     biweekly_1on1_job,
 ]
+
+
+async def template_status_reconcile_job(ctx, payload: dict | None = None):
+    """Re-pull template status from Meta for anything stuck in review.
+
+    Meta's review takes up to 24h and webhooks are dropped silently, so a
+    webhook-only design leaves templates stuck in PENDING forever. Re-query any
+    template that has been PENDING for a while, one connection at a time so a
+    rate-limited WABA does not block the others.
+    """
+    from sqlalchemy import select
+    from aios.db.backend import db_session
+    from aios.core.meta_api import MetaAPIError
+    from aios.db.models import WhatsappConnection, WhatsappTemplate
+    from datetime import datetime, timedelta, timezone
+
+    stale_before = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=10)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    async with db_session() as db:
+        conns = (await db.execute(
+            select(WhatsappConnection).where(WhatsappConnection.status == "verified")
+        )).scalars().all()
+    if not conns:
+        return {"checked": 0}
+
+    from aios.dashboard.app import _wa_meta_client, _wa_apply_meta_state
+
+    checked = updated = 0
+    for conn in conns:
+        try:
+            async with db_session() as db:
+                pending = (await db.execute(
+                    select(WhatsappTemplate).where(
+                        WhatsappTemplate.org_id == conn.org_id,
+                        WhatsappTemplate.status == "PENDING",
+                        WhatsappTemplate.meta_template_id.is_not(None),
+                        WhatsappTemplate.submitted_at.is_not(None),
+                        WhatsappTemplate.submitted_at < stale_before,
+                    )
+                )).scalars().all()
+                if not pending:
+                    continue
+                client = _wa_meta_client(conn)
+                for tpl in pending:
+                    checked += 1
+                    try:
+                        info = await client.get_template(tpl.meta_template_id)
+                    except MetaAPIError as e:
+                        # 80008 means we are being rate limited; stop this WABA and
+                        # leave the rows PENDING for the next tick.
+                        logger.warning("template reconcile rate-limited org=%s", conn.org_id)
+                        break
+                    _wa_apply_meta_state(tpl, info)
+                    tpl.last_synced_at = now
+                    updated += 1
+                await db.commit()
+        except Exception:
+            logger.exception("template reconcile failed org=%s", conn.org_id)
+            continue
+    logger.info("template reconcile: checked=%d updated=%d", checked, updated)
+    return {"checked": checked, "updated": updated}

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, ForeignKey, Integer, String, Table, Text, UniqueConstraint, text
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, Table, Text, UniqueConstraint, text
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -196,6 +196,107 @@ class Message(Base, TimestampMixin):
     __table_args__ = (
         UniqueConstraint("org_id", "channel_message_id", name="uq_messages_org_provider_msg"),
     )
+
+
+# --- WhatsApp Cloud API: WABA connections + message templates ---
+#
+# Templates are assets of a WhatsApp Business Account, NOT of this app. They do
+# not transfer between WABAs, so waba_id is denormalised onto the template row:
+# every template query must scope to the org's own connection rather than
+# trusting "the" default WABA.
+
+class WhatsappConnection(Base, TimestampMixin, OrgScopedMixin):
+    """One row per tenant's WhatsApp Business Account.
+
+    Onboarding is deliberately manual: the tenant generates a system-user token
+    with whatsapp_business_management for their own WABA and pastes it here.
+    That avoids requiring us to be a Meta Tech Provider (which would require
+    Advanced access and an App Review that can be rejected and restarted).
+    """
+    __tablename__ = "whatsapp_connections"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    waba_id: Mapped[str] = mapped_column(String(64), index=True)
+    phone_number_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    business_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    # encrypted via aios.core.secrets.encrypt_secret, never plaintext
+    access_token_enc: Mapped[str] = mapped_column(Text, default="")
+    # encrypted per-connection secret Meta echoes back on template webhooks, so
+    # one tenant cannot flip another tenant's template status
+    webhook_secret_enc: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(30), default="unverified")
+    last_verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "waba_id", name="uq_whatsapp_conn_org_waba"),
+    )
+
+
+# Mirrors Meta's template status enum. PAUSED / DISABLED / LIMIT_EXCEEDED are
+# not rejections: they mean a previously APPROVED template stopped being
+# sendable, which silently breaks any automation still referencing it by name.
+TEMPLATE_STATUSES = (
+    "APPROVED", "PENDING", "REJECTED", "PAUSED", "DISABLED",
+    "LIMIT_EXCEEDED", "IN_APPEAL", "PENDING_DELETION", "DELETED",
+)
+
+# Meta's rejected_reason enum is closed and coarse. Duplication — one of the
+# most common causes — is NOT in it, and NONE is a valid value. We store exactly
+# what Meta returns and never synthesise an explanation.
+TEMPLATE_REJECT_REASONS = (
+    "ABUSIVE_CONTENT", "INVALID_FORMAT", "NONE",
+    "PROMOTIONAL", "TAG_CONTENT_MISMATCH", "SCAM",
+)
+
+TEMPLATE_CATEGORIES = ("UTILITY", "MARKETING", "AUTHENTICATION")
+
+# Statuses whose template can actually be sent.
+TEMPLATE_SENDABLE_STATUSES = ("APPROVED",)
+
+
+class WhatsappTemplate(Base, TimestampMixin, OrgScopedMixin):
+    """A message template authored here and tracked against Meta's copy."""
+    __tablename__ = "whatsapp_templates"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    connection_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("whatsapp_connections.id"), index=True, nullable=True
+    )
+    waba_id: Mapped[str] = mapped_column(String(64), index=True, default="")
+    # Meta's numeric template id, assigned on submit.
+    meta_template_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    language: Mapped[str] = mapped_column(String(16), default="pt_BR")
+    category: Mapped[str] = mapped_column(String(30), default="UTILITY")
+    sub_category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+    header_text: Mapped[str] = mapped_column(Text, default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    footer: Mapped[str] = mapped_column(Text, default="")
+    # {"1": "João"} — Meta requires an example value per parameter at creation.
+    examples_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    status: Mapped[str] = mapped_column(String(30), default="DRAFT", index=True)
+    rejected_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rejection_note: Mapped[str] = mapped_column(Text, default="")
+    quality_score: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    message_send_ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    submitted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # tracks the 10-edits-per-30-days quota Meta enforces on APPROVED templates
+    edit_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_edit_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    local_notes: Mapped[str] = mapped_column(Text, default="")
+
+    __table_args__ = (
+        Index("ix_whatsapp_templates_org_status", "org_id", "status"),
+        Index("ix_whatsapp_templates_org_name", "org_id", "name"),
+        UniqueConstraint(
+            "org_id", "waba_id", "name", "language", name="uq_watpl_org_waba_name_lang"
+        ),
+    )
+
 
 
 # --- Channel Connection ---

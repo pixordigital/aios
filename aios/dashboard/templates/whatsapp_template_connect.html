@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+{% include '_whatsapp_tabs.html' %}
+
+<h1 style="font-size:1.125rem;font-weight:600;margin-bottom:0.25rem">Conectar WhatsApp Business Account</h1>
+<p style="font-size:0.8125rem;color:var(--text-tertiary);margin-bottom:1rem">
+  Templates pertencem a uma conta do WhatsApp Business. Conecte a sua para criar e
+  submeter templates diretamente ao Meta.
+</p>
+
+{% if saved %}  <div class="alert alert-success mb-3">Credenciais salvas. Use <strong>Verificar</strong> para confirmar com o Meta.</div>{% endif %}
+{% if verified %}<div class="alert alert-success mb-3">Conexão verificada com o Meta.</div>{% endif %}
+{% if need %}<div class="alert alert-warning mb-3">Conecte uma WABA antes de criar templates.</div>{% endif %}
+{% if error == 'missing' %}<div class="alert alert-danger mb-3">Informe <code>waba_id</code> e <code>access_token</code>.</div>{% endif %}
+{% if error == 'crash' %}<div class="alert alert-danger mb-3">Falha inesperada ao verificar. Veja os logs.</div>{% endif %}
+{% if error == 'meta' %}
+  <div class="alert alert-danger mb-3">
+    O Meta recusou a verificação{% if code %} (código <span class="font-mono">{{ code }}</span>){% endif %}.
+    <div style="font-size:0.75rem;margin-top:0.25rem">
+      Causas comuns: token sem a permissão <code>whatsapp_business_management</code>,
+      ou <code>waba_id</code> incorreto.
+    </div>
+  </div>
+{% endif %}
+
+{% if connection %}
+  <div class="card mb-4" style="border-left:3px solid {{ 'var(--green)' if connection.status=='verified' else 'var(--amber)' }}">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem">
+      <div>
+        <div style="font-weight:600">{{ connection.display_name or connection.waba_id }}</div>
+        <div class="font-mono" style="font-size:0.75rem;color:var(--text-tertiary)">{{ connection.waba_id }}</div>
+        {% if connection.phone_number_id %}
+          <div class="font-mono" style="font-size:0.6875rem;color:var(--text-tertiary)">phone_number_id: {{ connection.phone_number_id }}</div>
+        {% endif %}
+        {% if connection.last_verified_at %}
+          <div style="font-size:0.6875rem;color:var(--text-tertiary)">Verificado em {{ connection.last_verified_at.strftime('%d/%m/%Y %H:%M') }}</div>
+        {% endif %}
+      </div>
+      <div class="flex" style="gap:0.375rem">
+        <form method="POST" action="/dashboard/whatsapp/templates/connect/verify">
+          <button class="btn btn-ghost btn-sm" type="submit">Verificar com o Meta</button>
+        </form>
+        <a href="/dashboard/whatsapp/templates" class="btn btn-primary btn-sm">Ver templates</a>
+      </div>
+    </div>
+    <div style="margin-top:0.5rem">
+      <span class="badge" style="font-size:0.625rem">{{ connection.status }}</span>
+    </div>
+  </div>
+{% endif %}
+
+<div class="card">
+  <h2 style="font-size:0.9375rem;font-weight:600;margin-bottom:0.75rem">
+    {{ 'Atualizar credenciais' if connection else 'Conectar sua WABA' }}
+  </h2>
+
+  <form method="POST" action="/dashboard/whatsapp/templates/connect" style="display:flex;flex-direction:column;gap:0.75rem">
+    <div>
+      <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">WABA ID</label>
+      <input name="waba_id" class="input" required placeholder="102290129340398"
+             value="{{ connection.waba_id if connection else '' }}">
+      <span style="font-size:0.625rem;color:var(--text-tertiary)">Meta Business Suite → sua conta → WhatsApp Business Accounts</span>
+    </div>
+    <div>
+      <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Phone Number ID (opcional)</label>
+      <input name="phone_number_id" class="input" placeholder="106540352242922"
+             value="{{ connection.phone_number_id if connection and connection.phone_number_id else '' }}">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">Nome de exibição (opcional)</label>
+      <input name="display_name" class="input" value="{{ connection.display_name if connection else '' }}">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.6875rem;color:var(--text-tertiary);margin-bottom:0.25rem">System user access token</label>
+      <input name="access_token" type="password" class="input" required
+             placeholder="{{ 'deixe em branco para manter o atual' if connection else 'EAA...' }}">
+      <span style="font-size:0.625rem;color:var(--text-tertiary)">
+        Gere um token de system user com a permissão <code>whatsapp_business_management</code> para esta WABA.
+        O token é criptografado antes de ser salvo.
+      </span>
+    </div>
+    <div>
+      <button class="btn btn-primary" type="submit">Salvar</button>
+    </div>
+  </form>
+</div>
+
+{% endblock %}
