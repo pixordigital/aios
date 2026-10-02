@@ -411,6 +411,10 @@ app.add_middleware(
 # "pixor" operator org. An anonymous internet request to /dashboard/ rendered
 # that tenant's agent roster, team names and monthly spend. Exempt only the
 # genuine unauthenticated endpoints.
+#
+# Verified live against production: an unauthenticated GET /dashboard/ returned
+# 200 and ~165KB of that tenant's data. Every other /dashboard/* path redirects
+# to login.
 AUTH_EXEMPT = {"/dashboard/login", "/dashboard/register", "/dashboard/logout"}
 
 # ponytail: referer check for dashboard state-changes — CSRF defense without token state
