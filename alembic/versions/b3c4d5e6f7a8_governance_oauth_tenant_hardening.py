@@ -20,7 +20,7 @@ def upgrade() -> None:
     is_sqlite = conn.dialect.name == "sqlite"
 
     # --- Agent governance config ---
-    op.add_column("agents", sa.Column("governance_config", sa.JSON, nullable=False, server_default="'{}'::json"))
+    op.add_column("agents", sa.Column("governance_config", sa.JSON, nullable=False, server_default="{}"))
 
     # --- User email verification ---
     op.add_column("users", sa.Column("email_verified", sa.Boolean, nullable=False, server_default="false"))
@@ -107,7 +107,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id"), index=True, nullable=False),
         sa.Column("provider", sa.String(50), nullable=False),
         sa.Column("provider_user_id", sa.String(255), nullable=False),
-        sa.Column("extra_data", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("extra_data", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime, nullable=False),
         sa.Column("updated_at", sa.DateTime, nullable=False),
     )

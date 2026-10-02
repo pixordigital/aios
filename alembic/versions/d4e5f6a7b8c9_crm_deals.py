@@ -28,7 +28,7 @@ def upgrade() -> None:
         sa.Column("agent_id", sa.String(36), sa.ForeignKey("agents.id"), nullable=True, index=True),
         sa.Column("team_id", sa.String(36), sa.ForeignKey("teams.id"), nullable=True),
         sa.Column("pipeline", sa.String(50), nullable=False, server_default="default"),
-        sa.Column("extra_data", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("extra_data", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime, nullable=False),
         sa.Column("updated_at", sa.DateTime, nullable=False),
     )

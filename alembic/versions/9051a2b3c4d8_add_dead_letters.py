@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column("conversation_id", sa.String(36), sa.ForeignKey("conversations.id"), index=True, nullable=True),
         sa.Column("direction", sa.String(20), nullable=False),
         sa.Column("job_name", sa.String(255), nullable=False),
-        sa.Column("payload", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("payload", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("error", sa.Text, nullable=False, server_default=""),
         sa.Column("attempts", sa.Integer, nullable=False, server_default="0"),
         sa.Column("status", sa.String(20), nullable=False, server_default="failed"),

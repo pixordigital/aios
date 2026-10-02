@@ -45,7 +45,7 @@ def upgrade() -> None:
         sa.Column("api_key", sa.String(500), nullable=False, server_default=""),
         sa.Column("client_org_id", sa.String(36), nullable=False, server_default=""),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
-        sa.Column("extra_data", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("extra_data", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime, nullable=False),
         sa.Column("updated_at", sa.DateTime, nullable=False),
     )
@@ -57,7 +57,7 @@ def upgrade() -> None:
         sa.Column("action", sa.String(50), index=True, nullable=False),
         sa.Column("resource_type", sa.String(50), nullable=False),
         sa.Column("resource_id", sa.String(36), nullable=True),
-        sa.Column("details", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("details", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("ip_address", sa.String(45), nullable=True),
         sa.Column("created_at", sa.DateTime, nullable=False),
         sa.Column("updated_at", sa.DateTime, nullable=False),

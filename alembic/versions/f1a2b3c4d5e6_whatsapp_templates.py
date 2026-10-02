@@ -132,8 +132,12 @@ def upgrade() -> None:
     )
 
     for name, cols in (
-        ("uq_whatsapp_conn_org_waba", [CONN, "org_id", "waba_id"]),
-        ("uq_watpl_org_waba_name_lang", [TMPL, "org_id", "waba_id", "name", "language"]),
+        # columns only: an earlier revision mistakenly included the table
+        # name (CONN/TMPL) as the first "column". SQLite's batch mode accepts
+        # anything without validating, so CI never caught it; Postgres rejects
+        # the unknown column and the whole chain aborts here.
+        ("uq_whatsapp_conn_org_waba", ["org_id", "waba_id"]),
+        ("uq_watpl_org_waba_name_lang", ["org_id", "waba_id", "name", "language"]),
     ):
         table = CONN if name.startswith("uq_whatsapp_conn") else TMPL
         if not _has_unique(table, name):

@@ -21,7 +21,7 @@ def upgrade() -> None:
         sa.Column("type", sa.String(30), nullable=False, index=True),
         sa.Column("name", sa.String(255), nullable=False, server_default=""),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
-        sa.Column("config", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("config", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("webhook_path", sa.String(255), nullable=True, unique=True, index=True),
         sa.Column("cron_expr", sa.String(100), nullable=True),
         sa.Column("event_type", sa.String(100), nullable=True),
@@ -36,7 +36,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("cred_type", sa.String(50), nullable=False),
         sa.Column("data_enc", sa.Text, nullable=False, server_default=""),
-        sa.Column("extra_data", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("extra_data", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime, nullable=False),
         sa.Column("updated_at", sa.DateTime, nullable=False),
     )
@@ -48,7 +48,7 @@ def upgrade() -> None:
         sa.Column("node_id", sa.String(36), nullable=True),
         sa.Column("level", sa.String(20), nullable=False, server_default="info"),
         sa.Column("message", sa.Text, nullable=False, server_default=""),
-        sa.Column("data", sa.JSON, nullable=False, server_default="'{}'::json"),
+        sa.Column("data", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime, nullable=False),
         sa.Column("updated_at", sa.DateTime, nullable=False),
     )
