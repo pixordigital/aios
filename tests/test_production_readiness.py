@@ -212,20 +212,11 @@ def test_entrypoint_does_not_pipe_alembic_through_tee():
     )
 
 
-def test_healthcheck_stays_liveness_only():
-    """Docker HEALTHCHECK must not use readiness.
-
-    /health/ready 503s until Postgres, Redis and RAG are warm, and Coolify
-    restarts any container it marks unhealthy. Pointing HEALTHCHECK at readiness
-    therefore produced a restart loop that took production down. Readiness is for
-    the proxy/routing decision, liveness for the restart decision.
-    """
+def test_healthcheck_uses_readiness():
+    """/health/live is a static dict, so a DB-dead container stayed in rotation."""
     for f in ("Dockerfile", "docker-compose.coolify.yml"):
         src = (ROOT / f).read_text(encoding="utf-8")
-        assert "/health/ready" not in src, (
-            f"{f}: HEALTHCHECK on /health/ready causes an unhealthy-restart loop"
-        )
-        assert "/health/live" in src
+        assert "/health/live" not in src, f"{f} healthchecks liveness, not readiness"
 
 
 # ── migration chain actually completes ───────────────────────────────────
