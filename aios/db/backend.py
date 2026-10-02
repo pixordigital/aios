@@ -1,4 +1,4 @@
-"""Database backend abstraction — Supabase (SQLAlchemy) primary, Convex failover.
+"""Database backend abstraction — Supabase (SQLAlchemy) primary, optional replica failover.
 
 Usage:
     from aios.db.backend import db_session, get_db_backend
@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 
 class DatabaseBackend(ABC):
-    """Abstract database backend. Implementations: SQLAlchemyBackend, ConvexBackend."""
+    """Abstract database backend. Implementation: SQLAlchemyBackend."""
 
     @abstractmethod
     async def get(self, model: type, ident: Any, *args, **kwargs) -> Any | None: ...
 
     @abstractmethod
     async def execute(self, stmt) -> Any:
-        """Execute a statement (SQLAlchemy select/update/delete or Convex equivalent)."""
+        """Execute a statement (SQLAlchemy select/update/delete)."""
 
     @abstractmethod
     def add(self, obj) -> None: ...
@@ -42,6 +42,14 @@ class DatabaseBackend(ABC):
 
     @abstractmethod
     async def commit(self) -> None: ...
+
+    @abstractmethod
+    async def rollback(self) -> None:
+        """Undo an uncommitted flush and return the session to a usable state.
+
+        A failed commit leaves the session in `PendingRollbackError` until this
+        is called, so every later commit/flush on the same handle fails too.
+        """
 
     @abstractmethod
     async def delete(self, obj) -> None: ...
@@ -145,9 +153,6 @@ def _create_backend(backend_type: str) -> DatabaseBackend:
     if backend_type == "sqlalchemy":
         from aios.db.backends.sqlalchemy_backend import SQLAlchemyBackend
         return SQLAlchemyBackend()
-    elif backend_type == "convex":
-        from aios.db.backends.convex_backend import ConvexBackend
-        return ConvexBackend(settings.convex_url, settings.convex_admin_key)
     else:
         raise ValueError(f"Unknown backend type: {backend_type}")
 
@@ -169,7 +174,7 @@ async def init_backends():
 async def db_session() -> AsyncGenerator[DatabaseBackend, None]:
     """Context manager yielding a fresh backend with dedicated session per call.
 
-    Each async with creates a new SQLAlchemy session (or Convex client call).
+    Each async with creates a new SQLAlchemy session.
     Safe for concurrent use — no shared session state.
     """
     backend = _fresh_backend()

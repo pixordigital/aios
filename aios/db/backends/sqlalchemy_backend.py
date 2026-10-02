@@ -48,6 +48,10 @@ class SQLAlchemyBackend(DatabaseBackend):
         s = await self._sess()
         await s.commit()
 
+    async def rollback(self) -> None:
+        s = await self._sess()
+        await s.rollback()
+
     async def delete(self, obj) -> None:
         s = await self._sess()
         await s.delete(obj)

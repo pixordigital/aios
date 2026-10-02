@@ -14,6 +14,8 @@ import time
 from typing import Dict, List
 
 from aios.core.agent import AgentRuntime
+from aios.core.agent_events import emit_trial_event
+from aios.core.providers import STREAM_TOKEN
 from aios.db.models import Agent as AgentModel
 
 logger = logging.getLogger(__name__)
@@ -122,8 +124,19 @@ class AutonomousAgent:
         self.hitl_value_threshold = gov.get("hitl_value_threshold", HITL_VALUE_THRESHOLD)
         self.hitl_discount_threshold = gov.get("hitl_discount_threshold", 10)  # % desconto que exige aprovação
 
-    async def run(self, conversation_id: str, user_message: str, db=None) -> str:
-        """Loop autônomo até done verificado ou HITL."""
+    async def run(
+        self,
+        conversation_id: str,
+        user_message: str,
+        db=None,
+        emit=None,
+    ) -> str:
+        """Loop autônomo até done verificado ou HITL.
+
+        ``emit`` is an optional async callback receiving each event as it
+        happens. It exists so the agent canvas can show trial boundaries and
+        live tokens; the default keeps the historical drain-only behaviour.
+        """
         reflections: List[str] = []
         trajectory: List[dict] = []
         last_response = ""
@@ -143,7 +156,25 @@ class AutonomousAgent:
                 if reflections:
                     self.agent.system_prompt = original_prompt + "\n\n[Aprendizado de tentativas anteriores]\n" + "\n".join(f"- {r}" for r in reflections[-2:])
 
-                response = await self.runtime.run(conversation_id, augmented_message, db)
+                if emit is not None:
+                    await emit(
+                        emit_trial_event(
+                            self.agent, trial, self.max_trials, conversation_id
+                        )
+                    )
+
+                # Stream the inner runtime rather than draining it, so tokens
+                # reach the canvas as they are produced. AgentRuntime.run() was
+                # exactly this drain, so behaviour is otherwise unchanged.
+                chunks: List[str] = []
+                async for _ev in self.runtime.run_stream(
+                    conversation_id, augmented_message, db
+                ):
+                    if _ev.get("type") == STREAM_TOKEN:
+                        chunks.append(_ev.get("content", ""))
+                    if emit is not None:
+                        await emit(_ev)
+                response = "".join(chunks)
 
                 # Restore
                 self.agent.system_prompt = original_prompt
@@ -227,6 +258,52 @@ class AutonomousAgent:
             return f"⏸️ [HITL] Não consegui resolver autonomamente após {self.max_trials} tentativas. Reflexões: {' | '.join(reflections[-2:])}. Aguardando humano (ID: {hitl_id}). Última tentativa: {last_response[:500]}"
 
         return last_response or "Não consegui resolver. Tente reformular."
+
+    async def run_stream(
+        self, conversation_id: str, user_message: str, db=None
+    ):
+        """Stream an autonomous run, including trial boundaries.
+
+        The trial loop in :meth:`run` is a coroutine, so it cannot itself be
+        iterated. Fan-in via a queue: ``run`` pushes events into the queue as
+        it produces them, and this generator yields whatever arrives until the
+        run finishes.
+
+        Note each trial calls the inner runtime, which fires AGENT_START and
+        AGENT_END per attempt. Subscribers must treat node lifecycle as an
+        idempotent state set, not a counter.
+        """
+        import asyncio as _asyncio
+
+        q: "_asyncio.Queue[dict]" = _asyncio.Queue()
+
+        async def _emit(ev: dict) -> None:
+            await q.put(ev)
+
+        task = _asyncio.create_task(
+            self.run(conversation_id, user_message, db, emit=_emit)
+        )
+        try:
+            while True:
+                getter = _asyncio.create_task(q.get())
+                done, _ = await _asyncio.wait(
+                    {getter, task}, return_when=_asyncio.FIRST_COMPLETED
+                )
+                if getter in done:
+                    yield getter.result()
+                else:
+                    getter.cancel()
+                    break
+            # Drain anything queued between the run finishing and this check.
+            while not q.empty():
+                yield q.get_nowait()
+        finally:
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except (_asyncio.CancelledError, Exception):
+                pass
 
     def _needs_hitl(self, response: str, user_message: str) -> bool:
         """Heurística HITL: só quando realmente não pode resolver ou exige aprovação humana.

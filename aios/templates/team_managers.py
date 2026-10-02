@@ -47,7 +47,7 @@ Uma pergunta por vez. Estabeleça: valor, decisor, prazo, próximo passo. Antes 
 # 10. Escalation, transfer, and closing
 Humano quando: desconto >15%, enterprise sem decisor confirmado, ou reclamação. Sempre encerre com: etapa atual, próximo passo datado, e dono. Log da decisão no blackboard.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["calculator", "lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_delete_deal", "crm_pipeline_stats"],
+    "tools": ["ask_team_manager", "notify_human", "calculator", "lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_delete_deal", "crm_pipeline_stats"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }
 
@@ -83,7 +83,7 @@ Uma pergunta por vez. Estabeleça: comportamento esperado, comportamento atual, 
 # 10. Escalation, transfer, and closing
 Humano quando: risco de dado, decisão de arquitetura ambígua, ou pedido que enfraqueça uma checagem de segurança. Encerre com: o que mudou, qual teste prova, e o que fica para depois.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.2, "max_tokens": 4096},
-    "tools": ["read_file", "code", "sql_query", "python_sandbox", "http_request", "web_search", "current_datetime", "rag_search"],
+    "tools": ["ask_team_manager", "notify_human", "read_file", "code", "sql_query", "python_sandbox", "http_request", "web_search", "current_datetime", "rag_search"],
     "memory_config": {"short_term": {"max_messages": 80}, "long_term": {"enabled": True, "top_k": 8}, "episodic": {"enabled": True, "summarize_after": 15}},
 }
 
@@ -119,7 +119,7 @@ Uma pergunta por vez sobre a superfície: o que aceita entrada não confiável, 
 # 10. Escalation, transfer, and closing
 Humano quando: risco a dado real, credencial exposta, ou dependência externa comprometida. Encerre cada despacho com: arquivo:linha, entrada rastreada, impacto, passos de reprodução, e severidade justificada.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.2, "max_tokens": 4096},
-    "tools": ["read_file", "web_search", "http_request", "python_sandbox", "current_datetime", "sql_query"],
+    "tools": ["ask_team_manager", "notify_human", "read_file", "web_search", "http_request", "python_sandbox", "current_datetime", "sql_query"],
     "memory_config": {"short_term": {"max_messages": 80}, "long_term": {"enabled": True, "top_k": 8}, "episodic": {"enabled": True, "summarize_after": 15}},
 }
 
@@ -155,6 +155,6 @@ Uma pergunta por vez. Antes do patch: onde exatamente a entrada não confiável 
 # 10. Escalation, transfer, and closing
 Humano quando: precisa mudar contrato público, toca todos os tenants, ou o achado exige decisão de produto. Encerre com: causa raiz, arquivo:linha do fix, teste que prova, e o que ficou em aberto.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.2, "max_tokens": 4096},
-    "tools": ["read_file", "code", "sql_query", "python_sandbox", "http_request", "web_search", "current_datetime", "rag_search"],
+    "tools": ["ask_team_manager", "notify_human", "read_file", "code", "sql_query", "python_sandbox", "http_request", "web_search", "current_datetime", "rag_search"],
     "memory_config": {"short_term": {"max_messages": 80}, "long_term": {"enabled": True, "top_k": 8}, "episodic": {"enabled": True, "summarize_after": 15}},
 }

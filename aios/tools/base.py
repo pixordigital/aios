@@ -14,6 +14,9 @@ class BaseTool(ABC):
     # read it and refuse cross-org access. Empty = unknown caller (defense in
     # depth still applies, but scoping cannot).
     _org_id: str = ""
+    # Id of the agent whose run is executing the tool. Empty on admin/dashboard
+    # paths, where no agent is running.
+    _agent_id: str = ""
 
     @abstractmethod
     async def run(self, **kwargs) -> Any:

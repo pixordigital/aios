@@ -33,6 +33,30 @@ from aios.db.models import Message
 
 logger = logging.getLogger(__name__)
 
+# An agent run does not raise when it fails: AgentRuntime returns a canned
+# apology and AutonomousAgent returns a reflection/HITL string. Anything that
+# publishes a run's output to a human must screen these out, or a failed
+# evaluation loop gets delivered as if it were the answer.
+#
+# Defined above AgentRuntime, not below it: orchestrator.py imports this at
+# module level, and the agent<->orchestrator import cycle means orchestrator can
+# run while this module is only half-executed. Below the class it would not
+# exist yet and the import would fail with ImportError.
+_FAILED_RUN_MARKERS = (
+    "I'm having trouble completing this request",
+    "Não consegui",
+    "Falha após 3 tentativas",
+    "Falha: ",
+    "⏸️ [HITL]",
+)
+
+
+def is_failed_run(text: str) -> bool:
+    """True when `text` is a runtime failure notice, not a real answer."""
+    if not text or not text.strip():
+        return True
+    return any(marker in text for marker in _FAILED_RUN_MARKERS)
+
 # ponytail: prefix → context window; upgrade when model catalog grows
 _CTX_MAP = {
     "openai/gpt-4o": 128_000,
@@ -64,12 +88,23 @@ class AgentRuntime:
     MAX_ITERATIONS = 10
 
     def __init__(self, agent: AgentModel, db_session_factory=None):
+        """`db_session_factory` is accepted and unused.
+
+        It used to be stored on `self._db_factory` and never read, so callers
+        that passed one believed the run had a session when it did not — which
+        is how runs ended up with no conversation history. Anything that needs a
+        session now opens one where it needs it (see `MemoryManager.get_recent`).
+        Kept in the signature because a dozen call sites pass it.
+        """
         self.agent = agent
         model = agent.llm_config.get("model", "openai/gpt-4o")
         self.llm = get_provider(model)
-        self.tool_engine = ToolEngine(agent.tools or [], org_id=getattr(agent, "org_id", "") or "")
+        self.tool_engine = ToolEngine(
+            agent.tools or [],
+            org_id=getattr(agent, "org_id", "") or "",
+            agent_id=getattr(agent, "id", "") or "",
+        )
         self.memory = MemoryManager(agent.id, llm_provider=self.llm)
-        self._db_factory = db_session_factory
         # governance
         gov = agent.governance_config or {}
         self._autonomy = gov.get("autonomy", "draft")
@@ -214,6 +249,23 @@ class AgentRuntime:
         user_message: str,
         db: DatabaseBackend | None = None,
     ) -> AsyncGenerator[dict, None]:
+        """Streaming, with every event tagged and published to the canvas.
+
+        Thin wrapper: tagging happens in exactly one place so no yield site can
+        ship an anonymous event to subscribers.
+        """
+        run_id = uuid.uuid4().hex[:12]
+        from aios.core.agent_events import emit_stream_event
+
+        async for ev in self._run_stream_inner(conversation_id, user_message, db):
+            yield emit_stream_event(self.agent, ev, run_id)
+
+    async def _run_stream_inner(
+        self,
+        conversation_id: str,
+        user_message: str,
+        db: DatabaseBackend | None = None,
+    ) -> AsyncGenerator[dict, None]:
         """Streaming: yield token/tool_call/done events as they happen.
 
         Includes: health tracking, retry with fallback models, error escalation, telemetry.
@@ -233,19 +285,34 @@ class AgentRuntime:
             return
 
         # P0-15 guardrail: bloqueia LLM se check_org_limits negar (custo/tokens/msgs)
+        # Fail CLOSED. An earlier `except Exception: pass` meant a DB blip turned
+        # the spend gate off for every run on that process — the one moment the
+        # limit matters most is when we cannot afford the run.
         if db is not None:
+            from aios.core.limits import check_org_limits as _chk
             try:
-                from aios.core.limits import check_org_limits as _chk
                 _allowed, _reason = await _chk(self.agent.org_id, db)
-                if not _allowed:
-                    yield {"type": STREAM_ERROR, "error": _reason}
-                    return
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.error("check_org_limits failed for org %s: %s", self.agent.org_id, _e)
+                _allowed, _reason = False, "usage check unavailable"
+            if not _allowed:
+                yield {"type": STREAM_ERROR, "error": _reason}
+                return
 
-        scheduler.start(self.agent.id)
+        # Register the run with the scheduler. `start()` returns None both when
+        # the agent was never enqueued (the direct-call path, fine) and when the
+        # scheduler is at capacity (not fine) — so ask it to reserve the slot
+        # when there is a process to reserve.
+        _proc = self.agent.id and scheduler.start(self.agent.id)
+        if _proc is None and scheduler.get_process(self.agent.id) is not None:
+            yield {
+                "type": STREAM_ERROR,
+                "error": "scheduler at capacity — agent not started",
+            }
+            return
         hooks.fire(HookPoint.AGENT_START, HookContext(
             agent_id=self.agent.id,
+            org_id=self.agent.org_id,
             conversation_id=conversation_id,
         ))
 
@@ -259,7 +326,7 @@ class AgentRuntime:
 
                 # check cache for first iteration (no tool calls)
                 if iteration == 0 and not tools:
-                    cached = cache.get(context, model, temp, tools)
+                    cached = cache.get(context, model, temp, tools, self.agent.org_id)
                     if cached:
                         content = cached.get("content", "")
                         if content:
@@ -285,6 +352,18 @@ class AgentRuntime:
                     elif event["type"] == STREAM_TOOL_CALL:
                         response_tool_calls = event["tool_calls"]
                         total_tool_calls += len(response_tool_calls or [])
+                        # Token accounting. This counter was declared and never
+                        # incremented, so every telemetry.record(tokens=...) and
+                        # every cost dashboard read 0. Providers do not surface
+                        # usage on the stream, so count what we actually emitted.
+                        from aios.core.tokenizer import count_tokens as _ct
+
+                        total_tokens += _ct(response_content or "")
+                        # Re-yield: subscribers (agent canvas node activity, and
+                        # the dashboard sandbox tool counter) already handle
+                        # this event, but it was swallowed here so neither ever
+                        # saw a tool call.
+                        yield event
                     elif event["type"] == STREAM_ERROR:
                         yield event
                         return
@@ -329,24 +408,24 @@ class AgentRuntime:
                                 result = f"Tool '{fn_name}' was not approved by human."
                                 logger.info("Approval denied for tool '%s' on agent %s", fn_name, self.agent.id)
                             else:
-                                cached_result = tool_cache.get(fn_name, fn_args)
+                                cached_result = tool_cache.get(fn_name, fn_args, self.agent.org_id)
                                 if cached_result is not None:
                                     result = cached_result
                                 else:
                                     try:
                                         result = await self.tool_engine.execute(fn_name, fn_args)
-                                        tool_cache.set(fn_name, fn_args, result)
+                                        tool_cache.set(fn_name, fn_args, result, self.agent.org_id)
                                     except Exception as e:
                                         logger.exception("Tool execution failed: %s", fn_name)
                                         result = f"Tool error: {e}"
                         else:
-                            cached_result = tool_cache.get(fn_name, fn_args)
+                            cached_result = tool_cache.get(fn_name, fn_args, self.agent.org_id)
                             if cached_result is not None:
                                 result = cached_result
                             else:
                                 try:
                                     result = await self.tool_engine.execute(fn_name, fn_args)
-                                    tool_cache.set(fn_name, fn_args, result)
+                                    tool_cache.set(fn_name, fn_args, result, self.agent.org_id)
                                 except Exception as e:
                                     logger.exception("Tool execution failed: %s", fn_name)
                                     result = f"Tool error: {e}"
@@ -358,6 +437,7 @@ class AgentRuntime:
                         if db:
                             db.add(Message(
                                 conversation_id=conversation_id,
+                                org_id=self.agent.org_id,
                                 role="tool",
                                 content=str(result)[:2000],
                                 agent_id=self.agent.id,
@@ -386,11 +466,15 @@ class AgentRuntime:
 
                 # No tool calls — final response
                 if response_content:
+                    from aios.core.tokenizer import count_tokens as _ct
+
+                    total_tokens += _ct(response_content)
                     await self.memory.add(conversation_id, "assistant", response_content)
-                    cache.set(context, model, temp, {"content": response_content, "tool_calls": None}, tools)
+                    cache.set(context, model, temp, {"content": response_content, "tool_calls": None}, tools, self.agent.org_id)
                     if db:
                         db.add(Message(
                             conversation_id=conversation_id,
+                            org_id=self.agent.org_id,
                             role="assistant",
                             content=response_content,
                             agent_id=self.agent.id,
@@ -419,6 +503,7 @@ class AgentRuntime:
             telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, error=True)
             hooks.fire(HookPoint.AGENT_ERROR, HookContext(
                 agent_id=self.agent.id,
+                org_id=self.agent.org_id,
                 conversation_id=conversation_id,
                 data={"error": str(e)},
             ))
@@ -427,6 +512,7 @@ class AgentRuntime:
             scheduler.terminate(self.agent.id)
             hooks.fire(HookPoint.AGENT_END, HookContext(
                 agent_id=self.agent.id,
+                org_id=self.agent.org_id,
                 conversation_id=conversation_id,
             ))
 

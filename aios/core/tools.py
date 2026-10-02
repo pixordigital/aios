@@ -37,6 +37,7 @@ _ALLOWED_MODULES = {
     "aios.tools.calendar",
     "aios.tools.load_skills",
     "aios.tools.proactive_alerts",
+    "aios.tools.team_collaboration",
     "aios.tools.voice_call",
     "aios.tools.whatsapp_template",
 }
@@ -44,6 +45,23 @@ _ALLOWED_MODULES = {
 # Safety limits
 _TOOL_TIMEOUT = 30.0  # seconds per tool call
 _TOOL_MAX_RETRIES = 2
+# Tools that change the world outside AIOS. Retrying these after an ambiguous
+# failure duplicates the effect: the call may have succeeded and only the
+# response was lost. `send_email` sent three emails, `crm_create_deal` created
+# three deals. Everything else here is a read or a pure computation, so a retry
+# is free and correct.
+_TOOL_NON_IDEMPOTENT = {
+    "send_email",
+    "notify_human",
+    "ask_team_manager",
+    "crm_create_deal",
+    "crm_delete_deal",
+    "crm_merge_deals",
+    "crm_set_follow_up",
+    "whatsapp_template",
+    "calendar_create_event",
+    "voice_call",
+}
 _TOOL_MAX_OUTPUT = 100_000  # chars
 _TOOL_MAX_INPUT_ARGS = 50_000  # chars
 _TOOL_CALL_TRACKING = {}  # tool_name -> count for audit
@@ -56,9 +74,13 @@ class ToolExecutionError(Exception):
 
 
 class ToolEngine:
-    def __init__(self, tool_names: list[str], org_id: str = ""):
+    def __init__(self, tool_names: list[str], org_id: str = "", agent_id: str = ""):
         self.tools: dict[str, Any] = {}
         self.org_id = org_id or ""
+        # Caller identity for tools that answer "who is asking" (team_collaboration
+        # resolves the caller's team from it). Empty on admin/dashboard paths,
+        # where there is no agent — those callers pass org only.
+        self.agent_id = agent_id or ""
         self.missing: list[str] = []
         for name in tool_names:
             # A tool name that no longer exists must not take the whole agent
@@ -126,9 +148,13 @@ class ToolEngine:
         # SELECT another org's rows and nothing recorded whose data it was.
         try:
             tool._org_id = self.org_id
+            tool._agent_id = self.agent_id
         except Exception:
             pass
-        for attempt in range(_TOOL_MAX_RETRIES + 1):
+        # A retry is only safe for tools whose effect is idempotent. Retrying
+        # `send_email` after a lost response sent the email three times.
+        max_attempts = 1 if name in _TOOL_NON_IDEMPOTENT else _TOOL_MAX_RETRIES + 1
+        for attempt in range(max_attempts):
             try:
                 result = await asyncio.wait_for(
                     tool.run(**args),
@@ -141,14 +167,18 @@ class ToolEngine:
                 return output
             except TimeoutError:
                 last_err = f"Tool '{name}' timed out after {_TOOL_TIMEOUT}s"
-                if attempt < _TOOL_MAX_RETRIES:
+                if attempt < max_attempts - 1:
                     await asyncio.sleep(0.5)
                 else:
                     raise ToolExecutionError(last_err)
             except Exception as e:
                 logger.exception("Tool %s attempt %d failed", name, attempt + 1)
                 last_err = str(e)
-                if attempt < _TOOL_MAX_RETRIES:
+                # A permission denial is a verdict, not a hiccup. Retrying it
+                # three times bought three identical tracebacks and the same
+                # answer.
+                deterministic = isinstance(e, (PermissionError, ToolExecutionError))
+                if attempt < max_attempts - 1 and not deterministic:
                     await asyncio.sleep(0.5)
                 else:
                     raise ToolExecutionError(f"Tool '{name}' failed: {last_err}")

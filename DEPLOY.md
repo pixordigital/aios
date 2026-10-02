@@ -64,14 +64,6 @@ alembic check
 4. Mount `/data` volume for artifacts persistence
 5. Deploy
 
-## Convex Deploy (Optional Failover Backend)
-
-```bash
-cd convex
-npx convex dev --configure=existing
-# Then set AIOS_CONVEX_URL + AIOS_CONVEX_ADMIN_KEY in .env
-```
-
 ## Monitoring
 
 Health endpoints:

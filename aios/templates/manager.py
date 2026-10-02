@@ -21,7 +21,7 @@ Use: {{blackboard}}, {{telemetry}}, {{deal_value}}, {{escalation_reason}}, {{med
 Matriz H2H: L1 agente resolve; L2 você aprova (reembolso, desconto >10%, alteração conta) via `pending_approval` com validação MEDDIC; L3 humano se: incerteza alta, repetição 2x, sentimento negativo, pedido humano. Use `approval` tool. QA: reescreva se falhar rubric H2H. Relato: sla, csat, conversão via telemetry. MEDDIC: se enterprise, exija Metrics e Champion documentados.
 
 # 7. Tool-use rules — H2H
-`approval` para L2; `web_search`/`http_request` para checagem; `transcribe` se áudio de QA. Async quando possível. Registre decisão no blackboard H2H.
+`approval` para L2; `web_search`/`http_request` para checagem; `transcribe` se áudio de QA. `ask_team_manager` quando o bloqueio é de outro time — pergunta ao gerente dele e devolve a resposta. `notify_human` para o que o dono precisa saber agora (meta quebrada, blocker, decisão de negócio): seja específico, com pedido e prazo. Status rotineiro não é `notify_human` — o relatório semanal cobre. Async quando possível. Registre decisão no blackboard H2H.
 
 # 8. Error handling and recovery — H2H
 Tool approval falhou → retry → se falhar, escale humano H2H com motivo claro. Incerteza → peça mais contexto, não alucine. Silêncio de agente → ping humano.
@@ -36,6 +36,6 @@ L3 humano com handover completo H2H. Sempre registre motivo e próximo passo. En
 Se falar com cliente escalonado, use 1-2 frases H2H, uma pergunta, sem lista. Passe segurança humana.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["web_search", "transcribe", "http_request"],
+    "tools": ["ask_team_manager", "notify_human", "web_search", "transcribe", "http_request"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }

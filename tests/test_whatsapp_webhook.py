@@ -87,9 +87,43 @@ class TestSignatureVerification:
         body = {"instance": "x"}
         assert _verify_evolution_sig("", body, "right-key") is not True
 
-    def test_api_key_lookup_is_a_coroutine(self):
-        from aios.api.evolution_webhook import _get_evolution_api_key
-        assert inspect.iscoroutinefunction(_get_evolution_api_key)
+    def test_stored_ciphertext_is_not_used_as_the_webhook_secret(self):
+        """Auth used the raw config value; dashboard stores `enc:<fernet>`.
+
+        The header Evolution sends is the plaintext secret, so comparing it to
+        the ciphertext failed auth for every dashboard-created channel while
+        API-created ones passed — the one path tests exercised.
+        """
+        from aios.api.evolution_webhook import _channel_api_key
+        from aios.core.secrets import encrypt_channel_config
+        from aios.db.models import ChannelConnection
+
+        secret = "whatsapp-secret-do-not-log"
+        ch = ChannelConnection(
+            org_id="o1", label="l", channel_type="evolution",
+            config=encrypt_channel_config({"instance": "i1", "api_key": secret}),
+        )
+        assert _channel_api_key(ch) == secret
+        assert not _channel_api_key(ch).startswith("enc:")
+
+    def test_plaintext_key_still_works(self):
+        from aios.api.evolution_webhook import _channel_api_key
+        from aios.db.models import ChannelConnection
+
+        ch = ChannelConnection(
+            org_id="o1", label="l", channel_type="evolution",
+            config={"instance": "i1", "api_key": "plain"},
+        )
+        assert _channel_api_key(ch) == "plain"
+
+    def test_missing_key_is_empty_not_ciphertext(self):
+        from aios.api.evolution_webhook import _channel_api_key
+        from aios.db.models import ChannelConnection
+
+        ch = ChannelConnection(
+            org_id="o1", label="l", channel_type="evolution", config={"instance": "i1"},
+        )
+        assert _channel_api_key(ch) == ""
 
 
 class TestEvolutionChannel:

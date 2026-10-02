@@ -88,7 +88,17 @@ async def deliver_message(
                 contact = extra_j.get("from_number") or extra_j.get("to") or conversation_id
                 window_open = extra_j.get("window_open", True)
                 is_template = extra_j.get("is_template", False)
-                ok, reason = await guard_send(contact, text, is_template=is_template, window_open=window_open)
+                # record=False: this is the pre-check, not the send. The channel
+                # adapter is the layer that owns the send and records the
+                # send. Recording here too made the adapter's own check read
+                # back this write and refuse the message as a duplicate.
+                ok, reason = await guard_send(
+                    contact,
+                    text,
+                    is_template=is_template,
+                    window_open=window_open,
+                    record=False,
+                )
                 if not ok:
                     logger.warning("Guard block %s: %s", contact, reason)
                     if "opt-out" in reason:
@@ -145,17 +155,36 @@ async def deliver_message(
 
             if result is not None:
                 # Record the key so a retry after a lost response is suppressed.
+                #
+                # By stamping the reply row the caller already saved, not by
+                # inserting a second one. A new row per send meant every agent
+                # reply appeared twice in the conversation and was fed to the
+                # LLM twice through get_recent.
                 try:
+                    from sqlalchemy import select as _sel
+
                     from aios.db.engine import async_session as _sess
                     from aios.db.models import Message as _Msg
                     async with _sess() as _s:
-                        _s.add(_Msg(
-                            conversation_id=conversation_id,
-                            org_id=getattr(conn, "org_id", ""),
-                            role="assistant",
-                            content=text,
-                            channel_message_id=idempotency_key,
-                        ))
+                        existing = (await _s.execute(
+                            _sel(_Msg).where(
+                                _Msg.conversation_id == conversation_id,
+                                _Msg.role == "assistant",
+                                _Msg.content == text,
+                            ).order_by(_Msg.created_at.desc()).limit(1)
+                        )).scalars().first()
+                        if existing is not None:
+                            existing.channel_message_id = idempotency_key
+                        else:
+                            # No prior row (e.g. an operator replying from the
+                            # inbox) — the send still needs its own record.
+                            _s.add(_Msg(
+                                conversation_id=conversation_id,
+                                org_id=getattr(conn, "org_id", ""),
+                                role="assistant",
+                                content=text,
+                                channel_message_id=idempotency_key,
+                            ))
                         await _s.commit()
                 except Exception:
                     logger.debug("deliver_message: could not record idempotency key")

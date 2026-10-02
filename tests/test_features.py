@@ -69,8 +69,8 @@ async def test_approval_approve_flow():
 
     async def decider():
         await asyncio.sleep(0.1)
-        assert am.approve("id1") is False  # unknown id
-        ok = am.approve("a1", decided_by="user9")
+        assert await am.approve("id1") is False  # unknown id
+        ok = await am.approve("a1", decided_by="user9")
         return ok
 
     task1 = asyncio.create_task(requester())
@@ -90,7 +90,7 @@ async def test_approval_reject_flow():
 
     async def decider():
         await asyncio.sleep(0.1)
-        am.reject("a2", decided_by="user9")
+        await am.reject("a2", decided_by="user9")
 
     task1 = asyncio.create_task(requester())
     task2 = asyncio.create_task(decider())

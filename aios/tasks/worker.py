@@ -14,7 +14,7 @@ import os
 from arq import cron
 from arq.connections import RedisSettings
 from aios.config import settings
-from .jobs import FUNCTIONS, biweekly_1on1_job, weekly_standup_job
+from .jobs import FUNCTIONS, monthly_report_job, weekly_report_job, weekly_standup_job
 
 
 def _parse_redis(redis_url: str) -> RedisSettings:
@@ -232,7 +232,8 @@ class WorkerSettings:
         cron(_eval_review_cron, minute=25),
         cron(integration_outbox_cron, second=30),
         cron(weekly_standup_job, hour=9, minute=0),  # daily trigger, self-skips unless Monday
-        cron(biweekly_1on1_job, hour=9, minute=30),  # daily trigger, self-skips unless 1:1 week
+        cron(weekly_report_job, hour=9, minute=15),  # owner report + 1:1 agenda, Mondays
+        cron(monthly_report_job, hour=9, minute=30),  # last month's report, 1st of the month
     ]
     redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379"))
     max_jobs = 20
@@ -250,6 +251,19 @@ class WorkerSettings:
             await init_db()
         except Exception:
             pass
+        # Same registration the API process does in its lifespan. Without it
+        # every syscall dispatched from a worker hit "No handler" and silently
+        # fell back to the direct provider, losing per-org secret resolution —
+        # so an org's own LLM key was ignored on every background run.
+        try:
+            from aios.main import _register_syscall_handlers
+
+            await _register_syscall_handlers()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "worker: syscall handlers not registered — LLM calls will use "
+                "the instance key instead of the org's"
+            )
 
     @staticmethod
     async def on_shutdown(ctx):

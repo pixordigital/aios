@@ -30,14 +30,7 @@ POSTGRES_PASSWORD=<generate-strong-password>
 
 No password needed for internal Docker network.
 
-### 3. Convex (Optional — for real-time features)
-
-If deploying Convex separately:
-- Create a Convex project at [convex.dev](https://convex.dev)
-- Deploy schema: `cd convex && npx convex deploy`
-- Note the `CONVEX_URL` and `ADMIN_KEY` from project settings
-
-### 4. AIOS App (Main Service)
+### 3. AIOS App (Main Service)
 
 **Service Type:** Docker Compose
 **Source:** Git repository
@@ -62,11 +55,6 @@ services:
       # ─── Database (Supabase/PostgreSQL) ───
       AIOS_DATABASE_URL: "postgresql+asyncpg://aios:<password>@postgres:5432/aios"
       AIOS_DB_BACKEND: "sqlalchemy"
-      AIOS_DB_REPLICA_BACKEND: "convex"
-
-      # ─── Convex (Failover) ───
-      AIOS_CONVEX_URL: "https://your-project.convex.cloud"
-      AIOS_CONVEX_ADMIN_KEY: "<your-admin-key>"
 
       # ─── Redis ───
       AIOS_REDIS_URL: "redis://redis:6379"
@@ -142,7 +130,7 @@ volumes:
   app-data:
 ```
 
-### 5. Caddy (Reverse Proxy)
+### 4. Caddy (Reverse Proxy)
 
 **Service Type:** Docker Compose
 
@@ -217,7 +205,6 @@ Mount `/data` for artifact storage.
 
 - App → PostgreSQL: Use Docker network (same compose stack)
 - App → Redis: Use Docker network
-- App → Convex: External (convex.cloud)
 - Caddy → App: Internal network
 
 ## Post-Deploy Checklist
@@ -261,9 +248,6 @@ Supabase handles backups automatically. For manual:
 docker compose exec postgres pg_dump -U aios aios > backup.sql
 ```
 
-### Convex
-Convex handles backups via their dashboard.
-
 ## Monitoring
 
 - **Health:** `https://aios.yourdomain.com/health`
@@ -279,10 +263,6 @@ Convex handles backups via their dashboard.
 - Check logs: `docker compose logs app`
 - Verify PostgreSQL is reachable: `docker compose exec app curl -sf http://postgres:5432`
 - Verify Redis: `docker compose exec app redis-cli -h redis ping`
-
-### Convex connection failed
-- Check `AIOS_CONVEX_URL` and `AIOS_CONVEX_ADMIN_KEY`
-- Verify Convex project is deployed: `cd convex && npx convex dashboard`
 
 ### Migration errors
 - Run: `docker compose exec app alembic upgrade head`

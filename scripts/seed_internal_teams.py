@@ -123,7 +123,9 @@ async def main():
             else:
                 print(f"  ! {ch_env} unset — wire #{team_name} later via dashboard (slack_channel_id)")
 
-            # 1:1 DM channel wiring (biweekly job posts here when config.slack_1on1)
+            # Owner DM channel wiring. config.slack_1on1 marks the channel the
+            # weekly + monthly reports post to, and the one notify_human sends
+            # to. Without it a team gets no owner-facing reports at all.
             one_env = f"SLACK_CH_1ON1_{team_name.upper()}"
             one_id = os.environ.get(one_env, "")
             if one_id:

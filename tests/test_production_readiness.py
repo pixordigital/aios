@@ -53,7 +53,8 @@ def test_approval_decisions_pass_org_id():
     assert "reject(action_id, decided_by=user.id, org_id=user.org_id)" in src
 
 
-def test_approve_refuses_cross_org_in_memory_row():
+@pytest.mark.asyncio(loop_scope="function")
+async def test_approve_refuses_cross_org_in_memory_row():
     """approve() reported 404 but still wrote the other tenant's row."""
     from aios.core.approval import approval_manager
 
@@ -67,7 +68,7 @@ def test_approve_refuses_cross_org_in_memory_row():
         tool_args={},
     )
     approval_manager._pending["act-cross-org"] = pa
-    assert approval_manager.approve("act-cross-org", org_id="org-ATTACKER") is False
+    assert await approval_manager.approve("act-cross-org", org_id="org-ATTACKER") is False
     # status defaults are applied at flush, so only assert it was NOT approved
     assert pa.status != "approved", "cross-org approve must not mutate the row"
     approval_manager._pending.clear()

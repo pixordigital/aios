@@ -264,8 +264,27 @@ def record_send(contact: str):
 
 
 async def guard_send(
-    contact: str, text: str, is_template: bool = False, window_open: bool = True, provider: str = "meta", instance: str = ""
+    contact: str,
+    text: str,
+    is_template: bool = False,
+    window_open: bool = True,
+    provider: str = "meta",
+    instance: str = "",
+    record: bool = True,
 ) -> tuple[bool, str]:
+    """Decide whether a send may proceed.
+
+    Exactly one caller per outbound message must pass `record=True` — the
+    layer that owns the send. Every other layer on the path (the delivery
+    retry wrapper) passes `record=False` for a pure pre-check.
+
+    The distinction is load-bearing: this function writes `_last_text`,
+    `record_send` and `record_global_send`, and the very next line reads
+    `_last_text` back through `is_duplicate`. Two recording calls for one
+    message meant the second one always saw its own write and returned
+    "duplicate 5min", so the send was refused *after* it had been approved —
+    every agent reply was dropped and retried into the DLQ.
+    """
     if is_opt_out(text):
         record_opt_out(contact)
         return False, "user opt-out recorded"
@@ -286,6 +305,8 @@ async def guard_send(
     if not ok:
         logger.warning("WhatsApp guard block %s [%s]: %s", contact, provider, reason)
         return False, reason
+    if not record:
+        return True, ""
     record_send(contact)
     record_global_send(instance)
     _last_text[contact] = (text.strip(), time.time())

@@ -109,15 +109,25 @@ async def _process_inbound_once(
             logger.warning("process_inbound: channel %s not found", channel_connection_id)
             return
 
-        # find or create conversation
+        # Find or create the conversation for THIS contact.
+        #
+        # The fallback used to be "latest conversation on this channel", which
+        # put every customer of one Evolution number into a single thread: their
+        # messages, the agent's replies, its memory and its RAG injections all
+        # interleaved, and the inbox showed one row for the whole business.
+        # A channel carries many contacts, so the thread is keyed by the
+        # contact, not the channel.
+        contact = extra.get("from_number") or user_id or ""
         conv = None
         if conversation_id:
             conv = await db.get(Conversation, conversation_id)
-        if not conv:
+        if not conv and contact:
             conv = (await db.execute(
                 select(Conversation).where(
+                    Conversation.org_id == conn.org_id,
                     Conversation.channel == channel_type,
                     Conversation.channel_connection_id == channel_connection_id,
+                    Conversation.external_id == contact,
                 ).order_by(Conversation.created_at.desc())
             )).scalars().first()
 
@@ -128,10 +138,28 @@ async def _process_inbound_once(
                 channel_connection_id=channel_connection_id,
                 agent_id=conn.agent_id,
                 team_id=conn.team_id,
+                external_id=contact or None,
                 extra_data=extra,
             )
             db.add(conv)
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception:
+                # Two workers handling the same contact's first message at once.
+                # The unique index on (org, channel, connection, contact) is the
+                # one that lost — take the winner's row instead of failing the
+                # customer's message.
+                await db.rollback()
+                conv = (await db.execute(
+                    select(Conversation).where(
+                        Conversation.org_id == conn.org_id,
+                        Conversation.channel == channel_type,
+                        Conversation.channel_connection_id == channel_connection_id,
+                        Conversation.external_id == contact,
+                    ).order_by(Conversation.created_at.desc())
+                )).scalars().first()
+                if not conv:
+                    raise
             await db.refresh(conv)
 
         # save inbound message
@@ -264,14 +292,29 @@ async def _process_inbound_once(
             await db.commit()
             await track_usage(conn.org_id, db, messages=1, tokens=len(reply_text))
 
-            # deliver reply via channel (with retry + DLQ)
-            await deliver_message(
-                ctx,
-                channel_connection_id,
-                conv.id,
-                reply_text,
-                json.dumps(extra),
-            )
+            # Screen failures out before they reach the customer. A run that
+            # failed does not raise — AgentRuntime returns a canned apology and
+            # AutonomousAgent a reflection/HITL string — so without this the
+            # "⏸️ [HITL]" control token and the internal reflection text were
+            # delivered verbatim as if they were the answer.
+            from aios.core.agent import is_failed_run
+
+            if is_failed_run(reply_text):
+                # Log it and let a human see it in the inbox. An escalation
+                # channel (Slack/email) is the next step, not a guess here.
+                logger.error(
+                    "process_inbound: run failed for conv %s, not delivering: %s",
+                    conv.id, reply_text[:200],
+                )
+            else:
+                # deliver reply via channel (with retry + DLQ)
+                await deliver_message(
+                    ctx,
+                    channel_connection_id,
+                    conv.id,
+                    reply_text,
+                    json.dumps(extra),
+                )
 
         # Mark the inbound row handled. Until this flag is set a retry re-enters
         # and resumes the agent run; once set, a genuine provider redelivery is
@@ -647,34 +690,43 @@ async def weekly_standup_job(ctx):
     return {"posted": posted, "failed": failed}
 
 
-async def biweekly_1on1_job(ctx):
-    """Monday 9h even ISO weeks (cron daily, self-skips): 1:1 prompts to manager DM channels."""
-    from datetime import date
+async def _post_team_reports(kind: str, year_month: str | None = None,
+                             since=None, until=None) -> dict:
+    """Build + post one report per team to the owner's Slack DM.
 
-    from sqlalchemy import select
-
-    today = date.today()
-    if today.weekday() != 0 or today.isocalendar()[1] % 2:
-        return {"skipped": True, "reason": "not-1on1-week"}
-    from aios.core.meetings import one_on_one_text, post_to_slack, team_week_stats
+    Shared by weekly_report_job and monthly_report_job. Walks orgs → active
+    slack connections → teams, and resolves managers in two batched queries
+    rather than 2N round-trips inside the loop.
+    """
+    from aios.core.meetings import (
+        manager_narrative,
+        post_to_slack,
+        report_targets,
+        report_text,
+        team_stats,
+    )
     from aios.core.sales_goals import month_progress
     from aios.db.backend import db_session
     from aios.db.models import Agent, ChannelConnection, Organization, Team
+    from sqlalchemy import select
 
-    posted, failed = 0, 0
+    posted, failed, no_manager, silent = 0, 0, 0, 0
     async with db_session() as db:
         import asyncio as _aio
 
-        orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
+        orgs = (await db.execute(
+            select(Organization).where(Organization.is_active == True)  # noqa: E712
+        )).scalars().all()
         for org in orgs:
             conns = (await db.execute(select(ChannelConnection).where(
                 ChannelConnection.org_id == org.id,
                 ChannelConnection.channel_type == "slack",
                 ChannelConnection.is_active == True,  # noqa: E712
+                ChannelConnection.team_id != None,  # noqa: E711
             ))).scalars().all()
-            wanted = [c for c in conns
-                      if isinstance(c.config or {}, dict) and (c.config or {}).get("slack_1on1")]
-            team_ids = {c.team_id for c in wanted if c.team_id}
+            if not conns:
+                continue
+            team_ids = {c.team_id for c in conns if c.team_id}
             teams = {}
             if team_ids:
                 teams = {t.id: t for t in (await db.execute(
@@ -684,26 +736,71 @@ async def biweekly_1on1_job(ctx):
             if mgr_ids:
                 managers = {a.id: a for a in (await db.execute(
                     select(Agent).where(Agent.id.in_(mgr_ids)))).scalars().all()}
-            for conn in wanted:
-                cfg = conn.config or {}
-                channel = cfg.get("slack_channel_id", "")
-                token = cfg.get("bot_token", "")
-                team = teams.get(conn.team_id) if conn.team_id else None
-                if not team or not channel or not token:
-                    continue
+
+            for team in teams.values():
                 manager = managers.get(team.manager_agent_id) if team.manager_agent_id else None
-                stats = await team_week_stats(db, org.id, team.id)
+                if manager is None:
+                    # No manager means no owner for the team and nobody to carry
+                    # the remediation plan. Counted, not guessed around.
+                    no_manager += 1
+                    continue
+                targets = report_targets(conns, team.id)
+                if not targets:
+                    continue
+
+                stats = await team_stats(db, org.id, team.id, days=7, since=since, until=until)
                 try:
-                    goal = await month_progress(db, org.id, team_id=team.id)
+                    goal = await month_progress(db, org.id, year_month, team_id=team.id)
                 except Exception:
+                    logger.exception("report: goal progress failed for team %s", team.id)
                     goal = None
-                text = one_on_one_text(team.name, manager.name if manager else "-", stats, goal)
-                # post_to_slack is sync urllib: keep it off the event loop.
-                if await _aio.to_thread(post_to_slack, token, channel, text):
-                    posted += 1
-                else:
-                    failed += 1
-    return {"posted": posted, "failed": failed}
+                # The manager narrates its own numbers. This is a full agent
+                # run, so it costs an LLM call per team per week — that is the
+                # point of the report, not a template.
+                narrative = await manager_narrative(manager, team, stats, goal, kind)
+                if not narrative:
+                    silent += 1
+                text = report_text(
+                    kind, team.name, manager.name, stats, goal, narrative
+                )
+                for t in targets:
+                    # post_to_slack is sync urllib: keep it off the event loop.
+                    if await _aio.to_thread(post_to_slack, t["token"], t["channel"], text):
+                        posted += 1
+                    else:
+                        failed += 1
+    return {
+        "kind": kind,
+        "posted": posted,
+        "failed": failed,
+        "teams_without_manager": no_manager,
+        "teams_manager_silent": silent,
+    }
+
+
+async def weekly_report_job(ctx):
+    """Monday 9h15 (cron daily, self-skips): weekly report + 1:1 agenda to the owner."""
+    from datetime import date
+
+    if date.today().weekday() != 0:
+        return {"skipped": True, "reason": "not-monday"}
+    return await _post_team_reports("weekly")
+
+
+async def monthly_report_job(ctx):
+    """1st of month 9h30 (cron daily, self-skips): last month's report to the owner."""
+    from datetime import date, timedelta
+
+    if date.today().day != 1:
+        return {"skipped": True, "reason": "not-first-of-month"}
+
+    from aios.core.sales_goals import _month_bounds
+
+    prev_month = (date.today().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    start, end = _month_bounds(prev_month)
+    return await _post_team_reports(
+        "monthly", year_month=prev_month, since=start, until=end
+    )
 
 
 # ARQ worker function registry
@@ -718,5 +815,6 @@ FUNCTIONS = [
     download_voice_recording,
     process_commitment_at_risk,
     weekly_standup_job,
-    biweekly_1on1_job,
+    weekly_report_job,
+    monthly_report_job,
 ]

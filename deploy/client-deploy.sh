@@ -137,6 +137,5 @@ echo "  1. Set AIOS_* env vars for production features (see PRODUCTION_CONFIG.md
 echo "  2. Configure Stripe billing (if selling subscriptions)"
 echo "  3. Configure SMTP (for email verification/password reset)"
 echo "  4. Set up HTTPS (Cloudflare or Caddy)"
-echo "  5. Deploy Convex schema: cd convex && npx convex deploy"
 echo ""
 echo "=== DONE ==="

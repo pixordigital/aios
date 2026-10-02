@@ -223,9 +223,26 @@ class MemoryManager:
 
     async def get_recent(self, conversation_id: str, limit: int = 20,
                          db: DatabaseBackend | None = None) -> list[dict]:
-        if conversation_id not in self._loaded and db is not None:
-            await self._load_from_db(conversation_id, db)
+        if conversation_id not in self._loaded:
+            if db is not None:
+                await self._load_from_db(conversation_id, db)
+            else:
+                # Open our own session. The ARQ path builds a fresh AgentRuntime
+                # per inbound message, so the in-process buffer is always empty
+                # there — and the `db is not None` guard made that permanent, so
+                # the agent answered every channel message with no history of
+                # the conversation it was replying to.
+                await self._load_own_session(conversation_id)
         return self._buffers.get(conversation_id, [])[-limit:]
+
+    async def _load_own_session(self, conversation_id: str) -> None:
+        try:
+            from aios.db.backend import db_session
+
+            async with db_session() as sess:
+                await self._load_from_db(conversation_id, sess)
+        except Exception:
+            logger.debug("memory: could not load history for %s", conversation_id)
 
     async def get_context_injections(self, query: str, top_k: int = 3) -> list[dict]:
         """Get formatted memory injections — uses SA-CTS when autonomous."""

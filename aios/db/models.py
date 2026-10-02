@@ -169,10 +169,21 @@ class Conversation(Base, TimestampMixin, OrgScopedMixin):
     team_id: Mapped[str | None] = mapped_column(ForeignKey("teams.id"), nullable=True)
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
     channel: Mapped[str] = mapped_column(String(50), default="web")
+    # The contact on the other end (WhatsApp number, Slack user, ...). One
+    # channel serves many contacts, so the thread is keyed by this, not by the
+    # channel. The unique index is what stops two workers racing to create the
+    # same contact's thread.
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     messages = relationship("Message", back_populates="conversation", order_by="Message.created_at")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "channel", "channel_connection_id", "external_id",
+            name="uq_conversations_org_channel_contact",
+        ),
+    )
 
 
 class Message(Base, TimestampMixin):

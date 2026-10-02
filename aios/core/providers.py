@@ -150,6 +150,11 @@ class LLMProvider(ABC):
         if not _circuit_allowed(ck):
             yield {"type": STREAM_ERROR, "error": f"Circuit breaker open for {kw.get('model', 'unknown')}"}
             return
+        # `started` is the guard against replaying a partial stream. Events
+        # already yielded cannot be taken back, so retrying after the first one
+        # re-sent the whole prefix to the caller — duplicated text, and any tool
+        # call in the prefix executed twice. Only a stream that failed before
+        # emitting anything is safe to replay.
         started = False
         for attempt in range(_MAX_RETRIES + 1):
             try:
@@ -159,6 +164,15 @@ class LLMProvider(ABC):
                 _circuit_record_success(ck)
                 return
             except _RETRYABLE_ERRORS as e:
+                if started:
+                    # Half a response is already in the caller's hands. Replaying
+                    # would duplicate it, so surface the error instead.
+                    _circuit_record_failure(ck)
+                    yield {
+                        "type": STREAM_ERROR,
+                        "error": f"Stream failed mid-response: {e}",
+                    }
+                    return
                 if attempt < _MAX_RETRIES:
                     delay = _BASE_DELAY * (2 ** attempt)
                     logger.warning("Stream retry %d/%d after %s", attempt+1, _MAX_RETRIES, type(e).__name__)

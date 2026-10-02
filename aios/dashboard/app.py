@@ -464,6 +464,58 @@ async def control_center(request: Request):
     return await _render("control_center.html", request, title="Control Center — Deal Desk Governado", pending=pending_data, metrics=hist, versions=versions, deals=deals_data, logs=logs)
 
 
+# ─── Agent Canvas ───
+
+@router.get("/agent-canvas", response_class=HTMLResponse)
+async def agent_canvas(request: Request):
+    """Live canvas of agents working together.
+
+    Org is resolved strictly, unlike _org_filter(). _org_filter falls back to
+    _default_org_id(), which returns the hardcoded "pixor" operator org — the
+    exact default-tenant fallback that once served a tenant's agent roster and
+    spend to an anonymous request. Live agent output is more sensitive than a
+    roster, so this route refuses when the authenticated org is unknown rather
+    than guessing.
+    """
+    from aios.api.deps import create_jwt_token, get_dashboard_user
+    import aios.core.agent_events as agent_events
+
+    org_id = getattr(request.state, "org_id", None)
+    if not org_id:
+        return HTMLResponse(
+            "<h1>403</h1><p>No organization resolved for this session. "
+            "Sign in again.</p>",
+            status_code=403,
+        )
+
+    user = await get_dashboard_user(request)
+    if not user:
+        return HTMLResponse(
+            "<h1>403</h1><p>Not authenticated.</p>", status_code=403
+        )
+
+    async with db_session() as db:
+        agents = (
+            await db.execute(
+                select(Agent).where(Agent.org_id == org_id).order_by(Agent.name)
+            )
+        ).scalars().all()
+        teams = (
+            await db.execute(select(Team).where(Team.org_id == org_id))
+        ).scalars().all()
+
+    return await _render(
+        "agent_canvas.html",
+        request,
+        title="Agent Canvas",
+        agents=agents,
+        teams=teams,
+        ws_token=create_jwt_token(user.id, org_id),
+        org_id=org_id,
+        cross_process=bool(agent_events.CROSS_PROCESS),
+    )
+
+
 # ─── Agent CRUD ───
 
 AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"]
@@ -3196,7 +3248,7 @@ async def crm_approve(request: Request, pid: str):
         pa = await db.get(PendingAction, pid)
         if not pa or pa.org_id != org_id:
             return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
-    approval_manager.approve(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
+    await approval_manager.approve(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.post("/crm/approve_edit/{pid}")
@@ -3222,7 +3274,7 @@ async def crm_approve_edit(request: Request, pid: str):
         else:
             # Do not fall through and approve it anyway.
             return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
-    approval_manager.approve(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
+    await approval_manager.approve(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 
@@ -3238,7 +3290,7 @@ async def crm_reject(request: Request, pid: str):
         if not pa or pa.org_id != org_id:
             return HTMLResponse("<h2>Ação não encontrada</h2>", status_code=404)
     u = await get_dashboard_user(request)
-    approval_manager.reject(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
+    await approval_manager.reject(pid, decided_by=u.id if u else "dashboard", org_id=org_id)
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.get("/crm/export")

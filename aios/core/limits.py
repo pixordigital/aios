@@ -11,7 +11,7 @@ from datetime import date
 from sqlalchemy import func, select, text
 
 from aios.config import PLANS, DEFAULT_PLAN
-from aios.db.models import Agent, Organization, Team, UsageRecord
+from aios.db.models import Agent, Organization, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -75,20 +75,14 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     plan_name = _get_plan(org)
     limits = PLANS.get(plan_name, PLANS[DEFAULT_PLAN])
 
-    # agent count check
-    max_agents = limits.get("max_agents", 999)
-    if max_agents != 999:
-        count = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id, Agent.status == "active"))).scalar() or 0
-        if count >= max_agents:
-            return False, f"Plan limit: max {max_agents} active agents ({plan_name} plan)"
-
-    # team count check
-    max_teams = limits.get("max_teams", 999)
-    if max_teams != 999:
-        count = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
-        if count >= max_teams:
-            return False, f"Plan limit: max {max_teams} teams ({plan_name} plan)"
-
+    # NOTE: max_agents / max_teams are *resource count* quotas, checked where
+    # the resource is created (POST /api/agents, POST /api/teams). They used to
+    # be checked here too, on the assumption that this function only runs at
+    # create time — but it is the run gate: once an org reached its agent
+    # quota, every run of its own already-deployed agents was denied with
+    # "Plan limit: max N active agents". One org, zero replies. Only spend
+    # belongs in a per-run gate.
+    #
     # atomic daily/monthly budget check with row lock
     today = date.today().isoformat()
     start_month = date.today().replace(day=1).isoformat()
@@ -110,6 +104,9 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
                 ON CONFLICT (org_id, date) DO NOTHING
             """).bindparams(id=_uuid.uuid4().hex, org_id=org_id, date=today),
         )
+        # ponytail: commits the caller's session too, so the FOR UPDATE below is
+        # released at the caller's next commit rather than held for the run. A
+        # per-run DB session would hold it properly; costs a session per run.
         await db.commit()
 
         # Now lock the row for update. FOR UPDATE is Postgres/MySQL only —

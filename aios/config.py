@@ -26,10 +26,8 @@ class Settings(BaseSettings):
     s3_endpoint: str = ""  # for Supabase Storage, R2, MinIO
     s3_sse_enabled: bool = True  # Server-Side Encryption (SSE-S3)
     s3_versioning_enabled: bool = True  # Bucket versioning for ransomware protection
-    db_backend: str = "sqlalchemy"  # "sqlalchemy" | "convex"
+    db_backend: str = "sqlalchemy"  # "sqlalchemy"
     db_replica_backend: str = ""  # failover backend type, empty = no failover
-    convex_url: str = ""
-    convex_admin_key: str = ""
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     litellm_api_key: str = "sk-litellm"

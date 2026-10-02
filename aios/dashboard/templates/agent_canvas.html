@@ -1,0 +1,262 @@
+{# Agent Canvas — live view of agents working together.
+   Reuses the proven ReactFlow-via-ESM setup from flow_editor.html (no build
+   step, no bundler). Edges come from structured `handoff` events; node state
+   from node_start/node_end/node_error; live text from token events. #}
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  :root{
+    --bg:#0b0d10; --bg-elevated:#14171c; --border:#242a33; --text:#e6e9ef;
+    --text-tertiary:#8b94a3; --accent:#4c8dff; --green:#2ecc71; --amber:#f5a623;
+    --red:#ef4444; --mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.5 Inter,system-ui,-apple-system,sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:10px 16px;
+         border-bottom:1px solid var(--border);background:var(--bg-elevated)}
+  h1{font-size:15px;margin:0;font-weight:600}
+  .spacer{flex:1}
+  .pill{font:11px var(--mono);padding:3px 8px;border-radius:99px;
+        border:1px solid var(--border);color:var(--text-tertiary)}
+  .pill.live{color:var(--green);border-color:var(--green)}
+  .pill.down{color:var(--red);border-color:var(--red)}
+  /* Honesty: if cross-process is off the canvas cannot see ARQ-raised runs.
+     Say so instead of showing a quietly incomplete picture. */
+  #coverage{display:none;padding:8px 16px;font-size:12px;
+            background:rgba(245,166,35,.12);color:var(--amber);
+            border-bottom:1px solid var(--border)}
+  #wrapper{height:calc(100vh - 110px)}
+  .agent-node{background:var(--bg-elevated);border:1px solid var(--border);
+              border-radius:10px;padding:9px 11px;min-width:190px;max-width:260px;
+              font-size:12px}
+  .agent-node .nm{font-weight:600;display:flex;align-items:center;gap:6px}
+  .agent-node .dot{width:8px;height:8px;border-radius:99px;background:var(--text-tertiary);flex:none}
+  .agent-node .st{font:10px var(--mono);color:var(--text-tertiary);margin:3px 0}
+  .agent-node .tail{color:var(--text-tertiary);font:10px/1.35 var(--mono);
+                    max-height:44px;overflow:hidden;word-break:break-word}
+  .agent-node .tr{font:10px var(--mono);color:var(--amber);margin-top:3px}
+  .s-idle{border-color:var(--border)}      .s-idle .dot{background:var(--text-tertiary)}
+  .s-running{border-color:var(--accent)}   .s-running .dot{background:var(--accent);animation:pulse 1.1s infinite}
+  .s-done{border-color:var(--green)}       .s-done .dot{background:var(--green)}
+  .s-error{border-color:var(--red)}        .s-error .dot{background:var(--red)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  .react-flow__handle{background:var(--accent);border:2px solid var(--bg)}
+</style>
+<link href="https://cdn.jsdelivr.net/npm/reactflow@11/dist/style.css" rel="stylesheet">
+<script type="importmap">{"imports":{"react":"https://esm.sh/react@18","react-dom":"https://esm.sh/react-dom@18","reactflow":"https://esm.sh/reactflow@11"}}</script>
+</head>
+<body>
+<header>
+  <h1>Agent Canvas</h1>
+  <span class="pill" id="conn">connecting…</span>
+  <span class="pill" id="counts">0 nodes · 0 edges</span>
+  <div class="spacer"></div>
+  <span class="pill">{{ agents|length }} agents · {{ teams|length }} teams</span>
+</header>
+<div id="coverage">
+  Cross-process bridge is <strong>off</strong>: agent runs triggered from
+  WhatsApp/email/cron happen in the ARQ worker and are <strong>not</strong>
+  visible here. Only runs raised in the web process appear. Set
+  <code>AIOS_REDIS_URL</code> and restart to enable.
+</div>
+<div id="wrapper"></div>
+
+<script>
+window.__CANVAS__ = {
+  wsToken: {{ ws_token|tojson }},
+  crossProcess: {{ cross_process|tojson }},
+  orgId: {{ org_id|tojson }},
+  agents: [
+    {% for a in agents %}
+    {id: {{ a.id|tojson }}, name: {{ a.name|tojson }}, status: {{ a.status|tojson }} },
+    {% endfor %}
+  ]
+};
+</script>
+<script>
+const S = window.__CANVAS__;
+// Live-only: a dropped socket is retried, but state is NOT replayed. Reload
+// the page for a fresh picture rather than implying we can restore history.
+const state = new Map();   // agent_id -> {status, tail, trial, tools}
+const edges = new Map();   // "from>to" -> edge
+let ws = null, backoff = 1000;
+
+function st(id){
+  if(!state.has(id)) state.set(id, {status:'idle', tail:'', trial:0, tools:0});
+  return state.get(id);
+}
+
+function connect(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/agents?token=${encodeURIComponent(S.wsToken)}`);
+  ws.onopen = () => { pill('conn','live','live'); backoff = 1000; };
+  ws.onmessage = (m) => handle(JSON.parse(m.data));
+  ws.onclose = () => {
+    pill('conn','down','reconnecting…');
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff * 2, 15000);
+  };
+  ws.onerror = () => { try{ ws.close(); }catch(_){} };
+}
+function pill(id, cls, text){
+  const el = document.getElementById(id);
+  el.className = 'pill ' + cls;
+  el.textContent = text;
+}
+
+function handle(ev){
+  if(ev.type === 'hello'){
+    if(!ev.cross_process) document.getElementById('coverage').style.display = 'block';
+    return;
+  }
+  if(ev.type === 'error'){ pill('conn','down','error: ' + ev.error); return; }
+
+  const id = ev.agent_id;
+  if(!id) return;
+  const s = st(id);
+
+  switch(ev.type){
+    case 'node_start':
+      // Idempotent set, not a counter: an autonomous agent fires this once per
+      // trial, and AGENT_END follows every trial too.
+      s.status = 'running';
+      break;
+    case 'node_end':
+      // Never let a clean end overwrite an error state.
+      if(s.status !== 'error') s.status = 'done';
+      break;
+    case 'node_error':
+      s.status = 'error';
+      s.tail = (ev.error || '').slice(0, 120);
+      break;
+    case 'trial_start':
+      s.trial = ev.trial || 0;
+      s.status = 'running';
+      break;
+    case 'token':
+      s.status = 'running';
+      s.tail = (s.tail + (ev.content || '')).slice(-240);
+      break;
+    case 'tool_call':
+      s.tools += (ev.tool_calls || []).length;
+      break;
+    case 'handoff': {
+      const key = ev.from_agent_id + '>' + ev.to_agent_id;
+      if(!edges.has(key)){
+        edges.set(key, {
+          id: key, source: ev.from_agent_id, target: ev.to_agent_id,
+          animated: true,
+          label: (ev.reason || '').slice(0, 40),
+          style: {stroke:'var(--accent)'},
+        });
+      }
+      break;
+    }
+  }
+  render();
+}
+
+function render(){
+  const nodes = S.agents.map(a => {
+    const s = state.get(a.id) || {status:'idle', tail:'', trial:0, tools:0};
+    const trial = s.trial ? `<div class="tr">trial ${s.trial} run</div>` : '';
+    const tools = s.tools ? `<div class="tr">🔧 ${s.tools} tool call(s)</div>` : '';
+    return {
+      id: a.id, position: nodesPos(a.id),
+      data: { label: `
+        <div class="agent-node s-${s.status}">
+          <div class="nm"><span class="dot"></span>${esc(a.name)}</div>
+          <div class="st">${s.status}${a.status && a.status!=='active' ? ' · '+esc(a.status) : ''}</div>
+          ${s.tail ? `<div class="tail">${esc(s.tail)}</div>` : ''}
+          ${trial}${tools}
+        </div>` },
+    };
+  });
+  window.__setNodes && window.__setNodes(nodes, [...edges.values()]);
+  document.getElementById('counts').textContent =
+    `${nodes.length} nodes · ${edges.size} edges`;
+}
+
+// Stable, readable layout: grid, so a reconnecting browser does not reshuffle.
+function nodesPos(id){
+  if(!window.__pos) window.__pos = new Map();
+  if(!window.__pos.has(id)){
+    const i = window.__pos.size, cols = 4;
+    window.__pos.set(id, {x: (i % cols) * 250, y: Math.floor(i / cols) * 150});
+  }
+  return window.__pos.get(id);
+}
+function esc(s){
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+window.__render = render;
+connect();
+</script>
+<script type="module">
+import ReactFlow, {Background, Controls, MiniMap, applyNodeChanges, applyEdgeChanges, addEdge}
+  from "reactflow";
+import React, {useCallback, useMemo, useState} from "react";
+import {createRoot} from "react-dom/client";
+
+const S = window.__CANVAS__;
+const STATUS_COLOR = {
+  idle:'#8b94a3', running:'#4c8dff', done:'#2ecc71', error:'#ef4444'
+};
+
+function App(){
+  const [nodes, setNodes] = useState(() => S.agents.map(a => ({
+    id: a.id, position:{x:0,y:0}, data:{label:`<div class="agent-node s-idle">
+      <div class="nm"><span class="dot"></span>${a.name.replace(/[<>&]/g,'')}</div>
+      <div class="st">idle</div></div>`}
+  })));
+  const [eds, setEds] = useState([]);
+
+  // The plain-JS reducer above owns live state; expose a setter it can call.
+  window.__setNodes = (ns, es) => {
+    setNodes(prev => ns.map(n => {
+      const old = prev.find(p => p.id === n.id);
+      return {...n, position: old ? old.position : n.position};
+    }));
+    setEds(prev => {
+      const have = new Set(prev.map(e => e.id));
+      // handoff events already arrive as complete edge objects, so append them
+      // rather than passing them through addEdge (which is for user drags).
+      const add = es.filter(e => !have.has(e.id));
+      return add.length ? [...prev, ...add] : prev;
+    });
+  };
+  // Events that arrived before React mounted would otherwise never paint.
+  if (window.__render) window.__render();
+
+  const onNodesChange = useCallback(ch => setNodes(ns => applyNodeChanges(ch, ns)), []);
+  const onEdgesChange = useCallback(ch => setEds(es => applyEdgeChanges(ch, es)), []);
+  const onConnect = useCallback(p => setEds(es => addEdge(p, es)), []);
+
+  return React.createElement(ReactFlow, {
+    nodes, edges: eds, onNodesChange, onEdgesChange, onConnect,
+    fitView: true, snapToGrid: true, snapGrid: [12,12],
+    panOnDrag: true, zoomOnScroll: true,
+    nodeTypes: useMemo(() => ({}), []),
+    defaultEdgeOptions: {animated:true, style:{stroke:'var(--accent)'}},
+  },
+    React.createElement(Background, {gap:16}),
+    React.createElement(Controls),
+    React.createElement(MiniMap, {nodeColor: n => {
+      const m = (n.data && n.data.label || '').match(/s-(\w+)/);
+      return STATUS_COLOR[m ? m[1] : 'idle'] || '#8b94a3';
+    }})
+  );
+}
+
+const el = document.getElementById('wrapper');
+if(el) createRoot(el).render(React.createElement(App));
+</script>
+</body>
+</html>

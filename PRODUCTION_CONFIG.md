@@ -53,13 +53,6 @@ AIOS_DASHBOARD_ENABLED=true
 
 ## Step 2: Optional Services
 
-### Convex (Failover Database)
-```bash
-AIOS_DB_REPLICA_BACKEND="convex"
-AIOS_CONVEX_URL="http://backend-xxx:3210"
-AIOS_CONVEX_ADMIN_KEY="<from convex dashboard>"
-```
-
 ### Supabase Storage (S3)
 ```bash
 AIOS_STORAGE_BACKEND="s3"
@@ -138,14 +131,7 @@ curl https://your-domain/health
 open https://your-domain/dashboard
 ```
 
-## Step 4: Convex Schema Deploy
-
-```bash
-cd convex
-npx convex deploy
-```
-
-## Step 5: Verify Everything
+## Step 4: Verify Everything
 
 ```bash
 # Health check

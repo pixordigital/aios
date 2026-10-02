@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIOS — Plataforma de Agentes de IA & Times de Agentes</title>
-    <meta name="description" content="AIOS — crie, gerencie e escale agentes de IA e times de agentes: 16 blueprints 1-click, deploy canary, HITL, skills e governança. Ferramenta interna, self-hosted no seu VPS.">
+    <meta name="description" content="AIOS — crie, gerencie e escale agentes de IA e times de agentes: 21 blueprints 1-click, deploy canary, HITL, skills e governança. Ferramenta interna, self-hosted no seu VPS.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -202,10 +202,10 @@
         <div class="hero-text">
             <div class="hero-badge">
                 <span class="dot"></span>
-                <span class="mono">✓ Plataforma de Agentes + 16 Blueprints 1-Click</span>
+                <span class="mono">✓ Plataforma de Agentes + 21 Blueprints 1-Click</span>
             </div>
             <h1>Crie & Gerencie <span class="accent">Agentes de IA e Times</span> para seu Negócio</h1>
-            <p>Crie agentes do zero ou ative <strong>16 blueprints prontos</strong> (vendas, suporte, dados, engenharia, red/blue team), monte <strong>times de agentes</strong> com orquestração, deploy com <strong>canary + rollback</strong>, recarregue skills sem restart e mantenha humanos no loop (HITL) onde importa.</p>
+            <p>Crie agentes do zero ou ative <strong>21 blueprints prontos</strong> (vendas, suporte, dados, engenharia, red/blue team), monte <strong>times de agentes</strong> com orquestração, deploy com <strong>canary + rollback</strong>, recarregue skills sem restart e mantenha humanos no loop (HITL) onde importa.</p>
             <div style="display:inline-flex;align-items:center;gap:0.5rem;background:var(--cyan-dim);border:1px solid var(--cyan);border-radius:99px;padding:0.375rem 0.75rem;font-size:0.75rem;margin-bottom:1rem"><span style="background:var(--cyan);color:#000;padding:0.125rem 0.375rem;border-radius:99px;font-weight:700">🛡️ HITL Nativo</span> Aprovação humana em descontos críticos • Expiração de 7 dias • Ledger ARVO</div>
             <div class="hero-actions">
                 <a href="#agentes" class="btn-primary">Criar meu primeiro agente →</a>
@@ -217,7 +217,7 @@
             <div class="status-bar">
                 <div class="status-item">
                     <span class="status-dot green"></span>
-                    <span class="status-label">16 Blueprints</span>
+                    <span class="status-label">21 Blueprints</span>
                     <span class="status-value mono">Deploy 1-Click</span>
                 </div>
                 <div class="status-item">
@@ -255,9 +255,9 @@
     <div class="inner">
         <div class="section-label">01 / Plataforma de Agentes</div>
         <h2 class="section-title">Crie agentes, monte times<br>e escale com <span style="color:var(--cyan)">governança</span></h2>
-        <p class="section-desc">Lifecycle completo: CRUD via API ou dashboard, <strong>16 blueprints 1-click</strong>, deploy com canary + rollback, spawn de subagentes, reload de skills sem restart e import/export entre organizações. No modo interno as quotas de plano ficam desligadas — tracking de uso continua, limites só se você reativar.</p>
+        <p class="section-desc">Lifecycle completo: CRUD via API ou dashboard, <strong>21 blueprints 1-click</strong>, deploy com canary + rollback, spawn de subagentes, reload de skills sem restart e import/export entre organizações. No modo interno as quotas de plano ficam desligadas — tracking de uso continua, limites só se você reativar.</p>
 
-        <h3 style="font-size:15px;font-weight:700;margin:32px 0 16px">16 blueprints prontos — grouped by what they do</h3>
+        <h3 style="font-size:15px;font-weight:700;margin:32px 0 16px">21 blueprints prontos — grouped by what they do</h3>
 
         <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:24px">
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px">
@@ -267,6 +267,7 @@
                     <li><strong style="color:var(--text)">closer</strong> — fechamento (SPIN + Challenger + MEDDIC + GPCT)</li>
                     <li><strong style="color:var(--text)">support</strong> — atendimento e resolução, com pass de voz pt-BR</li>
                     <li><strong style="color:var(--text)">manager</strong> — coordenação do time, matriz de escalonamento e QA</li>
+                    <li><strong style="color:var(--text)">manager_sales / manager_dev / manager_red / manager_blue / manager_data</strong> — gerentes com prompt e ferramentas próprios por função (todo time exige um manager)</li>
                 </ul>
             </div>
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px">
@@ -476,9 +477,14 @@
                 <div class="feature-desc">Tokens e custo medidos por agente/equipe em tempo real, para controle interno. Sem cobrança: é ferramenta da casa, não SaaS.</div>
             </div>
             <div class="feature-card fade-in">
+                <div class="feature-icon">🤝</div>
+                <div class="feature-title">Times Conversam Entre Si</div>
+                <div class="feature-desc">Gerente pede para o gerente de outro time (<code>ask_team_manager</code>) e recebe a resposta inline; <code>notify_human</code> avisa o dono no Slack sob demanda. Thread persistida com trilha de auditoria.</div>
+            </div>
+            <div class="feature-card fade-in">
                 <div class="feature-icon">🛠</div>
                 <div class="feature-title">Ferramentas Prontas</div>
-                <div class="feature-desc">calculator, web_search, send_email, http_request, crm_create_deal, crm_update_deal, lead_score, hybrid_search, current_datetime. Extensível.</div>
+                <div class="feature-desc">39 tools registradas: calculator, web_search, send_email, http_request, crm_create_deal, crm_update_deal, lead_score, hybrid_search, voice_call, calendar, sql_query, code. Conjunto por agente (least privilege) — cada blueprint usa só o que precisa.</div>
             </div>
         </div>
         <!-- CRM 100% IA highlight -->
@@ -532,6 +538,14 @@
                     </ul>
                 </div>
                 <div>
+                    <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">🛡️ Antiban</h4>
+                    <ul style="font-size:13px;color:var(--text-dim);list-style:none;padding:0;line-height:1.8">
+                        <li>✓ Scoring real de risco de ban por número</li>
+                        <li>✓ Quarentena automática quando o risco sobe</li>
+                        <li>✓ Estado de guard durável (sobrevive restart)</li>
+                    </ul>
+                </div>
+                <div>
                     <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">📈 Escala</h4>
                     <ul style="font-size:13px;color:var(--text-dim);list-style:none;padding:0;line-height:1.8">
                         <li>✓ N números WhatsApp, sem trava de plano</li>
@@ -577,16 +591,77 @@
     </div>
 </section>
 
-<!-- Caso de uso: governança -->
+<!-- Casos de uso -->
 <section id="governanca" style="background:var(--surface);">
     <div class="inner">
-        <div class="section-label">07 / Caso de uso — Governança</div>
-        <h2 class="section-title">Desconto fora da política <span style="color:var(--cyan)">não vira invoice</span> sem prova</h2>
-        <p class="section-desc">Regra por agente (limite de desconto + valor que exige aprovação) → <strong>alerta</strong> com <code>exposure estimada</code> e <code>EvidencePack 3 camadas</code> (SOURCE/CALCULATION/EVIDENCE). <strong>Humano decide</strong> via <code>PendingAction</code>, que expira em 7 dias por padrão.</p>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:32px">
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px"><h4 style="font-weight:600;margin-bottom:8px">🔔 Alert-only</h4><p style="font-size:13px;color:var(--text-dim)">Nunca auto-aprova. Disclaimer interno: alerta informativo, requer validação humana.</p></div>
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px"><h4 style="font-weight:600;margin-bottom:8px">💰 Budget por time</h4><p style="font-size:13px;color:var(--text-dim)">Orçamento de tokens e custo por organização, time ou agente, com burn diário e dias restantes.</p></div>
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px"><h4 style="font-weight:600;margin-bottom:8px">📊 Control Center</h4><p style="font-size:13px;color:var(--text-dim)"><a href="/dashboard/control-center" style="color:var(--cyan)">/dashboard/control-center</a> — fila HITL, degradação 24h, humano vs agente.</p></div>
+        <div class="section-label">07 / Casos de uso</div>
+        <h2 class="section-title">Quatro fluxos que <span style="color:var(--cyan)">rodam sem planilha</span></h2>
+        <p class="section-desc">Cada caso abaixo é o fluxo real do produto — não é roadmap. Todos rodam nos canais que você já tem.</p>
+
+        <!-- Caso 1 — Governança -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:32px;margin-top:32px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+                <span style="font-size:24px">🛡️</span>
+                <h3 style="font-size:18px;font-weight:600">1 · Desconto fora da política não vira invoice sem prova</h3>
+                <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">Governança</span>
+            </div>
+            <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-bottom:20px">
+                Regra por agente (limite de desconto + valor que exige aprovação) → <strong>alerta</strong> com <code>exposure estimada</code> e <code>EvidencePack 3 camadas</code> (SOURCE/CALCULATION/EVIDENCE). <strong>Humano decide</strong> via <code>PendingAction</code>, que expira em 7 dias por padrão. Aprovado, o evento vai para o ledger ARVO com HMAC + <code>Idempotency-Key</code> — retry não duplica.
+            </p>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px"><h4 style="font-size:13px;font-weight:600;margin-bottom:6px">🔔 Alert-only</h4><p style="font-size:13px;color:var(--text-dim)">Nunca auto-aprova. Alerta informativo, requer validação humana.</p></div>
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px"><h4 style="font-size:13px;font-weight:600;margin-bottom:6px">💰 Budget por time</h4><p style="font-size:13px;color:var(--text-dim)">Orçamento de tokens e custo por org, time ou agente, com burn diário e dias restantes.</p></div>
+                <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px"><h4 style="font-size:13px;font-weight:600;margin-bottom:6px">📊 Control Center</h4><p style="font-size:13px;color:var(--text-dim)"><a href="/dashboard/control-center" style="color:var(--cyan)">/dashboard/control-center</a> — fila HITL, degradação 24h, humano vs agente.</p></div>
+            </div>
+        </div>
+
+        <!-- Caso 2 — Captação -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:32px;margin-top:24px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+                <span style="font-size:24px">📈</span>
+                <h3 style="font-size:18px;font-weight:600">2 · Lead chega no WhatsApp e vira deal no CRM sozinho</h3>
+                <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">Captação</span>
+            </div>
+            <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-bottom:20px">
+                Blueprint <code>sdr</code> recebe a mensagem inbound (webhook → fila → worker), consulta a base de conhecimento com <code>hybrid_search</code>, qualifica com <code>lead_score</code>, cria o deal com <code>crm_create_deal</code> e move o kanban <code>prospection → mql → sql → opportunity</code> com <code>crm_update_deal</code>. Acima de 15% de desconto ou <code>closed_won &gt; R$5k</code>, a ação vira <code>PendingAction</code> e espera o manager. HubSpot, Pipedrive, RDStation e Zendesk no mesmo fluxo.
+            </p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+                <a href="/dashboard/crm" class="btn-ghost" style="font-size:13px">Ver CRM →</a>
+                <a href="/dashboard/funnels" class="btn-ghost" style="font-size:13px">Funis →</a>
+                <a href="/dashboard/conversations" class="btn-ghost" style="font-size:13px">Conversas →</a>
+            </div>
+        </div>
+
+        <!-- Caso 3 — Atendimento com base de conhecimento -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:32px;margin-top:24px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+                <span style="font-size:24px">📚</span>
+                <h3 style="font-size:18px;font-weight:600">3 · Time pergunta, agente responde com a fonte do PDF</h3>
+                <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">Conhecimento</span>
+            </div>
+            <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-bottom:20px">
+                A empresa sobe o catálogo, a tabela de preços e as políticas em <code>/dashboard/files</code>. O <code>pypdf</code> extrai o texto, cada chunk vira memória de longo prazo com <code>embedding</code>, e o agente responde por <code>hybrid_search</code> (vetor + BM25) citando a origem. Sem RAG configurado à mão: o <code>sdr</code>, o <code>support</code> e o <code>data_analyst</code> já usam.
+            </p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+                <a href="/dashboard/files" class="btn-ghost" style="font-size:13px">Base de Conhecimento →</a>
+                <a href="/dashboard/knowledge" class="btn-ghost" style="font-size:13px">Ver itens indexados →</a>
+            </div>
+        </div>
+
+        <!-- Caso 4 — Times se coordenando -->
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:32px;margin-top:24px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+                <span style="font-size:24px">🤝</span>
+                <h3 style="font-size:18px;font-weight:600">4 · Time de vendas pede pro time de dados e recebe a resposta</h3>
+                <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">Coordenação</span>
+            </div>
+            <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-bottom:20px">
+                Todo time tem manager com prompt e ferramentas próprios. O <code>ask_team_manager</code> entrega a pergunta ao manager de outro time e devolve a resposta na mesma conversa — thread persistida com trilha de auditoria, limite de saltos para não entrar em ping-pong, e <strong>nada atravessa a organização</strong>. O <code>notify_human</code> avisa o dono no Slack DM quando o próprio manager não resolve.
+            </p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+                <a href="/dashboard/teams" class="btn-ghost" style="font-size:13px">Ver times →</a>
+                <a href="/dashboard/automations" class="btn-ghost" style="font-size:13px">Automações →</a>
+            </div>
         </div>
     </div>
 </section>
@@ -663,7 +738,7 @@ const terminalLines = [
     { type: 'output', text: 'Enviando PendingAction para aprovação humana (HITL) — expira em 7 dias...', delay: 4800 },
     { type: 'success', text: '✓ Aprovado por humano → Sincronizado com Ledger ARVO (idempotente).', delay: 5200 },
     { type: 'cmd', text: 'aios status', delay: 6000 },
-    { type: 'success', text: '  Agentes: 16 blueprints  |  Times: orquestrados  |  HITL: Ativo  |  Ledger ARVO: Sincronizado', delay: 6500 },
+    { type: 'success', text: '  Agentes: 21 blueprints  |  Times: orquestrados  |  HITL: Ativo  |  Ledger ARVO: Sincronizado', delay: 6500 },
 ];
 
 function typeTerminal() {

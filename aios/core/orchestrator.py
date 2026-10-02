@@ -5,7 +5,7 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from aios.core.agent import AgentRuntime
+from aios.core.agent import AgentRuntime, is_failed_run
 
 
 def _get_runtime(agent, db=None):
@@ -357,7 +357,7 @@ Respond with JSON:
             agent = _get_runtime(agents[idx], self._db)
             out = await agent.run(conv_id, routed.get("handoff_message", msg), db)
             # Reflection: if routed agent failed (not HITL), try next best
-            if out and ("Não consegui" in out or "Falha após 3 tentativas" in out) and len(agents) > 1:
+            if out and is_failed_run(out) and len(agents) > 1:
                 # Try next best via semantic
                 try:
                     from aios.core.memory import _embed
@@ -376,7 +376,7 @@ Respond with JSON:
                         refl = f"Roteamento para {agents[idx].name} falhou ({out[:100]}). Tentando {scored[0][1].name}."
                         await self.update_blackboard(conv_id, "orchestrator_reflection", refl)
                         out2 = await next_agent.run(conv_id, msg, db)
-                        if out2 and "Não consegui" not in out2:
+                        if not is_failed_run(out2):
                             out = out2 + f"\n\n[Reflexão orquestrador: {refl}]"
                 except Exception:
                     pass
@@ -384,7 +384,14 @@ Respond with JSON:
             try:
                 from aios.core.telemetry import telemetry
 
-                telemetry.record(agents[idx].id, getattr(agents[idx], "org_id", ""), tokens=len(out))
+                from aios.core.tokenizer import count_tokens as _ct
+
+                # Was len(out) — a character count in the tokens field, ~4x off.
+                telemetry.record(
+                    agents[idx].id,
+                    getattr(agents[idx], "org_id", ""),
+                    tokens=_ct(out or ""),
+                )
             except Exception:
                 pass
             return out
@@ -403,12 +410,15 @@ Respond with JSON:
             yield {"type": STREAM_DONE}
             return
         routed = await self._llm_route(msg, conv_id)
-        idx = min(routed["agent_index"], len(self.agents) - 1)
+        # Clamp both ends. A negative index from the LLM (`min(-5, n-1)`) indexed
+        # from the end of the list and raised IndexError on any team with fewer
+        # than 5 agents. The non-stream sibling below already did this.
+        idx = max(0, min(routed["agent_index"], len(self.agents) - 1))
         yield {
             "type": STREAM_TOKEN,
             "content": f"[Routing to {self.agents[idx].name}: {routed.get('reason', '')}]\n\n",
         }
-        agent = AgentRuntime(self.agents[idx], self._db)
+        agent = _get_runtime(self.agents[idx], self._db)
         async for ev in agent.run_stream(
             conv_id, routed.get("handoff_message", msg), db
         ):
@@ -428,7 +438,7 @@ Respond with JSON:
                 update(Team).where(Team.id == self.team.id).values(extra_data=extra)
             )
             await db.commit()
-        agent = AgentRuntime(self.agents[idx], self._db)
+        agent = _get_runtime(self.agents[idx], self._db)
         return await agent.run(conv_id, msg, db)
 
     async def _round_robin_stream(
@@ -447,7 +457,7 @@ Respond with JSON:
                 update(Team).where(Team.id == self.team.id).values(extra_data=extra)
             )
             await db.commit()
-        agent = AgentRuntime(self.agents[idx], self._db)
+        agent = _get_runtime(self.agents[idx], self._db)
         async for ev in agent.run_stream(conv_id, msg, db):
             yield ev
 
@@ -547,7 +557,7 @@ Respond with JSON:
                     best_score = dot
                     best = a
             if best:
-                async for ev in AgentRuntime(best, self._db).run_stream(
+                async for ev in _get_runtime(best, self._db).run_stream(
                     conv_id, msg, db
                 ):
                     yield ev
@@ -642,9 +652,35 @@ Respond with JSON:
                                 "type": STREAM_TOKEN,
                                 "content": f"[Handoff: Manager {manager.name} → {agent.name}] {reason}\n\n",
                             }
-                            
+                            # Structured edge for the agent canvas. The token
+                            # above is for humans reading the transcript; this
+                            # is what the canvas turns into a line between
+                            # nodes. Broadcast directly because it is produced
+                            # here, not by the inner runtime, so it never passes
+                            # through AgentRuntime's tagging wrapper.
+                            handoff = {
+                                "type": "handoff",
+                                "from_agent_id": manager.id,
+                                "from_agent_name": manager.name,
+                                "to_agent_id": agent.id,
+                                "to_agent_name": agent.name,
+                                "task": task,
+                                "reason": reason,
+                                "org_id": getattr(manager, "org_id", "") or "",
+                                "conversation_id": conv_id,
+                            }
+                            from aios.core.ws_manager import ws_manager
+
+                            ws_manager.broadcast(handoff)
+                            yield handoff
+
+                            # Was `agent.run_stream(...)` on the raw ORM model,
+                            # which has no such method. The AttributeError was
+                            # swallowed by the bare `except` below, so every
+                            # hierarchical stream silently fell through to the
+                            # supervisor fallback.
                             rt = _get_runtime(agent, self._db)
-                            async for ev in agent.run_stream(conv_id, task, db):
+                            async for ev in rt.run_stream(conv_id, task, db):
                                 yield ev
                     
                     yield {"type": STREAM_TOKEN, "content": f"[Manager {manager.name}: All tasks delegated]\n\n"}

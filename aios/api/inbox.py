@@ -1,5 +1,6 @@
 """Unified Inbox API — multi-channel conversation view with human assignment."""
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -16,6 +17,16 @@ from .deps import get_current_user, get_org_id
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
+
+
+def _json_str(model, key: str):
+    """A JSON column value as text, on any dialect.
+
+    The Postgres-only `astext` accessor is JSONB-only. `extra_data` is a generic
+    `sqlalchemy.JSON`, so that attribute does not exist and using it raised
+    AttributeError at query build time.
+    """
+    return model.extra_data[key].as_string()
 
 
 @router.get("", response_model=PageResponse[dict])
@@ -46,8 +57,12 @@ async def list_inbox_conversations(
     if team_id:
         query = query.where(Conversation.team_id == team_id)
     
+    # `extra_data` is a generic sqlalchemy.JSON column, so the Postgres-only
+    # JSONB text accessor does not exist on it. Every filter below raised
+    # AttributeError, so the whole inbox 500'd on any status, assignment or
+    # search filter. `.as_string()` compiles on both dialects.
     if assigned_to_me:
-        query = query.where(Conversation.extra_data["assigned_to"].astext == user.id)
+        query = query.where(_json_str(Conversation, "assigned_to") == user.id)
     elif status == "assigned":
         query = query.where(Conversation.extra_data["assigned_to"].isnot(None))
     elif status == "unassigned":
@@ -56,15 +71,19 @@ async def list_inbox_conversations(
             Conversation.extra_data["assigned_to"] == ""
         ))
     elif status == "open":
-        query = query.where(Conversation.extra_data["status"].astext != "closed")
+        # NULL is not "closed": a conversation with no status key is open.
+        query = query.where(or_(
+            _json_str(Conversation, "status").is_(None),
+            _json_str(Conversation, "status") != "closed",
+        ))
     elif status == "closed":
-        query = query.where(Conversation.extra_data["status"].astext == "closed")
-    
+        query = query.where(_json_str(Conversation, "status") == "closed")
+
     if search:
         search_term = f"%{search}%"
         query = query.where(or_(
             Conversation.external_id.ilike(search_term),
-            Conversation.extra_data["contact_name"].astext.ilike(search_term),
+            _json_str(Conversation, "contact_name").ilike(search_term),
         ))
     
     if date_from:
@@ -367,12 +386,21 @@ async def send_inbox_message(
     # Deliver via channel
     if conv.channel_connection_id:
         from aios.tasks.queue import enqueue_job
+        # The contact has to travel with the message. EvolutionChannel reads
+        # `from_number` from extra_data and otherwise falls back to
+        # config["default_number"], which nothing ever writes — so an operator
+        # reply in the inbox had no recipient, the send returned None, and the
+        # message went to the DLQ after three retries. The conversation is
+        # keyed by the contact, so it is on the row.
+        extra = {"from_inbox": True, "user_id": user.id}
+        if conv.external_id:
+            extra["from_number"] = conv.external_id
         await enqueue_job(
             "deliver_message",
             channel_connection_id=conv.channel_connection_id,
             conversation_id=conv.id,
             text=content,
-            extra_data='{"from_inbox": true, "user_id": "' + user.id + '"}',
+            extra_data=json.dumps(extra),
         )
     
     await log_audit(db, org_id, "inbox.send", "message",
@@ -397,13 +425,19 @@ async def inbox_stats(
     # Open conversations
     open_count = (await db.execute(
         select(func.count(Conversation.id))
-        .where(Conversation.org_id == org_id, Conversation.extra_data["status"].astext != "closed")
+        .where(
+            Conversation.org_id == org_id,
+            or_(
+                _json_str(Conversation, "status").is_(None),
+                _json_str(Conversation, "status") != "closed",
+            ),
+        )
     )).scalar() or 0
-    
+
     # Assigned to me
     assigned_me = (await db.execute(
         select(func.count(Conversation.id))
-        .where(Conversation.org_id == org_id, Conversation.extra_data["assigned_to"].astext == user.id)
+        .where(Conversation.org_id == org_id, _json_str(Conversation, "assigned_to") == user.id)
     )).scalar() or 0
     
     # Unassigned

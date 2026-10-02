@@ -66,18 +66,79 @@ async def evo_fetch_instances():
         logger.warning("evo fetch failed %s", e)
     return []
 
+async def evo_set_webhook(name: str, api_key: str = "") -> dict:
+    """Point an instance's webhook at AIOS, with the shared secret.
+
+    The shape here is verified against the running `evoapicloud/evolution-api:v2.3.7`:
+    `POST /webhook/set/{instance}` validates a body with a required top-level
+    `webhook` object (`enabled`, `url` required; `byEvents`, `base64`,
+    `events`, `headers` optional) and answers 400 on anything else. A flat body
+    is rejected outright.
+
+    Two things this had to get right, and did not:
+
+    * The secret goes in the custom `headers` map, not a `webhookAuth` field.
+      Evolution accepts `webhookAuth`, never persists it, and then sends
+      nothing — so every inbound call failed `_verify_request`.
+    * The option keys are `byEvents` and `base64`. The `webhookByEvents` /
+      `webhookBase64` names in the previous body are not in the schema, so they
+      were silently dropped and Evolution applied its own defaults.
+
+    Both call sites (instance creation and the channel form) must come through
+    here; they had drifted into two different bodies, one of them with no
+    auth header at all.
+    """
+    url = f"{settings.evolution_webhook_base.rstrip('/')}/{name}"
+    key = api_key or settings.evolution_api_key or ""
+    if not key:
+        logger.error(
+            "evo_set_webhook: no API key for instance %s — inbound will fail auth", name
+        )
+    body = {
+        "webhook": {
+            "enabled": True,
+            "url": url,
+            "byEvents": False,
+            "base64": False,
+            "events": ["MESSAGES_UPSERT"],
+            "headers": {"x-webhook-auth": key},
+        }
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(
+                f"{_base()}/webhook/set/{name}",
+                headers={"apikey": key, "Content-Type": "application/json"},
+                json=body,
+            )
+        if r.status_code in (200, 201):
+            return {"ok": True, "url": url}
+        return {"ok": False, "message": f"{r.status_code}: {r.text[:200]}"}
+    except Exception as e:
+        logger.exception("evo_set_webhook failed for %s", name)
+        return {"ok": False, "message": str(e)}
+
+
 async def evo_create_instance(name: str):
     try:
         async with httpx.AsyncClient(timeout=15) as c:
             r = await c.post(f"{_base()}/instance/create", headers=_evo_headers(), json={"instanceName": name, "qrcode": True, "integration": "WHATSAPP-BAILEYS"})
             data = r.json() if r.headers.get("content-type","").startswith("application/json") else {}
-            # set webhook to AIOS
-            webhook_url = f"{settings.app_url.rstrip('/')}/api/evolution/webhook/{name}"
-            try:
-                await c.post(f"{_base()}/webhook/set/{name}", headers=_evo_headers(), json={"webhook": {"enabled": True, "url": webhook_url, "webhookByEvents": False, "webhookBase64": False, "events": ["MESSAGES_UPSERT"]}})
-            except Exception:
-                pass
-            return {"status": r.status_code, "data": data, "ok": r.status_code in (200,201)}
+            ok = r.status_code in (200, 201)
+            if ok:
+                # An instance with no webhook pointed at AIOS can send but
+                # never receives, so it looked provisioned while being inert.
+                hooked = await evo_set_webhook(name)
+                if not hooked.get("ok"):
+                    logger.error(
+                        "Instance %s created but webhook not set: %s",
+                        name, hooked.get("message"),
+                    )
+                    return {
+                        "status": r.status_code, "data": data, "ok": True,
+                        "webhook_ok": False, "webhook_error": hooked.get("message"),
+                    }
+            return {"status": r.status_code, "data": data, "ok": ok, "webhook_ok": True}
     except Exception as e:
         return {"status": 0, "error": str(e), "ok": False}
 

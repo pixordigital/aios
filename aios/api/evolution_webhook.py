@@ -31,22 +31,35 @@ async def evolution_webhook(instance: str, request: Request):
     Routes by instance name — single webhook endpoint for all providers.
     """
     body = await request.json()
+    request.state.aios_body = body
 
-    # Authenticate the caller — fail closed, and say so loudly.
+    # Authenticate FIRST, before looking at the payload at all. Parsing before
+    # auth meant an empty body short-circuited to `{"status": "ok"}` without
+    # ever being checked, so an unauthenticated caller could tell configured
+    # instances from unconfigured ones.
     #
     # Evolution API does NOT sign request bodies. Its `webhookAuth` config sends
     # a static shared secret in a request header. The previous code required an
     # x-evolution-signature header and compared it to HMAC(api_key, canonical_json),
     # which no Evolution version produces — so every inbound message was dropped
     # with a log line nobody was watching.
-    instance_key = await _get_evolution_api_key(instance)
+    #
+    # One lookup for both the credential and the channel: reading the row twice
+    # meant auth judged a different snapshot than the dispatch used.
+    async with db_session() as db:
+        conn = await _resolve_channel(db, instance)
+        instance_key = _channel_api_key(conn)
+        # Copy out of the session: these are read after the block closes.
+        channel_id = conn.id if conn else ""
+        org_id = conn.org_id if conn else ""
+
     if not instance_key:
         logger.error(
-            "Evolution webhook: no configured instance %r (is the channel active?) — rejecting", instance
+            "Evolution webhook: instance %r has no configured channel or api_key "
+            "— rejecting", instance
         )
         return {"status": "ignored", "reason": "unknown_instance"}
 
-    request.state.aios_body = body
     if not _verify_request(request, instance_key):
         logger.error(
             "Evolution webhook: auth failed for instance %r — rejecting", instance
@@ -61,28 +74,6 @@ async def evolution_webhook(instance: str, request: Request):
     msg_text, msg_from, msg_id = _parse_message(data, event)
     if not msg_text or not msg_from:
         return {"status": "ok"}
-
-    async with db_session() as db:
-        result = await db.execute(
-            select(ChannelConnection).where(
-                ChannelConnection.channel_type == "evolution",
-                ChannelConnection.is_active == True,
-            )
-        )
-        conn = None
-        for ch in result.scalars():
-            if ch.config.get("instance") == instance:
-                conn = ch
-                break
-
-        if not conn:
-            logger.warning("No active Evolution channel for instance %s", instance)
-            return {"status": "ok"}
-
-    # Resolve the org before handling consent: an opt-out that lives only in
-    # process memory is forgotten on the next deploy, and then the number gets
-    # messaged again. Persistence needs the org id, so it happens here.
-    org_id = conn.org_id
 
     try:
         from aios.core.whatsapp_guard import (
@@ -113,7 +104,7 @@ async def evolution_webhook(instance: str, request: Request):
     from aios.core.dispatch import dispatch_inbound
     await dispatch_inbound(
         channel_type="evolution",
-        channel_connection_id=conn.id,
+        channel_connection_id=channel_id,
         conversation_id="",
         text=msg_text,
         user_id=msg_from,
@@ -192,30 +183,51 @@ def _parse_message(data: dict, event: str) -> tuple[str, str, str]:
     return msg_text, msg_from, msg_id
 
 
-async def _get_evolution_api_key(instance_name: str) -> str:
-    """Look up API key for Evolution instance from channel configs. Org-isolated."""
-    from aios.db.engine import async_session
-    from sqlalchemy import select as sql_select
+async def _resolve_channel(db, instance_name: str):
+    """Find the active Evolution channel for `instance_name`.
+
+    Scoped in SQL rather than by scanning every tenant's config blob. Ambiguous
+    instance names (two orgs both using `default`) resolve to the lowest id, so
+    the winner is at least deterministic instead of depending on row order.
+    """
+    result = await db.execute(
+        select(ChannelConnection)
+        .where(
+            ChannelConnection.channel_type == "evolution",
+            ChannelConnection.is_active == True,  # noqa: E712
+            ChannelConnection.config["instance"].as_string() == instance_name,
+        )
+        .order_by(ChannelConnection.id)
+        .limit(1)
+    )
+    return result.scalars().first()
+
+
+def _channel_api_key(conn) -> str:
+    """Decrypted Evolution API key for a channel.
+
+    Channels created through the dashboard store the key as `enc:<fernet>`, so
+    the raw config value is not the secret Evolution sends in the webhook
+    header. Comparing the header against the ciphertext failed auth for every
+    dashboard-created channel while the API-created ones worked — which is why
+    this looked healthy in tests.
+    """
+    if not conn:
+        return ""
+    raw = (conn.config or {}).get("api_key", "")
+    if not raw:
+        return ""
+    if not str(raw).startswith("enc:"):
+        return raw
+    from aios.core.secrets import decrypt_channel_config
     try:
-        async with async_session() as conn:
-            # Push the filter into SQL. This pulled every tenant's config blob
-            # into Python on every inbound WhatsApp message and looped over it,
-            # so it scanned all tenants' rows on the hot path -- and resolved the
-            # API key by first match, which meant two orgs using the same
-            # instance name silently used each other's key.
-            result = await conn.execute(
-                sql_select(ChannelConnection.config).where(
-                    ChannelConnection.channel_type == "evolution",
-                    ChannelConnection.is_active == True,
-                    ChannelConnection.config["instance"].as_string() == instance_name,
-                ).limit(1)
-            )
-            row = result.first()
-            if row and isinstance(row[0], dict):
-                return row[0].get("api_key", "")
-            return ""
+        return decrypt_channel_config({"api_key": raw}).get("api_key", "")
     except Exception:
-        logger.debug("Could not fetch Evolution API key for signature check")
+        logger.error(
+            "Evolution channel %s: api_key could not be decrypted "
+            "(is AIOS_ENCRYPTION_KEY still the one it was stored with?)",
+            getattr(conn, "id", "?"),
+        )
         return ""
 
 

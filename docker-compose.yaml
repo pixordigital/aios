@@ -223,8 +223,10 @@ services:
             AIOS_LLM_PROVIDER: openrouter
             AIOS_LITELLM_BASE_URL: 'http://litellm:4000'
             AIOS_LITELLM_API_KEY: sk-litellm
-            EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:-change-me-in-production}'
-            EVOLUTION_SERVER_URL: 'http://evolution:8080'
+            # AIOS_ prefix is required: Settings uses env_prefix="AIOS_".
+            # Unprefixed, these were never read and evolution_api_key stayed "".
+            AIOS_EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:-change-me-in-production}'
+            AIOS_EVOLUTION_SERVER_URL: 'http://evolution:8080'
             AIOS_OPENROUTER_API_KEY: ''
             AIOS_OPENAI_API_KEY: ''
             AIOS_ANTHROPIC_API_KEY: ''

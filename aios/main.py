@@ -220,6 +220,16 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logger.exception("Failed to start channel %s", conn.label)
 
+    # Agent canvas event bridge: local pump + optional cross-process redis
+    # subscriber. Never fatal — the canvas is a dashboard, and /health/ready
+    # already gates on redis.
+    try:
+        import aios.core.agent_events as agent_events
+
+        await agent_events.init()
+    except Exception:
+        logger.exception("agent_events init failed (canvas degraded)")
+
     yield
 
     for ch in _channel_tasks:
@@ -233,6 +243,17 @@ async def lifespan(app: FastAPI):
         stop_cron_scheduler()
     except Exception:
         pass
+
+    # Order matters: the canvas subscriber holds its own dedicated redis
+    # connection, so it must be closed before the shared pool below. Closing
+    # the pool first would tear the connection out from under it.
+    try:
+        import aios.core.agent_events as agent_events
+
+        await agent_events.shutdown()
+    except Exception:
+        logger.exception("agent_events shutdown failed")
+
     # close Redis pool
     from aios.tasks.queue import close_pool
     try:
@@ -240,8 +261,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    # Stop event bus
-    logger.info("event bus removed; shutdown cleanup complete")
+    logger.info("shutdown cleanup complete")
 
     logger.info("Shutting down AIOS...")
 

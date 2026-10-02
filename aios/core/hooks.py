@@ -47,6 +47,10 @@ class HookContext:
     """Mutable context passed through hook chain. Hooks can modify it."""
     trace_id: str = ""
     agent_id: str = ""
+    # org_id carries the tenant so subscribers can filter without a DB read.
+    # Empty means "unknown" — consumers must treat that as unscoped, not as a
+    # reason to reject.
+    org_id: str = ""
     conversation_id: str = ""
     data: dict = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)

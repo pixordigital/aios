@@ -94,8 +94,17 @@ class EvolutionChannel(Channel):
                 )
                 await record_event(self.org_id, self.instance, "blocked", "quarantined")
                 return None
-        except Exception:
-            pass
+        except Exception as e:
+            # Fail CLOSED. Swallowing this sent with no opt-out check, no
+            # quarantine gate and no ban accounting whenever the guard or the
+            # DB behind it hiccuped — the exact moment the anti-ban rules
+            # exist to matter. Dropping a message is recoverable; a banned
+            # number is not.
+            logger.error(
+                "Evolution guard raised for instance=%s to=%s; refusing to send: %s",
+                self.instance, to, e,
+            )
+            return None
 
         try:
             # humanize_delay is a plain sync function. The old `await humanize_delay(...)`
@@ -175,6 +184,30 @@ class EvolutionChannel(Channel):
 
         extra = message.extra_data or {}
         wtype = extra.get("whatsapp_type") or extra.get("type") or "text"
+
+        # Same guard as the Baileys path. Without it the Meta path enforced
+        # neither opt-out nor the 24h window (the delivery-layer pre-check
+        # passes window_open=True by default), so every out-of-window free-form
+        # reply drew a 131047 from Meta with no ban telemetry recorded.
+        from aios.core.whatsapp_guard import guard_send, record_ban_signal
+
+        try:
+            ok, reason = await guard_send(
+                to,
+                message.text,
+                is_template=(wtype == "template"),
+                window_open=bool(extra.get("window_open", True)),
+                provider="meta",
+                instance=self.instance,
+            )
+            if not ok:
+                logger.warning("Evolution Meta guard block %s: %s", to, reason)
+                return None
+        except Exception as e:
+            logger.error(
+                "Evolution Meta guard raised for to=%s; refusing to send: %s", to, e
+            )
+            return None
 
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -339,7 +372,20 @@ class EvolutionChannel(Channel):
                     json=payload,
                 )
                 if resp.status_code in (200, 201):
-                    return {"ok": True, "data": resp.json()}
+                    # No webhook meant no inbound: the instance could send but
+                    # never received, and nothing on the page said so.
+                    hooked = await self._set_webhook(instance_name)
+                    if not hooked.get("ok"):
+                        logger.error(
+                            "Instance %s created but webhook not set: %s",
+                            instance_name, hooked.get("message"),
+                        )
+                    return {
+                        "ok": True,
+                        "data": resp.json(),
+                        "webhook_ok": bool(hooked.get("ok")),
+                        "webhook_error": None if hooked.get("ok") else hooked.get("message"),
+                    }
                 return {"ok": False, "message": f"{resp.status_code}: {resp.text[:200]}"}
         except Exception as e:
             logger.exception("Evolution create_instance error")
@@ -458,35 +504,15 @@ class EvolutionChannel(Channel):
     async def _set_webhook(self, instance_name: str) -> dict:
         """Point an instance's webhook at us, with the shared secret.
 
-        Evolution silently drops a `webhookAuth` field — it accepts it and
-        never persists it. The secret has to go in the custom `headers` map
-        under the name our own webhook reader checks.
+        Delegates to the single implementation in `evolution_api`, passing this
+        channel's own key. The two call sites had drifted into different bodies
+        — one nested (ignored by Evolution 2.x, so no URL was stored) and one
+        with no `headers` at all (no secret, so auth failed).
         """
-        from aios.config import settings
+        from aios.core.evolution_api import evo_set_webhook
 
-        url = f"{settings.evolution_webhook_base.rstrip('/')}/{instance_name}"
-        body = {
-            "webhook": {
-                "url": url,
-                "enabled": True,
-                "events": ["MESSAGES_UPSERT"],
-                "headers": {"x-webhook-auth": self.api_key},
-                "webhookBase64": False,
-            }
-        }
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    f"{self.base_url}/webhook/set/{instance_name}",
-                    headers={"apikey": self.api_key, "Content-Type": "application/json"},
-                    json=body,
-                )
-            if resp.status_code in (200, 201):
-                return {"ok": True, "message": url}
-            return {"ok": False, "message": f"{resp.status_code}: {resp.text[:200]}"}
-        except Exception as e:
-            logger.exception("Evolution webhook set failed")
-            return {"ok": False, "message": str(e)}
+        res = await evo_set_webhook(instance_name, api_key=self.api_key)
+        return {"ok": res.get("ok", False), "message": res.get("url") or res.get("message", "")}
 
     async def _check_instance_limit(self) -> dict:
         """Check if org has reached max Evolution instances for their plan."""

@@ -82,7 +82,6 @@ File: `tests/test_channel_types.py`
 | Channel types (7) | ✅ |
 | Quotas per plan | ✅ |
 | SSRF protection | ✅ |
-| Convex integration | ✅ (code ready, needs deploy) |
 | Supabase/S3 storage | ✅ (code ready, needs creds) |
 | Agent metrics/versions tables | ✅ migrated `c9a1b2c3d4e6` |
 | Datasets/eval_runs tables | ✅ migrated `c9a1b2c3d4e6` |
@@ -96,7 +95,6 @@ File: `tests/test_channel_types.py`
 
 | Item | Effort | Notes |
 |------|--------|-------|
-| Convex deploy | Low | Run `npx convex dev --configure=existing` + set env vars |
 | Supabase/S3 credentials | Low | Get from Coolify dashboard — code already handles both plain + encrypted secrets |
 
 ---

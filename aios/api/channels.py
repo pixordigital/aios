@@ -210,6 +210,15 @@ async def create_evolution_instance(
 
     if result["ok"]:
         await log_audit(db, org_id, "evolution.instance.create", "channel", user_id=user.id, resource_id=channel_id, details={"instance": instance_name, "provider": provider})
+        if not result.get("webhook_ok", True):
+            # An instance with no inbound webhook is not provisioned. Say so
+            # instead of returning ok and leaving the operator to find out
+            # when a customer messages and nothing happens.
+            result["message"] = (
+                f"Instance created, but the webhook could not be set: "
+                f"{result.get('webhook_error')}. Inbound messages will not arrive."
+            )
+            logger.error("create_evolution_instance: %s", result["message"])
 
     return result
 

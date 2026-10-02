@@ -50,6 +50,10 @@ async def create_agent(
         llm_config=final_llm,
         tools=final_tools,
         memory_config=final_mem,
+        # Was dropped here. Every reader defaults `gov.get("autonomous", True)`
+        # to True, so a client that POSTed {"autonomous": false} silently got
+        # a fully autonomous HITL agent — the opposite of what it asked for.
+        governance_config=body.governance_config or {},
         extra_data=body.extra_data or {},
     )
     db.add(agent)

@@ -28,13 +28,18 @@ class AgentState(Enum):
     TERMINATED = "terminated"
     FAILED = "failed"
 
-
 @dataclass
 class AgentProcess:
     """Represents an agent's execution within the scheduler."""
+
     agent_id: str
     agent_name: str = ""
     conversation_id: str = ""
+    # Carried on the process so `start()` does not have to be told again.
+    # agent_instances.org_id is a non-nullable FK, and it used to be written
+    # as "" here (and "default" in enqueue), which is a ForeignKeyViolation on
+    # Postgres — swallowed by a bare except, so the row never appeared.
+    org_id: str = ""
     state: AgentState = AgentState.QUEUED
     priority: int = 0  # lower = higher priority
     created_at: float = 0.0
@@ -74,11 +79,20 @@ class AgentScheduler:
 
     def enqueue(self, agent_id: str, conv_id: str = "", agent_name: str = "",
                 priority: int = 0, org_id: str = "") -> AgentProcess:
-        """Add agent to request queue + persist AgentInstance."""
+        """Add agent to request queue + persist AgentInstance.
+
+        This is bookkeeping only — it records that a run was requested. It must
+        not dispatch one: it used to enqueue an `agent_run` ARQ job with no
+        `text`, so the job ran the agent against an empty user message. Since
+        TeamOrchestrator.enqueues every agent of the team on every inbound team
+        message, that was N extra full LLM calls per message, each writing its
+        own assistant row into the conversation.
+        """
         proc = AgentProcess(
             agent_id=agent_id,
             agent_name=agent_name,
             conversation_id=conv_id,
+            org_id=org_id or "",
             state=AgentState.QUEUED,
             created_at=time.time(),
             priority=priority,
@@ -90,11 +104,6 @@ class AgentScheduler:
             _aio.create_task(self._persist_instance(agent_id, org_id, conv_id, "queued"))
         except Exception:
             pass
-        try:
-            from aios.tasks.queue import enqueue_task
-            _aio.create_task(enqueue_task("agent_run", {"agent_id": agent_id, "conv_id": conv_id}))
-        except Exception:
-            pass
 
         hctx = HookContext()
         hctx.agent_id = agent_id
@@ -104,11 +113,21 @@ class AgentScheduler:
         return proc
 
     async def _persist_instance(self, agent_id: str, org_id: str, conv_id: str, status: str):
+        if not org_id:
+            # agent_instances.org_id is a non-nullable FK. Writing "default" (or
+            # "") made every insert fail on Postgres, and the bare except hid
+            # it, so the run history was empty in production while dev (SQLite,
+            # FK enforcement off) looked fine.
+            logger.warning(
+                "scheduler: no org_id for agent %s, skipping AgentInstance(%s)",
+                agent_id, status,
+            )
+            return
         try:
             from aios.db.engine import async_session
             from aios.db.models import AgentInstance
             async with async_session() as sess:
-                inst = AgentInstance(agent_id=agent_id, org_id=org_id or "default", status=status, extra_data={"conversation_id": conv_id})
+                inst = AgentInstance(agent_id=agent_id, org_id=org_id, status=status, extra_data={"conversation_id": conv_id})
                 sess.add(inst)
                 await sess.commit()
         except Exception:
@@ -118,9 +137,17 @@ class AgentScheduler:
         """Mark agent as running."""
         proc = self._processes.get(agent_id)
         if not proc:
+            # The common case: `run()` is called directly and was never
+            # enqueued, so there is no process to transition. Not an error.
             return None
         if self._running_count >= self._max_concurrent:
-            logger.warning("Scheduler at capacity %d, queuing %s", self._max_concurrent, agent_id)
+            # At capacity the run must not proceed, so say so. Returning None
+            # with the process left in QUEUED while the caller ran anyway made
+            # max_concurrent advisory — it was never enforced.
+            logger.warning(
+                "Scheduler at capacity %d/%d, refusing to start %s",
+                self._running_count, self._max_concurrent, agent_id,
+            )
             return None
         proc.state = AgentState.RUNNING
         proc.started_at = time.time()
@@ -128,7 +155,11 @@ class AgentScheduler:
         self._running_count += 1
         try:
             import asyncio as _aio
-            _aio.create_task(self._persist_instance(agent_id, "", proc.conversation_id, "running"))
+            _aio.create_task(
+                self._persist_instance(
+                    agent_id, proc.org_id, proc.conversation_id, "running"
+                )
+            )
         except Exception:
             pass
         return proc
@@ -167,8 +198,12 @@ class AgentScheduler:
         proc.ended_at = time.time()
         proc.total_runtime_ms = round((proc.ended_at - proc.started_at) * 1000, 1) if proc.started_at else 0
         proc.error = error
-        self._running.pop(agent_id, None)
-        self._running_count = max(0, self._running_count - 1)
+        # Only release a slot that was actually taken. `start()` leaves the
+        # process QUEUED when it refuses at capacity, and the run then aborts —
+        # decrementing anyway drove the counter below the real concurrency and
+        # the ceiling stopped meaning anything.
+        if self._running.pop(agent_id, None) is not None:
+            self._running_count = max(0, self._running_count - 1)
 
         hctx = HookContext()
         hctx.agent_id = agent_id

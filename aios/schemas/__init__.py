@@ -1,9 +1,12 @@
 """Pydantic schemas with input validation."""
 
+import logging
 from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -106,13 +109,20 @@ class AgentCreate(BaseModel):
         if not v:
             return v
         try:
+            # Importing aios.tools is what populates the registry. The old code
+            # read TOOL_REGISTRY without importing it, so at validation time it
+            # was empty and the hardcoded fallback list below was used — and that
+            # list was missing ask_team_manager, notify_human, the crm_* read
+            # tools, calendar_*, etl_url and transcribe. Any one tool module
+            # failing to import (aios/tools/__init__.py swallows those) put every
+            # manager agent into "invalid tools" territory.
+            import aios.tools  # noqa: F401
+
             from aios.tools.registry import TOOL_REGISTRY
             allowed = set(TOOL_REGISTRY.keys())
-            if not allowed:
-                raise ImportError
         except Exception:
-            # fallback list when registry not yet populated
-            allowed = {"calculator","web_search","send_email","read_file","current_datetime","http_get","http_request","code","transform","if_branch","wait","hubspot","pipedrive","rdstation","transcribe","voice_call","crm_create_deal","crm_update_deal","lead_score","sql_query","python_sandbox","crm","lead_scoring","dynamic","load_project_skills"}
+            logger.warning("tool registry unavailable; skipping tool validation", exc_info=True)
+            return v
         invalid = [t for t in v if t not in allowed]
         if invalid:
             raise ValueError(f"tools inválidas: {invalid}")
