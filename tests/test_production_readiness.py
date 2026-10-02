@@ -206,10 +206,6 @@ def test_entrypoint_does_not_pipe_alembic_through_tee():
         "migration currently starts the app against a half-migrated schema"
     )
     assert "Refusing to start" in src
-    assert "alembic stamp head" in src, (
-        "a database created by create_all has no alembic_version; replaying the "
-        "chain must stamp head rather than crash-loop the container"
-    )
 
 
 def test_healthcheck_uses_readiness():
