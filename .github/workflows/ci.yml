@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
       - run: pip install ruff
       - run: ruff check aios/
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: pip
       - run: pip install -e . mypy
       - run: mypy aios/ --ignore-missing-imports --exclude aios/channels/voice.py --exclude aios/api/voice.py
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

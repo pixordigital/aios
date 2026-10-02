@@ -1,5 +1,5 @@
 # ─── Builder stage ───
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 COPY pyproject.toml .
@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir . && \
     pip freeze > /installed.txt
 
 # ─── Runtime stage ───
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # runtime deps (postgresql-client for pg_isready in healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # copy installed packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/lib/python3.14/site-packages /usr/local/lib/python3.14/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 WORKDIR /app
