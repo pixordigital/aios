@@ -115,7 +115,12 @@ services:
     restart: unless-stopped
 
   calcom:
-    image: calcom.docker.scarf.sh/calcom/cal.diy
+    # Pinned to the official image and to the same version calcom-api builds
+    # from below. The previous `calcom.docker.scarf.sh/calcom/cal.diy` was a
+    # Scarf vanity-registry mirror that no longer resolves -- Docker reported
+    # "repository not found" and the service could never start. It was also
+    # untagged, so it was unpinnable even while it worked.
+    image: calcom/cal.com:v6.2.0
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.calcom.rule=Host(`${CALCOM_HOST:-cal.local}`)"
@@ -128,12 +133,6 @@ services:
       CALCOM_TELEMETRY_DISABLED: "true"
     depends_on:
       calcom-db: { condition: service_healthy }
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
-      interval: 20s
-      timeout: 10s
-      start_period: 60s
-      retries: 5
     restart: unless-stopped
     deploy:
       resources:
