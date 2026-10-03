@@ -331,6 +331,39 @@ async def _process_inbound_once(
             await db.commit()
             await track_usage(conn.org_id, db, messages=1, tokens=len(reply_text))
 
+            # SDR -> CRM handoff. An answered conversation used to leave no
+            # trace outside the agent's context window, so whoever picked the
+            # lead up next inherited a name and a phone number and nothing
+            # else. Runs after the reply is already committed and fails soft:
+            # a customer must never lose their answer because the CRM write
+            # failed. Matching is by phone, so a deal the agent created itself
+            # during the run is the row that gets enriched, not duplicated.
+            try:
+                if getattr(agent_or_team, "agent_type", None) is not None:
+                    from aios.core.crm_handoff import ensure_deal_for_contact, record_interaction
+
+                    deal_id = await ensure_deal_for_contact(
+                        db,
+                        org_id=conn.org_id,
+                        phone=contact or user_id,
+                        name=(extra.get("from_name") or extra.get("pushName") or ""),
+                        source=channel_type or "whatsapp",
+                    )
+                    if deal_id:
+                        await record_interaction(
+                            db,
+                            deal_id,
+                            conn.org_id,
+                            agent_or_team.id,
+                            inbound_text=text,
+                            reply_text=reply_text,
+                        )
+                        await db.commit()
+            except Exception as exc:
+                logger.warning(
+                    "crm handoff failed conv=%s: %s", getattr(conv, "id", "?"), exc
+                )
+
             # Screen failures out before they reach the customer. A run that
             # failed does not raise — AgentRuntime returns a canned apology and
             # AutonomousAgent a reflection/HITL string — so without this the
@@ -609,6 +642,88 @@ async def proactive_event_job(ctx, payload: dict):
             org_id=org_id or None,
         )
         raise
+
+
+async def workday_job(ctx):
+    """Clock every proactive agent in and hand it its board for the day.
+
+    This is the piece that makes an agent behave like an employee rather than a
+    reaction function. `proactive_event_job` only ever ran an agent when
+    something had been published, so an agent with no subscriptions to anything
+    did nothing, ever. A Closer with fifty open deals had no way to learn that.
+
+    It runs from the work the agent already owns rather than from a new table:
+    its open deals, ranked by the timing score, with due follow-ups first. So
+    the board reflects yesterday simply because yesterday was recorded.
+
+    One agent failing must not cost the others their morning, so each run is
+    isolated. Failures are logged and dead-lettered rather than raised: a raise
+    here would abandon every agent after the first.
+    """
+    from sqlalchemy import select
+
+    from aios.core.workday import board_for_agent, render_board, should_work_day
+    from aios.db.backend import db_session
+    from aios.db.models import Agent, Organization
+
+    worked, empty, failed = 0, 0, 0
+
+    async with db_session() as db:
+        orgs = (await db.execute(select(Organization.id).where(Organization.is_active == True))).scalars().all()  # noqa: E712
+        agents = (
+            await db.execute(select(Agent).where(Agent.org_id.in_(orgs), Agent.status == "active"))
+        ).scalars().all()
+
+    for agent in agents:
+        if not should_work_day(agent):
+            continue
+        try:
+            async with db_session() as db:
+                fresh = await db.get(Agent, agent.id)
+                if not fresh or not should_work_day(fresh):
+                    continue
+                board = await board_for_agent(fresh, db)
+                instruction = render_board(board)
+                if not instruction:
+                    empty += 1
+                    continue
+
+                gov = fresh.governance_config or {}
+                is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
+                if is_autonomous:
+                    from aios.core.autonomous_agent import AutonomousAgent
+
+                    out = await AutonomousAgent(fresh).run("", instruction, db)
+                else:
+                    from aios.core.agent import AgentRuntime
+
+                    out = await AgentRuntime(fresh).run("", instruction)
+                worked += 1
+
+                from aios.core.events import publish as publish_event
+
+                await publish_event(
+                    "agent.workday_completed",
+                    fresh.org_id,
+                    {
+                        "agent_id": fresh.id,
+                        "agent_name": fresh.name,
+                        "items": board["count"],
+                        "overdue": board["overdue"],
+                        "output": str(out)[:4000],
+                    },
+                    actor_id=fresh.id,
+                    # One board per agent per day. Without this a retried or
+                    # duplicated run would have the agent work the same deals
+                    # twice, which is worse than not working them.
+                    idempotency_key=f"workday:{fresh.id}:{board['date']}",
+                )
+        except Exception as exc:
+            failed += 1
+            logger.exception("workday failed for agent %s: %s", agent.id, exc)
+
+    logger.info("workday: %d worked, %d empty board, %d failed", worked, empty, failed)
+    return {"worked": worked, "empty": empty, "failed": failed}
 
 
 async def budget_alert_job(ctx, payload: dict):
@@ -1040,6 +1155,7 @@ FUNCTIONS = [
     monthly_report_job,
     event_consume_job,
     proactive_event_job,
+    workday_job,
 ]
 
 

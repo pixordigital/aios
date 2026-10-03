@@ -21,6 +21,7 @@ from .jobs import (
     template_status_reconcile_job,
     weekly_report_job,
     weekly_standup_job,
+    workday_job,
 )
 
 
@@ -248,6 +249,9 @@ class WorkerSettings:
         # read the stream — it never decides what an agent does, so no agent
         # work happens unless an event was actually published.
         cron(event_consume_job, second={0, 20, 40}),
+        # 07:00, before the 08:00 sales sweep, so a rep works today's board on
+        # freshly-staged data rather than yesterday's.
+        cron(workday_job, hour=7, minute=0),
         cron(weekly_standup_job, hour=9, minute=0),  # daily trigger, self-skips unless Monday
         cron(weekly_report_job, hour=9, minute=15),  # owner report + 1:1 agenda, Mondays
         cron(monthly_report_job, hour=9, minute=30),  # last month's report, 1st of the month
