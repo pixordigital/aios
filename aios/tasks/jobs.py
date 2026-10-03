@@ -365,6 +365,32 @@ async def _process_inbound_once(
         # Event triggers. `fire_event_triggers` existed with zero callers, so
         # every "event" trigger the dashboard could create (documented event
         # type: message.received) was inert. Inbound is the event they describe.
+        #
+        # Published to the durable bus as well, not only to workflow triggers:
+        # otherwise an agent subscribed to message.received (escalation,
+        # sentiment watch, handoff) could never react, and "proactive agents"
+        # would have nothing to observe on the highest-volume event.
+        try:
+            from aios.core.events import publish as publish_event
+
+            await publish_event(
+                "message.received",
+                conn.org_id,
+                {
+                    "channel": channel_type,
+                    "conversation_id": conv.id,
+                    "channel_connection_id": channel_connection_id,
+                    "text": text[:4000],
+                    "user_id": user_id,
+                    "answered": bool(reply_text),
+                },
+                # Conversation+message is the fact's identity, so an ARQ retry of
+                # the same inbound does not re-trigger subscribers a second time.
+                idempotency_key=f"msg:{channel_connection_id}:{getattr(msg, 'id', '') or conv.id}",
+            )
+        except Exception:
+            logger.error("message.received publish failed conv=%s", getattr(conv, "id", "?"), exc_info=True)
+
         try:
             from aios.api.automations import fire_event_triggers
 
@@ -471,6 +497,118 @@ async def quota_alert_job(ctx, payload: dict):
     from aios.core.limits import _send_quota_alert
 
     await _send_quota_alert(payload.get("org_id"), payload.get("pct", 0), payload.get("plan", ""))
+
+
+def render_event_instruction(ev) -> str:
+    """Turn an event into the instruction an autonomous agent receives.
+
+    A named function so the wording is testable and stable — subscribed agents
+    start depending on this text, and a silent rewording would change the
+    behaviour of every one of them.
+    """
+    payload = json.dumps(ev.payload, ensure_ascii=False, default=str)[:4000]
+    return (
+        f"[event] {ev.event_type}\n"
+        f"occurred_at: {ev.ts}\n"
+        f"event_id: {ev.event_id}\n"
+        f"data: {payload}\n\n"
+        "You are subscribed to this event type. Decide and act autonomously: "
+        "if it needs action, use your tools and do it now; if it needs no "
+        "action, do nothing. Do not ask for confirmation unless a tool "
+        "requires approval."
+    )
+
+
+async def event_consume_job(ctx, payload: dict | None = None):
+    """Drain the durable event stream and dispatch to subscribed agents.
+
+    Registered as an ARQ cron job: the timer is only a wake-up nudge, the work
+    is still event-driven — no event, no agent activity. A job rather than a
+    long-lived loop so a crash is a retry instead of a dead consumer, and so a
+    second web replica cannot spawn a competing reader.
+    """
+    from aios.core.events import consume_once
+
+    return {"handled": await consume_once(block_ms=1000, count=20)}
+
+
+async def proactive_event_job(ctx, payload: dict):
+    """Run one agent because it subscribed to the dispatched event.
+
+    Unlike ``agent_run`` there is no inbound message to answer, so the event
+    becomes an instruction and the agent chooses what to do with it.
+    """
+    from aios.core.events import EventEnvelope, ev_type_matches, publish, subscriptions_for
+    from aios.db.engine import async_session as _sess
+    from aios.db.models import Agent as AgentModel
+
+    event = payload.get("event") or {}
+    agent_id = payload.get("agent_id", "")
+    org_id = payload.get("org_id", "")
+    ev = EventEnvelope.from_dict(event)
+
+    try:
+        async with _sess() as sess:
+            agent = await sess.get(AgentModel, agent_id)
+            # org check is the tenant boundary: a dispatched agent that is not
+            # in the event's org is a routing bug, not a transient failure.
+            if not agent or agent.org_id != org_id:
+                logger.error("proactive_event_job: agent %s not in org %s", agent_id, org_id)
+                return {"error": "agent not found in org"}
+
+            # Re-check the subscription: it may have been removed between
+            # publish and dispatch, and a stale run must not execute.
+            if not any(ev_type_matches(ev.event_type, s) for s in subscriptions_for(agent)):
+                logger.info(
+                    "proactive_event_job: %s no longer subscribes to %s", agent_id, ev.event_type
+                )
+                return {"skipped": "unsubscribed"}
+
+            instruction = render_event_instruction(ev)
+            gov = agent.governance_config or {}
+            is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
+
+            # Same execution path as inbound runs, so governance, model routing,
+            # memory and tool guards behave identically for proactive work.
+            if is_autonomous:
+                from aios.core.autonomous_agent import AutonomousAgent
+
+                out = await AutonomousAgent(agent).run("", instruction, sess)
+            else:
+                from aios.core.agent import AgentRuntime
+
+                # No db arg: AgentRuntime takes a DatabaseBackend, not the
+                # AsyncSession this job holds. Same call shape as agent_run.
+                out = await AgentRuntime(agent).run("", instruction)
+
+            # Emit what the agent did so downstream automations can react too.
+            await publish(
+                "agent.proactive_completed",
+                org_id,
+                {
+                    "agent_id": agent_id,
+                    "agent_name": agent.name,
+                    "source_event": ev.event_type,
+                    "source_event_id": ev.event_id,
+                    "output": str(out)[:4000],
+                },
+                actor_id=agent_id,
+                idempotency_key=f"{ev.idempotency_key}:{agent_id}:done",
+            )
+            return {"ok": True, "agent_id": agent_id, "output": str(out)[:2000]}
+    except Exception as exc:
+        logger.exception("proactive_event_job failed agent=%s event=%s", agent_id, ev.event_type)
+        from aios.core.dead_letter import write_dlq
+
+        await write_dlq(
+            direction="outbound",
+            channel_type="proactive_event",
+            job_name="aios.tasks.jobs.proactive_event_job",
+            payload=payload,
+            error=str(exc),
+            org_id=org_id or None,
+        )
+        raise
 
 
 async def budget_alert_job(ctx, payload: dict):
@@ -900,6 +1038,8 @@ FUNCTIONS = [
     weekly_standup_job,
     weekly_report_job,
     monthly_report_job,
+    event_consume_job,
+    proactive_event_job,
 ]
 
 

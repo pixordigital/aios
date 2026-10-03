@@ -16,6 +16,7 @@ from arq.connections import RedisSettings
 from aios.config import settings
 from .jobs import (
     FUNCTIONS,
+    event_consume_job,
     monthly_report_job,
     template_status_reconcile_job,
     weekly_report_job,
@@ -243,6 +244,10 @@ class WorkerSettings:
         # Meta review runs up to 24h and drops webhooks; re-poll stale PENDING rows.
         cron(template_status_reconcile_job, minute=23),
         cron(integration_outbox_cron, second=30),
+        # Event-driven proactive agents. This timer only wakes the consumer to
+        # read the stream — it never decides what an agent does, so no agent
+        # work happens unless an event was actually published.
+        cron(event_consume_job, second={0, 20, 40}),
         cron(weekly_standup_job, hour=9, minute=0),  # daily trigger, self-skips unless Monday
         cron(weekly_report_job, hour=9, minute=15),  # owner report + 1:1 agenda, Mondays
         cron(monthly_report_job, hour=9, minute=30),  # last month's report, 1st of the month

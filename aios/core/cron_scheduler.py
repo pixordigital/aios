@@ -113,10 +113,20 @@ async def _backup_tick():
 
 
 async def _proactive_alerts_tick():
-    """Daily 08:00 UTC proactive sales drop alerts via WhatsApp."""
+    """Detect a sales drop and publish it as an event.
+
+    This used to send the WhatsApp alert itself. Now it only reports the fact;
+    which agent decides to act on it (and whether to message a human at all) is
+    the agent's own governance. That is what makes the behaviour configurable
+    per org and per agent instead of hardcoded here.
+    """
     global _last_proactive_alert_day
     now = datetime.now(timezone.utc)
-    if now.hour != 8 or now.minute not in (0, 1):
+    # "At or after 08:00", not "during minute 0-1 of hour 8". The old exact-window
+    # check meant one delayed tick, a restart or a long GC pause silently skipped
+    # the whole day; combined with the in-process once-a-day guard below, nothing
+    # would ever tell that org its sales dropped.
+    if now.hour < 8:
         return
     today = now.date().isoformat()
     if _last_proactive_alert_day == today:
@@ -126,8 +136,10 @@ async def _proactive_alerts_tick():
 
     try:
         from aios.db.engine import async_session
-        from aios.db.models import Organization, ChannelConnection
+        from aios.db.models import Organization
         from sqlalchemy import select
+
+        from aios.core.events import publish as publish_event
 
         async with async_session() as sess:
             orgs = (
@@ -140,35 +152,41 @@ async def _proactive_alerts_tick():
             ).scalars().all()
 
             for org_id in orgs:
-                has_evo = (
-                    await sess.execute(
-                        select(ChannelConnection.id).where(
-                            ChannelConnection.org_id == org_id,
-                            ChannelConnection.channel_type == "evolution",
-                            ChannelConnection.is_active == True,
-                        ).limit(1)
-                    )
-                ).scalar_one_or_none()
-                if not has_evo:
-                    continue
-
                 try:
-                    from aios.tools.proactive_alerts import check_sales_drop, send_alert_via_evolution
+                    from aios.tools.proactive_alerts import check_sales_drop
+
                     alert = await check_sales_drop(org_id)
-                    if alert:
-                        await send_alert_via_evolution(org_id, alert)
-                        logger.info("Proactive alert sent for org %s: %.1f%% drop", org_id, alert.get("drop_pct", 0))
+                    if not alert:
+                        continue
+                    await publish_event(
+                        "sales.drop_detected",
+                        org_id,
+                        alert,
+                        # Day-scoped so the daily check cannot fire the same
+                        # drop twice if the tick is retried.
+                        idempotency_key=f"sales-drop:{org_id}:{today}",
+                    )
+                    logger.info(
+                        "sales.drop_detected published org=%s drop=%.1f%%",
+                        org_id, alert.get("drop_pct", 0),
+                    )
                 except Exception as e:
-                    logger.exception("Proactive alert failed for org %s: %s", org_id, e)
+                    logger.exception("sales drop check failed for org %s: %s", org_id, e)
     except Exception as e:
         logger.exception("Proactive alerts tick failed: %s", e)
 
 
 async def _crm_mql_stale_tick():
-    """C4: Daily 09:00 UTC - deals em mql >7d sem mover → push WhatsApp pro dono."""
+    """Publish an event per deal stalled in MQL for 7+ days.
+
+    Was: resolve the owner's phone and send WhatsApp directly. Now the stall is
+    a fact on the bus, so an agent can decide to nudge the owner, re-score the
+    deal, or do nothing. The phone lookup and message template move into the
+    agent, which is where they belong.
+    """
     global _last_crm_mql_alert_day
     now = datetime.now(timezone.utc)
-    if now.hour != 9 or now.minute not in (0, 1):
+    if now.hour < 9:
         return
     today = now.date().isoformat()
     if _last_crm_mql_alert_day == today:
@@ -178,54 +196,46 @@ async def _crm_mql_stale_tick():
 
     try:
         from aios.db.engine import async_session
-        from aios.db.models import CrmDeal, Organization, ChannelConnection, Agent
-        from sqlalchemy import select, and_
-        from aios.core.evolution_api import evo_send_text
+        from aios.db.models import CrmDeal, Organization, Agent
+        from sqlalchemy import select
         from datetime import timedelta
 
-        async with async_session() as sess:
-            orgs = (await sess.execute(select(Organization.id).where(Organization.is_active==True))).scalars().all()
-            for org_id in orgs:
-                # active evolution channel
-                ch = (await sess.execute(
-                    select(ChannelConnection).where(
-                        ChannelConnection.org_id==org_id,
-                        ChannelConnection.channel_type=="evolution",
-                        ChannelConnection.is_active==True
-                    ).limit(1)
-                )).scalars().first()
-                if not ch or not ch.config or not ch.config.get("instance"):
-                    continue
-                instance = ch.config["instance"]
+        from aios.core.events import publish as publish_event
 
-                # deals mql >7d
+        async with async_session() as sess:
+            orgs = (await sess.execute(select(Organization.id).where(Organization.is_active == True))).scalars().all()
+            for org_id in orgs:
                 cutoff = datetime.now() - timedelta(days=7)
                 stale = (await sess.execute(
                     select(CrmDeal).where(
-                        CrmDeal.org_id==org_id,
-                        CrmDeal.stage=="mql",
-                        CrmDeal.updated_at < cutoff
+                        CrmDeal.org_id == org_id,
+                        CrmDeal.stage == "mql",
+                        CrmDeal.updated_at < cutoff,
                     )
                 )).scalars().all()
 
                 for d in stale:
-                    # find owner phone - agent or org admin
-                    to_phone = None
-                    owner_name = "Time"
-                    if d.agent_id:
-                        ag = await sess.get(Agent, d.agent_id)
-                        if ag and ag.extra_data and ag.extra_data.get("phone"):
-                            to_phone = ag.extra_data["phone"]
-                        owner_name = ag.name if ag else "SDR"
-                    if not to_phone:
-                        # fallback: first active channel's default_number or org extra_data
-                        to_phone = ch.config.get("default_number") or (ch.extra_data or {}).get("admin_phone")
-                    if not to_phone:
-                        continue
-
-                    msg = f"⚠️ Deal parado há 7+ dias\nLead: {d.lead_name or d.lead_email}\nValor: R$ {d.value:,.0f}\nPipeline: {d.pipeline}\nDono: {owner_name}\nAcesse: {os.getenv('AIOS_APP_URL','')}/dashboard/crm"
-                    await evo_send_text(instance, to_phone, msg)
-                    logger.info("CRM mql stale alert sent org=%s deal=%s", org_id, d.id)
+                    owner = await sess.get(Agent, d.agent_id) if d.agent_id else None
+                    try:
+                        await publish_event(
+                            "crm.deal_stalled",
+                            org_id,
+                            {
+                                "deal_id": d.id,
+                                "lead_name": d.lead_name,
+                                "lead_email": d.lead_email,
+                                "pipeline": d.pipeline,
+                                "value": float(d.value or 0),
+                                "stage": d.stage,
+                                "days_stalled": 7,
+                                "owner_agent_id": d.agent_id or "",
+                                "owner_agent_name": owner.name if owner else "",
+                            },
+                            idempotency_key=f"crm-stalled:{d.id}:{today}",
+                        )
+                    except Exception:
+                        # One bad deal must not abort the org sweep.
+                        logger.exception("crm.deal_stalled publish failed deal=%s", d.id)
     except Exception as e:
         logger.exception("CRM mql stale tick failed: %s", e)
 

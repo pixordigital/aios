@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from aios.db.backend import get_db_backend, DatabaseBackend
@@ -5,6 +7,8 @@ from aios.schemas import PageResponse
 from aios.db.models import CrmDeal, Agent, Team
 from aios.core.secrets import encrypt_secret
 from .deps import get_current_user, get_org_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/crm", tags=["crm"])
 
@@ -92,6 +96,34 @@ async def update_deal(deal_id: str, body: dict, db: DatabaseBackend = Depends(ge
             setattr(deal, k, body[k])
     await db.commit()
     await db.refresh(deal)
+
+    # Stage movement is the signal proactive agents care about (follow up on
+    # won/lost, rescue stalled deals). Published only on a real transition —
+    # re-saving a deal without changing stage is not news. Idempotency key is
+    # deal+old->new so a retried request cannot notify twice.
+    new_stage = body.get("stage")
+    if new_stage and new_stage != old_stage:
+        try:
+            from aios.core.events import publish as publish_event
+
+            await publish_event(
+                f"crm.stage_changed.{new_stage}",
+                org_id,
+                {
+                    "deal_id": deal.id,
+                    "lead_name": deal.lead_name,
+                    "lead_email": deal.lead_email,
+                    "old_stage": old_stage,
+                    "new_stage": new_stage,
+                    "value": float(deal.value or 0),
+                    "pipeline": deal.pipeline,
+                    "owner_agent_id": deal.agent_id or "",
+                },
+                idempotency_key=f"crm-stage:{deal.id}:{old_stage}->{new_stage}",
+            )
+        except Exception:
+            logger.exception("crm.stage_changed publish failed deal=%s", deal.id)
+
     # Memory Layer — insight pós closed_won/lost
     if body.get("stage") in ("closed_won", "closed_lost") and old_stage != body.get("stage"):
         try:

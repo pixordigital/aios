@@ -150,8 +150,37 @@ class AgentUpdate(BaseModel):
     tools: list[str] | None = Field(default=None, max_length=50)
     memory_config: dict | None = None
     governance_config: dict | None = None
-    extra_data: dict | None = None  # project_path, custom config
+    extra_data: dict | None = None  # project_path, custom config, event_subscriptions
     status: str | None = Field(default=None, max_length=20)
+
+    @field_validator("extra_data")
+    @classmethod
+    def _validate_event_subscriptions(cls, v: dict | None) -> dict | None:
+        """Reject event subscriptions that could never match.
+
+        A malformed subscription is otherwise stored happily and silently never
+        fires, leaving an operator staring at an agent that never goes proactive
+        with no error anywhere.
+        """
+        if not v or "event_subscriptions" not in v:
+            return v
+        subs = v.get("event_subscriptions")
+        if isinstance(subs, str):
+            subs = [subs]
+        if not isinstance(subs, list):
+            raise ValueError("event_subscriptions deve ser uma lista de strings")
+        for s in subs:
+            if not isinstance(s, str):
+                raise ValueError("event_subscriptions deve ser uma lista de strings")
+            s = s.strip()
+            if not s:
+                raise ValueError("event_subscriptions não aceita entradas vazias")
+            if len(s) > 100:
+                raise ValueError(f"event_subscription longa demais: {s[:40]}...")
+            # Only exact, a trailing prefix wildcard, or a bare "*" ever match.
+            if "*" in s.strip("*"):
+                raise ValueError(f"event_subscription inválida: {s}")
+        return v
 
     @field_validator("tools")
     @classmethod

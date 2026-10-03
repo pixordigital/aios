@@ -114,6 +114,14 @@ async def update_agent(
         merged.update(update_data["llm_config"])
         agent.llm_config = merged
         update_data.pop("llm_config")
+    if "extra_data" in update_data and isinstance(update_data["extra_data"], dict):
+        # Merge, don't replace. extra_data holds independent settings
+        # (project_path, phone, event_subscriptions); a plain setattr made a
+        # client that PUT only one key silently delete the rest.
+        merged_extra = dict(agent.extra_data or {})
+        merged_extra.update(update_data["extra_data"])
+        agent.extra_data = merged_extra
+        update_data.pop("extra_data")
     for key, val in update_data.items():
         setattr(agent, key, val)
     await db.commit()
