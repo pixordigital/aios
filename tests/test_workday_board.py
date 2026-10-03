@@ -12,10 +12,46 @@ Two gaps, both about continuity rather than capability:
 
 from datetime import datetime, timedelta, timezone
 
+import contextlib
+
 import pytest
 from sqlalchemy import select
 
 from aios.db.models import Agent, CrmDeal, CrmDealVersion, Organization
+
+from aios.db.engine import async_session
+
+
+@contextlib.asynccontextmanager
+async def _cookie(client, user):
+    """Dashboard routes authenticate by cookie, not bearer.
+
+    Encoded exactly like the `auth_headers` fixture so both credentials resolve
+    to the same user and org. A cookie minted for a different org reads a
+    different organization and every assertion silently passes against nothing.
+    """
+    import jwt
+    from datetime import datetime, timedelta, timezone
+
+    from aios.api.deps import COOKIE_NAME
+
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "sub": user.id,
+            "org": user.org_id,
+            "type": "access",
+            "iat": now,
+            "exp": now + timedelta(minutes=60),
+        },
+        "test-secret",
+        algorithm="HS256",
+    )
+    client.cookies.set(COOKIE_NAME, token)
+    try:
+        yield
+    finally:
+        client.cookies.clear()
 
 
 async def _org(name: str) -> str:
@@ -36,6 +72,16 @@ async def _agent(org_id: str, name: str, agent_type: str = "closer", status: str
         sess.add(a)
         await sess.commit()
         return a.id
+
+
+async def _enable_workday(org_id: str) -> None:
+    """Flip the org master switch on, as the dashboard toggle would."""
+    from aios.db.engine import async_session
+
+    async with async_session() as sess:
+        o = await sess.get(Organization, org_id)
+        o.extra_data = {**(o.extra_data or {}), "workday_enabled": True}
+        await sess.commit()
 
 
 async def _deal(org_id: str, agent_id: str | None, **kw):
@@ -329,10 +375,10 @@ async def test_handoff_never_crosses_tenants(test_session):
 async def test_workday_job_skips_reactive_and_empty_agents(test_session, monkeypatch):
     """No board means no run. An agent must never be woken to be told there is
     nothing to do."""
-    from aios.db.engine import async_session
     from aios.tasks import jobs as J
 
     org = await _org("job-skip")
+    await _enable_workday(org)
     closer = await _agent(org, "closer-bot")            # no deals -> empty board
     await _deal(org, closer, lead_name="owned by closer")
 
@@ -360,10 +406,10 @@ async def _noop_publish(*a, **k):
 
 
 async def test_workday_job_ignores_sdr_and_support(test_session, monkeypatch):
-    from aios.db.engine import async_session
     from aios.tasks import jobs as J
 
     org = await _org("job-reactive")
+    await _enable_workday(org)
     sdr = await _agent(org, "sdr-bot", agent_type="sdr")
     support = await _agent(org, "support-bot", agent_type="support")
     # Give them deals: if the filter were wrong they would clock in and run.
@@ -386,3 +432,210 @@ async def test_workday_job_ignores_sdr_and_support(test_session, monkeypatch):
     result = await J.workday_job(None)
     assert ran == []
     assert result["worked"] == 0
+
+
+# ─── the master switch ─────────────────────────────────────────────────────
+
+class TestOrgSwitch:
+    def test_off_by_default(self):
+        """Shipping this must not start every agent working. An operator turns
+        it on deliberately."""
+        from aios.core.workday import org_workday_enabled
+
+        assert not org_workday_enabled(Organization(name="x", slug="x"))
+        assert not org_workday_enabled(Organization(extra_data={}))
+        assert not org_workday_enabled(Organization(extra_data={"workday_enabled": False}))
+        assert not org_workday_enabled(None)
+
+    def test_a_real_true_enables(self):
+        from aios.core.workday import org_workday_enabled
+
+        assert org_workday_enabled(Organization(extra_data={"workday_enabled": True}))
+
+    def test_junk_is_not_truthy(self):
+        """`is True`, so a string or a number from a hand-edited row cannot
+        quietly start spending tokens."""
+        from aios.core.workday import org_workday_enabled
+
+        # Strings and numbers included on purpose: the dashboard and the API both
+        # write a real bool, so anything else means a hand-edited row and must
+        # not start an org spending tokens.
+        for junk in ("true", "1", "sim", "yes", 1, "on", [1]):
+            assert not org_workday_enabled(Organization(extra_data={"workday_enabled": junk}))
+
+
+async def test_job_does_nothing_while_the_org_is_off(test_session, monkeypatch):
+    """The switch has to actually stop the work, not just display a state."""
+    from aios.tasks import jobs as J
+
+    org = await _org("off-switch")
+    closer = await _agent(org, "closer-bot")
+    await _deal(org, closer, lead_name="has work")
+
+    ran: list[str] = []
+
+    class _FakeAuto:
+        def __init__(self, agent):
+            self.agent = agent
+
+        async def run(self, conv, msg, db=None, emit=None):
+            ran.append(self.agent.id)
+            return "x"
+
+    monkeypatch.setattr("aios.core.autonomous_agent.AutonomousAgent", _FakeAuto)
+    monkeypatch.setattr("aios.core.events.publish", _noop_publish)
+
+    result = await J.workday_job(None)
+    assert ran == [], "an agent worked its board with the org switch off"
+    assert result["worked"] == 0
+    assert result["orgs_paused"] == 1
+
+
+async def test_job_works_once_the_org_is_switched_on(test_session, monkeypatch):
+    from aios.db.engine import async_session
+    from aios.tasks import jobs as J
+
+    org = await _org("on-switch")
+    closer = await _agent(org, "closer-bot")
+    await _deal(org, closer, lead_name="has work")
+
+    async with async_session() as sess:
+        o = await sess.get(Organization, org)
+        o.extra_data = {"workday_enabled": True}
+        await sess.commit()
+
+    ran: list[str] = []
+
+    class _FakeAuto:
+        def __init__(self, agent):
+            self.agent = agent
+
+        async def run(self, conv, msg, db=None, emit=None):
+            ran.append(self.agent.id)
+            return "x"
+
+    monkeypatch.setattr("aios.core.autonomous_agent.AutonomousAgent", _FakeAuto)
+    monkeypatch.setattr("aios.core.events.publish", _noop_publish)
+
+    result = await J.workday_job(None)
+    assert ran == [closer]
+    assert result["worked"] == 1
+    assert result["orgs_paused"] == 0
+
+
+async def test_a_paused_org_is_not_revived_by_an_agent_flag(test_session, monkeypatch):
+    """The org switch is absolute. Otherwise pausing would not actually pause
+    anything that had been configured before the pause."""
+    from aios.tasks import jobs as J
+
+    org = await _org("absolute")
+    closer = await _agent(org, "eager-bot", workday=True)
+    await _deal(org, closer, lead_name="has work")
+
+    ran: list[str] = []
+
+    class _FakeAuto:
+        def __init__(self, agent):
+            self.agent = agent
+
+        async def run(self, conv, msg, db=None, emit=None):
+            ran.append(self.agent.id)
+            return "x"
+
+    monkeypatch.setattr("aios.core.autonomous_agent.AutonomousAgent", _FakeAuto)
+    monkeypatch.setattr("aios.core.events.publish", _noop_publish)
+
+    result = await J.workday_job(None)
+    assert ran == []
+    assert result["worked"] == 0
+
+
+async def test_toggle_endpoint_flips_the_switch(test_org, async_client, test_user, auth_headers):
+    """The switch has to be operable, not just readable.
+
+    Uses the `test_org` fixture rather than a fresh org: `async_client` is bound
+    to it, so a switch written against another org would never be visible here.
+    """
+    async with _cookie(async_client, test_user):
+        r = await async_client.get("/api/agents/workday/status", headers=auth_headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["enabled"] is False
+
+        r = await async_client.post(
+            "/api/agents/workday/toggle", json={"enabled": True}, headers=auth_headers
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["enabled"] is True
+
+        async with async_session() as sess:
+            o = await sess.get(Organization, test_org.id)
+            assert o.extra_data["workday_enabled"] is True
+
+        r = await async_client.get("/api/agents/workday/status", headers=auth_headers)
+        assert r.json()["enabled"] is True
+
+        r = await async_client.post(
+            "/api/agents/workday/toggle", json={"enabled": False}, headers=auth_headers
+        )
+        assert r.json()["enabled"] is False
+
+
+async def test_status_reports_what_the_switch_would_actually_do(
+    test_org, test_session, async_client, test_user, auth_headers
+):
+    """Zero eligible agents with the switch on looks like it worked and does
+    nothing, so the count has to be reported."""
+    closer = await _agent(test_org.id, "closer-count")
+    await _deal(test_org.id, closer, lead_name="owned")
+
+    async with _cookie(async_client, test_user):
+        # Flipped through the API rather than written from another session: the
+        # client runs on a session opened before this test, so a cross-session
+        # write can read back stale.
+        r = await async_client.post(
+            "/api/agents/workday/toggle", json={"enabled": True}, headers=auth_headers
+        )
+        assert r.status_code == 200, r.text
+        r = await async_client.get("/api/agents/workday/status", headers=auth_headers)
+    body = r.json()
+    assert body["enabled"] is True
+    assert body["eligible_agents"] == 1
+    assert body["open_deals_owned"] == 1
+
+
+async def test_settings_page_shows_the_switch(async_client, test_user):
+    """The switch has to be reachable without calling the API by hand."""
+    async with _cookie(async_client, test_user):
+        r = await async_client.get("/dashboard/settings")
+    assert r.status_code == 200, r.text
+    assert 'id="workday-toggle"' in r.text
+    assert "/dashboard/settings/workday" in r.text
+
+
+async def test_settings_switch_writes_the_flag(test_org, async_client, test_user):
+    async with _cookie(async_client, test_user):
+        r = await async_client.post(
+            "/dashboard/settings/workday", data={"enabled": "1"}, headers={"Referer": "http://test/dashboard/settings"}
+        )
+        assert r.status_code in (200, 303), r.text
+
+        r = await async_client.post(
+            "/dashboard/settings/workday", data={"enabled": "0"}, headers={"Referer": "http://test/dashboard/settings"}
+        )
+        assert r.status_code in (200, 303), r.text
+
+        r = await async_client.get("/dashboard/settings")
+        assert "Pausada" in r.text
+
+
+async def test_settings_switch_is_not_reachable_cross_origin(test_org, async_client, test_user):
+    """The toggle is a state change, so the dashboard's Referer check has to
+    cover it. Without this a third-party page could pause every agent in the
+    org with one cross-origin form post."""
+    async with _cookie(async_client, test_user):
+        r = await async_client.post(
+            "/dashboard/settings/workday",
+            data={"enabled": "1"},
+            headers={"Referer": "https://evil.example.com/attack"},
+        )
+        assert r.status_code == 403, r.text

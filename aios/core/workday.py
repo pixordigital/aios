@@ -27,6 +27,24 @@ REACTIVE_AGENT_TYPES = frozenset({"sdr", "support"})
 
 DEFAULT_BOARD_SIZE = 10
 
+# Org-level master switch, read from Organization.extra_data. Off by default:
+# switching it on starts every eligible agent spending tokens each morning, so
+# this is something an operator turns on deliberately rather than something a
+# deploy turns on for them.
+WORKDAY_ENABLED_KEY = "workday_enabled"
+
+
+def org_workday_enabled(org) -> bool:
+    """Whether this org has opted its agents into a daily board.
+
+    The org switch is absolute: with it off nothing runs, whatever an
+    individual agent's own flag says. A paused company should not keep agents
+    working because one of them was configured individually before the pause.
+    """
+    if org is None:
+        return False
+    return (getattr(org, "extra_data", None) or {}).get(WORKDAY_ENABLED_KEY) is True
+
 
 def should_work_day(agent) -> bool:
     """Whether this agent gets a daily board.

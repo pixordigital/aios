@@ -93,6 +93,58 @@
       <p class="text-xs text-tertiary" style="margin-top:0.5rem">Alert-only: expira para `expired`, nunca bloqueia. Validação humana obrigatória.</p>
     </div>
 
+    <div class="card" style="border-left:3px solid var(--border-accent)">
+      <div class="flex-between">
+        <div>
+          <h3 style="margin-bottom:0.125rem">Jornada Diária dos Agentes</h3>
+          <p class="text-xs text-tertiary" style="margin:0.25rem 0 0">Cada agente proactive recebe sua fila de deals e trabalha sozinho às 07:00 UTC.</p>
+        </div>
+        <form method="POST" action="/dashboard/settings/workday" id="workday-form">
+          <input type="hidden" name="enabled" value="{% if workday_enabled %}0{% else %}1{% endif %}">
+          <label class="toggle-switch" title="Ativar ou pausar a jornada diária">
+            <input type="checkbox" id="workday-toggle" {% if workday_enabled %}checked{% endif %}
+                   onchange="document.getElementById('workday-form').submit()"
+                   aria-label="Ativar jornada diária dos agentes">
+            <span class="toggle-slider"></span>
+          </label>
+        </form>
+      </div>
+
+      <div style="display:flex;gap:1.5rem;margin-top:1rem;flex-wrap:wrap">
+        <div>
+          <div class="text-xs text-tertiary">Estado</div>
+          <div style="font-weight:600;color:{{ 'var(--green)' if workday_enabled else 'var(--text-tertiary)' }}">
+            {{ 'Ativa' if workday_enabled else 'Pausada' }}
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-tertiary">Agentes na fila</div>
+          <div style="font-weight:600">{{ workday_agent_count }} de {{ workday_active_total }} ativos</div>
+        </div>
+      </div>
+
+      {% if request.query_params.get('workday') %}
+        <div class="badge" style="background:var(--green-subtle);border-color:var(--green);color:var(--green);margin-top:0.75rem">
+          Jornada {{ 'ativada' if request.query_params.get('workday') == '1' else 'pausada' }}
+        </div>
+      {% endif %}
+
+      <p class="text-xs text-tertiary" style="margin-top:0.75rem">
+        SDR e support ficam de fora — eles trabalham quando chega uma mensagem.
+        Para tirar um agente específico da fila mesmo com a jornada ativa,
+        defina <code>workday: false</code> nas flags do agente
+        (<code>PUT /api/agents/&lt;id&gt;</code> com <code>extra_data</code>).
+        A fila vem dos deals abertos que o agente é dono, e o histórico do CRM é o que
+        muda o dia seguinte — nada é lembrado por fora.
+      </p>
+      {% if not workday_agent_count %}
+        <p class="text-xs" style="color:var(--amber);margin-top:0.5rem">
+          Nenhum agente elegível no momento. Ligar a jornada agora não faz nada até
+          existir um agente ativo com deals abertos.
+        </p>
+      {% endif %}
+    </div>
+
     <div class="card">
       <h3>Stripe / OAuth / Outros</h3>
       <div class="grid-2">

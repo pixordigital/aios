@@ -7,6 +7,7 @@ from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, AgentInstance
 from aios.schemas import AgentCreate, AgentOut, AgentUpdate, PageResponse
+from pydantic import BaseModel
 from aios.templates import apply_template
 from aios.core.skill_loader import skill_loader
 from .deps import get_current_user, get_org_id
@@ -537,4 +538,99 @@ async def get_agent_skills(
     return {
         "db_skills": [{"id": s.id, "name": s.name, "description": s.description, "usage_count": s.usage_count} for s in db_skills],
         "project_skills": [{"name": s.name, "source": s.source_file, "description": s.description, "tags": s.tags} for s in project_skills],
+    }
+
+
+class WorkdayToggle(BaseModel):
+    """Master switch for the daily agent board. Org-level, not per agent."""
+
+    enabled: bool
+
+
+@router.post("/workday/toggle")
+async def toggle_workday(
+    payload: WorkdayToggle,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Start or stop every eligible agent's daily board for this org.
+
+    Org-level and absolute. Per-agent `extra_data["workday"] = false` still
+    opts a single agent out while the org is on, but it cannot re-enable an org
+    that has been switched off here -- which is what makes this a reliable
+    panic button.
+    """
+    from aios.core.workday import WORKDAY_ENABLED_KEY
+    from aios.db.models import Organization
+
+    org = await db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(404, "Organization not found")
+
+    data = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
+    data[WORKDAY_ENABLED_KEY] = bool(payload.enabled)
+    org.extra_data = data
+    await db.commit()
+    await log_audit(
+        db,
+        org_id,
+        "workday.toggle",
+        "organization",
+        resource_id=org_id,
+        details={"enabled": bool(payload.enabled)},
+    )
+
+    return {
+        "enabled": bool(payload.enabled),
+        "message": "Jornada diária " + ("ativada" if payload.enabled else "desativada"),
+    }
+
+
+@router.get("/workday/status")
+async def workday_status(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Current switch state, plus how many agents it would actually run.
+
+    The count matters: flipping the switch on with zero eligible agents looks
+    like it worked and does nothing, so the UI should be able to say so.
+    """
+    from sqlalchemy import select
+
+    from aios.core.workday import (
+        REACTIVE_AGENT_TYPES,
+        WORKDAY_ENABLED_KEY,
+        org_workday_enabled,
+        should_work_day,
+    )
+    from aios.db.models import Agent, CrmDeal, Organization
+
+    org = await db.get(Organization, org_id)
+    enabled = org_workday_enabled(org)
+    agents = (
+        await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active"))
+    ).scalars().all()
+    eligible = [a for a in agents if should_work_day(a)]
+
+    deals_with_work = 0
+    if eligible:
+        ids = [a.id for a in eligible]
+        rows = (
+            await db.execute(
+                select(CrmDeal.agent_id).where(
+                    CrmDeal.org_id == org_id,
+                    CrmDeal.agent_id.in_(ids),
+                    CrmDeal.stage.in_(("prospection", "mql", "sql", "opportunity")),
+                )
+            )
+        ).scalars().all()
+        deals_with_work = len({r for r in rows if r})
+
+    return {
+        "enabled": enabled,
+        "eligible_agents": len(eligible),
+        "reactive_agents_skipped": len([a for a in agents if (a.agent_type or "") in REACTIVE_AGENT_TYPES]),
+        "open_deals_owned": deals_with_work,
+        "key": WORKDAY_ENABLED_KEY,
     }

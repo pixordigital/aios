@@ -3826,7 +3826,28 @@ async def settings_page(request: Request):
                 pending_expiry_days = 7
         masked = {k: mask_key(v) if v else "" for k, v in secrets.items()}
         has_key = {k: bool(secrets.get(k)) for k in ALLOWED_KEYS}
-    return await _render("settings.html", request, title="Configurações", secrets=secrets, masked=masked, has_key=has_key, pending_expiry_days=pending_expiry_days)
+
+        # Daily agent board. Rendered server-side so the switch shows the real
+        # state on load rather than a guess the JS has to fetch and correct.
+        from aios.core.workday import org_workday_enabled, should_work_day
+        from aios.db.models import Agent
+
+        workday_enabled = org_workday_enabled(org)
+        active_agents = (
+            await db.execute(
+                select(Agent).where(Agent.org_id == org_id, Agent.status == "active")
+            )
+        ).scalars().all()
+        workday_agents = [a for a in active_agents if should_work_day(a)]
+
+    return await _render(
+        "settings.html", request, title="Configurações",
+        secrets=secrets, masked=masked, has_key=has_key,
+        pending_expiry_days=pending_expiry_days,
+        workday_enabled=workday_enabled,
+        workday_agent_count=len(workday_agents),
+        workday_active_total=len(active_agents),
+    )
 
 
 @router.post("/settings/save")
@@ -3864,6 +3885,33 @@ async def settings_save(request: Request):
         org.extra_data = data
         await db.commit()
     return RedirectResponse("/dashboard/settings?saved=1", status_code=303)
+
+
+@router.post("/settings/workday")
+async def settings_workday(request: Request):
+    """Master switch for the daily agent board.
+
+    Separate from settings/save on purpose: that handler rewrites the secrets
+    block, so mixing a one-click switch into it would couple "pause every
+    agent" to whatever else happens to be in the form.
+    """
+    org_id = await _org_filter(request)
+    form = await request.form()
+    enabled = str(form.get("enabled", "")).lower() in ("1", "true", "on", "yes")
+    async with db_session() as db:
+        from aios.core.workday import WORKDAY_ENABLED_KEY
+        from aios.db.models import Organization
+
+        org = await db.get(Organization, org_id)
+        if not org:
+            return RedirectResponse("/dashboard/settings", status_code=303)
+        data = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
+        data[WORKDAY_ENABLED_KEY] = enabled
+        org.extra_data = data
+        await db.commit()
+    return RedirectResponse(
+        f"/dashboard/settings?workday={'1' if enabled else '0'}", status_code=303
+    )
 
 
 @router.post("/settings/test")

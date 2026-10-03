@@ -662,16 +662,34 @@ async def workday_job(ctx):
     """
     from sqlalchemy import select
 
-    from aios.core.workday import board_for_agent, render_board, should_work_day
+    from aios.core.workday import (
+        board_for_agent,
+        org_workday_enabled,
+        render_board,
+        should_work_day,
+    )
     from aios.db.backend import db_session
     from aios.db.models import Agent, Organization
 
-    worked, empty, failed = 0, 0, 0
+    worked, empty, failed, paused = 0, 0, 0, 0
 
     async with db_session() as db:
-        orgs = (await db.execute(select(Organization.id).where(Organization.is_active == True))).scalars().all()  # noqa: E712
+        orgs = (
+            await db.execute(
+                select(Organization).where(Organization.is_active == True)  # noqa: E712
+            )
+        ).scalars().all()
+        # The org switch is checked here and nowhere subtler, so "off" is
+        # unambiguous: no org means no run, and the per-agent flag cannot
+        # re-enable a paused org on its own.
+        live = [o for o in orgs if org_workday_enabled(o)]
+        paused = len(orgs) - len(live)
         agents = (
-            await db.execute(select(Agent).where(Agent.org_id.in_(orgs), Agent.status == "active"))
+            await db.execute(
+                select(Agent).where(
+                    Agent.org_id.in_([o.id for o in live]), Agent.status == "active"
+                )
+            )
         ).scalars().all()
 
     for agent in agents:
@@ -722,8 +740,11 @@ async def workday_job(ctx):
             failed += 1
             logger.exception("workday failed for agent %s: %s", agent.id, exc)
 
-    logger.info("workday: %d worked, %d empty board, %d failed", worked, empty, failed)
-    return {"worked": worked, "empty": empty, "failed": failed}
+    logger.info(
+        "workday: %d worked, %d empty board, %d failed, %d org(s) opted out",
+        worked, empty, failed, paused,
+    )
+    return {"worked": worked, "empty": empty, "failed": failed, "orgs_paused": paused}
 
 
 async def budget_alert_job(ctx, payload: dict):
