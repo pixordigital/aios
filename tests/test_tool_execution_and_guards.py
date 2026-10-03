@@ -52,16 +52,21 @@ async def test_customer_authored_dynamic_tool_runs():
     """ToolEngine routed dynamic tools to a sandbox runner that imported
     asyncio (deny-listed) and referenced an undefined `tool_instance`, so
     100% of "write your own tool" tools failed."""
-    from aios.tools.dynamic import register_dynamic_tool
+    from aios.tools.dynamic import register_dynamic_tool, TOOL_REGISTRY
 
     register_dynamic_tool(
         "t_dyn_probe", "doubles",
         "result = {'doubled': _input['n'] * 2}",
         {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]},
     )
-    eng = ToolEngine(["t_dyn_probe"], org_id="o", agent_id="a")
-    out = json.loads(await eng.execute("t_dyn_probe", json.dumps({"n": 21})))
-    assert out == {"doubled": 42}, out
+    try:
+        eng = ToolEngine(["t_dyn_probe"], org_id="o", agent_id="a")
+        out = json.loads(await eng.execute("t_dyn_probe", json.dumps({"n": 21})))
+        assert out == {"doubled": 42}, out
+    finally:
+        # Clean up dynamic tool to not pollute global registry for other tests
+        from aios.tools.dynamic import TOOL_REGISTRY
+        TOOL_REGISTRY.pop("t_dyn_probe", None)
 
 
 # ─── the schema the model is shown ────────────────────────────────────────

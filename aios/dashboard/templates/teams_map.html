@@ -75,7 +75,7 @@
         <a id="mp-edit" class="btn btn-primary btn-sm" href="#">Editar</a>
     </aside>
 </div>
-<p class="text-sm text-secondary mt-2">Arraste para navegar, scroll para zoom, clique num nó para detalhes.</p>
+<p class="text-sm text-secondary mt-2">Arraste para navegar, scroll para zoom, clique num agente para editar, numa equipe para detalhes.</p>
 <script>
 (function () {
     const data = {{ graph | tojson }};
@@ -237,9 +237,9 @@
         el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 10, fill: "var(--bg-raised)", stroke: "var(--border-accent)", "stroke-width": 1.25, "class": "frame" }, grp);
         label(p.x + 12, p.y + 25, t.label, 14, "var(--text)");
         label(p.x + 12, p.y + 45, t.strategy || "—", 11, "var(--text-secondary)");
-        grp.addEventListener("click", () => openPanel("team", t.id));
+        grp.addEventListener("click", () => openPanel(t.id));
         grp.addEventListener("keydown", ev => {
-            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openPanel("team", t.id); }
+            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openPanel(t.id); }
         });
         teamGroups[t.id] = grp;
     });
@@ -280,9 +280,10 @@
             (ROLE_TAG[inst.role] ? " — " + ROLE_TAG[inst.role] : "") +
             (others.length ? " — também em: " + others.map(t => t.replace(/^team:/, "")).join(", ") : "");
         grp.appendChild(title);
-        grp.addEventListener("click", () => openPanel("agent", key));
+        // Agents go straight to their edit screen — the panel is for teams.
+        grp.addEventListener("click", () => { window.location.href = n.url; });
         grp.addEventListener("keydown", ev => {
-            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openPanel("agent", key); }
+            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); window.location.href = n.url; }
         });
         instGroups[key] = grp;
     });
@@ -302,45 +303,25 @@
         d.appendChild(a); d.appendChild(b);
         mpRows.appendChild(d);
     };
-    const ago = iso => {
-        if (!iso) return "sem atividade recente";
-        const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-        if (m < 1) return "agora mesmo";
-        if (m < 60) return "há " + m + " min";
-        return "há " + Math.round(m / 60) + " h";
-    };
     let activity = {};
-    function openPanel(kind, id) {
+    function openPanel(id) {
         lastFocus = document.activeElement;
         mpRows.innerHTML = "";
-        if (kind === "team") {
-            const disp = teams.find(x => x.id === id);
-            if (!disp) return;
-            mpTitle.textContent = disp.label;
-            mpSub.textContent = "Equipe · " + (disp.strategy || "—");
-            const col = cols.find(c => c.team && c.team.id === disp.id);
-            const counts = { orchestrator: 0, manager: 0, member: 0 };
-            (col ? col.rows : []).forEach(r => { counts[r.role] = (counts[r.role] || 0) + 1; });
-            row("Orquestrador", (col && col.rows.find(r => r.role === "orchestrator")
-                ? agentsById[col.rows.find(r => r.role === "orchestrator").aid].label : "—"));
-            row("Manager", (col && col.rows.find(r => r.role === "manager")
-                ? agentsById[col.rows.find(r => r.role === "manager").aid].label : "—"));
-            row("Membros", String(counts.member || 0));
-            mpEdit.href = disp.url;
-        } else {
-            const inst = instOf[id];
-            if (!inst || !inst.agent) return;
-            const n = inst.agent;
-            mpTitle.textContent = n.label;
-            mpSub.textContent = "Agente · " + (n.status || "—");
-            if (ROLE_TAG[inst.role]) row("Papel aqui", ROLE_TAG[inst.role].replace(/^★ |^◆ /, ""));
-            const otherNames = agentTeams(n.id)
-                .filter(t => t !== inst.team)
-                .map(t => { const tm = teams.find(x => ("team:" + x.id) === t); return tm ? tm.label : t; });
-            if (otherNames.length) row("Também em", otherNames.join(", "));
-            row("Última atividade", ago(activity[n.id]));
-            mpEdit.href = n.url;
-        }
+        const disp = teams.find(x => x.id === id);
+        if (!disp) return;
+        mpTitle.textContent = disp.label;
+        mpSub.textContent = "Equipe · " + (disp.strategy || "—");
+        const col = cols.find(c => c.team && c.team.id === disp.id);
+        const counts = { orchestrator: 0, manager: 0, member: 0 };
+        (col ? col.rows : []).forEach(r => { counts[r.role] = (counts[r.role] || 0) + 1; });
+        const named = role => {
+            const r = col && col.rows.find(x => x.role === role);
+            return r && agentsById[r.aid] ? agentsById[r.aid].label : "—";
+        };
+        row("Orquestrador", named("orchestrator"));
+        row("Manager", named("manager"));
+        row("Membros", String(counts.member || 0));
+        mpEdit.href = disp.url;
         panel.hidden = false;
         mpClose.focus();
     }

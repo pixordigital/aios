@@ -1,29 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex-between mb-4"><div><h1>Editor de Fluxos</h1><p class="text-sm text-secondary">Zap + Voz + Dado — arraste da paleta, conecte handles, clique para editar</p></div><div class="flex gap-2"><input id="wf-name" class="input" style="width:200px" placeholder="nome do fluxo" value="{{wf_id|default('')}}"><a href="/dashboard/automations" class="btn btn-ghost btn-sm">← Automações</a><button id="btn-save" class="btn btn-primary btn-sm">Salvar</button></div></div>
+<div class="flex-between mb-4"><div><h1>Editor de Fluxos</h1><p class="text-sm text-secondary">Arraste da paleta, conecte handles, <b>▶ Executar</b> para testar</p></div><div class="flex gap-2" style="align-items:center"><input id="wf-name" class="input" style="width:200px" placeholder="nome do fluxo" value="{{wf_id|default('')}}"><a href="/dashboard/automations" class="btn btn-ghost btn-sm">← Automações</a><button id="btn-run" class="btn btn-ghost btn-sm" title="Salvar e executar o fluxo">▶ Executar</button><button id="btn-save" class="btn btn-primary btn-sm">Salvar</button><span id="run-status" class="text-xs text-secondary" aria-live="polite"></span></div></div>
 <div style="display:flex;height:560px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg)" id="flow-layout">
   <div style="width:200px;min-width:200px;border-right:1px solid var(--border);background:var(--bg-elevated);padding:10px;overflow-y:auto;display:flex;flex-direction:column;gap:10px" id="palette">
-    {#- `evolution` and `whatsapp` were offered here but are not in TOOL_REGISTRY,
-        so every node built from them failed with "Unknown tool". The real
-        WhatsApp tool is whatsapp_template, below. -#}
-    <div><div class="text-xs" style="font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:.04em">VOZ</div><div style="display:flex;flex-direction:column;gap:6px">
-      <div draggable="true" data-tool="voice_call" data-label="Chamada de Voz" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🎙️ voice_call</div>
-      <div draggable="true" data-tool="transcribe" data-label="Transcrever" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">📝 transcribe</div>
-    </div></div>
-    <div><div class="text-xs" style="font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:.04em">DADO</div><div style="display:flex;flex-direction:column;gap:6px">
-      <div draggable="true" data-tool="sql_query" data-label="Consulta SQL" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🗄️ sql_query</div>
-      <div draggable="true" data-tool="python_sandbox" data-label="Sandbox Python" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🐍 python_sandbox</div>
-      <div draggable="true" data-tool="rag_search" data-label="Busca RAG" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🔍 rag_search</div>
-      <div draggable="true" data-tool="http_request" data-label="Requisição HTTP" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🌐 http_request</div>
-      <div draggable="true" data-tool="calculator" data-label="Calculadora" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">🧮 calculator</div>
-      <div draggable="true" data-tool="crm_create_deal" data-label="Criar Deal CRM" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">💼 crm_create_deal</div>
-      <div draggable="true" data-tool="crm_update_deal" data-label="Atualizar Deal CRM" ondragstart="event.dataTransfer.setData('application/reactflow', this.dataset.tool); event.dataTransfer.setData('label', this.dataset.label); event.dataTransfer.effectAllowed='move'" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">✏️ crm_update_deal</div>
-    </div></div>
-    <div class="text-xs text-tertiary" style="margin-top:4px">Arraste para o canvas → cria nó. Ou <b>clique</b> no item → adiciona no centro. Conecte arrastando handle.</div>
+    <div><input id="palette-search" class="input" style="width:100%;font-size:12px" placeholder="🔍 buscar ferramenta…" aria-label="Buscar ferramenta"></div>
+    <div id="palette-groups" style="display:flex;flex-direction:column;gap:10px"><div class="text-xs text-tertiary">Carregando ferramentas…</div></div>
+    <div class="text-xs text-tertiary" style="margin-top:4px">Arraste para o canvas → cria nó. Ou <b>clique</b> no item → adiciona no centro. Conecte arrastando handle. <b>Del</b> exclui o nó selecionado.</div>
   </div>
   <div style="flex:1;position:relative;background:var(--bg);min-height:560px;pointer-events:auto" id="flow-wrapper"><div style="height:560px;min-height:560px;pointer-events:auto" id="flow-root"></div><div id="fallback-canvas" style="display:none;position:absolute;inset:0;background:var(--bg);overflow:auto;padding:12px"></div><div id="save-status" class="text-xs" style="position:absolute;bottom:8px;right:10px;background:var(--bg-elevated);border:1px solid var(--border);padding:4px 8px;border-radius:6px;color:var(--text-secondary);display:none;z-index:5"></div><div id="flow-error" style="display:none;position:absolute;inset:0;background:var(--bg-elevated);padding:2rem;text-align:center;color:var(--text-tertiary)"></div></div>
 </div>
-<div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Paleta → <b>arraste</b> ou <b>clique</b> para criar nó. <b>Conecte:</b> arraste do ponto direito → ponto esquerdo, ou <b>Shift+clique</b> origem → destino. Clique no nó para editar. Salvar persiste posições.</p></div>
+<div class="card mt-3"><h3>Como usar</h3><p class="text-sm text-secondary">Paleta → <b>arraste</b> ou <b>clique</b> para criar nó. <b>Conecte:</b> arraste do ponto direito → ponto esquerdo, ou <b>Shift+clique</b> origem → destino. Clique no nó para editar (<b>Del</b> exclui). <b>▶ Executar</b> salva, roda e pinta cada nó (verde ok, vermelho erro) — clique no nó para ver a saída.</p></div>
 
 <!-- P0-2: Tour 30s -->
 <div id="flow-tour">
@@ -63,20 +49,14 @@
     <label>tool_name
       <select id="m-tool" class="input">
         <option value="">(agente)</option>
-        <option value="evolution">evolution</option>
-        <option value="whatsapp">whatsapp</option>
-        <option value="voice_call">voice_call</option>
-        <option value="transcribe">transcribe</option>
-        <option value="sql_query">sql_query</option>
-        <option value="python_sandbox">python_sandbox</option>
-        <option value="rag_search">rag_search</option>
-        <option value="http_request">http_request</option>
-        <option value="calculator">calculator</option>
-        <option value="crm_create_deal">crm_create_deal</option>
-        <option value="crm_update_deal">crm_update_deal</option>
       </select>
     </label>
-    <label>params (JSON)<textarea id="m-params" class="input input-mono" rows="5" placeholder='{"chave":"valor"}'></textarea></label>
+    <div id="m-tool-desc" class="text-xs text-secondary"></div>
+    <div id="m-fields" style="display:flex;flex-direction:column;gap:8px"></div>
+    <details id="m-json-wrap"><summary class="text-xs text-secondary" style="cursor:pointer">JSON avançado</summary>
+    <label style="margin-top:6px">params (JSON)<textarea id="m-params" class="input input-mono" rows="5" placeholder='{"chave":"valor"}'></textarea></label>
+    </details>
+    <div id="m-output-wrap" style="display:none"><label>Última saída<pre id="m-output" class="input input-mono" style="max-height:180px;overflow:auto;white-space:pre-wrap"></pre></label></div>
     <div class="flex gap-2"><button id="m-save" class="btn btn-primary btn-sm">Aplicar</button><button id="m-del" class="btn btn-danger btn-sm">Excluir nó</button></div>
   </div>
 </div>
@@ -166,7 +146,12 @@
     fallback.style.position='absolute'; fallback.style.inset='0'; fallback.style.overflow='hidden'; fallback.style.cursor=isPanning?'grabbing':'grab';
     let content=fallback.querySelector('#fallback-content');
     if(!content){ content=document.createElement('div'); content.id='fallback-content'; content.style.position='absolute'; content.style.inset='0'; content.style.transformOrigin='0 0'; fallback.appendChild(content); }
-    content.innerHTML = store.length ? store.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick(event, '${n.id}')" draggable="true" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid var(--accent);border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${n.label} • ${n.tool_name} <button onclick="event.stopPropagation(); window._delFallbackNode('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">×</button><span data-handle="source" data-id="${n.id}" draggable="true" onclick="window._fallbackHandleClick(event, '${n.id}')" ondragstart="event.stopPropagation(); event.dataTransfer.setData('text/plain', 'conn:${n.id}'); window._fallbackDragSource='${n.id}';" ontouchstart="window._fallbackDragSource='${n.id}';" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--accent);border:2px solid var(--bg);border-radius:50%;cursor:crosshair;touch-action:none"></span><span data-handle="target" data-id="${n.id}" onclick="window._fallbackHandleClick(event, '${n.id}')" style="position:absolute;left:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--bg-elevated);border:2px solid var(--accent);border-radius:50%"></span></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:180px">Nenhum nó — arraste ou clique na paleta à esquerda<br><span style="font-size:0.75rem">Toque no nó para editar • Arraste handle direita→esquerda para conectar • Fundo para pan</span></div>';
+    content.innerHTML = store.length ? store.map(n=>{
+      const st=(window.__flowNodeStatus||{})[n.id];
+      const border=!st?'var(--accent)':st.state==='error'?'var(--red)':st.state==='running'?'var(--amber)':'var(--green)';
+      const dot=!st?'':st.state==='error'?' <span style="color:var(--red)">●</span>':st.state==='running'?' <span style="color:var(--amber)">◌</span>':' <span style="color:var(--green)">●</span>';
+      return `<div data-id="${n.id}" onclick="window._fallbackNodeClick(event, '${n.id}')" draggable="true" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid ${border};border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab;user-select:none;box-shadow:0 2px 8px rgba(0,0,0,0.3)">${n.label} • ${n.tool_name}${dot} <button onclick="event.stopPropagation(); window._delFallbackNode('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">×</button><span data-handle="source" data-id="${n.id}" draggable="true" onclick="window._fallbackHandleClick(event, '${n.id}')" ondragstart="event.stopPropagation(); event.dataTransfer.setData('text/plain', 'conn:${n.id}'); window._fallbackDragSource='${n.id}';" ontouchstart="window._fallbackDragSource='${n.id}';" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--accent);border:2px solid var(--bg);border-radius:50%;cursor:crosshair;touch-action:none"></span><span data-handle="target" data-id="${n.id}" onclick="window._fallbackHandleClick(event, '${n.id}')" style="position:absolute;left:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--bg-elevated);border:2px solid var(--accent);border-radius:50%"></span></div>`;
+    }).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:180px">Nenhum nó — arraste ou clique na paleta à esquerda<br><span style="font-size:0.75rem">Toque no nó para editar • Arraste handle direita→esquerda para conectar • Fundo para pan</span></div>';
     applyTransform();
     // drag nós no fallback
     content.querySelectorAll('[data-id]').forEach(el=>{
@@ -323,6 +308,10 @@
     const name=(document.getElementById('wf-name')?.value||'').trim()||'Flow '+new Date().toISOString().slice(0,10);
     const store=window.__flowStore||[];
     if(!store.length){ toast2('Adicione nós primeiro', false); return; }
+    if(window.__validateFlow){
+      const errs=window.__validateFlow(store);
+      if(errs.length){ toast2('Corrija: '+errs.slice(0,3).join(' • '), false); return; }
+    }
     try{
       let wfId=new URLSearchParams(location.search).get('wf');
       if(!wfId){
@@ -335,6 +324,232 @@
       toast2('Salvo ✓');
     }catch(err){ toast2('Erro: '+err.message, false); }
   }); }
+})();
+</script>
+<script>
+// Builder data layer: registry-driven palette/modal, validation, run+status.
+// Lives outside the React module so BOTH canvases (ReactFlow + fallback)
+// share one store, one validation and one status map.
+(function(){
+  window.__flowTools = [];
+  window.__flowNodeStatus = {}; // id -> {state:'running'|'ok'|'error', output, error}
+  const GROUP_OF = [
+    [/^(voice_|transcribe|audio)/, "VOZ", "var(--amber)"],
+    [/^(crm_|hubspot|pipedrive|rdstation|lead_)/, "CRM", "var(--accent)"],
+    [/^(sql_|python_|rag_|http_|etl_|calculator|code|transform)/, "DADO", "var(--accent)"],
+    [/^(whatsapp_|send_|telegram|slack|email|voice_call)/, "MENSAGEM", "var(--green)"],
+    [/^(memory|read_skill|load_skills|knowledge)/, "MEMÓRIA", "var(--accent)"],
+  ];
+  function groupOf(name){
+    for (const [re, g, c] of GROUP_OF) if (re.test(name)) return [g, c];
+    return ["OUTROS", "var(--text-secondary)"];
+  }
+  function itemHTML(tool){
+    const [g, c] = groupOf(tool.name);
+    return `<div draggable="true" data-tool="${tool.name}" data-label="${tool.name}" title="${(tool.description||"").replace(/"/g,"&quot;")}" style="padding:8px 10px;border:1px solid var(--border);border-left:3px solid ${c};border-radius:6px;background:var(--bg);font-size:12px;cursor:grab">${tool.name}</div>`;
+  }
+  function renderPalette(filter){
+    const host = document.getElementById("palette-groups");
+    if (!host) return;
+    const q = (filter || "").toLowerCase();
+    const list = window.__flowTools.filter(t => !q || t.name.toLowerCase().includes(q) || (t.description||"").toLowerCase().includes(q));
+    if (!list.length){ host.innerHTML = '<div class="text-xs text-tertiary">Nenhuma ferramenta encontrada.</div>'; return; }
+    const groups = {};
+    list.forEach(t => { const [g] = groupOf(t.name); (groups[g] = groups[g] || []).push(t); });
+    const order = ["VOZ", "MENSAGEM", "CRM", "DADO", "MEMÓRIA", "OUTROS"];
+    host.innerHTML = Object.keys(groups).sort((a,b) => order.indexOf(a) - order.indexOf(b))
+      .map(g => `<div><div class="text-xs" style="font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:.04em">${g}</div><div style="display:flex;flex-direction:column;gap:6px">${groups[g].map(itemHTML).join("")}</div></div>`).join("");
+  }
+  window.__renderPalette = renderPalette;
+  async function loadRegistry(){
+    try{
+      const r = await fetch("/api/tools/registry", {credentials: "include"});
+      if (!r.ok) throw new Error("http " + r.status);
+      const j = await r.json();
+      window.__flowTools = j.tools || [];
+    }catch(e){
+      // Offline/static fallback: last-known good set, minus the ghost
+      // `evolution`/`whatsapp` entries that were never runnable.
+      window.__flowTools = ["voice_call","transcribe","sql_query","python_sandbox","rag_search","http_request","calculator","crm_create_deal","crm_update_deal"].map(n => ({name:n, description:"", input_schema:{}}));
+    }
+    renderPalette(document.getElementById("palette-search")?.value || "");
+    fillToolSelect();
+  }
+  function fillToolSelect(){
+    const sel = document.getElementById("m-tool");
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">(agente)</option>' + window.__flowTools.map(t =>
+      `<option value="${t.name}" title="${(t.description||"").replace(/"/g,"&quot;")}">${t.name}</option>`).join("");
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    buildParamFields();
+  }
+  window.__flowToolByName = name => (window.__flowTools || []).find(t => t.name === name);
+  // Schema-driven param fields that edit the same JSON the save handlers read.
+  function buildParamFields(){
+    const host = document.getElementById("m-fields");
+    const desc = document.getElementById("m-tool-desc");
+    const toolName = document.getElementById("m-tool")?.value || "";
+    const tool = window.__flowToolByName(toolName);
+    if (desc) desc.textContent = tool ? (tool.description || "") : "";
+    if (!host) return;
+    host.innerHTML = "";
+    const props = tool?.input_schema?.properties || {};
+    if (!Object.keys(props).length) return;
+    let current = {};
+    try { current = JSON.parse(document.getElementById("m-params")?.value || "{}") || {}; } catch(_){}
+    const required = new Set(tool.input_schema.required || []);
+    const sync = () => {
+      const out = {};
+      host.querySelectorAll("[data-f]").forEach(inp => {
+        const k = inp.dataset.f, kind = inp.dataset.k;
+        let v = inp.type === "checkbox" ? inp.checked : inp.value;
+        if (kind === "number") v = v === "" ? "" : Number(v);
+        if (kind === "json") { try { v = v.trim() === "" ? "" : JSON.parse(v); } catch(_) { return; } }
+        if (v !== "" && v !== undefined) out[k] = v;
+      });
+      const ta = document.getElementById("m-params");
+      if (ta) ta.value = JSON.stringify(out, null, 2);
+    };
+    Object.entries(props).forEach(([k, sch]) => {
+      const type = sch.type || "string";
+      const wrap = document.createElement("label");
+      wrap.style.cssText = "font-size:12px;color:var(--text-secondary)";
+      wrap.textContent = k + (required.has(k) ? " *" : "");
+      let inp;
+      if (type === "boolean") { inp = document.createElement("input"); inp.type = "checkbox"; inp.checked = !!current[k]; }
+      else if (type === "integer" || type === "number") { inp = document.createElement("input"); inp.type = "number"; inp.className = "input"; inp.value = current[k] ?? ""; inp.dataset.k = "number"; }
+      else if (type === "object" || type === "array") { inp = document.createElement("textarea"); inp.className = "input input-mono"; inp.rows = 3; inp.dataset.k = "json"; try { inp.value = current[k] !== undefined ? JSON.stringify(current[k]) : ""; } catch(_) { inp.value = ""; } }
+      else { inp = document.createElement("input"); inp.type = "text"; inp.className = "input"; inp.value = current[k] ?? ""; if (sch.description) inp.placeholder = String(sch.description).slice(0, 80); }
+      inp.dataset.f = k;
+      inp.addEventListener("input", sync);
+      inp.addEventListener("change", sync);
+      wrap.appendChild(inp);
+      host.appendChild(wrap);
+    });
+  }
+  document.getElementById("m-tool")?.addEventListener("change", buildParamFields);
+  document.getElementById("palette-search")?.addEventListener("input", e => renderPalette(e.target.value));
+  window.__buildParamFields = buildParamFields;
+
+  // Validation shared by save + run, both canvases.
+  window.__validateFlow = function(store){
+    const errs = [];
+    const ids = new Set((store || []).map(n => n.id));
+    const known = new Set((window.__flowTools || []).map(t => t.name));
+    (store || []).forEach(n => {
+      if (n.tool_name && !known.has(n.tool_name)) errs.push(`nó "${n.label || n.id.slice(0,6)}": ferramenta desconhecida "${n.tool_name}"`);
+      (n.depends_on || []).forEach(d => {
+        if (d === n.id) errs.push(`nó "${n.label || n.id.slice(0,6)}": depende de si mesmo`);
+        else if (!ids.has(d)) errs.push(`nó "${n.label || n.id.slice(0,6)}": depende de nó inexistente`);
+      });
+    });
+    // cycle check over depends_on edges (dep -> node direction)
+    const adj = {};
+    (store || []).forEach(n => { adj[n.id] = (n.depends_on || []).filter(d => ids.has(d)); });
+    const state = {};
+    const visit = id => {
+      if (state[id] === 1) return true;
+      if (state[id] === 2) return false;
+      state[id] = 1;
+      for (const d of adj[id] || []) if (visit(d)) return true;
+      state[id] = 2;
+      return false;
+    };
+    if ((store || []).some(n => visit(n.id))) errs.push("ciclo detectado nas dependências");
+    return errs;
+  };
+
+  // Status painting for both canvases.
+  window.__flowSetStatus = function(map){
+    window.__flowNodeStatus = map || {};
+    try { if (window.__flowPaintRF) window.__flowPaintRF(window.__flowNodeStatus); } catch(_){}
+    try { if (window.__renderFallback) window.__renderFallback(); } catch(_){}
+  };
+  window.__fillModalOutput = function(id){
+    const wrap = document.getElementById("m-output-wrap");
+    const pre = document.getElementById("m-output");
+    if (!wrap || !pre) return;
+    const st = (window.__flowNodeStatus || {})[id];
+    if (!st || (!st.output && !st.error)) { wrap.style.display = "none"; return; }
+    wrap.style.display = "block";
+    pre.textContent = st.error ? ("ERRO: " + st.error) : (typeof st.output === "string" ? st.output.slice(0, 4000) : JSON.stringify(st.output, null, 2).slice(0, 4000));
+  };
+
+  // ▶ Executar: save-then-run against the RF store if present, else fallback store.
+  async function runFlow(){
+    if (window.__flowRunning) return;
+    window.__flowRunning = true;
+    const statusEl = document.getElementById("run-status");
+    const say = (m, color) => { if (!statusEl) return; statusEl.textContent = m; statusEl.style.color = color || ""; };
+    const store = window.__flowStore || [];
+    if (!store.length) { say("Adicione nós primeiro", "var(--red)"); return; }
+    const errs = window.__validateFlow(store);
+    if (errs.length) { say("Corrija antes de executar: " + errs[0], "var(--red)"); return; }
+    let wfId = new URLSearchParams(location.search).get("wf");
+    const name = (document.getElementById("wf-name")?.value || "").trim() || "Flow " + new Date().toISOString().slice(0, 10);
+    try {
+      say("Salvando…");
+      const nodesPayload = store.map(s => ({...s}));
+      if (!wfId) {
+        const r = await fetch("/api/workflows", {method: "POST", headers: {"Content-Type": "application/json"}, credentials: "include", body: JSON.stringify({name, description: "via flow builder"})});
+        if (!r.ok) throw new Error(await r.text());
+        wfId = (await r.json()).id;
+        history.replaceState(null, "", "?wf=" + wfId);
+      }
+      const r2 = await fetch(`/api/workflows/${wfId}`, {method: "PATCH", headers: {"Content-Type": "application/json"}, credentials: "include", body: JSON.stringify({name, nodes: nodesPayload})});
+      if (!r2.ok) throw new Error(await r2.text());
+      say("Executando…", "var(--amber)");
+      const running = {};
+      store.forEach(n => { running[n.id] = {state: "running"}; });
+      window.__flowSetStatus(running);
+      const r3 = await fetch(`/api/workflows/${wfId}/run`, {method: "POST", headers: {"Content-Type": "application/json"}, credentials: "include", body: JSON.stringify({async: true})});
+      if (!r3.ok) throw new Error(await r3.text());
+      const runId = (await r3.json()).run_id;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 120000) {
+        await new Promise(r => setTimeout(r, 3000));
+        const rp = await fetch(`/api/workflows/${wfId}/runs/${runId}`, {credentials: "include"});
+        if (!rp.ok) throw new Error(await rp.text());
+        const run = await rp.json();
+        if (run.status === "done" || run.status === "failed") {
+          const map = {};
+          const ns = run.node_status || {};
+          Object.entries(ns).forEach(([nid, st]) => {
+            map[nid] = (st && typeof st === "object")
+              ? {state: st.status || st.state || "ok", output: st.output, error: st.error}
+              : {state: String(st)};
+          });
+          // nodes missing from node_status but present in store ran without a record
+          store.forEach(n => { if (!map[n.id]) map[n.id] = {state: run.status === "done" ? "ok" : "error"}; });
+          window.__flowSetStatus(map);
+          // A node-level error fails the run even if the run record says done.
+          const failed = run.status !== "done" || Object.values(map).some(s => s.state === "error");
+          const detail = failed ? (run.error || Object.values(map).find(s => s.error)?.error || "") : "";
+          say(failed ? "Falhou: " + String(detail).slice(0, 120) : "Concluído ✓", failed ? "var(--red)" : "var(--green)");
+          return;
+        }
+      }
+      say("Ainda executando no worker — recarregue para ver o resultado", "var(--amber)");
+    } catch (e) {
+      say("Erro: " + String(e.message || e).slice(0, 160), "var(--red)");
+    } finally {
+      window.__flowRunning = false;
+    }
+  }
+  document.getElementById("btn-run")?.addEventListener("click", runFlow);
+
+  // Del key deletes the selected node (either canvas), when not typing.
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Delete" && e.key !== "Backspace") return;
+    if (e.target.closest && e.target.closest("input, textarea, select")) return;
+    const modal = document.getElementById("node-modal");
+    if (modal && modal.style.display === "flex") return;
+    const id = window._fallbackEditId;
+    if (id && window.__flowDelete) { e.preventDefault(); window.__flowDelete(id); window._fallbackEditId = null; }
+  });
+
+  loadRegistry();
 })();
 </script>
 <script type="module">
@@ -364,12 +579,25 @@ function App(){
   const selectedRef=React.useRef(null);
   // Expor para fallback touch handlers
   React.useEffect(()=>{ window._reactSetStore=setStore; window._reactSyncToRf=syncToRf; }, [syncToRf]);
+  // Status painting from the shared run flow: border colors per node state.
+  React.useEffect(()=>{
+    window.__flowPaintRF=(map)=>{
+      setNodes(nds=>nds.map(n=>{
+        const st=(map||{})[n.id];
+        const tool=n.data?.tool_name||"";
+        const border = !st ? (tool?'var(--accent)':'var(--border)')
+          : st.state==='error' ? 'var(--red)'
+          : st.state==='running' ? 'var(--amber)' : 'var(--green)';
+        return {...n, style:{...n.style, border:`1px solid ${border}`}};
+      }));
+    };
+  },[]);
 
   // sync store -> rf nodes/edges
   const syncToRf = React.useCallback((list)=>{
     window.__flowStore = list;
     if(window.__renderFallback) window.__renderFallback();
-    const ns=list.map((n,i)=>({id:n.id, position:n.position||{x:20+i*220,y:40+Math.floor(i/4)*90}, data:{label:(n.label||n.id.slice(0,6))+" • "+(n.tool_name||"agent")}, style:{background:n.agent_id?'var(--accent-subtle)':'var(--bg-elevated)',border:`1px solid ${n.tool_name?'var(--accent)':'var(--border)'}`,borderRadius:8,padding:'8px 10px',fontSize:12,minWidth:120}, sourcePosition: 'right', targetPosition: 'left'}));
+    const ns=list.map((n,i)=>({id:n.id, position:n.position||{x:20+i*220,y:40+Math.floor(i/4)*90}, data:{label:(n.label||n.id.slice(0,6))+" • "+(n.tool_name||"agent"), tool_name:n.tool_name||""}, style:{background:n.agent_id?'var(--accent-subtle)':'var(--bg-elevated)',border:`1px solid ${n.tool_name?'var(--accent)':'var(--border)'}`,borderRadius:8,padding:'8px 10px',fontSize:12,minWidth:120}, sourcePosition: 'right', targetPosition: 'left'}));
     const es=list.flatMap(n=>(n.depends_on||[]).map(d=>({id:d+"->"+n.id, source:d, target:n.id, animated:true, style:{stroke:"var(--accent)"}})));
     setNodes(ns); setEdges(es);
   },[]);
@@ -435,6 +663,8 @@ function App(){
     if(lbl) lbl.value=s.label||"";
     if(tool) tool.value=s.tool_name||"";
     if(params) params.value=JSON.stringify(s.tool_args||{},null,2);
+    if(window.__buildParamFields) window.__buildParamFields();
+    if(window.__fillModalOutput) window.__fillModalOutput(s.id);
   },[store, syncToRf]);
 
   // drop from palette
@@ -534,6 +764,10 @@ function App(){
       const name=(wfNameInput.value||"").trim()||"Flow "+new Date().toISOString().slice(0,10);
       // snapshot store
       const snap=[...store];
+      if(window.__validateFlow){
+        const errs=window.__validateFlow(snap);
+        if(errs.length){ toast("Corrija: "+errs.slice(0,3).join(" • "),false); return; }
+      }
       // sync positions from rf nodes (in case drag not flushed)
       const posMap={}; nodes.forEach(n=>posMap[n.id]=n.position);
       const nodesPayload=snap.map(s=>({...s, position: s.position || posMap[s.id] || {x:20,y:40}}));
@@ -576,17 +810,10 @@ setTimeout(()=>{
     const err=document.getElementById("flow-error");
     if(fb) fb.style.display='block';
     if(err && err.style.display==='none') { err.style.display='flex'; err.innerHTML='<div style="margin:auto;text-align:center"><div style="font-size:1.2rem">📋 Canvas fallback ativo</div><div class="text-sm text-secondary" style="margin-top:0.5rem">Clique na paleta → nó aparece aqui. Salvar funciona normal.</div></div>'; }
-    // render fallback nodes como divs absolutos se já houver store
-    const renderFallback=()=>{
-      const canvas=document.getElementById("fallback-canvas");
-      if(!canvas) return;
-      // pega store via global se existir
-      const nodes=window.__flowStore || [];
-      canvas.innerHTML = nodes.length ? nodes.map(n=>`<div data-id="${n.id}" onclick="window._fallbackNodeClick && window._fallbackNodeClick(event, '${n.id}')" style="position:absolute;left:${n.position.x}px;top:${n.position.y}px;background:var(--bg-elevated);border:1px solid ${n.tool_name?'var(--accent)':'var(--border)'};border-radius:8px;padding:8px 10px;font-size:12px;min-width:120px;cursor:grab">${n.label||n.id.slice(0,6)} • ${n.tool_name||'agent'} <button onclick="event.stopPropagation(); window.__flowDelete && window.__flowDelete('${n.id}')" style="float:right;background:none;border:none;color:var(--red);cursor:pointer">×</button><span data-handle="source" data-id="${n.id}" draggable="true" onclick="window._fallbackHandleClick(event, '${n.id}')" ondragstart="event.stopPropagation(); event.dataTransfer.setData('text/plain', 'conn:${n.id}'); window._fallbackDragSource='${n.id}';" ontouchstart="window._fallbackDragSource='${n.id}';" style="position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--accent);border:2px solid var(--bg);border-radius:50%;cursor:crosshair;touch-action:none"></span><span data-handle="target" data-id="${n.id}" onclick="window._fallbackHandleClick(event, '${n.id}')" style="position:absolute;left:-6px;top:50%;transform:translateY(-50%);width:14px;height:14px;background:var(--bg-elevated);border:2px solid var(--accent);border-radius:50%"></span></div>`).join('') : '<div style="color:var(--text-tertiary);text-align:center;margin-top:200px">Nenhum nó — clique na paleta à esquerda</div>';
-    };
-    // expõe para click handler atualizar fallback
-    window.__renderFallback = renderFallback;
-    setInterval(renderFallback, 800);
+    // Usa o renderizador do primeiro bloco (com status de execução); a
+    // definição local duplicada que vivia aqui sombreava window.__renderFallback
+    // com uma cópia sem status e ainda apagava a zoomBar via innerHTML.
+    if(window.__renderFallback) window.__renderFallback();
   }
 }, 2500);
 // P0-2 Tour logic
@@ -682,6 +909,8 @@ window._fallbackNodeClick=(e,id)=>{
   if(modal){ modal.style.display='flex'; modal.style.alignItems='center'; modal.style.justifyContent='center'; }
   const lbl=document.getElementById("m-label"), tool=document.getElementById("m-tool"), params=document.getElementById("m-params");
   if(lbl) lbl.value=s.label||""; if(tool) tool.value=s.tool_name||""; if(params) params.value=JSON.stringify(s.tool_args||{},null,2);
+  if(window.__buildParamFields) window.__buildParamFields();
+  if(window.__fillModalOutput) window.__fillModalOutput(id);
 };
 // Patch modal save to handle fallback edit
 const _origFallbackSave = document.getElementById("m-save")?.onclick;
@@ -708,6 +937,8 @@ document.getElementById("m-save")?.addEventListener('click', (e)=>{
     if(modal){ modal.style.display='flex'; modal.style.alignItems='center'; modal.style.justifyContent='center'; }
     const lbl=document.getElementById('m-label'), tool=document.getElementById('m-tool'), params=document.getElementById('m-params');
     if(lbl) lbl.value=s.label||""; if(tool) tool.value=s.tool_name||""; if(params) params.value=JSON.stringify(s.tool_args||{},null,2);
+    if(window.__buildParamFields) window.__buildParamFields();
+    if(window.__fillModalOutput) window.__fillModalOutput(nodeId);
   }
   // Click on node body -> edit (fallback ou ReactFlow quando onNodeClick não dispara)
   wrapper?.addEventListener('click', e=>{

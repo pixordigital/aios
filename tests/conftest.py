@@ -152,3 +152,14 @@ async def auth_client(async_client: AsyncClient, auth_headers: dict) -> AsyncCli
     """Async client with auth headers."""
     async_client.headers.update(auth_headers)
     return async_client
+
+
+@pytest.fixture(autouse=True)
+def _reset_tool_registry():
+    """Ensure TOOL_REGISTRY is clean for each test."""
+    from aios.tools.dynamic import TOOL_REGISTRY
+    original = dict(TOOL_REGISTRY)
+    yield
+    TOOL_REGISTRY.clear()
+    TOOL_REGISTRY.update(original)
+

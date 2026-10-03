@@ -79,39 +79,26 @@
   <button class="btn btn-ghost btn-sm" onclick="location.href='/dashboard/crm?q='+encodeURIComponent(document.getElementById('crm-q').value)+'&pipeline='+document.getElementById('crm-pipeline').value+'&agent_id='+document.getElementById('crm-agent').value+'&sort='+document.getElementById('crm-sort').value">Filtrar</button>
   <a class="btn btn-ghost btn-sm" href="/dashboard/crm/export?q={{q}}&pipeline={{pipeline}}&agent_id={{agent_id}}&sort={{sort}}">⬇ CSV</a>
 </div>
-<div class="card mb-4" style="border-left:4px solid var(--purple)">
-  <h3 style="font-size:0.875rem;margin-bottom:0.5rem">🔀 Mesclar negócios duplicados (C8)</h3>
-  <form method="POST" action="/dashboard/crm/merge" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end">
-    <div style="flex:1;min-width:200px"><label style="font-size:0.6875rem;color:var(--text-tertiary)">E-mail do lead</label><input name="lead_email" class="input" placeholder="lead@empresa.com" required></div>
-    <div style="width:160px"><label style="font-size:0.6875rem;color:var(--text-tertiary)">Manter</label><select name="keep_strategy" class="input"><option value="oldest">Mais antigo</option><option value="highest_value">Maior valor</option><option value="newest">Mais novo</option></select></div>
-    <button class="btn btn-primary btn-sm" onclick="return confirm('Mesclar todos negócios com este e-mail? Ação irreversível.')">Mesclar</button>
-  </form>
-  <p class="text-sm text-tertiary" style="margin-top:0.5rem">Encontra todos negócios com mesmo e-mail na org, combina notas, mantém maior valor, deleta os outros. Dedup automático já impede novos duplicados (exceto perdidos).</p>
-</div>
-{#- Columns come from the stages actually present in the data, ordered by the
-    canonical ladder first. This used to iterate a hardcoded six-stage list in a
-    repeat(6,1fr) grid, while the rest of the codebase uses at least two other
-    vocabularies (_DEFAULT_STAGES is prospection/qualification/proposal/
-    negotiation/closed_won). A deal in "qualification" or "proposal" was counted
-    in stats.total and total_value but appeared in NO column, so the board
-    understated the pipeline while the totals disagreed with the board. -#}
+{#- Kanban board: one stable column per canonical stage (plus any extra
+    stages present in the data), so columns never appear/disappear with the
+    data and empty stages stay valid drop targets. Cards drag between columns;
+    the drop POSTs to the existing /crm/{id}/move endpoint (same trust level
+    as the Avançar forms: same-origin + dashboard session). -#}
 {% set canonical = ["prospection","qualification","mql","sql","proposal","negotiation","opportunity","closed_won","closed_lost"] %}
 {% set present = stats.by_stage.keys()|list %}
 {% set extras = present|reject("in", canonical)|list %}
-{% set ordered = [] %}
-{% for st in canonical %}{% if st in present %}{% set _ = ordered.append(st) %}{% endif %}{% endfor %}
-{% for st in extras %}{% set _ = ordered.append(st) %}{% endfor %}
+{% set ordered = canonical + extras %}
 {% set stage_labels = {"prospection":"Prospecção","qualification":"Qualificação","mql":"MQL","sql":"SQL","proposal":"Proposta","negotiation":"Negociação","opportunity":"Oportunidade","closed_won":"Ganhos","closed_lost":"Perdidos"} %}
 {% if stats.truncated %}
   <div class="alert alert-warning mb-2" style="font-size:0.75rem">Exibindo os 200 negócios mais relevantes. Os totais acima refletem apenas esses 200 — filtre a busca para ver o pipeline completo.</div>
 {% endif %}
-<div style="display:grid;grid-template-columns:repeat({{ ordered|length if ordered else 1 }},1fr);gap:0.5rem" class="mb-4">
+<div id="crm-board" style="display:grid;grid-template-columns:repeat({{ ordered|length if ordered else 1 }},minmax(180px,1fr));gap:0.5rem;overflow-x:auto" class="mb-4">
   {% for stage in ordered %}
-  <div style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:0.5rem;min-height:320px">
-    <div style="font-weight:600;font-size:0.75rem;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:0.5rem">{{stage_labels[stage]}} <span class="badge" style="font-size:0.625rem">{{stats.by_stage[stage] or 0}}</span></div>
-    <div style="display:flex;flex-direction:column;gap:0.375rem">
+  <div data-stage="{{stage}}" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:0.5rem;min-height:320px">
+    <div style="font-weight:600;font-size:0.75rem;text-transform:uppercase;color:var(--text-tertiary);margin-bottom:0.5rem">{{stage_labels.get(stage, stage)}} <span class="badge" style="font-size:0.625rem">{{stats.by_stage.get(stage, 0)}}</span></div>
+    <div style="display:flex;flex-direction:column;gap:0.375rem;min-height:200px">
     {% for d in deals if d.stage==stage %}
-      <div style="background:var(--bg);border:1px solid var(--border);border-left:3px solid {% if d.agent_id %}var(--accent){% else %}var(--amber){% endif %};border-radius:6px;padding:0.5rem">
+      <div draggable="true" data-deal-id="{{d.id}}" style="background:var(--bg);border:1px solid var(--border);border-left:3px solid {% if d.agent_id %}var(--accent){% else %}var(--amber){% endif %};border-radius:6px;padding:0.5rem;cursor:grab">
         <div style="font-weight:600;font-size:0.8125rem">{{d.lead_name or d.lead_email[:15]}}</div>
         <div style="font-size:0.6875rem;color:var(--text-tertiary)">{{d.lead_email}} • {{d.lead_phone}}</div>
         <div style="font-size:0.6875rem">R$ {{ "%.0f"|format(d.value) }} • score {{d.score}} • <span class="font-mono">{{d.agent.name if d.agent else '—'}}</span></div>
@@ -123,10 +110,64 @@
         </div>
       </div>
     {% endfor %}
+    {% if not deals|selectattr("stage","equalto",stage)|list %}
+      <div class="text-xs text-tertiary" data-drop-hint style="padding:0.75rem 0.5rem;border:1px dashed var(--border);border-radius:6px;text-align:center">— arraste para cá —</div>
+    {% endif %}
     </div>
   </div>
   {% endfor %}
 </div>
+<style>.crm-col-hover{outline:2px dashed var(--accent);outline-offset:-2px}</style>
+<script>
+(function(){
+  const board=document.getElementById('crm-board');
+  if(!board) return;
+  let dragId=null;
+  board.addEventListener('dragstart', e=>{
+    const card=e.target.closest('[data-deal-id]');
+    if(!card) return;
+    dragId=card.dataset.dealId;
+    try{ e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed='move'; }catch(_){}
+    card.style.opacity='0.4';
+  });
+  board.addEventListener('dragend', e=>{
+    const card=e.target.closest('[data-deal-id]');
+    if(card) card.style.opacity='';
+    dragId=null;
+    board.querySelectorAll('[data-stage]').forEach(c=>c.classList.remove('crm-col-hover'));
+  });
+  board.addEventListener('dragover', e=>{
+    const col=e.target.closest('[data-stage]');
+    if(!col || !dragId) return;
+    e.preventDefault();
+    try{ e.dataTransfer.dropEffect='move'; }catch(_){}
+    col.classList.add('crm-col-hover');
+  });
+  board.addEventListener('dragleave', e=>{
+    const col=e.target.closest('[data-stage]');
+    if(col && !(e.relatedTarget && col.contains(e.relatedTarget))) col.classList.remove('crm-col-hover');
+  });
+  board.addEventListener('drop', async e=>{
+    const col=e.target.closest('[data-stage]');
+    e.preventDefault();
+    if(!col || !dragId) return;
+    try{
+      await fetch(`/dashboard/crm/${dragId}/move`, {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({stage: col.dataset.stage}), credentials:'same-origin'});
+    }catch(_){}
+    location.reload();
+  });
+})();
+</script>
+<div class="card mb-4" style="border-left:4px solid var(--purple)">
+  <h3 style="font-size:0.875rem;margin-bottom:0.5rem">🔀 Mesclar negócios duplicados (C8)</h3>
+  <form method="POST" action="/dashboard/crm/merge" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end">
+    <div style="flex:1;min-width:200px"><label style="font-size:0.6875rem;color:var(--text-tertiary)">E-mail do lead</label><input name="lead_email" class="input" placeholder="lead@empresa.com" required></div>
+    <div style="width:160px"><label style="font-size:0.6875rem;color:var(--text-tertiary)">Manter</label><select name="keep_strategy" class="input"><option value="oldest">Mais antigo</option><option value="highest_value">Maior valor</option><option value="newest">Mais novo</option></select></div>
+    <button class="btn btn-primary btn-sm" onclick="return confirm('Mesclar todos negócios com este e-mail? Ação irreversível.')">Mesclar</button>
+  </form>
+  <p class="text-sm text-tertiary" style="margin-top:0.5rem">Encontra todos negócios com mesmo e-mail na org, combina notas, mantém maior valor, deleta os outros. Dedup automático já impede novos duplicados (exceto perdidos).</p>
+</div>
+
  <div id="pending" class="card"><h2>HITL — Aprovações pendentes</h2>{% for p in pending %}<div style="background:var(--bg);border:1px solid var(--amber);border-radius:6px;padding:0.75rem;margin-bottom:0.5rem;display:flex;gap:0.5rem;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:200px"><div style="display:flex;gap:0.375rem;align-items:center;margin-bottom:0.25rem"><b style="font-size:0.8125rem">{{p.tool_name}}</b>{% set stage = p.tool_args.get('stage','') %}<span class="badge" style="font-size:0.625rem;border-color:{% if stage in ['mql','sql'] %}var(--cyan){% elif stage in ['opportunity','closed_won'] %}var(--purple){% else %}var(--border){% endif %};color:{% if stage in ['mql','sql'] %}var(--cyan){% elif stage in ['opportunity','closed_won'] %}var(--purple){% else %}var(--text-tertiary){% endif %}">{% if stage in ['mql','sql'] %}via SDR{% elif stage in ['opportunity','closed_won'] %}via Closer{% else %}{{stage}}{% endif %}</span></div><div class="font-mono" style="font-size:0.6875rem;background:var(--bg-elevated);padding:0.25rem 0.375rem;border-radius:4px;word-break:break-all">{{p.tool_args}}</div><div style="font-size:0.75rem;color:var(--text-tertiary);margin-top:0.25rem">{{p.context_summary}}</div></div><div style="display:flex;gap:0.25rem;flex-shrink:0;align-items:center"><button class="btn btn-ghost btn-sm" onclick="document.getElementById('edit-{{p.id}}').showModal()" style="font-size:0.6875rem">✏️ Editar</button><a href="/dashboard/crm/approve/{{p.id}}" class="btn btn-primary btn-sm">Aprovar</a><a href="/dashboard/crm/reject/{{p.id}}" class="btn btn-ghost btn-sm">Rejeitar</a></div></div><dialog id="edit-{{p.id}}" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:1rem;width:min(480px,94vw);color:var(--text)"><form method="POST" action="/dashboard/crm/approve_edit/{{p.id}}" style="display:flex;flex-direction:column;gap:0.5rem"><h3 style="font-size:0.875rem">Editar e Aprovar</h3><label style="font-size:0.75rem;color:var(--text-tertiary)">Stage</label><select name="stage" class="input"><option value="mql" {% if stage=='mql' %}selected{% endif %}>mql</option><option value="sql" {% if stage=='sql' %}selected{% endif %}>sql</option><option value="opportunity" {% if stage=='opportunity' %}selected{% endif %}>opportunity</option><option value="closed_won" {% if stage=='closed_won' %}selected{% endif %}>closed_won</option><option value="closed_lost" {% if stage=='closed_lost' %}selected{% endif %}>closed_lost</option></select><label style="font-size:0.75rem;color:var(--text-tertiary)">Notas</label><input name="notes" class="input" value="{{p.tool_args.get('notes','')}}"><div style="display:flex;gap:0.5rem;justify-content:flex-end"><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancelar</button><button class="btn btn-primary btn-sm">Aprovar com edição</button></div></form></dialog>{% else %}<div class="text-sm text-tertiary">Nenhuma pendência — agentes operando sozinhos</div>{% endfor %}</div>
 {% endif %}
 

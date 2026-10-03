@@ -148,6 +148,14 @@ class Settings(BaseSettings):
     # ─── Calendar (P3) ───
     google_calendar_credentials: str = ""  # JSON service account inline ou path (env GOOGLE_CALENDAR_CREDENTIALS / AIOS_GOOGLE_CALENDAR_CREDENTIALS)
     google_calendar_id: str = "primary"  # calendarId (env GOOGLE_CALENDAR_ID)
+    # ─── Cal.com self-hosted (sales scheduling) ───
+    # API key from the self-hosted instance: Settings > Security (cal_ test /
+    # cal_live_ prod). Empty = the cal_booking tool fails closed.
+    calcom_api_url: str = "http://calcom-api:80"  # internal service name (env AIOS_CALCOM_API_URL)
+    calcom_api_key: str = ""  # env AIOS_CALCOM_API_KEY
+    calcom_api_version: str = "2024-08-13"  # env AIOS_CALCOM_API_VERSION (slots pin 2024-09-04)
+    calcom_event_type_id: int = 0  # default event type for SDR bookings (env AIOS_CALCOM_EVENT_TYPE_ID)
+    calcom_timezone: str = "America/Sao_Paulo"  # env AIOS_CALCOM_TIMEZONE
     calendar_webhook_url: str = ""  # webhook Calendly/Zapier/n8n (env CALENDAR_WEBHOOK_URL / AIOS_CALENDAR_WEBHOOK_URL)
     # AIOS ↔ ARVO integration (Fase 1A — feature-flag off por padrão)
     arvo_integration_enabled: bool = False

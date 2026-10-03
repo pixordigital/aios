@@ -38,6 +38,7 @@ _ALLOWED_MODULES = {
     "aios.tools.load_skills",
     "aios.tools.read_skill",
     "aios.tools.memory",
+    "aios.tools.cal_booking",
     "aios.tools.proactive_alerts",
     "aios.tools.team_collaboration",
     "aios.tools.voice_call",

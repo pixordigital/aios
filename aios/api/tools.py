@@ -1,3 +1,6 @@
+import importlib
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
@@ -94,6 +97,43 @@ async def list_tools(
 async def tool_audit_calls(user=Depends(get_current_user)):
     """Get tool call audit counters (in-memory, since app start)."""
     return ToolEngine.audit_summary()
+
+
+def registry_entries() -> list[dict]:
+    """Code registry as builder metadata: name, description, input schema.
+
+    The single source of truth for the flow builder palette, the node modal
+    tool list, and save-time validation. Built from TOOL_REGISTRY (populated
+    by importing aios.tools), so a tool that exists in code but was never
+    wired in cannot appear — and a palette entry can never name a tool that
+    fails at run time with "Unknown tool". Entries that fail to instantiate
+    are skipped, never fatal to the whole list.
+    """
+    import aios.tools  # noqa: F401 — importing populates the registry
+    from aios.tools.registry import TOOL_REGISTRY
+
+    log = logging.getLogger(__name__)
+    out = []
+    for name in sorted(TOOL_REGISTRY):
+        try:
+            mod_path = TOOL_REGISTRY[name]["code_reference"]
+            mod = importlib.import_module(mod_path.rsplit(".", 1)[0])
+            tool = getattr(mod, mod_path.rsplit(".", 1)[1])()
+            schema = tool.openai_schema().get("function", {})
+            out.append({
+                "name": name,
+                "description": getattr(tool, "description", "") or "",
+                "input_schema": (schema.get("parameters") or {}),
+            })
+        except Exception:
+            log.warning("registry entry %s skipped", name, exc_info=True)
+    return out
+
+
+@router.get("/registry")
+async def tool_registry(user=Depends(get_current_user)):
+    """Builder metadata for every runnable code tool."""
+    return {"tools": registry_entries()}
 
 
 @router.post("/{tool_id}/test")

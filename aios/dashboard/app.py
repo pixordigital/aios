@@ -3017,6 +3017,8 @@ async def lojista_create(request: Request, phone: str = Form(...), solution: str
 # it holds for browser and API alike.
 
 _DEFAULT_STAGES = ["prospection", "qualification", "proposal", "negotiation", "closed_won"]
+# Every stage the kanban board can render or receive a drop into.
+_CRM_BOARD_STAGES = ["prospection", "qualification", "mql", "sql", "proposal", "negotiation", "opportunity", "closed_won", "closed_lost"]
 _SALES_STAGES_KEY = "stages"
 
 
@@ -3307,7 +3309,10 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
             # reading as the whole pipeline.
             stats["truncated"] = len(deals) >= 200
             # pipelines distintos para filtro
-            pipelines = sorted({d.pipeline for d in (await db.execute(select(CrmDeal.pipeline).where(CrmDeal.org_id==org_id).distinct())).scalars().all() if d}) or ["default"]
+            # select(CrmDeal.pipeline) yields plain strings, not rows — the old
+            # `{d.pipeline ...}` raised AttributeError on any non-empty
+            # pipeline, 500ing the entire CRM page (board included).
+            pipelines = sorted({d for d in (await db.execute(select(CrmDeal.pipeline).where(CrmDeal.org_id==org_id).distinct())).scalars().all() if d}) or ["default"]
             for d in deals:
                 stats["by_stage"][d.stage] = stats["by_stage"].get(d.stage,0)+1
                 stats["total_value"] += d.value or 0
@@ -3390,7 +3395,10 @@ async def crm_move(request: Request, deal_id: str, stage: str = Form(...)):
     from aios.db.models import CrmDeal
     async with db_session() as db:
         d = await db.get(CrmDeal, deal_id)
-        if d and d.org_id==org_id and stage in ["prospection","mql","sql","opportunity","closed_won","closed_lost"]:
+        # Same nine rungs the kanban board renders: restricting moves to six
+        # stages while showing nine columns made drops into qualification,
+        # proposal and negotiation redirect with no change and no error.
+        if d and d.org_id==org_id and stage in _CRM_BOARD_STAGES:
             d.stage = stage
             await db.commit()
     return RedirectResponse("/dashboard/crm", status_code=303)

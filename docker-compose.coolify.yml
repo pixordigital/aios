@@ -92,6 +92,81 @@ services:
         limits: { cpus: "1", memory: 1024M }
         reservations: { cpus: "0.2", memory: 256M }
 
+  # Cal.com self-hosted scheduling for sales agents (v6.2.0 pinned).
+  # First run: open https://<CALCOM_HOST>, create the admin user + org, add an
+  # event type (e.g. "Visita comercial 30min"), then create an API key in
+  # Settings > Security and set AIOS_CALCOM_API_KEY (+ event type id) for the
+  # app below. The cal_booking agent tool talks to calcom-api over the
+  # internal network — no public exposure needed for the API container.
+  calcom-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${CALCOM_DB:-calcom}
+      POSTGRES_USER: ${CALCOM_DB_USER:-calcom}
+      POSTGRES_PASSWORD: ${CALCOM_DB_PASSWORD:-changeme}
+    volumes:
+      - calcom-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CALCOM_DB_USER:-calcom} -d ${CALCOM_DB:-calcom}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  calcom:
+    image: calcom.docker.scarf.sh/calcom/cal.diy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.calcom.rule=Host(`${CALCOM_HOST:-cal.local}`)"
+    environment:
+      DATABASE_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+      DATABASE_DIRECT_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+      NEXTAUTH_SECRET: ${CALCOM_NEXTAUTH_SECRET:-changeme-generate-with-openssl-rand-hex-32}
+      CALENDSO_ENCRYPTION_KEY: ${CALCOM_ENCRYPTION_KEY:-changeme-generate-32-byte-hex}
+      NEXT_PUBLIC_WEBAPP_URL: "https://${CALCOM_HOST:-cal.local}"
+      CALCOM_TELEMETRY_DISABLED: "true"
+    depends_on:
+      calcom-db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 1536M }
+        reservations: { cpus: "0.2", memory: 512M }
+
+  calcom-api:
+    build:
+      context: https://github.com/calcom/cal.com.git#v6.2.0
+      dockerfile: apps/api/v2/Dockerfile
+      args:
+        DATABASE_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+        DATABASE_DIRECT_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+      DATABASE_DIRECT_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+      DATABASE_READ_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+      DATABASE_WRITE_URL: "postgresql://${CALCOM_DB_USER:-calcom}:${CALCOM_DB_PASSWORD:-changeme}@calcom-db:5432/${CALCOM_DB:-calcom}"
+      NEXTAUTH_SECRET: ${CALCOM_NEXTAUTH_SECRET:-changeme-generate-with-openssl-rand-hex-32}
+      JWT_SECRET: ${CALCOM_JWT_SECRET:-changeme-generate-with-openssl-rand-hex-32}
+      API_PORT: "80"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-changeme}@redis:6379/2"
+      CALCOM_TELEMETRY_DISABLED: "true"
+    depends_on:
+      calcom-db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 1024M }
+        reservations: { cpus: "0.2", memory: 256M }
+
   app:
     build: .
     ports:
@@ -272,6 +347,7 @@ volumes:
   postgres-data:
   redis-data:
   app-data:
+  calcom-data:
   evolution-data:
   evolution-store:
   voice-tts-data:
