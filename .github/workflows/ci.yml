@@ -27,7 +27,11 @@ jobs:
           python-version: "3.14"
           cache: pip
       - run: pip install -e . mypy
-      - run: mypy aios/ --ignore-missing-imports --exclude aios/channels/voice.py --exclude aios/api/voice.py
+      # MYPYPATH is required because aios/ is a namespace package with no
+      # __init__.py. Without it mypy names modules by basename and aborts on
+      # "Duplicate module named whatsapp" (aios/api/whatsapp.py vs
+      # aios/core/whatsapp/) -- a single error that silently hid the other 305.
+      - run: MYPYPATH=. mypy aios/ --ignore-missing-imports --explicit-package-bases --namespace-packages --exclude aios/channels/voice.py --exclude aios/api/voice.py
   gitleaks:
     runs-on: ubuntu-latest
     steps:
