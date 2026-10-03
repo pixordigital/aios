@@ -1,5 +1,5 @@
 """Proxy pool híbrido $0: Tier1 IPv6 /64 Hetzner + Tier2 Squid IPv4 + Tier3 direct."""
-import ipaddress, random, logging
+import ipaddress, logging
 logger = logging.getLogger(__name__)
 
 class ProxyPoolManager:

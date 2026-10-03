@@ -8,7 +8,7 @@ import logging
 import uuid
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select, desc, func, update
+from sqlalchemy import select, desc, func
 
 from aios.db.backend import db_session
 from aios.db.models import TeamSwarmConfig, SwarmTask, SwarmMessage, Team
@@ -133,16 +133,6 @@ class SwarmCoordinator:
                 # count agents via relationship would need extra query; use swarm_tasks assigned count fallback
                 n_agents = max(1, len(votes))
                 # if we have team_agents count use it
-                from sqlalchemy import text
-                try:
-                    cnt = (await db.execute(
-                        select(func.count()).select_from(
-                            select(Team).where(Team.id == task.team_id).subquery()
-                        )
-                    )).scalar()
-                    # fallback: use votes len
-                except Exception:
-                    pass
             approves = sum(1 for v in votes.values() if v == "approve")
             if votes and approves / len(votes) >= threshold:
                 task.status = "done"

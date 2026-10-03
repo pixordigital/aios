@@ -3,7 +3,7 @@ from sqlalchemy import delete, select
 
 from aios.api.deps import get_current_user, get_org_id
 from aios.db.backend import DatabaseBackend, get_db_backend
-from aios.db.models import Agent, Conversation, Message, Organization, Team, User
+from aios.db.models import Agent, Organization
 
 router = APIRouter(prefix="/api/org", tags=["gdpr"])
 
@@ -34,7 +34,8 @@ async def delete_org(
     from sqlalchemy import or_ as _or_  # noqa: F401
 
     tables = list(Base.metadata.sorted_tables)
-    pk_name = lambda t: list(t.primary_key.columns)[0].name
+    def pk_name(t):
+        return list(t.primary_key.columns)[0].name
 
     # seed: every table with an org_id column
     pending: dict = {}

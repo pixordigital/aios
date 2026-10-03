@@ -8,7 +8,7 @@ Tracks per-agent error rates. When threshold exceeded:
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 

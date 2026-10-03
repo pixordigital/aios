@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Workflow, WorkflowNode, WorkflowRun, Agent, Conversation
+from aios.db.models import Workflow, WorkflowNode, WorkflowRun, Agent
 from aios.schemas import BaseModel, PageResponse
 from .deps import get_current_user, get_org_id
 
@@ -61,8 +61,7 @@ async def create_workflow(
 ):
     _require_role(user, ["admin", "org_admin"])
     # per-agent quota check (bypass em internal_mode)
-    from aios.core.agent_health import health_tracker as _ht
-    from aios.config import PLANS, settings
+    from aios.config import settings
     from aios.db.models import Organization
 
     org = await db.get(Organization, org_id)

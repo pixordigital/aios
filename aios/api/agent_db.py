@@ -1,6 +1,5 @@
 """AgentDB API — knowledge, learnings, reflections (Ruflo AgentDB pattern)."""
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field

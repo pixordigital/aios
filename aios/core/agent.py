@@ -19,7 +19,6 @@ from aios.core.memory import MemoryManager
 from aios.core.providers import get_provider
 from aios.core.providers import (
     STREAM_TOKEN, STREAM_DONE, STREAM_ERROR, STREAM_TOOL_CALL,
-    LLMError, _fallback_models,
 )
 from aios.core import router
 from aios.core.router import floor_from_extra, route, should_escalate
@@ -342,7 +341,6 @@ class AgentRuntime:
         start_time = time.time()
         total_tokens = 0
         total_tool_calls = 0
-        had_error = False
 
         # check agent health
         if not health_tracker.is_available(self.agent.id):
@@ -650,7 +648,6 @@ class AgentRuntime:
         except Exception as e:
             logger.exception("Agent stream failed: agent=%s conv=%s", self.agent.id, conversation_id)
             health_tracker.record_failure(self.agent.id, str(e)[:200])
-            had_error = True
             response_ms = int((time.time() - start_time) * 1000)
             telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, error=True)
             hooks.fire(HookPoint.AGENT_ERROR, HookContext(

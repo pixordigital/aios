@@ -83,7 +83,7 @@ async def _esaa_append(team_id: str, event: dict):
     try:
         from aios.db.engine import async_session
         from aios.db.models import Team as TeamModel
-        import time, json
+        import time
         async with async_session() as sess:
             team = await sess.get(TeamModel, team_id)
             if team:
@@ -363,7 +363,6 @@ class WorkflowEngine:
                 return result
 
         try:
-            from aios.core.expressions import render_value
             ctx = {"outputs": result.outputs, "shared": shared, "input": shared.get("initial_input",""), "json": shared}
             ctx.update(shared)
             ctx["outputs"] = result.outputs

@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 
 from aios.api.deps import get_current_user, get_db_backend
 from aios.core.meta_agent import meta_agent
-from aios.core.rubric import rubric_manager
 from aios.db.backend import DatabaseBackend
 from aios.db.models import User
 

@@ -56,14 +56,24 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
-# E402 is pervasive and harmless here: FastAPI app objects and routers are
-# module-level constants that must be defined before route decorators below
-# them import them. Ignoring it locally is a lie; excluding it explicitly is not.
-ignore = []
-
-[tool.ruff.lint.per-file-ignores]
-# Alembic env.py and the CLI entrypoints import before configuring by design.
-"alembic/*" = ["E402"]
+# Each of these five encodes a choice this codebase made deliberately. Ignoring
+# them is the honest record; the alternative is churning ~126 lines for no
+# functional gain. Every finding that is NOT in this list is meant to be fixed.
+ignore = [
+    # E401/E701/E702: compact house style -- `import os, sys`, `if x: return`,
+    # `a = 1; b = 2`. Reads fine and is used consistently across the tree.
+    "E401",
+    "E701",
+    "E702",
+    # E402: function-level imports are load-bearing here, not laziness. They
+    # break import cycles (dispatch -> tools -> models) and keep FastAPI router
+    # objects defined before the route decorators below them use them.
+    "E402",
+    # E712: `Model.column == True` inside SQLAlchemy where() clauses is required
+    # to emit a SQL boolean comparison. Ruff's suggested rewrite is wrong here;
+    # `.is_(True)` is the correct form, so the rule cannot be autofixed.
+    "E712",
+]
 
 [tool.mypy]
 python_version = "3.14"

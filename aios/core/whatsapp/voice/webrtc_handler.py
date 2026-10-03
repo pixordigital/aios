@@ -1,5 +1,4 @@
 import httpx, logging, uuid
-from aios.core.whatsapp.config import settings
 logger = logging.getLogger(__name__)
 
 JANUS_URL = "http://janus:8088/janus"  # self-hosted Janus (deploy new)

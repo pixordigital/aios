@@ -5,7 +5,6 @@ Aggregated hourly for dashboard BI.
 """
 
 import logging
-import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -59,8 +58,6 @@ class AgentTelemetry:
 
     def get_metrics_for_agent(self, agent_id: str, hours: int = 24) -> list[dict]:
         """Get recent metrics for an agent."""
-        now = datetime.now(timezone.utc)
-        cutoff = now.strftime("%Y-%m-%d-%H")
         results = []
         for key, m in self._metrics.items():
             if key.startswith(f"{agent_id}:"):
@@ -155,7 +152,6 @@ class AgentTelemetry:
         try:
             from aios.db.backend import db_session
             from aios.db.models import AgentMetric
-            from sqlalchemy import select
 
             async with db_session() as db:
                 for key, m in list(self._metrics.items()):

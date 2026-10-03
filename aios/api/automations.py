@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Workflow, WorkflowRun, Credential
-from aios.core.secrets import encrypt_secret, decrypt_secret
+from aios.core.secrets import encrypt_secret
 from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/automations", tags=["automations"])
@@ -255,7 +255,6 @@ async def delete_credential(cred_id: str, db: DatabaseBackend = Depends(get_db_b
 
 @router.get("/executions")
 async def list_executions(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), limit: int = 20):
-    from aios.db.models import WorkflowRun
     res = await db.execute(select(WorkflowRun).where(WorkflowRun.org_id==org_id).order_by(WorkflowRun.created_at.desc()).limit(limit))
     return res.scalars().all()
 

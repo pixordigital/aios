@@ -3,9 +3,17 @@
 from __future__ import annotations  # noqa: F401  (list[str] would collide with the .list() methods below)
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    # Imported for type checking only: these appear solely inside annotations,
+    # which `from __future__ import annotations` leaves unevaluated at runtime.
+    # Without the import they were undefined names, so anything calling
+    # typing.get_type_hints() on these methods would have raised NameError.
+    from aios.sdk.agent import AgentHandle
+    from aios.sdk.conversation import ConversationHandle
 
 logger = logging.getLogger(__name__)
 

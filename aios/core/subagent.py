@@ -10,7 +10,7 @@ import logging
 import multiprocessing
 import multiprocessing.process
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 

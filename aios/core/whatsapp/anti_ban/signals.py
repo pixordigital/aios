@@ -50,7 +50,7 @@ def looks_like_ban(status_code: int, body: str) -> bool:
 async def record_response(org_id: str, instance: str, status_code: int, body: str = ""):
     """Turn an Evolution response into the right signal."""
     if status_code == 429:
-        await record_event(org_id, instance, "http_429", f"HTTP 429")
+        await record_event(org_id, instance, "http_429", "HTTP 429")
         return "http_429"
     if looks_like_ban(status_code, body):
         await record_event(org_id, instance, "ban_signal", f"HTTP {status_code}")

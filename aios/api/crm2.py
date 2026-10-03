@@ -1,11 +1,10 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.schemas import PageResponse
-from aios.db.models import CrmDeal, Agent, Team
-from aios.core.secrets import encrypt_secret
+from aios.db.models import CrmDeal
 from .deps import get_current_user, get_org_id
 
 logger = logging.getLogger(__name__)

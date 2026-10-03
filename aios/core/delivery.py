@@ -7,7 +7,6 @@ Failed messages after max retries land in a DB DLQ table.
 import json
 import logging
 
-from aios.core.dead_letter import write_dlq
 from aios.db.backend import db_session
 from aios.db.models import ChannelConnection
 

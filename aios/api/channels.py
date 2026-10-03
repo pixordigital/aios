@@ -342,7 +342,6 @@ async def evolution_analytics(
     
     # Find channel connection for this instance
     # Use JSON extraction compatible with both SQLite and PostgreSQL
-    from sqlalchemy import func
     channel = (await db.execute(
         select(ChannelConnection).where(
             ChannelConnection.channel_type == "evolution",

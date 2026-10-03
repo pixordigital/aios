@@ -7,7 +7,7 @@ from sqlalchemy import text
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY
 from aios.db.engine import async_session
-from aios.db.models import Organization, ChannelConnection, Memory
+from aios.db.models import Organization, Memory
 
 logger = logging.getLogger(__name__)
 

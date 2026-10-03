@@ -4,7 +4,6 @@ Supports both inbound (receive) and outbound (send) messages.
 Event-driven: incoming messages dispatch to ARQ worker.
 """
 
-import json
 import logging
 
 from aios.channels.base import Channel, OutboundMessage

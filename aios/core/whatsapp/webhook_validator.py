@@ -10,7 +10,11 @@ async def validate(request, secret: str, redis_url: str | None = None) -> dict:
         try:
             if abs(time.time() - int(ts)) > 300:
                 return {"ok": False, "reason": "timestamp expired"}
-        except: pass
+        except (ValueError, TypeError):
+            # Unparseable timestamp means the age check could not be made.
+            # Previously a bare `except: pass` swallowed it and the request was
+            # treated as fresh, so a garbage ts skipped the 300s replay window.
+            return {"ok": False, "reason": "invalid timestamp"}
     # hmac
     if secret and sig:
         exp = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()

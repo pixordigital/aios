@@ -1,16 +1,12 @@
 """Auth deps: JWT validation, dashboard cookie auth."""
 
 import logging
-import secrets
 from datetime import datetime, timedelta, timezone
 
-import jwt
 from fastapi import Depends, Header, HTTPException
 from fastapi import Request as FastAPIRequest
-from sqlalchemy import select
 
 from aios.api.auth import _is_login_allowed, _verify_jwt_token, _create_jwt_token
-from aios.config import settings
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import User
 

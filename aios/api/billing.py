@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from aios.config import PLANS, STRIPE_PRICE_MAP, settings
 from aios.core.limits import get_monthly_usage, get_usage_summary
-from aios.core.whatsapp_pricing import estimate_creation_cost, get_rates, whatsapp_cost_for_messages
+from aios.core.whatsapp_pricing import estimate_creation_cost, get_rates
 from aios.db.backend import db_session, get_db_backend, DatabaseBackend
 from aios.db.models import Budget, Organization
 from .deps import get_current_user, get_org_id
@@ -169,11 +169,9 @@ async def budget_forecast(budget_id: str = "", db: DatabaseBackend = Depends(get
             amount_brl = 800
     remaining = max(amount_brl - spent_brl, 0)
     days_left = int(remaining / daily_brl) if daily_brl > 0 else 999
-    from datetime import datetime, timezone
 
     date_end = (date.today() + timedelta(days=days_left)).isoformat() if days_left < 999 else None
     # cenário pós 01/10: sem free service/utility dentro janela → +38% WA (estimativa)
-    wa_after = daily_brl * 0.38 if any(c in str(monthly) for c in ["whatsapp"]) else 0  # placeholder
     # calcula WA split exemplo para BR: assume 60% inside_window
     scenario_after_days = int(remaining / (daily_brl * 1.38)) if daily_brl > 0 else days_left
     return {
@@ -253,7 +251,7 @@ async def stripe_webhook(request: Request):
 
     try:
         event = stripe.Webhook.construct_event(payload, sig, settings.stripe_webhook_secret)
-    except Exception as e:
+    except Exception:
         logger.exception("Stripe webhook signature invalid")
         raise HTTPException(400, "Assinatura inválida")
 

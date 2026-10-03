@@ -10,7 +10,7 @@ from sqlalchemy import select, func, or_, desc
 
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Conversation, Message, ChannelConnection, User, Team
+from aios.db.models import Conversation, Message, ChannelConnection, User
 from aios.schemas import PageResponse
 from .deps import get_current_user, get_org_id
 
@@ -47,7 +47,6 @@ async def list_inbox_conversations(
     """List conversations across all channels for unified inbox."""
     
     # Base query with conversation and latest message
-    from sqlalchemy.orm import selectinload
     
     query = select(Conversation).where(Conversation.org_id == org_id)
     

@@ -7,12 +7,12 @@ Runs as ARQ cron alongside worker.py jobs, but focused on agent improvement.
 import logging
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, desc
 
 from aios.db.backend import db_session
 from aios.db.models import (
-    Agent, AgentMetric, AgentLearning, AgentReflection,
-    LearningJob, OptimizationRecord, Memory, Skill,
+    AgentMetric, AgentLearning, AgentReflection,
+    OptimizationRecord,
 )
 
 logger = logging.getLogger(__name__)

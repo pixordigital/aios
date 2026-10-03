@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Agent, AgentInstance, Conversation, Message, Organization, Memory, ChannelConnection
+from aios.db.models import Agent, Conversation, Message, Organization, Memory, ChannelConnection
 from aios.schemas import BaseModel
 from aios.core.cache import cache
 from aios.core.tracing import get_trace, METRICS

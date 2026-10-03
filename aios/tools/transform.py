@@ -1,4 +1,3 @@
-import json
 from pydantic import BaseModel, Field
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY

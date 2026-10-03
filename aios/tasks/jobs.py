@@ -1089,7 +1089,7 @@ async def template_status_reconcile_job(ctx, payload: dict | None = None):
                     checked += 1
                     try:
                         info = await client.get_template(tpl.meta_template_id)
-                    except MetaAPIError as e:
+                    except MetaAPIError:
                         # 80008 means we are being rate limited; stop this WABA and
                         # leave the rows PENDING for the next tick.
                         logger.warning("template reconcile rate-limited org=%s", conn.org_id)

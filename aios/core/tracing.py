@@ -153,7 +153,6 @@ async def _persist_span(span: TraceSpan):
         agent_id = extra.get("agent_id") or "unknown"
         org_id = extra.get("org_id") or "unknown"
         async with async_session() as sess:
-            from sqlalchemy import select
 
             dur = int((span.end - span.start) * 1000) if span.end else 0
             tok = span.tokens or 0
@@ -168,7 +167,6 @@ async def _persist_span(span: TraceSpan):
             # `except Exception: pass` swallowed it -- telemetry for that agent/hour
             # was then lost forever, silently, and the duplicate rows double-counted
             # every dashboard total.
-            bind = AgentMetric.__table__
             await sess.execute(
                 _ins(AgentMetric).values(
                     agent_id=agent_id, org_id=org_id, hour=hour,

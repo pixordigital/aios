@@ -121,11 +121,8 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
 
         if usage_row:
             msgs_used = usage_row["messages"]
-            tokens_used = usage_row["llm_tokens"]
-            cost_used = usage_row["cost_usd"] or 0.0
         else:
-            msgs_used = tokens_used = 0
-            cost_used = 0.0
+            msgs_used = 0
 
         # Check daily message limit
         if max_msgs != 99999 and msgs_used >= max_msgs:
@@ -157,7 +154,6 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         # Budget check — informativo, nunca bloqueia (usuário pode pagar mais). Apenas alerta.
         # creation (one_off) e operation (monthly) são só forecast/controle, não gate.
         try:
-            from sqlalchemy import select as _s2
 
             from aios.db.models import Budget
 
@@ -341,8 +337,6 @@ async def get_monthly_usage(org_id: str, db) -> dict:
 
     today = _dt.date.today()
     start_month = today.replace(day=1).isoformat()
-    end_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1).isoformat()
-    days_in_month = (int(end_month[:4]), int(end_month[5:7]))
     import calendar
 
     days_in_month_num = calendar.monthrange(today.year, today.month)[1]

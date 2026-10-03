@@ -9,7 +9,6 @@ from fastapi import APIRouter, Request
 
 from aios.db.backend import db_session
 from aios.db.models import ChannelConnection
-from aios.config import settings
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)

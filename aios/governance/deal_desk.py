@@ -4,7 +4,6 @@ Reuso: PLANS thresholds, PendingAction, AuditLog, AgentMetric, CrmDealVersion.
 Fase 1: Deal → audit → PendingAction (alertar humano, não auto-aprovar) → ledger.
 """
 
-from aios.config import PLANS
 from aios.db.models import AuditLog, CrmDealVersion, PendingAction
 
 

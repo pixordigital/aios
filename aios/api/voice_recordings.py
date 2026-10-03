@@ -8,9 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 
 from aios.core.audit import log_audit
-from aios.core.storage import read_artifact_text, save_artifact
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import VoiceRecording, Conversation
+from aios.db.models import VoiceRecording
 from aios.schemas import PageResponse
 from .deps import get_current_user, get_org_id
 
@@ -105,7 +104,6 @@ async def search_recordings(
     user=Depends(get_current_user),
 ):
     """Full-text search in voice recording transcripts."""
-    from sqlalchemy import or_
     
     # Build search query using ILIKE for transcript content
     search_term = f"%{q}%"
@@ -154,7 +152,6 @@ async def search_recordings(
 
 def _highlight_match(text: str, query: str, context_chars: int = 100) -> str:
     """Return text snippet with query highlighted."""
-    import re
     lower_text = text.lower()
     lower_query = query.lower()
     idx = lower_text.find(lower_query)

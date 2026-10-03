@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 

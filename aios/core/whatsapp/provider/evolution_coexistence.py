@@ -36,7 +36,6 @@ class EvolutionCoexistenceProvider(WhatsAppProvider):
                         name = inst.get("name") or inst.get("instanceName") or inst.get("instance",{}).get("instanceName","")
                         if name==instance:
                             # coexistence flag
-                            is_coex = inst.get("is_on_biz_app") or inst.get("isOnBizApp") or False
                             state = inst.get("state") or inst.get("instance",{}).get("state") or ""
                             connected = state in ("open","connected")
                             # risco ban ~0 para coexistence (Cloud oficial)

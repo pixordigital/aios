@@ -1,6 +1,5 @@
 import hashlib
 from datetime import datetime, timezone
-from sqlalchemy import select
 from aios.db.engine import async_session
 from aios.db.models import Organization
 

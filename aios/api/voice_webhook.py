@@ -4,7 +4,6 @@ import base64
 import hashlib
 import hmac
 import logging
-from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlparse, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request

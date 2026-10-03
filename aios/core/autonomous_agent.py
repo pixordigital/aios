@@ -10,7 +10,6 @@ Referências: Reflexion, ReAct, ReflAct, ELL, U-Mem, Agentic Memory
 import asyncio
 import json
 import logging
-import time
 from typing import Dict, List
 
 from aios.core.agent import AgentRuntime
@@ -391,7 +390,6 @@ class AutonomousAgent:
     async def _create_hitl(self, conversation_id: str, user_message: str, response: str, db, reason: str = "Valor > threshold") -> str:
         """Cria PendingAction para humano aprovar."""
         try:
-            from aios.core.approval import approval_manager
             import uuid
             action_id = str(uuid.uuid4())
             # request_approval BLOCKS until a human decides (or the 300s timeout

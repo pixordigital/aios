@@ -34,12 +34,6 @@ class CRMCreateDealInput(BaseModel):
     pipeline: str = Field(default="default", description="pipeline/unidade")
 
 
-class CRMUpdateDealInput(BaseModel):
-    deal_id: str = Field(description="ID do deal no CRM")
-    stage: str = Field(description="Novo stage")
-    notes: str = Field(default="")
-
-
 class CRMTool(BaseTool):
     name = "crm_create_deal"
     input_model = CRMCreateDealInput
@@ -138,7 +132,6 @@ class CRMTool(BaseTool):
         try:
             from aios.db.engine import async_session
             from aios.db.models import CrmDeal, CrmDealVersion
-            import uuid
             from sqlalchemy import select as _sel
             async with async_session() as s:
                 # Org comes from the tool engine (the calling agent's org).
@@ -490,7 +483,6 @@ class CRMMergeTool(BaseTool):
             from aios.db.engine import async_session
             from aios.db.models import CrmDeal, CrmDealVersion
             from sqlalchemy import select as _sel
-            import uuid
             async with async_session() as s:
                 # Engine org, not Organization.limit(1): merging by email must
                 # never touch another org's deals.
@@ -677,7 +669,6 @@ class CRMStaleDealsTool(BaseTool):
             from sqlalchemy import select as _sel
 
             now = _now_utc()
-            cutoff = now - timedelta(days=max(1, int(stale_days or 7)))
             async with async_session() as s:
                 deals = (await s.execute(
                     _sel(CrmDeal).where(

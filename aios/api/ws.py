@@ -4,16 +4,14 @@ Handles incoming messages from web clients → dispatches to ARQ worker.
 Outbound replies pushed back via WebSocket.
 """
 
-import json
 import logging
-import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from sqlalchemy import select
 
 from aios.db.backend import db_session
-from aios.db.models import Agent, ChannelConnection, Conversation, Message, Team, User
+from aios.db.models import ChannelConnection, Conversation, Message, User
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +206,7 @@ async def websocket_workflow(websocket: WebSocket, run_id: str):
 
 
 @router.websocket("/ws/{channel_connection_id}")
-async def websocket_chat(websocket: WebSocket, channel_connection_id: str):
+async def websocket_channel_chat(websocket: WebSocket, channel_connection_id: str):
     """WebSocket endpoint for web channel chat.
 
     Client connects, sends messages, receives agent replies in real-time.

@@ -10,7 +10,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
@@ -656,7 +655,6 @@ async def agent_clone(request: Request, aid: str):
         db.add(agent)
         await db.flush()
         from aios.db.models import AgentVersion as _AV2
-        from sqlalchemy import func as _f2, select as _s2
         db.add(_AV2(agent_id=agent.id, org_id=agent.org_id, version=1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="clone"))
         await db.commit()
     return RedirectResponse("/dashboard/agents", status_code=303)
@@ -754,7 +752,6 @@ async def agent_save(
             )
             db.add(agent)
             await db.flush()
-            from sqlalchemy import select as _select2, func as _func2
             from aios.db.models import AgentVersion
             db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="initial"))
         await db.commit()
@@ -2187,7 +2184,6 @@ async def sandbox_chat(
                     tid2 = current_trace_id()
                     yield "data: " + json.dumps({"type": "done", "trace_id": tid2}) + "\n\n"
 
-    from fastapi.responses import StreamingResponse
     return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
 
@@ -2800,82 +2796,6 @@ async def automations_run(request: Request, wf_id: str):
             await db.commit()
     return RedirectResponse(f"/dashboard/automations/{wf_id}?result=ok", status_code=303)
 
-@router.post("/automations/{wf_id}/duplicate")
-async def automations_duplicate(request: Request, wf_id: str):
-    org_id = await _org_filter(request)
-    from aios.db.models import Workflow, WorkflowNode
-    async with db_session() as db:
-        wf = await db.get(Workflow, wf_id)
-        if not wf or wf.org_id != org_id:
-            return RedirectResponse("/dashboard/automations", status_code=303)
-        nodes = (await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id==wf_id))).scalars().all()
-        new_wf = Workflow(org_id=org_id, name=wf.name+" (cópia)", description=wf.description, timeout_seconds=wf.timeout_seconds)
-        db.add(new_wf)
-        await db.flush()
-        id_map = {}
-        for n in nodes:
-            nn = WorkflowNode(workflow_id=new_wf.id, label=n.label, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=dict(n.tool_args or {}), depends_on=[], condition=n.condition, output_key=n.output_key, timeout_seconds=n.timeout_seconds, position=dict(n.position or {}))
-            db.add(nn)
-            await db.flush()
-            id_map[n.id] = nn.id
-        # fix deps
-        for n in nodes:
-            if n.depends_on:
-                nn_id = id_map[n.id]
-                nn = await db.get(WorkflowNode, nn_id)
-                nn.depends_on = [id_map.get(d, d) for d in n.depends_on]
-        await db.commit()
-    return RedirectResponse("/dashboard/automations", status_code=303)
-
-@router.get("/automations/{wf_id}/delete")
-async def automations_delete(request: Request, wf_id: str):
-    org_id = await _org_filter(request)
-    from aios.db.models import Workflow
-    async with db_session() as db:
-        wf = await db.get(Workflow, wf_id)
-        if wf and wf.org_id == org_id:
-            await db.delete(wf)
-            await db.commit()
-    return RedirectResponse("/dashboard/automations", status_code=303)
-
-@router.get("/automations/{wf_id}/compare")
-async def automations_compare(request: Request, wf_id: str, run1: str = "", run2: str = ""):
-    org_id = await _org_filter(request)
-    from aios.db.models import WorkflowRun
-    async with db_session() as db:
-        r1 = await db.get(WorkflowRun, run1) if run1 else None
-        r2 = await db.get(WorkflowRun, run2) if run2 else None
-        return await _render("automation_compare.html", request, title="Comparar", r1=r1, r2=r2, wf_id=wf_id)
-
-@router.get("/automations/{wf_id}/run/{run_id}")
-async def automations_run_detail(request: Request, wf_id: str, run_id: str):
-    org_id = await _org_filter(request)
-    from aios.db.models import WorkflowRun
-    async with db_session() as db:
-        run = await db.get(WorkflowRun, run_id)
-        if not run or run.org_id != org_id:
-            return HTMLResponse("<h2>Não encontrado</h2>", status_code=404)
-        return await _render("automation_run.html", request, title="Execução", run=run)
-
-@router.post("/automations/credentials")
-async def automations_cred_create(request: Request):
-    org_id = await _org_filter(request)
-    form = await request.form()
-    name = form.get("name") or ""
-    ctype = form.get("cred_type") or "bearer"
-    val = form.get("value") or ""
-    if not name or not val:
-        return RedirectResponse("/dashboard/automations", status_code=303)
-    from aios.db.models import Credential
-    from aios.core.secrets import encrypt_secret
-    import json
-    async with db_session() as db:
-        data = {"value": val, "token": val, "key": val}
-        enc = encrypt_secret(json.dumps(data))
-        db.add(Credential(org_id=org_id, name=name, cred_type=ctype, data_enc=enc))
-        await db.commit()
-    return RedirectResponse("/dashboard/automations", status_code=303)
-
 @router.get("/automations/credentials/{cid}/delete")
 async def automations_cred_delete(request: Request, cid: str):
     org_id = await _org_filter(request)
@@ -2903,7 +2823,6 @@ async def proposal_page(request: Request):
         from aios.core.limits import get_monthly_usage
         org = await db.get(Organization, org_id)
         monthly = await get_monthly_usage(org_id, db)
-        from sqlalchemy import func as _func2
         from aios.db.models import Agent as _Ag2
         agent_count = (await db.execute(select(func.count(_Ag2.id)).where(_Ag2.org_id == org_id))).scalar() or 0
         # Honest projection from the numbers shown on the page: messages are
@@ -2963,7 +2882,7 @@ async def wizard_create(request: Request, phone: str = Form(...), vertical: str 
         ch = ChannelConnection(org_id=org_id, label=f"WhatsApp {phone}", channel_type="evolution", config=encrypt_channel_config({"server_url": settings.evolution_server_url, "api_key": settings.evolution_api_key, "instance": inst_name}), agent_id=ag.id, is_active=True)
         db.add(ch)
         await db.commit()
-    return RedirectResponse(f"/dashboard/evolution", status_code=303)
+    return RedirectResponse("/dashboard/evolution", status_code=303)
 
 @router.get("/lojista", response_class=HTMLResponse)
 async def lojista_page(request: Request):
@@ -3007,7 +2926,7 @@ async def lojista_create(request: Request, phone: str = Form(...), solution: str
         ch = ChannelConnection(org_id=org_id, label=f"WhatsApp {phone}", channel_type="evolution", config=encrypt_channel_config({"server_url": settings.evolution_server_url, "api_key": settings.evolution_api_key, "instance": inst_name}), agent_id=ag.id, is_active=True)
         db.add(ch)
         await db.commit()
-    return RedirectResponse(f"/dashboard/evolution", status_code=303)
+    return RedirectResponse("/dashboard/evolution", status_code=303)
 
 # ─── Funis de Vendas (Vendas opera, Dados analisa) ───
 #
@@ -3091,7 +3010,6 @@ def _columns(stages: list[str], deals: list, transitions: dict | None = None) ->
         rate = None
         n_rate = None
         if s in advancing and i + 1 < len(stages):
-            nxt = stages[i + 1]
             moved_ids = transitions.get(s)
             # Absent history means "unknown who advanced", NOT "nobody advanced".
             # Reporting 0% would tell Sales every deal is stalled when the truth
@@ -3477,7 +3395,6 @@ async def crm_reject(request: Request, pid: str):
 async def crm_export(request: Request, q: str = "", agent_id: str = "", pipeline: str = "", sort: str = ""):
     """C2: Export CSV 1-click com mesmos filtros do kanban"""
     import csv, io
-    from fastapi.responses import StreamingResponse
     org_id = await _org_filter(request)
     async with db_session() as db:
         from aios.db.models import CrmDeal
@@ -3550,7 +3467,7 @@ async def crm_deal_notes(request: Request, deal_id: str):
     form = await request.form()
     note = form.get("note", "").strip()
     if not note:
-        return RedirectResponse(f"/dashboard/crm", status_code=303)
+        return RedirectResponse("/dashboard/crm", status_code=303)
     async with db_session() as db:
         from aios.db.models import CrmDeal
         deal = await db.get(CrmDeal, deal_id)
@@ -3735,7 +3652,6 @@ async def whatsapp_risk_page(request: Request):
     unofficial route — Meta Cloud API is an official channel and does not carry
     this class of risk.
     """
-    from aios.core.whatsapp.anti_ban.dashboard_data import org_report
     from aios.core.whatsapp.anti_ban.signals import gather_counts
 
     org_id = await _org_filter(request)
@@ -4010,7 +3926,7 @@ async def settings_test_calendar(request: Request):
     if not creds:
         return JSONResponse({"ok": False, "error": "Credenciais vazias — cole JSON do service account"})
     try:
-        import json, httpx
+        import json
         # validate JSON
         data=json.loads(creds)
         if "private_key" not in data or "client_email" not in data:
@@ -4145,7 +4061,6 @@ async def wa_templates_connect_page(request: Request):
 @router.post("/whatsapp/templates/connect")
 async def wa_templates_connect_save(request: Request):
     org_id = await _org_filter(request)
-    from aios.api.deps import get_dashboard_user
     from aios.core.secrets import encrypt_secret
     from aios.db.models import WhatsappConnection
     form = await request.form()
@@ -4270,7 +4185,6 @@ def _wa_edit_quota_note(tpl) -> str:
 async def wa_template_save(request: Request):
     """Save a local draft. Never contacts Meta."""
     org_id = await _org_filter(request)
-    from aios.api.deps import get_dashboard_user
     from aios.db.models import WhatsappTemplate
     form = await request.form()
     name = (form.get("name") or "").strip()

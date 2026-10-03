@@ -326,7 +326,6 @@ Respond with JSON:
                     for assignment in assignments:
                         agent_id = assignment.get("agent_id")
                         task = assignment.get("task", "")
-                        reason = assignment.get("reason", "")
 
                         agent = next((a for a in self.agents if a.id == agent_id), None)
                         if agent and agent.id != self.team.orchestrator_agent_id and agent.id != self.team.manager_agent_id:
@@ -404,7 +403,7 @@ Respond with JSON:
             for tc in resp.get("tool_calls") or []:
                 if tc.get("function", {}).get("name") == "_route":
                     return json.loads(tc["function"]["arguments"])
-        except Exception as e:
+        except Exception:
             logger.exception("LLM routing failed, falling back to agent 0")
         return {"agent_index": 0, "reason": "fallback", "handoff_message": msg}
 
@@ -657,7 +656,6 @@ Respond with JSON:
         2. Orchestrator hands off to Manager
         3. Manager hands off to appropriate agent
         """
-        handoff_config = self.team.handoff_config or {}
         
         if not self.team.orchestrator_agent_id:
             async for ev in self._supervisor_route_stream(conv_id, msg, db):

@@ -42,7 +42,7 @@ class RDStationTool(BaseTool):
         async with httpx.AsyncClient(timeout=20) as client:
             payload = {"email": email, "name": name, "cf_custom": properties or {}, "api_key": token}
             # RD legacy endpoint
-            r = await client.post(f"https://api.rd.services/platform/conversions", headers=headers, json=payload) if action=="create_lead" else await client.patch(f"https://api.rd.services/platform/contacts/email:{email}", headers=headers, json=payload)
+            r = await client.post("https://api.rd.services/platform/conversions", headers=headers, json=payload) if action=="create_lead" else await client.patch(f"https://api.rd.services/platform/contacts/email:{email}", headers=headers, json=payload)
             # fallback to events API
             if r.status_code >= 400:
                 r2 = await client.post("https://api.rd.services/platform/events", headers=headers, json={"event_type":"CONVERSION","event_family":"CDP","payload":{"email":email,"conversion_identifier": name or "lead","cf_custom": properties or {}}})

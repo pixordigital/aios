@@ -76,7 +76,7 @@ class EtlUrlTool(BaseTool):
                 try:
                     from aios.db.engine import async_session
                     from sqlalchemy import select
-                    from aios.db.models import Organization, Memory, Agent
+                    from aios.db.models import Memory, Agent
                     from aios.core.memory import _embed
 
                     # Caller's org, never `select(Organization).limit(1)`:

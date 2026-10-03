@@ -396,7 +396,7 @@ class EvolutionChannel(Channel):
         # neither opt-out nor the 24h window (the delivery-layer pre-check
         # passes window_open=True by default), so every out-of-window free-form
         # reply drew a 131047 from Meta with no ban telemetry recorded.
-        from aios.core.whatsapp_guard import guard_send, record_ban_signal
+        from aios.core.whatsapp_guard import guard_send
 
         try:
             ok, reason = await guard_send(

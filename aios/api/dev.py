@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from aios.api.deps import get_current_user, get_superadmin
+from aios.api.deps import get_superadmin
 from aios.core.dev_cli import run_claude, run_codex, dual_review, dual_build, run_codex_review
 
 router = APIRouter(prefix="/api/dev", tags=["dev"])

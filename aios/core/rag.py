@@ -87,7 +87,6 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
         if not org_id:
             return []
 
-        q_str = "[" + ",".join(f"{x:.6f}" for x in q) + "]"
         async with async_session() as s:
             try:
                 await s.execute(text("SET LOCAL hnsw.ef_search = 100"))

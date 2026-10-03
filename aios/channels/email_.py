@@ -62,7 +62,7 @@ class EmailChannel(Channel):
             )
             logger.info("Email sent to %s", to)
             return message.conversation_id
-        except Exception as e:
+        except Exception:
             logger.exception("Email send failed to %s", to)
             return None
 

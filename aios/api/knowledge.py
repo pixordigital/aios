@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Memory
-from .deps import get_current_user, get_org_id
+from .deps import get_org_id
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 

@@ -34,7 +34,7 @@ class TranscribeTool(BaseTool):
                         data = await w.download_media(media_id)
                         if data:
                             # whisper via openai
-                            import os, httpx
+                            import httpx
                             from aios.config import settings
                             # try org key first
                             key = settings.openai_api_key or settings.openrouter_api_key
@@ -66,7 +66,7 @@ class TranscribeTool(BaseTool):
                                         return {"text": text, "segments": segs, "diarized": True, "ok": True, "cost": cost if 'cost' in locals() else 0}
                                     return {"text": text, "ok": True, "cost": cost if 'cost' in locals() else 0}
                                 return {"error": r.text[:400], "status": r.status_code}
-                    except Exception as e:
+                    except Exception:
                         continue
             return {"error": "não baixou media"}
         except Exception as e:
