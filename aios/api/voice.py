@@ -171,5 +171,13 @@ async def webhook(request: Request, db: DatabaseBackend = Depends(get_db_backend
         user_id=from_number,
         extra_data={"from_number": from_number, "agent_id": body.get("agent_id", ""), "inbound_call": True},
     )
-    tts = await synthesize(text[:500])
-    return {"ok": True, "status": "dispatched", "ack_audio_base64": tts.get("audio_base64") if tts.get("ok") else None}
+    # A hold/ack tone is fine; the CALLER'S OWN spoken text is not. This used
+    # to synthesise `text` (what they just said) and return it, so a caller
+    # heard themselves back. The agent's actual answer travels the normal
+    # dispatch -> process_inbound -> deliver_message -> VoiceChannel.send path.
+    ack = await synthesize("Olá, um instante.")
+    return {
+        "ok": True,
+        "status": "dispatched",
+        "ack_audio_base64": ack.get("audio_base64") if ack.get("ok") else None,
+    }

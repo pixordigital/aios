@@ -3,7 +3,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 import zoneinfo
-from datetime import datetime
+# `timezone` is also this tool's run() parameter name, so the module-level
+# import was shadowed by the parameter: `datetime.now(timezone.utc)` resolved
+# to `"".utc` and raised AttributeError on 100% of calls. Alias it.
+from datetime import datetime, timezone as _tz
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY
 
@@ -23,7 +26,7 @@ class CurrentDatetimeTool(BaseTool):
     }
 
     async def run(self, timezone: str = "") -> dict:
-        utc = datetime.now(timezone.utc)
+        utc = datetime.now(_tz.utc)
         if timezone:
             try:
                 tz = zoneinfo.ZoneInfo(timezone)

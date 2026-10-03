@@ -24,15 +24,18 @@ from .jobs import (
 
 
 def _parse_redis(redis_url: str) -> RedisSettings:
-    """Parse redis:// URL into RedisSettings."""
-    from urllib.parse import urlparse
-    parsed = urlparse(redis_url)
-    return RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
-        database=int(parsed.path.lstrip("/") or "0"),
-        password=parsed.password or None,
-    )
+    """Parse redis:// into RedisSettings.
+
+    Delegates to the API process's parser rather than re-implementing it. This
+    copy dropped `username`, `ssl` and the settings fallback, so a `user:pass`
+    URL authenticated as `AUTH pass` (WRONGPASS) and `rediss://` dialled in
+    plaintext — and since WorkerSettings read a bare default when
+    AIOS_REDIS_URL was unset, the worker silently polled localhost while the API
+    worked fine.
+    """
+    from .queue import _parse_redis as _shared
+
+    return _shared(redis_url)
 
 
 async def backup_job(ctx):
@@ -244,7 +247,7 @@ class WorkerSettings:
         cron(weekly_report_job, hour=9, minute=15),  # owner report + 1:1 agenda, Mondays
         cron(monthly_report_job, hour=9, minute=30),  # last month's report, 1st of the month
     ]
-    redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379"))
+    redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", ""))
     max_jobs = 20
     job_timeout = 300
     poll_delay = 0.2

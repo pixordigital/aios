@@ -15,7 +15,7 @@ from typing import Dict, List
 
 from aios.core.agent import AgentRuntime
 from aios.core.agent_events import emit_trial_event
-from aios.core.providers import STREAM_TOKEN
+from aios.core.providers import STREAM_TOKEN, STREAM_TOOL_CALL
 from aios.db.models import Agent as AgentModel
 
 logger = logging.getLogger(__name__)
@@ -73,14 +73,34 @@ class Evaluator:
         return {"success": True, "reason": "ok", "confidence": 0.85}
 
 
+# The reflection prompt is a fixed boilerplate plus a trajectory truncated to
+# 3000 chars and a failure reason, so its size is bounded and known: ~4k chars,
+# or ~1k tokens at the 4-chars-per-token estimate the router uses elsewhere.
+_REFLECTION_CTX_TOKENS = 1_000
+
+
 class Reflector:
     """Gera reflexão verbal para corrigir falha."""
 
     def __init__(self, agent: AgentModel):
         from aios.core.providers import get_provider
-        model = agent.llm_config.get("model", "openai/gpt-4o-mini")
-        self.llm = get_provider(model)
+        from aios.core.router import route
+
+        # A reflection is a fixed-format two-sentence self-critique with no
+        # tools and no external effect. It was inheriting the agent's own
+        # model, so a gpt-4o agent paid frontier prices for it on every failed
+        # run. Routed instead of hardcoded, so it respects `min_tier` when an
+        # operator has asked for a quality floor.
+        decision = route(
+            agent.llm_config.get("model", "openai/gpt-4o"),
+            context_tokens=_REFLECTION_CTX_TOKENS,
+            tools=None,
+            autonomy="autonomous",
+            min_tier=agent.llm_config.get("min_tier") or None,
+        )
+        self.llm = get_provider(decision.model)
         self.agent = agent
+        self.model = decision.model
 
     async def reflect(self, evaluation: Dict, trajectory: List[dict], user_message: str) -> str:
         """Chama LLM para gerar reflexão 2-shot."""
@@ -96,7 +116,7 @@ Reflexão:"""
         try:
             resp = await self.llm.chat_retry(
                 messages=[{"role": "user", "content": prompt}],
-                model=self.agent.llm_config.get("model", "openai/gpt-4o-mini"),
+                model=self.model,
                 temperature=0.7,
                 max_tokens=300,
             )
@@ -150,12 +170,13 @@ class AutonomousAgent:
 
             # Executa via AgentRuntime
             try:
-                # Build context with reflection injection
-                # We do this by temporarily patching the agent's system_prompt
-                original_prompt = self.agent.system_prompt
-                if reflections:
-                    self.agent.system_prompt = original_prompt + "\n\n[Aprendizado de tentativas anteriores]\n" + "\n".join(f"- {r}" for r in reflections[-2:])
-
+                # Reflections reach the model through `augmented_message` above.
+                # They used to be appended to `self.agent.system_prompt` instead
+                # and restored afterwards — but `self.agent` is the ORM row the
+                # caller's session owns, and AgentRuntime commits that session
+                # mid-run, so SQLAlchemy autoflushed the reflection text into
+                # agents.system_prompt and the customer's deployed prompt was
+                # permanently overwritten. One injected copy, no mutation.
                 if emit is not None:
                     await emit(
                         emit_trial_event(
@@ -167,17 +188,24 @@ class AutonomousAgent:
                 # reach the canvas as they are produced. AgentRuntime.run() was
                 # exactly this drain, so behaviour is otherwise unchanged.
                 chunks: List[str] = []
+                trial_tool_calls: List[dict] = []
                 async for _ev in self.runtime.run_stream(
                     conversation_id, augmented_message, db
                 ):
                     if _ev.get("type") == STREAM_TOKEN:
                         chunks.append(_ev.get("content", ""))
+                    elif _ev.get("type") == STREAM_TOOL_CALL:
+                        # Collected so Evaluator case 4 can actually see a tool
+                        # error. It was declared and never assigned, so
+                        # `last_tool_calls` was always None and the check was
+                        # dead code: a run whose tool returned "Tool error: ..."
+                        # was judged a success and the bad answer shipped.
+                        trial_tool_calls.extend(_ev.get("tool_calls") or [])
                     if emit is not None:
                         await emit(_ev)
                 response = "".join(chunks)
-
-                # Restore
-                self.agent.system_prompt = original_prompt
+                if trial_tool_calls:
+                    last_tool_calls = trial_tool_calls
 
                 # Captura trajectory
                 trajectory.append({"trial": trial, "response": response[:500], "success": False, "reason": ""})
@@ -346,7 +374,17 @@ class AutonomousAgent:
         if "desconto" in text and any(f"{p}%" in text for p in range(self.hitl_discount_threshold, 100)):
             return True
         # 3. Delete / drop → HITL
-        if any(kw in text for kw in ["delete", "drop", "deletar", "apagar", "remover"]):
+        #
+        # Only when the user ASKS for the destructive action. The old check
+        # scanned `response + user_message`, so ordinary phrasing ("remove the
+        # duplicate lead", "apaga o contato antigo") matched and the agent
+        # replied "⏸️ [HITL]" instead of doing the job, on the first try, every
+        # time. Scan the user's own request and require the verb, not the nouns
+        # that sit next to it.
+        if re.search(
+            r"\b(?:delet\w+|dro\w+|apag\w+|remov\w+|exclu\w+|elimin\w+)\b",
+            (user_message or "").lower(),
+        ):
             return True
         return False
 
@@ -356,19 +394,45 @@ class AutonomousAgent:
             from aios.core.approval import approval_manager
             import uuid
             action_id = str(uuid.uuid4())
-            # Tenta criar via approval_manager
-            await approval_manager.request_approval(
-                action_id=action_id,
-                agent_id=self.agent.id,
-                conversation_id=conversation_id,
-                tool_name="autonomous_hitl",
-                tool_args={"user_message": user_message, "response": response[:500], "reason": reason},
-                context_summary=f"HITL: {reason}",
-            )
+            # request_approval BLOCKS until a human decides (or the 300s timeout
+            # expires). It was awaited here on the hot path of every HITL reply,
+            # so creating the approval parked the agent run for five minutes,
+            # and its return value — the actual verdict — was discarded. Return
+            # the id immediately and let the row be decided out of band.
+            import asyncio as _aio
+
+            _aio.create_task(self._await_hitl_decision(
+                action_id, conversation_id, user_message, response, reason
+            ))
             return action_id
         except Exception as e:
             logger.warning("HITL creation failed: %s", e)
-            return "pending"
+            return "falha ao criar aprovação"
+
+    async def _await_hitl_decision(
+        self, action_id: str, conversation_id: str,
+        user_message: str, response: str, reason: str,
+    ) -> None:
+        """Persist the HITL row and wait for the verdict. Never raises."""
+        try:
+            from aios.core.approval import approval_manager
+
+            ok = await approval_manager.request_approval(
+                action_id=action_id,
+                agent_id=self.agent.id,
+                org_id=self.agent.org_id,
+                conversation_id=conversation_id,
+                tool_name="autonomous_hitl",
+                tool_args={
+                    "user_message": user_message,
+                    "response": response[:500],
+                    "reason": reason,
+                },
+                context_summary=f"HITL: {reason}",
+            )
+            logger.info("HITL %s decided: approved=%s", action_id, ok)
+        except Exception:
+            logger.exception("HITL %s could not be recorded", action_id)
 
     async def _extract_skill(self, user_message: str, trajectory: List[dict], reflections: List[str], db):
         """Extrai skill de trajetória de sucesso (ELL)."""

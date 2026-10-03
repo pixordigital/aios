@@ -65,11 +65,13 @@ class Settings(BaseSettings):
     voice_webhook_secret: str = ""  # Voice webhook HMAC secret
     usage_webhook_url: str = ""  # Metered billing webhook (voice_minutes, llm_tokens)
     usage_webhook_secret: str = ""  # HMAC secret for usage webhook
-    discord_webhook_secret: str = ""  # Discord webhook HMAC secret
     slack_signing_secret: str = ""  # Slack signing secret for signature verification
-    sendgrid_webhook_secret: str = ""  # SendGrid inbound parse webhook secret
+    # SendGrid inbound parse is Ed25519/ECDSA over (timestamp + payload) and is
+    # verified with the app's PUBLIC key — a shared secret cannot check it, so
+    # there is no secret field for it and the endpoint refuses loudly.
+    # Only Mailgun's scheme is checkable with a shared secret.
     mailgun_webhook_secret: str = ""  # Mailgun webhook secret
-    ses_webhook_secret: str = ""  # SES/SNS webhook secret
+    # SES/SNS likewise signs with the platform's RSA key, not a shared secret.
     siem_webhook_url: str = ""  # SIEM webhook URL for audit log forwarding
     siem_webhook_secret: str = ""  # SIEM webhook HMAC secret
     smtp_host: str = ""
@@ -90,6 +92,14 @@ class Settings(BaseSettings):
     evolution_webhook_base: str = "http://app:8777/api/evolution/webhook"
     evolution_ip_allowlist: str = ""  # comma-separated IPs/CIDRs allowed to access Evolution API (e.g. "10.0.0.0/8,192.168.1.0/24")
     evolution_api_key_rotation_days: int = 30  # days before API key rotation recommended
+    # Outbound bubble batching: texts to the same recipient inside the window
+    # are joined with a blank line and sent as ONE WhatsApp message (one
+    # per-message fee instead of N). Templates, interactive and media messages
+    # never join a batch — they flush it and go alone, in order.
+    whatsapp_batch_enabled: bool = True
+    whatsapp_batch_window_sec: float = 2.0
+    whatsapp_batch_max_messages: int = 5
+    whatsapp_batch_max_chars: int = 3800  # merged cap, under Meta's 4096 limit
     codex_model: str = "gpt-5.4"
     voice_provider: str = "selfhosted"  # "elevenlabs" | "vapi" | "retell" | "selfhosted"
     elevenlabs_api_key: str = ""
@@ -104,10 +114,12 @@ class Settings(BaseSettings):
     # anywhere, so an unset VOICE_TTS_URL produced a connection error against a
     # host that could never exist.
     voice_tts_url: str = "http://voice-tts-kokoro:8880/v1"
-    # No STT image is currently deployable (ghcr.io/onyx-dot-app/whisper-api is
-    # unavailable), so this default is a placeholder. Empty is handled: callers
-    # report "sem stt_url nem openai key" instead of hanging.
-    voice_stt_url: str = "http://voice-stt:9000"
+    # Empty by default on purpose. No STT service runs unless the opt-in
+    # `voice-stt` compose profile is started, so a non-empty default made
+    # VoiceChannel.test() print "+ STT configurado" and /api/voice/providers
+    # publish a URL that never resolves — every transcription then failed with a
+    # DNS error. Empty takes the honest "sem stt_url nem openai key" path.
+    voice_stt_url: str = ""
     voice_bridge_url: str = ""  # SIP dial bridge (Twilio/Asterisk gateway)
     voice_from_number: str = ""
     kokoro_url: str = "http://voice-tts-kokoro:8880"  # Kokoro-FastAPI TTS
@@ -122,6 +134,11 @@ class Settings(BaseSettings):
     whatsapp_app_secret: str = ""
 
     registration_enabled: bool = False  # fechar cadastros — home buttons desabilitados
+    # Single-operator lockdown. Comma-separated emails allowed to authenticate
+    # (password login, dashboard login, refresh, OAuth). Empty = open to any
+    # registered user (legacy behavior); set AIOS_LOGIN_ALLOWLIST in production.
+    # Env: AIOS_LOGIN_ALLOWLIST
+    login_allowlist: str = ""
 
     # ─── Internal mode (P1 pivot) ───
     # True = ferramenta interna de times de agentes: ignora quotas PLANS,
@@ -183,7 +200,7 @@ PLANS = {
         "max_tokens_per_month": 50_000_000,
         "max_cost_brl": 800,
         "sla_minutes": 5,
-        "channels": ["web", "evolution", "email", "slack", "telegram", "discord", "voice"],
+        "channels": ["web", "evolution", "email", "slack", "telegram", "voice"],
         "max_evolution_instances": 3,
     },
     "enterprise": {

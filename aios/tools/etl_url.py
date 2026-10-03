@@ -79,11 +79,14 @@ class EtlUrlTool(BaseTool):
                     from aios.db.models import Organization, Memory, Agent
                     from aios.core.memory import _embed
 
+                    # Caller's org, never `select(Organization).limit(1)`:
+                    # that wrote tenant B's scraped content into tenant A's
+                    # memories.
+                    org_id = getattr(self, "_org_id", "") or ""
+                    if not org_id:
+                        return {"ok": False, "error": "sem org no contexto"}
                     async with async_session() as s:
-                        org = (await s.execute(select(Organization).limit(1))).scalars().first()
-                        if not org:
-                            return {"ok": False, "error": "org not found"}
-                        ag = (await s.execute(select(Agent).where(Agent.org_id == org.id).limit(1))).scalars().first()
+                        ag = (await s.execute(select(Agent).where(Agent.org_id == org_id).limit(1))).scalars().first()
                         agent_id = ag.id if ag else "00000000-0000-0000-0000-000000000000"
                         for ch in chunks:
                             try:
@@ -92,7 +95,7 @@ class EtlUrlTool(BaseTool):
                                 emb = None
                             m = Memory(
                                 agent_id=agent_id,
-                                org_id=org.id,
+                                org_id=org_id,
                                 type="long_term",
                                 content=ch,
                                 extra_data={"source": url, "embedding": emb} if emb else {"source": url},

@@ -14,7 +14,6 @@ from sqlalchemy import select
 
 from aios.db.backend import db_session
 from aios.db.models import Agent, ChannelConnection, Conversation, Message, Team, User
-from aios.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +29,89 @@ async def _auth_ws(websocket: WebSocket):
     token = websocket.query_params.get("token", "")
     if not token:
         return None
-    import jwt as _jwt
+    # Route through the shared verifier, not a direct decode: the direct
+    # HS256-only decode ignored EdDSA-signed cookies entirely AND never
+    # checked the token type, so a stolen refresh token (30-day lifetime)
+    # authenticated a socket exactly like a 60-minute access token.
+    from aios.api.auth import _is_login_allowed, _verify_jwt_token
 
     try:
-        payload = _jwt.decode(
-            token, settings.jwt_secret, algorithms=[settings.jwt_algorithm]
-        )
+        payload = _verify_jwt_token(token)
+        if not payload or payload.get("type") != "access":
+            return None
         user_id = payload.get("sub")
         if not user_id:
             return None
         async with db_session() as db:
-            return await db.get(User, user_id)
+            user = await db.get(User, user_id)
+            if not user or not _is_login_allowed(user.email):
+                return None
+            return user
     except Exception:
         return None
+
+
+@router.websocket("/ws/chat")
+async def websocket_chat(websocket: WebSocket):
+    """Web-chat channel socket.
+
+    Nothing registered into `WebChannel._connections` and nothing called its
+    `handle_incoming`, so the web channel had no live transport at all: inbound
+    never reached an agent and outbound had nowhere to go.
+
+    `?conversation=<id>` pins the thread. Registered in BOTH the channel's own
+    map (so a same-process send can target this socket directly) and the shared
+    ws_manager (so a reply produced in the ARQ worker reaches this process over
+    the agent-events Redis bridge).
+    """
+    await websocket.accept()
+
+    user = await _auth_ws(websocket)
+    if not user:
+        await websocket.send_json({"type": "error", "error": "Not authenticated"})
+        await websocket.close()
+        return
+
+    from aios.channels.web import WebChannel
+    from aios.core.ws_manager import ws_manager
+
+    conversation_id = websocket.query_params.get("conversation", "") or ""
+    connection_id = websocket.query_params.get("connection", "") or ""
+    if not conversation_id:
+        await websocket.send_json({"type": "error", "error": "missing conversation"})
+        await websocket.close()
+        return
+
+    org_id = user.org_id
+    ws_manager.register(websocket, org_id)
+    WebChannel.attach(websocket, conversation_id)
+    try:
+        await websocket.send_json({"type": "ready", "conversation_id": conversation_id})
+        while True:
+            raw = await websocket.receive()
+            if raw.get("type") == "websocket.disconnect":
+                break
+            if raw.get("type") == "websocket.receive":
+                try:
+                    data = raw.get("json") or {}
+                except Exception:
+                    data = {}
+                text = (data.get("text") or "").strip()
+                if text:
+                    await WebChannel.handle_incoming(
+                        websocket, conversation_id, text, connection_id
+                    )
+    except WebSocketDisconnect:
+        logger.debug("web chat disconnected (conversation %s)", conversation_id)
+    except Exception:
+        logger.exception("web chat socket error")
+        try:
+            await websocket.send_json({"type": "error", "error": "internal"})
+        except Exception:
+            pass
+    finally:
+        WebChannel.detach(websocket, conversation_id)
+        ws_manager.unregister(websocket, org_id)
 
 
 @router.websocket("/ws/agents")

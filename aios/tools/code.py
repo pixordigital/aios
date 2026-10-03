@@ -20,15 +20,18 @@ class CodeTool(BaseTool):
         if len(code) > 15000:
             return {"error": "code too large"}
         input_data = input_data or {}
+        # No `sys`: the sandbox deny-list rejects it, and the wrapper never used
+        # it. `dir()` is a denied builtin too, so the `output` probe uses
+        # try/except NameError instead of `'output' in dir()`.
         wrapped = (
-            "import json, sys\n"
+            "import json\n"
             f"input_data = json.loads({json.dumps(json.dumps(input_data))!r})\n"
             "if isinstance(input_data, str):\n"
             "    import json as _j; input_data=_j.loads(input_data)\n"
             f"{code}\n"
-            "if 'output' in dir():\n"
+            "try:\n"
             "    _o=output\n"
-            "else:\n"
+            "except NameError:\n"
             "    _o=None\n"
             "if _o is not None:\n"
             "    print(json.dumps(_o) if isinstance(_o,(dict,list)) else str(_o))\n"

@@ -17,26 +17,25 @@ class RagSearchTool(BaseTool):
     input_model = RagSearchInput
 
     async def run(self, query: str, top_k: int = 5) -> dict:
-        # org_id: tenta pegar do contexto, senão primeiro org
-        org_id = ""
-        try:
-            from aios.db.engine import async_session
-            from sqlalchemy import select
-            from aios.db.models import Organization
-            async with async_session() as s:
-                org = (await s.execute(select(Organization).limit(1))).scalars().first()
-                if org:
-                    org_id = org.id
-        except Exception:
-            pass
-        # fallback: usa hybrid_search sem org (será filtrado se org_id vazio)
+        # The org comes from the running agent (ToolEngine sets `_org_id`), never
+        # from `select(Organization).limit(1)`: that returned whichever tenant was
+        # first in the table, so one tenant's agent retrieved another tenant's
+        # knowledge chunks. Empty org = no context, not "some org".
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {
+                "ok": False,
+                "error": "sem org no contexto; a busca fica restrita a base deste agente",
+                "query": query,
+                "results": [],
+                "count": 0,
+            }
         try:
             from aios.core.rag import hybrid_search
-            # tenta com org_id, se falhar tenta sem
-            results = await hybrid_search(org_id, query, top_k=min(max(top_k, 1), 10))
-            if not results and org_id:
-                # tenta sem filtro org para debug
-                results = await hybrid_search("", query, top_k)
+            results = await hybrid_search(
+                org_id, query, top_k=min(max(top_k, 1), 10),
+                agent_id=getattr(self, "_agent_id", "") or "",
+            )
             return {"ok": True, "query": query, "results": results, "count": len(results)}
         except Exception as e:
             return {"ok": False, "error": str(e)[:500], "query": query}

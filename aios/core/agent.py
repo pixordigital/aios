@@ -21,6 +21,8 @@ from aios.core.providers import (
     STREAM_TOKEN, STREAM_DONE, STREAM_ERROR, STREAM_TOOL_CALL,
     LLMError, _fallback_models,
 )
+from aios.core import router
+from aios.core.router import floor_from_extra, route, should_escalate
 from aios.core.scheduler import scheduler
 from aios.core.syscalls import (
     SyscallRequest, SyscallResponse, SyscallType,
@@ -76,6 +78,51 @@ def _ctx_window(model: str) -> int:
         if model.startswith(prefix):
             return window
     return 32_000
+
+
+# Tool results are appended to the live context at full size and re-sent on
+# every later iteration of the same run, so a 50kB SQL result is paid for
+# again on iterations 2..10. Only the *content* is trimmed: a `role="tool"`
+# message cannot be removed, because every provider requires it to follow an
+# assistant message carrying the matching `tool_call_id`, and deleting one
+# invalidates the whole chain.
+#
+# The most recent results stay intact because those are the ones being reasoned
+# over right now; older ones are already summarised into the model's own
+# reasoning and are kept only for reference.
+_TOOL_KEEP_FULL = 2
+_TOOL_RESULT_CAP_CHARS = 4_000
+
+
+def _trim_tool_results(context: list[dict]) -> None:
+    """Shrink already-consumed tool results in place. Never removes messages."""
+    tool_idxs = [i for i, m in enumerate(context) if m.get("role") == "tool"]
+    for i in tool_idxs[:-_TOOL_KEEP_FULL]:
+        content = context[i].get("content")
+        if isinstance(content, str) and len(content) > _TOOL_RESULT_CAP_CHARS:
+            context[i]["content"] = (
+                content[:_TOOL_RESULT_CAP_CHARS]
+                + f"\n[... {len(content) - _TOOL_RESULT_CAP_CHARS} chars trimmed]"
+            )
+
+
+def _context_tokens(context: list[dict]) -> int:
+    """Token count of the assembled context, for the router.
+
+    Estimated from the raw strings rather than tokenized properly: this runs on
+    every iteration of every run and a real tokenizer pass costs more than the
+    decision it feeds is worth. The router only compares against a coarse
+    threshold, so a few percent of error does not move the outcome.
+    """
+    chars = 0
+    for msg in context:
+        content = msg.get("content") or ""
+        if isinstance(content, str):
+            chars += len(content)
+        for tc in msg.get("tool_calls") or []:
+            chars += len(str(tc))
+    # ~4 chars per token, matching the estimator in aios.core.tokenizer
+    return chars // 4
 
 
 class AgentRuntime:
@@ -208,11 +255,29 @@ class AgentRuntime:
         existing_tools = self.tool_engine.schemas() if self.tool_engine.tools else []
         all_tools = existing_tools + [output_tool]
 
-        span = start_span("agent_structured", model=self.agent.llm_config.get("model", ""))
+        # Route on the agent's real tools only. `_output` is the structured
+        # output harness, not a capability the model has to reason about
+        # choosing — counting it made every structured call look like
+        # multi-step tool use and pinned the whole path to the frontier model.
+        decision = route(
+            self.agent.llm_config.get("model", "openai/gpt-4o"),
+            context_tokens=_context_tokens(context),
+            tools=existing_tools,
+            autonomy=self._autonomy,
+            min_tier=self.agent.llm_config.get("min_tier") or None,
+        )
+        router.record(decision)
+        if decision.changed:
+            logger.info(
+                "routing structured %s -> %s (%s)",
+                self.agent.llm_config.get("model"), decision.model, decision.reason,
+            )
+
+        span = start_span("agent_structured", model=decision.model)
         try:
             response = await self._llm_chat(
                 messages=context,
-                model=self.agent.llm_config.get("model", "openai/gpt-4o"),
+                model=decision.model,
                 temperature=self.agent.llm_config.get("temperature", 0.5),
                 max_tokens=self.agent.llm_config.get("max_tokens", 4096),
                 tools=all_tools,
@@ -320,9 +385,38 @@ class AgentRuntime:
             context = await self._build_context(conversation_id, user_message, db)
             model = self.agent.llm_config.get("model", "openai/gpt-4o")
             temp = self.agent.llm_config.get("temperature", 0.7)
+            ceiling = self.agent.llm_config.get("max_tier") or None
+            # Ratchets up and never down within a run. Without this the
+            # escalation was undone on the very next iteration: the router saw
+            # "short context, no tools" again and put the run straight back on
+            # the cheapest rung, so a struggling run oscillated on the bottom
+            # tier and the escalation cost an extra call for nothing.
+            # The operator's `min_tier` wins when set; otherwise fall back to
+            # whatever this agent previously learned (and still has grounds for).
+            floor = self.agent.llm_config.get("min_tier") or floor_from_extra(
+                getattr(self.agent, "extra_data", None)
+            )
 
             for iteration in range(self.MAX_ITERATIONS):
                 tools = self.tool_engine.schemas() if self.tool_engine.tools else None
+
+                # Route per iteration, not once per run: whether tools are
+                # attached is only known here, and it is the signal that decides
+                # whether this is a lookup or multi-step reasoning.
+                decision = route(
+                    model,
+                    context_tokens=_context_tokens(context),
+                    tools=tools,
+                    autonomy=self._autonomy,
+                    max_tokens=self.agent.llm_config.get("max_tokens", 4096),
+                    min_tier=floor,
+                )
+                router.record(decision)
+                if decision.changed:
+                    logger.info(
+                        "routing %s -> %s (%s)", model, decision.model, decision.reason
+                    )
+                    model = decision.model
 
                 # check cache for first iteration (no tool calls)
                 if iteration == 0 and not tools:
@@ -387,7 +481,7 @@ class AgentRuntime:
                         elif self._allowed_tools != "__all__" and fn_name not in self._allowed_tools:
                             result = f"Tool '{fn_name}' is not in the allowed list."
                             logger.warning("Governance blocked tool '%s' (not in allow-list) for agent %s", fn_name, self.agent.id)
-                        elif self._autonomy in ("ask_tools", "ask_all"):
+                        elif self._autonomy in ("ask", "ask_tools", "ask_all"):
                             # approval mode — block until human decides
                             from aios.core.approval import approval_manager
                             action_id = str(uuid.uuid4())
@@ -403,6 +497,12 @@ class AgentRuntime:
                                 tool_name=fn_name,
                                 tool_args=json.loads(fn_args) if isinstance(fn_args, str) else fn_args,
                                 context_summary=response_content[:200],
+                                # Without this the row lands with org_id="" and
+                                # the approvals API filters it out for every
+                                # tenant, so nobody could ever approve it — the
+                                # agent waited the full timeout on an action no
+                                # human could see.
+                                org_id=self.agent.org_id,
                             )
                             if not approved:
                                 result = f"Tool '{fn_name}' was not approved by human."
@@ -447,8 +547,20 @@ class AgentRuntime:
                         if result and "Tool error" not in str(result):
                             try:
                                 from aios.core.skills import skill_store
-                                asyncio.create_task(
-                                    skill_store.create(
+
+                                async def _extract():
+                                    # One row per tool: without this every call
+                                    # appended another identical auto:{tool} row,
+                                    # so the skill index filled with duplicates
+                                    # that all scored the same and crowded out
+                                    # real skills.
+                                    if await skill_store.exists(
+                                        agent_id=self.agent.id,
+                                        org_id=self.agent.org_id,
+                                        name=f"auto:{fn_name}",
+                                    ):
+                                        return
+                                    await skill_store.create(
                                         agent_id=self.agent.id,
                                         org_id=self.agent.org_id,
                                         name=f"auto:{fn_name}",
@@ -457,10 +569,12 @@ class AgentRuntime:
                                         content=f"Tool: {fn_name}\nArgs: {fn_args}\nResult: {str(result)[:500]}",
                                         source_conversation_id=conversation_id,
                                     )
-                                )
+
+                                asyncio.create_task(_extract())
                             except Exception:
                                 pass  # skill extraction is best-effort
                     scheduler.unblock(self.agent.id)
+                    _trim_tool_results(context)
                     yield {"type": STREAM_TOKEN, "content": "\n"}
                     continue
 
@@ -482,6 +596,22 @@ class AgentRuntime:
                         await db.commit()
                     # save context state
                     context_manager.save(conversation_id, self.agent.id, context)
+                else:
+                    # No tool calls and no text. The model returned nothing —
+                    # a cheap model that has given up looks exactly like this.
+                    # Repair it instead of shipping an empty turn.
+                    repair = should_escalate(
+                        model, empty_response=True, max_tier=ceiling
+                    )
+                    if repair:
+                        router.record(repair)
+                    if repair and repair.changed:
+                        logger.warning(
+                            "empty response on %s, escalating to %s", model, repair.model
+                        )
+                        model = repair.model
+                        floor = repair.model
+                        continue
 
                 yield {"type": STREAM_DONE}
                 health_tracker.record_success(self.agent.id)
@@ -489,12 +619,34 @@ class AgentRuntime:
                 telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, tokens=total_tokens, tool_calls=total_tool_calls)
                 return
 
-            logger.warning("Agent %s hit max iterations", self.agent.id)
+            logger.warning("Agent %s hit max iterations (%d)", self.agent.id, self.MAX_ITERATIONS)
+            # Exhausting the budget is a signal, not a verdict: a cheap model
+            # that cannot hold a multi-step thread looks identical to an agent
+            # that legitimately needs more rounds. Record it so the next run on
+            # this agent starts on a stronger tier instead of discovering it
+            # again.
+            # Remember the promotion for next time. Without this the floor was
+            # in-memory only, so every worker process and every restart
+            # rediscovered the same failure — a cheap call, an escalation and a
+            # wasted answer, repeated forever.
+            #
+            # `changed=False` here is correct and common, not a bug: an agent
+            # already configured on the strongest tier that runs out of budget
+            # has nowhere to be promoted to, and there is nothing to learn.
+            repair = should_escalate(model, hit_iteration_limit=True, max_tier=ceiling)
+            if repair:
+                router.record(repair)
+            if repair and repair.changed:
+                await self._pin_tier(repair.model, f"escalated: {repair.reason}", db=db)
             yield {"type": STREAM_TOKEN, "content": "I'm having trouble completing this request. Please try again."}
             yield {"type": STREAM_DONE}
-            health_tracker.record_failure(self.agent.id, "max_iterations")
+            # NOT record_failure: exhausting the iteration budget is not a broken
+            # agent. An agent that legitimately needs 11 tool round-trips was
+            # scored as failing, and 15 of those drive it to `stopped` — where
+            # record_success will not recover it and only a manual reset does.
+            # The customer sees a permanently dead agent.
             response_ms = int((time.time() - start_time) * 1000)
-            telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, error=True)
+            telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms)
         except Exception as e:
             logger.exception("Agent stream failed: agent=%s conv=%s", self.agent.id, conversation_id)
             health_tracker.record_failure(self.agent.id, str(e)[:200])
@@ -545,6 +697,41 @@ class AgentRuntime:
         skills = skill_loader.load_skills(project_path)
         return skill_loader.format_skills_for_context(skills)
 
+    async def _pin_tier(self, model: str, why: str, db=None) -> None:
+        """Remember a model escalation so the next run starts on a stronger tier.
+
+        Written to `extra_data`, never to `llm_config`: the operator's
+        configured model stays exactly as they set it, and the promotion is a
+        separate, inspectable, expiring record.
+
+        This was in-memory only, which meant every worker process and every
+        restart rediscovered the same failure from scratch — paying a cheap
+        call, an escalation and a wasted answer each time, forever.
+        """
+        from aios.core.router import remember_floor
+
+        current = getattr(self.agent, "extra_data", None) or {}
+        updated = remember_floor(current, model, why)
+        if updated == current:
+            return
+        self.agent.extra_data = updated
+        logger.info(
+            "agent %s learned floor %s (%s)", self.agent.id, model, why
+        )
+        if db is None:
+            # Direct-call paths run without a session (see the `db` parameter).
+            # The floor still applies to this process; it just does not outlive
+            # it, which is the old behaviour rather than a regression.
+            return
+        try:
+            db.add(self.agent)
+            await db.commit()
+        except Exception:
+            logger.warning(
+                "could not persist routing floor for agent %s", self.agent.id,
+                exc_info=True,
+            )
+
     async def _build_context(
         self, conversation_id: str, user_message: str, db: DatabaseBackend | None = None
     ) -> list[dict]:
@@ -553,8 +740,45 @@ class AgentRuntime:
         max_output = self.agent.llm_config.get("max_tokens", 4096)
         ctx = [{"role": "system", "content": self.agent.system_prompt}]
 
+        # Frozen curated snapshot (MEMORY.md / USER.md semantics): read once at
+        # run start, never refreshed mid-run, so writes made by the memory tool
+        # during this run take effect from the next one. Bounded by the block
+        # capacities (~1.3k tokens worst case), and load_curated never raises.
+        try:
+            from aios.core import curated as _curated
+
+            _blocks = await _curated.load_blocks(
+                getattr(self.agent, "id", "") or "",
+                getattr(self.agent, "org_id", "") or "",
+            )
+            _mem = _curated.format_block("memory", _blocks["memory"])
+            _usr = _curated.format_block("user", _blocks["user"])
+            if _mem or _usr:
+                ctx.append({"role": "system", "content": "\n\n".join(b for b in (_mem, _usr) if b)})
+        except Exception:
+            logger.debug("curated snapshot failed", exc_info=True)
+
         recent = await self.memory.get_recent(conversation_id, limit=20, db=db)
         ctx.extend(recent)
+
+        # Prefer the in-process context cache when it is at least as complete as
+        # what the DB gave us. The DB replay carries user/assistant text only —
+        # tool rows are filtered out (a bare `role="tool"` with no tool_call_id
+        # is rejected by every provider), so the assistant's tool_calls chain is
+        # lost across turns. The cache holds the assembled block with that chain
+        # intact, and `context_manager.save()` at the end of a run already writes
+        # it — but nothing ever read it back, so the save was dead weight.
+        # Guarded by length: if another process wrote newer turns, the DB copy
+        # wins and nothing is lost.
+        cached = context_manager.load(conversation_id, self.agent.id)
+        if cached and cached.message_count >= len(recent):
+            ctx = [ctx[0]] + list(cached.message_block)
+
+        # Feed the long-term extractor. Nothing else passes a "user" turn to it.
+        try:
+            await self.memory.note_user_turn(conversation_id, user_message)
+        except Exception:
+            logger.debug("long-term memory extraction failed", exc_info=True)
 
         # memory pipeline: inject relevant past context
         injections = await self.memory.get_context_injections(user_message, top_k=3)

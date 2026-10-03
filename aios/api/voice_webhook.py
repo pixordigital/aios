@@ -1,9 +1,11 @@
 """Voice webhook — Twilio inbound call events."""
 
+import base64
 import hashlib
 import hmac
 import logging
 from datetime import datetime, timezone
+from urllib.parse import parse_qsl, urlparse, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -14,6 +16,48 @@ from sqlalchemy import select
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice", tags=["voice"])
+
+
+def _verify_twilio_signature(request: Request, body: bytes) -> bool:
+    """Validate Twilio's real signature scheme.
+
+    Twilio sends `X-Twilio-Signature` = base64(HMAC-SHA1(auth_token,
+    full_url + sorted POST params)). The endpoint instead required an
+    `x-voice-signature` header holding hex(HMAC-SHA256(secret, body)) — a
+    header no provider emits and a construction none uses — so every genuine
+    call event 401'd while voice was listed in the Pro plan.
+
+    `AIOS_VOICE_WEBHOOK_SECRET` is read as the Twilio auth token.
+    """
+    header = request.headers.get("x-twilio-signature", "")
+    if not header:
+        logger.warning("Twilio webhook missing X-Twilio-Signature")
+        return False
+    token = settings.voice_webhook_secret.encode()
+
+    url = str(request.url)
+    # Twilio signs the URL with any query string removed, then each POST field
+    # name concatenated with its value, both sorted.
+    parsed = urlparse(url)
+    url_without_query = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+    fields: list[str] = []
+    if request.query_params:
+        for k, v in request.query_params.items():
+            fields.append(k + v)
+    if body:
+        try:
+            form = dict(parse_qsl(body.decode("utf-8", "replace"), keep_blank_values=True))
+            for k, v in form.items():
+                fields.append(k + v)
+        except Exception:
+            logger.debug("Twilio body is not form-encoded", exc_info=True)
+
+    payload = (url_without_query + "".join(sorted(fields))).encode()
+    expected = base64.b64encode(
+        hmac.new(token, payload, hashlib.sha1).digest()
+    ).decode()
+    return hmac.compare_digest(header, expected)
 
 
 @router.post("/webhook")
@@ -29,17 +73,9 @@ async def voice_webhook(request: Request):
         raise HTTPException(
             503, "Voice webhook secret not configured; refusing unauthenticated webhook"
         )
-    if settings.voice_webhook_secret:
-        sig = request.headers.get("x-voice-signature", "")
-        if not sig:
-            logger.warning("Voice webhook missing signature")
-            raise HTTPException(401, "Missing signature")
-        expected = hmac.new(
-            settings.voice_webhook_secret.encode(), raw_body, hashlib.sha256
-        ).hexdigest()
-        if not hmac.compare_digest(sig, expected):
-            logger.warning("Voice webhook signature mismatch")
-            raise HTTPException(401, "Invalid signature")
+    if not _verify_twilio_signature(request, raw_body):
+        logger.warning("Voice webhook signature rejected")
+        raise HTTPException(401, "Invalid signature")
 
     try:
         body = await request.json()
@@ -60,13 +96,19 @@ async def voice_webhook(request: Request):
         async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
             from aios.db.models import ChannelConnection
 
-            result = await db.execute(
-                select(ChannelConnection).where(
-                    ChannelConnection.channel_type == "voice",
-                    ChannelConnection.is_active == True,
-                )
+            # Same tenant-mixing defect as the email webhook: `.first()` picked
+            # an arbitrary tenant's voice connection.
+            q = select(ChannelConnection).where(
+                ChannelConnection.channel_type == "voice",
+                ChannelConnection.is_active == True,
             )
-            conn = result.scalars().first()
+            if body.get("channel_id"):
+                q = q.where(ChannelConnection.id == str(body["channel_id"]))
+            candidates = (await db.execute(q.limit(2))).scalars().all()
+            conn = candidates[0] if candidates else None
+            if conn is not None and not body.get("channel_id") and len(candidates) > 1:
+                return {"ok": False,
+                        "error": "more than one active voice channel; pass channel_id"}
 
             if conn:
                 # Create voice recording entry

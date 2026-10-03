@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% include "_teams_tabs.html" %}
 <div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
     <div><h1>Equipes</h1><p class="text-sm text-secondary mt-1">{{ teams|length }} equipe{{ 's' if teams|length != 1 }}</p></div>
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap">

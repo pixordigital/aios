@@ -40,7 +40,11 @@ class VoiceCallTool(BaseTool):
                 pass
         res = await place_call(to, script, cfg, {"via": "tool"})
         try:
-            cost = 0.02 if res.get("status") == "dialing" else 0.0
+            # place_call returns {"status": "queued"} and only flips to
+            # "dialing" later inside the async bridge task, so this comparison
+            # was never true and voice minutes were never metered. Queueing a
+            # call is already a billable event.
+            cost = 0.0 if res.get("status") in ("failed", "error", "rejected") else 0.02
             # Bill the org that owns the channel used, not whatever voice
             # channel happens to sort first globally.
             bill_org = (cfg or {}).get("_org_id") or getattr(self, "_org_id", "") or ""

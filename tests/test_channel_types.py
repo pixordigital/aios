@@ -9,7 +9,6 @@ CHANNEL_TYPES = [
     "whatsapp",
     "evolution",
     "voice",
-    "discord",
     "slack",
     "email",
 ]
@@ -136,7 +135,6 @@ class TestChannelTypes:
             "whatsapp": {"phone_number_id": "123456789", "business_account_id": "987654321"},
             "evolution": {"server_url": "https://evolution.example.com", "api_key": "test_key", "instance_name": "test"},
             "voice": {"provider": "selfhosted", "tts_url": "http://voice-tts-kokoro:8880/v1", "stt_url": "http://voice-stt:9000/v1"},
-            "discord": {"bot_token": "test_token", "guild_id": "123456789"},
             "slack": {"bot_token": "xoxb-test", "signing_secret": "test_secret"},
             "email": {"smtp_server": "smtp.example.com", "email": "test@example.com", "password": "test_pass", "imap_server": "imap.example.com"},
         }

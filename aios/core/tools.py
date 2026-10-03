@@ -36,6 +36,8 @@ _ALLOWED_MODULES = {
     "aios.tools.etl_url",
     "aios.tools.calendar",
     "aios.tools.load_skills",
+    "aios.tools.read_skill",
+    "aios.tools.memory",
     "aios.tools.proactive_alerts",
     "aios.tools.team_collaboration",
     "aios.tools.voice_call",
@@ -92,7 +94,15 @@ class ToolEngine:
                 self.tools[name] = self._load(name)
             except Exception as e:
                 self.missing.append(name)
-                logger.warning("Tool '%s' unavailable: %s", name, e)
+                # ERROR, not warning: a tool the customer configured that cannot
+                # load is a broken agent, and the LLM is never told — it just
+                # cannot do the thing its prompt promises. `missing` is read
+                # nowhere else, so the log line is the only signal.
+                logger.error(
+                    "Tool '%s' unavailable for agent %s — it will NOT be offered "
+                    "to the model: %s",
+                    name, agent_id or "?", e,
+                )
 
     def schemas(self) -> list[dict]:
         return [tool.openai_schema() for tool in self.tools.values()]
@@ -125,24 +135,6 @@ class ToolEngine:
         # audit tracking
         _TOOL_CALL_TRACKING[name] = _TOOL_CALL_TRACKING.get(name, 0) + 1
 
-        is_dynamic = entry.get("dynamic") if entry else False
-        if is_dynamic:
-            from aios.core.sandbox import run_isolated
-
-            code = entry.get("instance_code") or ""
-            runner = (
-                f"{code}\n"
-                f"import json, asyncio\n"
-                f"args=json.loads({args_json!r})\n"
-                f"result=asyncio.run(tool_instance.run(**args))\n"
-                f"print(json.dumps(result) if isinstance(result, dict) else str(result))\n"
-            )
-            sb = await run_isolated(runner, timeout=_TOOL_TIMEOUT)
-            if sb["ok"]:
-                return sb["stdout"][:_TOOL_MAX_OUTPUT]
-            raise ToolExecutionError(
-                sb.get("stderr") or sb.get("error") or "sandbox failed"
-            )
         last_err = None
         # Org context for tools that touch org-scoped rows (sql_query, read_file).
         # Without this every tool ran with a god-view session: an agent could
@@ -177,8 +169,21 @@ class ToolEngine:
                 last_err = str(e)
                 # A permission denial is a verdict, not a hiccup. Retrying it
                 # three times bought three identical tracebacks and the same
-                # answer.
-                deterministic = isinstance(e, (PermissionError, ToolExecutionError))
+                # answer. TypeError/ValueError/KeyError/AttributeError join it:
+                # they are argument-shape faults the model will not fix on a
+                # second identical call, and each retry burned up to another
+                # 30s of the agent's wall clock on a guaranteed failure.
+                deterministic = isinstance(
+                    e,
+                    (
+                        PermissionError,
+                        ToolExecutionError,
+                        TypeError,
+                        ValueError,
+                        KeyError,
+                        AttributeError,
+                    ),
+                )
                 if attempt < max_attempts - 1 and not deterministic:
                     await asyncio.sleep(0.5)
                 else:

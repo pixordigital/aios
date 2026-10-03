@@ -7,6 +7,7 @@ They're searchable, versioned by usage_count, and injectable into context.
 import logging
 from sqlalchemy import select, update
 
+from aios.core.content_scan import check_store_text
 from aios.db.backend import db_session
 from aios.db.models import Skill
 
@@ -16,10 +17,27 @@ logger = logging.getLogger(__name__)
 class SkillStore:
     """CRUD + search for skills. DB-backed."""
 
+    async def exists(self, *, agent_id: str, org_id: str, name: str) -> bool:
+        """Targeted name check (the auto-extractor's dedup; list() pages)."""
+        async with db_session() as db:
+            stmt = select(Skill.id).where(
+                Skill.agent_id == agent_id, Skill.name == name,
+            )
+            if org_id:
+                stmt = stmt.where(Skill.org_id == org_id)
+            return (await db.execute(stmt.limit(1))).first() is not None
+
     async def create(self, *, agent_id: str, org_id: str, name: str,
                      description: str = "", skill_type: str = "tool_pattern",
                      content: str = "", input_schema: dict = None,
                      tags: list[str] = None, source_conversation_id: str = None) -> Skill:
+        # Stored content is re-injected into future prompts, so scan at the
+        # store: a refused write raises here (dashboard/API surface it), while
+        # the fire-and-forget auto-extractor just drops that row.
+        scanned = check_store_text(content or "", source=f"skill:{name}")
+        if scanned is None:
+            raise ValueError(f"skill content rejected by store scan: {name}")
+        content = scanned
         async with db_session() as db:
             skill = Skill(
                 agent_id=agent_id,
@@ -66,6 +84,11 @@ class SkillStore:
             return list(result.scalars().all())
 
     async def update(self, skill_id: str, org_id: str = "", **fields) -> Skill | None:
+        if "content" in fields:
+            scanned = check_store_text(fields["content"] or "", source=f"skill:{skill_id}")
+            if scanned is None:
+                raise ValueError("skill content rejected by store scan")
+            fields = {**fields, "content": scanned}
         async with db_session() as db:
             stmt = update(Skill).where(Skill.id == skill_id)
             if org_id:

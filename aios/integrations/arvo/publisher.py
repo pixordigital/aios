@@ -99,6 +99,34 @@ async def _claim_rows(
         )
 
 
+async def _notify_exhausted(row: IntegrationOutbox, error: Exception) -> None:
+    """Tell a human that an integration event will never be delivered.
+
+    Best-effort and never raises: this runs inside the flush loop, and a failed
+    notification must not stop the remaining rows from being sent.
+    """
+    logger.error(
+        "integration outbox %s gave up after %d attempts (event=%s): %s",
+        row.id[:8], row.attempts, row.event_type, error,
+    )
+    try:
+        from aios.db.backend import db_session
+        from aios.db.models import IntegrationEvent
+
+        async with db_session() as db:
+            await db.execute(
+                IntegrationEvent.__table__.update()
+                .where(IntegrationEvent.idempotency_key == row.idempotency_key)
+                .values(response={
+                    "delivered": False,
+                    "reason": f"outbox exhausted after {row.attempts} attempts",
+                })
+            )
+            await db.commit()
+    except Exception:
+        logger.debug("could not annotate integration event", exc_info=True)
+
+
 async def _deliver(row: IntegrationOutbox, raise_errors: bool) -> bool:
     from aios.integrations.arvo.client import send_event
 
@@ -121,6 +149,11 @@ async def _deliver(row: IntegrationOutbox, raise_errors: bool) -> bool:
                 current.status = status
                 current.last_error = str(error)[:500]
                 await session.commit()
+        if status == "failed":
+            # A row that exhausts its retries used to sit at status="failed"
+            # forever with nobody told: no alert, no audit entry, and the
+            # flush counter looked like an ordinary retry. Surface it.
+            await _notify_exhausted(row, error)
         if raise_errors:
             raise
         logger.warning(
@@ -138,18 +171,30 @@ async def _deliver(row: IntegrationOutbox, raise_errors: bool) -> bool:
 
 
 async def flush_outbox(batch: int = 20) -> dict:
-    """Send claimed rows to peer. Returns send counters."""
+    """Send claimed rows to peer. Returns send counters.
+
+    `exhausted` is counted separately from `failed`: a failed attempt is
+    retried, an exhausted row never will be, and collapsing the two meant a
+    permanently undeliverable event looked like ordinary backoff.
+    """
     if not settings.arvo_integration_enabled or not settings.arvo_base_url:
         return {"skipped": True, "reason": "integration disabled"}
     rows = await _claim_rows(batch)
     sent = 0
     failed = 0
+    exhausted = 0
     for row in rows:
         if await _deliver(row, raise_errors=False):
             sent += 1
         else:
             failed += 1
-    return {"sent": sent, "failed": failed}
+            async with async_session() as session:
+                current = await session.get(IntegrationOutbox, row.id)
+                if current and current.status == "failed":
+                    exhausted += 1
+    if exhausted:
+        logger.error("integration outbox: %d event(s) permanently undeliverable", exhausted)
+    return {"sent": sent, "failed": failed, "exhausted": exhausted}
 
 
 async def integration_outbox_flush(

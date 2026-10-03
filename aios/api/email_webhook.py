@@ -14,32 +14,50 @@ router = APIRouter(prefix="/api/email", tags=["email"])
 
 
 def _verify_email_signature(request: Request, body: bytes, provider: str) -> bool:
-    """Verify webhook signature based on provider."""
-    secret_map = {
-        "sendgrid": settings.sendgrid_webhook_secret,
-        "mailgun": settings.mailgun_webhook_secret,
-        "ses": settings.ses_webhook_secret,
-    }
-    secret = secret_map.get(provider)
-    if not secret:
-        # Fail closed: without a configured secret there is nothing to verify
-        # against, so any caller would be accepted. No provider is configured
-        # in production today, so rejecting breaks nothing.
+    """Verify the provider's real signature scheme.
+
+    This computed one HMAC-SHA256 hex digest of the body and compared it to
+    every provider's header. No provider sends that, so all three 401'd
+    permanently:
+
+      * Mailgun  X-Mailgun-Signature = "<ts>,<hmac_sha256(ts + body)>"
+      * SendGrid  base64 ECDSA over (ts + body), verified with the app's
+        *public* key, not a shared secret
+      * SES/SNS  base64 RSA-SHA256 over a canonical string
+
+    Mailgun is implemented properly. SendGrid and SNS need asymmetric keys,
+    which this codebase has no setting for, so they fail closed with an
+    explicit reason instead of pretending to verify.
+    """
+    if provider == "mailgun":
+        secret = settings.mailgun_webhook_secret
+        if not secret:
+            logger.error("mailgun webhook called with no AIOS_MAILGUN_WEBHOOK_SECRET")
+            return False
+        header = request.headers.get("x-mailgun-signature", "")
+        if "," not in header:
+            logger.warning("mailgun signature missing or malformed")
+            return False
+        ts, _, signature = header.partition(",")
+        expected = hmac.new(
+            secret.encode(), ts.encode() + body, hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(signature.strip(), expected)
+
+    if provider in ("sendgrid", "ses"):
+        # Asymmetric schemes: SendGrid is ECDSA over ts+body with the app's
+        # public key, SNS is RSA-SHA256 over a canonical string. Neither can be
+        # checked with a shared secret, and guessing one produced a digest that
+        # never matched anything. Refuse loudly rather than silently accepting.
+        logger.error(
+            "%s inbound parse requires asymmetric signature verification, "
+            "which is not configured; refusing the request",
+            provider,
+        )
         return False
 
-    sig = request.headers.get("x-twilio-email-event-webhook-signature", "")  # SendGrid
-    if not sig:
-        sig = request.headers.get("x-mailgun-signature", "")  # Mailgun
-    if not sig:
-        sig = request.headers.get("x-amz-sns-signature", "")  # SES/SNS
-
-    if not sig:
-        return False
-
-    # Each provider has different signature format
-    # Simplified: just HMAC-SHA256 of body
-    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(sig, expected)
+    logger.error("unknown email provider %r; refusing", provider)
+    return False
 
 
 @router.post("/webhook")
@@ -132,13 +150,22 @@ async def _process_inbound_email(email_data: dict, provider: str):
         from aios.db.models import ChannelConnection
         from sqlalchemy import select
 
-        result = await db.execute(
-            select(ChannelConnection).where(
-                ChannelConnection.channel_type == "email",
-                ChannelConnection.is_active == True,
-            )
+        # Resolve THIS mailbox's connection, not whichever tenant happens to be
+        # first in the table: `.first()` handed tenant B's inbound mail to
+        # tenant A's agent, billed A's quota and stored the message under A's
+        # org_id. An explicit channel id wins; otherwise only a single active
+        # connection may be auto-resolved, and ambiguity is refused.
+        q = select(ChannelConnection).where(
+            ChannelConnection.channel_type == "email",
+            ChannelConnection.is_active == True,
         )
-        conn = result.scalars().first()
+        if body.get("channel_id"):
+            q = q.where(ChannelConnection.id == str(body["channel_id"]))
+        candidates = (await db.execute(q.limit(2))).scalars().all()
+        conn = candidates[0] if candidates else None
+        if conn is not None and not body.get("channel_id") and len(candidates) > 1:
+            return {"ok": False,
+                    "error": "more than one active email channel; pass channel_id"}
 
         if conn:
             await dispatch_inbound(

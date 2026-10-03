@@ -32,6 +32,60 @@ from aios.core.scheduler import scheduler
 from aios.db.backend import DatabaseBackend
 from aios.db.models import Team
 
+
+def _json_from_text(text: str) -> dict | None:
+    """Best-effort JSON object out of a model reply. None when there isn't one.
+
+    `json.loads` on the raw reply was the whole parser: a manager that wrapped
+    its JSON in "Aqui está o plano:" failed to parse, and the caller swallowed
+    the exception — discarding the orchestrator's plan AND the manager's
+    decision, then re-routing the raw message to the supervisor. Prose around
+    JSON is the common model output shape, so this happened often and silently.
+    """
+    import json
+
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    # Fenced block first, then the first balanced-looking object in the text.
+    fence = raw.find("```")
+    if fence != -1:
+        body = raw[fence + 3:]
+        nl = body.find("\n")
+        if nl != -1:
+            body = body[nl + 1:]
+        end = body.find("```")
+        if end != -1:
+            body = body[:end]
+        try:
+            parsed = json.loads(body.strip())
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    start = raw.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(raw)):
+        if raw[i] == "{":
+            depth += 1
+        elif raw[i] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    parsed = json.loads(raw[start:i + 1])
+                except json.JSONDecodeError:
+                    return None
+                return parsed if isinstance(parsed, dict) else None
+    return None
+
 # Ruflo wiring: auto-inject top learnings + post-run reflection (fire-and-forget)
 async def _maybe_reflect(team, agents, conv_id: str, user_msg: str, agent_response: str):
     try:
@@ -53,13 +107,22 @@ async def _maybe_reflect(team, agents, conv_id: str, user_msg: str, agent_respon
 
 logger = logging.getLogger(__name__)
 
+# Built with str.replace, not .format(): the JSON example below contains literal
+# braces, and .format() treats those as a placeholder. Every supervisor-strategy
+# team therefore raised KeyError('"agent_index"') inside the try, swallowed it,
+# and returned the "agent 0" fallback — so the LLM never chose an agent at all
+# and every message went to the first member regardless of who it was for.
 _SUPERVISOR_SYSTEM_PROMPT = """You are a routing supervisor. Analyze the incoming message and pick the best agent from the list below.
 
 Respond with JSON ONLY:
 {"agent_index": <int>, "reason": "<why this agent>", "handoff_message": "<rephrase for the agent, include relevant context>"}
 
 Available agents:
-{agent_list}"""
+__AGENT_LIST__"""
+
+
+def _supervisor_prompt(agent_list: str) -> str:
+    return _SUPERVISOR_SYSTEM_PROMPT.replace("__AGENT_LIST__", agent_list)
 
 
 class TeamOrchestrator:
@@ -254,16 +317,17 @@ Respond with JSON:
                 manager_decision = await rt.run(conv_id, manager_prompt, db)
                 
                 try:
-                    import json
-                    decision = json.loads(manager_decision)
+                    decision = _json_from_text(manager_decision)
+                    if decision is None:
+                        raise ValueError("no JSON object in manager reply")
                     assignments = decision.get("assignments", [])
-                    
+
                     results = []
                     for assignment in assignments:
                         agent_id = assignment.get("agent_id")
                         task = assignment.get("task", "")
                         reason = assignment.get("reason", "")
-                        
+
                         agent = next((a for a in self.agents if a.id == agent_id), None)
                         if agent and agent.id != self.team.orchestrator_agent_id and agent.id != self.team.manager_agent_id:
                             rt = _get_runtime(agent, self._db)
@@ -278,12 +342,19 @@ Respond with JSON:
         # Fallback: if no manager or manager handoff fails, use supervisor
         return await self._supervisor_route(conv_id, msg, db)
 
-    async def _llm_route(self, msg: str, conv_id: str = "") -> dict:
-        """Use LLM to pick the best agent. Returns dict with agent_index, reason, handoff_message."""
+    async def _llm_route(self, msg: str, conv_id: str = "", candidates: list | None = None) -> dict:
+        """Use LLM to pick the best agent. Returns dict with agent_index, reason, handoff_message.
+
+        `agent_index` indexes `candidates`, not self.agents. A sharded caller must
+        pass its shard: the index used to be resolved against the full team and
+        then applied to the shard, so on a team of 8+ the supervisor's choice was
+        silently remapped onto the wrong agent.
+        """
+        pool = candidates if candidates is not None else self.agents
         shared = await self._shared_context_for(conv_id) if conv_id else ""
         agent_lines = "\n".join(
             f"[{i}] {a.name} — type:{a.agent_type} — prompt: {a.system_prompt[:800]}"
-            for i, a in enumerate(self.agents)
+            for i, a in enumerate(pool)
         )
         if shared:
             agent_lines += f"\n\nShared team context (last 6 msgs):\n{shared}"
@@ -293,9 +364,7 @@ Respond with JSON:
                 messages=[
                     {
                         "role": "system",
-                        "content": _SUPERVISOR_SYSTEM_PROMPT.format(
-                            agent_list=agent_lines
-                        ),
+                        "content": _supervisor_prompt(agent_lines),
                     },
                     {"role": "user", "content": msg},
                 ],
@@ -352,7 +421,7 @@ Respond with JSON:
             h = int(hashlib.md5(conv_id.encode()).hexdigest(), 16) % 4
             agents = [a for i, a in enumerate(agents) if i % 4 == h] or agents
         try:
-            routed = await self._llm_route(msg, conv_id)
+            routed = await self._llm_route(msg, conv_id, candidates=agents)
             idx = min(max(0, routed["agent_index"]), len(agents) - 1)
             agent = _get_runtime(agents[idx], self._db)
             out = await agent.run(conv_id, routed.get("handoff_message", msg), db)
@@ -461,23 +530,17 @@ Respond with JSON:
         async for ev in agent.run_stream(conv_id, msg, db):
             yield ev
 
-    async def _broadcast(
-        self, conv_id: str, msg: str, db: DatabaseBackend | None = None
-    ) -> str:
-        if not self.agents:
-            return "No agents in team"
-        sem = asyncio.Semaphore(5)
+    async def _pick_best_answer(self, valid: list[str]) -> str:
+        """Judge picks the best answer; fall back to the longest one.
 
-        async def _run_one(a):
-            async with sem:
-                return await _get_runtime(a, self._db).run(conv_id, msg, db)
-
-        results = await asyncio.gather(
-            *(_run_one(a) for a in self.agents), return_exceptions=True
-        )
-        valid = [r for r in results if isinstance(r, str) and r.strip()]
+        Shared by both broadcast paths so a streaming team and a non-streaming
+        team get the same answer. The streaming path used to skip the judge
+        entirely and always return the longest candidate — usually the least
+        concise one — so the same team produced a materially worse answer
+        depending on which path the caller used.
+        """
         if not valid:
-            return "All agents failed"
+            return ""
         try:
             judge = get_provider("openai/gpt-4o-mini")
             resp = await judge.chat_retry(
@@ -504,6 +567,25 @@ Respond with JSON:
             pass
         return max(valid, key=lambda r: len(r))
 
+    async def _broadcast(
+        self, conv_id: str, msg: str, db: DatabaseBackend | None = None
+    ) -> str:
+        if not self.agents:
+            return "No agents in team"
+        sem = asyncio.Semaphore(5)
+
+        async def _run_one(a):
+            async with sem:
+                return await _get_runtime(a, self._db).run(conv_id, msg, db)
+
+        results = await asyncio.gather(
+            *(_run_one(a) for a in self.agents), return_exceptions=True
+        )
+        valid = [r for r in results if isinstance(r, str) and r.strip()]
+        if not valid:
+            return "All agents failed"
+        return await self._pick_best_answer(valid)
+
     async def _broadcast_stream(
         self, conv_id: str, msg: str, db: DatabaseBackend | None = None
     ) -> AsyncGenerator[dict, None]:
@@ -515,9 +597,8 @@ Respond with JSON:
             *(_get_runtime(a, self._db).run(conv_id, msg, db) for a in self.agents),
             return_exceptions=True,
         )
-        valid = [r for r in results if isinstance(r, str)]
-        best = max(valid, key=lambda r: len(r)) if valid else ""
-        yield {"type": STREAM_TOKEN, "content": best}
+        valid = [r for r in results if isinstance(r, str) and r.strip()]
+        yield {"type": STREAM_TOKEN, "content": await self._pick_best_answer(valid)}
         yield {"type": STREAM_DONE}
 
     async def _semantic_route(
@@ -637,10 +718,11 @@ Respond with JSON:
                 yield {"type": STREAM_TOKEN, "content": f"[Manager {manager.name} coordinating]\n{manager_decision[:500]}\n\n"}
                 
                 try:
-                    import json
-                    decision = json.loads(manager_decision)
+                    decision = _json_from_text(manager_decision)
+                    if decision is None:
+                        raise ValueError("no JSON object in manager reply")
                     assignments = decision.get("assignments", [])
-                    
+
                     for assignment in assignments:
                         agent_id = assignment.get("agent_id")
                         task = assignment.get("task", "")

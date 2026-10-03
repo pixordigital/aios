@@ -355,12 +355,45 @@ def _verify_jwt_token(token: str) -> dict | None:
     return _decode_jwt_token(token)
 
 
+# ─── Login allowlist (single-operator lockdown) ───
+
+
+def _login_allowlist() -> set[str]:
+    """Parse AIOS_LOGIN_ALLOWLIST into lowercased emails. Empty = not configured."""
+    raw = (settings.login_allowlist or "").replace(";", ",")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def _is_login_allowed(email: str) -> bool:
+    """True if this address may authenticate. Open to all when unconfigured."""
+    allowed = _login_allowlist()
+    if not allowed:
+        return True
+    return (email or "").strip().lower() in allowed
+
+
+def _is_allowlisted(email: str) -> bool:
+    """True only if the allowlist is configured AND contains this address.
+
+    Distinct from _is_login_allowed: used for trust decisions (e.g. skipping
+    the email-verification gate), where an unconfigured list must NOT imply
+    trust for everyone.
+    """
+    allowed = _login_allowlist()
+    return bool(allowed) and (email or "").strip().lower() in allowed
+
+
 # ─── Routes ───
 
 
 @router.post("/register", response_model=TokenResponse)
 async def register(request: Request, body: RegisterRequest, db: DatabaseBackend = Depends(get_db_backend)):
     if not settings.registration_enabled:
+        raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
+    # Defense in depth: even if registration is ever flipped back on, only
+    # allowlisted addresses may create accounts.
+    if not _is_login_allowed(body.email):
+        logger.warning("registration rejected for non-allowlisted address")
         raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
     _validate_password(body.password)
     # blacklist check (email/domain)
@@ -431,7 +464,22 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
     _verify_password(body.password, user.hashed_password if user else _DUMMY_HASH)
     if not user or not _verify_password(body.password, user.hashed_password):
         raise HTTPException(401, "E-mail ou senha inválidos")
-    if not user.email_verified and user.role != "superadmin" and not settings.registration_enabled:
+    # Allowlist is checked AFTER password verification with the same generic
+    # message, so the response is indistinguishable from a wrong password and
+    # reveals neither allowlist membership nor account existence.
+    if not _is_login_allowed(user.email):
+        logger.warning("login rejected for non-allowlisted account: %s", user.email)
+        raise HTTPException(401, "E-mail ou senha inválidos")
+    # An explicitly allowlisted operator account is trusted by configuration,
+    # so the closed-beta verification gate does not apply to it. Without this
+    # an unverified allowlisted address would be locked out by a gate meant for
+    # self-serve signups.
+    if (
+        not user.email_verified
+        and user.role != "superadmin"
+        and not settings.registration_enabled
+        and not _is_allowlisted(user.email)
+    ):
         raise HTTPException(403, "Verifique seu e-mail antes de entrar. Link reenviado.")
     if getattr(user, "totp_enabled", False) and user.totp_secret:
         if not body.totp_code:
@@ -471,6 +519,11 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(401, "Usuário não encontrado")
+    # Re-check on every refresh so revoking allowlist membership (or deleting
+    # the row) kills existing sessions immediately instead of at token expiry.
+    if not _is_login_allowed(user.email):
+        logger.warning("refresh rejected for non-allowlisted account: %s", user.email)
+        raise HTTPException(401, "Token de atualização inválido ou expirado")
 
     token = _create_access_token(user.id, user.org_id)
     refresh = _create_refresh_token(user.id)
@@ -489,6 +542,8 @@ async def verify_email(token: str = Query(...), db: DatabaseBackend = Depends(ge
     user = await db.get(User, payload["sub"])
     if not user:
         raise HTTPException(404, "Usuário não encontrado")
+    if not _is_login_allowed(user.email):
+        raise HTTPException(400, "Token de verificação inválido ou expirado")
     if user.email_verified:
         return {"message": "E-mail já verificado"}
 
@@ -502,8 +557,9 @@ async def forgot_password(email: str = Query(...), db: DatabaseBackend = Depends
     """Send password reset email."""
     result = await db.execute(select(User).where(User.email == email.lower().strip()))
     user = result.scalar_one_or_none()
-    if not user:
-        # Don't reveal whether email exists
+    # Generic response either way; no reset email leaves the server for
+    # non-allowlisted addresses.
+    if not user or not _is_login_allowed(user.email):
         return {"message": "Se o e-mail existir, um link de redefinição foi enviado"}
 
     token = _create_email_token(user.id, "password_reset", expire_minutes=60)
@@ -531,6 +587,8 @@ async def reset_password(body: ResetPasswordRequest, db: DatabaseBackend = Depen
     user = await db.get(User, payload["sub"])
     if not user:
         raise HTTPException(404, "Usuário não encontrado")
+    if not _is_login_allowed(user.email):
+        raise HTTPException(400, "Token de redefinição inválido ou expirado")
 
     user.hashed_password = _hash_password(body.new_password)
     await db.commit()
@@ -927,6 +985,12 @@ async def totp_backup_codes(request: Request, db: DatabaseBackend = Depends(get_
 
 async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_user_id: str, email: str, name: str) -> TokenResponse:
     """Find existing OAuth account or create user + OAuth account."""
+    # OAuth is a login path like any other: a Google/GitHub identity whose
+    # email is not allowlisted gets nothing, and no account row is created or
+    # linked for it. Without this, any Google account could obtain tokens.
+    if not _is_login_allowed(email):
+        logger.warning("oauth (%s) rejected for non-allowlisted address", provider)
+        raise HTTPException(403, "Acesso restrito — entre em contato com o administrador")
     from aios.db.models import OAuthAccount
 
     result = await db.execute(

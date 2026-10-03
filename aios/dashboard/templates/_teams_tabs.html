@@ -1,0 +1,23 @@
+{#- Shared sub-navigation for the Teams section (same pattern as _whatsapp_tabs.html).
+
+  The sidebar is flat, so section children live behind these tabs. The main
+  "Equipes" sidebar entry matches on startswith('/dashboard/teams'), so any
+  child highlights it automatically.
+-#}
+{% set _path = request.url.path %}
+{% set _tt = [
+    ("/dashboard/teams", "Equipes"),
+    ("/dashboard/teams/map", "Mapa"),
+] %}
+<div class="flex" style="gap:0.25rem;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:-1px;flex-wrap:wrap">
+  {% for href, label in _tt %}
+    {% set _active = (_path == href) or (_path.startswith(href ~ '/') and href != "/dashboard/teams") or (href == "/dashboard/teams" and _path == "/dashboard/teams") %}
+    <a href="{{ href }}"
+       style="padding:0.5rem 0.75rem;font-size:0.8125rem;font-weight:{{ '600' if _active else '400' }};
+              color:{{ 'var(--accent)' if _active else 'var(--text-secondary)' }};
+              border-bottom:2px solid {{ 'var(--accent)' if _active else 'transparent' }};
+              text-decoration:none">
+      {{ label }}
+    </a>
+  {% endfor %}
+</div>

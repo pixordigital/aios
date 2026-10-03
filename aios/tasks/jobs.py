@@ -166,7 +166,7 @@ async def _process_inbound_once(
         # Provider message id -> idempotency key. Webhook retries (Slack sends
         # event retries, Evolution redelivers) used to insert a duplicate row
         # every time because channel_message_id was never populated.
-        provider_msg_id = extra.get("msg_id") or None
+        provider_msg_id = extra.get("msg_id") or extra.get("message_id") or None
         if not provider_msg_id and channel_type == "slack" and extra.get("ts"):
             provider_msg_id = f"slack:{extra.get('channel_id', '')}:{extra.get('ts')}"
         msg = None
@@ -214,7 +214,24 @@ async def _process_inbound_once(
         # check org limits
         allowed, reason = await check_org_limits(conn.org_id, db)
         if not allowed:
+            # Deliberate refusal, not a crash: retrying cannot help. Record it
+            # in the DLQ so the message is visible instead of silently dropped.
             logger.warning("process_inbound: limit hit for org %s: %s", conn.org_id, reason)
+            from aios.core.dead_letter import write_dlq
+
+            await write_dlq(
+                direction="inbound",
+                channel_type=channel_type,
+                job_name="aios.tasks.jobs.process_inbound",
+                payload={
+                    "args": [channel_type, channel_connection_id, conv.id, text, user_id, extra_data],
+                    "kwargs": {},
+                },
+                error=f"org limit: {reason}",
+                org_id=conn.org_id,
+                channel_connection_id=channel_connection_id,
+                conversation_id=conv.id or None,
+            )
             return
 
         # resolve agent or team
@@ -240,16 +257,38 @@ async def _process_inbound_once(
             # filter to available agents
             available = [a for a in agents if health_tracker.is_available(a.id)]
             if not available:
+                # Every agent is `stopped` in the health tracker. Nothing can
+                # answer; record it rather than returning quietly.
                 logger.warning("process_inbound: all agents in team %s are stopped", agent_or_team.id)
+                from aios.core.dead_letter import write_dlq
+
+                await write_dlq(
+                    direction="inbound",
+                    channel_type=channel_type,
+                    job_name="aios.tasks.jobs.process_inbound",
+                    payload={
+                        "args": [channel_type, channel_connection_id, conv.id, text, user_id, extra_data],
+                        "kwargs": {},
+                    },
+                    error="every agent in the team is stopped",
+                    org_id=conn.org_id,
+                    channel_connection_id=channel_connection_id,
+                    conversation_id=conv.id or None,
+                )
                 return
             orch = TeamOrchestrator(agent_or_team, available)
-            reply_text = await orch.handle_message(conv.id, text)
+            # db must be passed: without it AgentRuntime skips both the
+            # check_org_limits gate and every Message write, so a team-bound
+            # channel never recorded the agent's own replies — the next inbound
+            # message reloaded history containing only the customer's turns and
+            # the agent answered as if it had never spoken.
+            reply_text = await orch.handle_message(conv.id, text, db)
             # if team failed, try each agent individually
             if not reply_text and len(available) > 1:
                 for agent in available:
                     try:
                         runtime = AgentRuntime(agent)
-                        reply_text = await runtime.run(conv.id, text)
+                        reply_text = await runtime.run(conv.id, text, db)
                         if reply_text:
                             break
                     except Exception:
@@ -278,7 +317,7 @@ async def _process_inbound_once(
             else:
                 from aios.core.agent import AgentRuntime
                 runtime = AgentRuntime(agent_or_team)
-                reply_text = await runtime.run(conv.id, text)
+                reply_text = await runtime.run(conv.id, text, db)
 
         if reply_text:
             # save reply
@@ -306,6 +345,13 @@ async def _process_inbound_once(
                     "process_inbound: run failed for conv %s, not delivering: %s",
                     conv.id, reply_text[:200],
                 )
+                # Raise so the wrapper retries and, past the last attempt,
+                # dead-letters the message. Returning quietly marked the ARQ job
+                # green and set inbound_completed below, so a customer message
+                # that produced no answer left no trace and nothing to retry.
+                raise RuntimeError(
+                    f"agent run produced no answer: {str(reply_text)[:200]}"
+                )
             else:
                 # deliver reply via channel (with retry + DLQ)
                 await deliver_message(
@@ -315,6 +361,27 @@ async def _process_inbound_once(
                     reply_text,
                     json.dumps(extra),
                 )
+
+        # Event triggers. `fire_event_triggers` existed with zero callers, so
+        # every "event" trigger the dashboard could create (documented event
+        # type: message.received) was inert. Inbound is the event they describe.
+        try:
+            from aios.api.automations import fire_event_triggers
+
+            await fire_event_triggers(
+                "message.received",
+                conn.org_id,
+                {
+                    "channel": channel_type,
+                    "conversation_id": conv.id,
+                    "channel_connection_id": channel_connection_id,
+                    "text": text[:4000],
+                    "user_id": user_id,
+                    "answered": bool(reply_text),
+                },
+            )
+        except Exception:
+            logger.debug("event triggers failed for conv %s", getattr(conv, "id", "?"), exc_info=True)
 
         # Mark the inbound row handled. Until this flag is set a retry re-enters
         # and resumes the agent run; once set, a genuine provider redelivery is
@@ -459,15 +526,31 @@ async def transcribe_voice_recording(ctx, recording_id: str, language: str = "pt
             from aios.config import settings as _cfg
             _s = ctx.get("settings") or {}
             _stt = _s.get("voice_stt_url") if isinstance(_s, dict) else getattr(_s, "voice_stt_url", None)
-            whisper_url = _stt or _cfg.voice_stt_url or "http://voice-stt:9000"
-            
+            whisper_url = _stt or _cfg.voice_stt_url or ""
+            if not whisper_url:
+                # No STT configured. Defaulting to a host that only exists under
+                # an opt-in compose profile turned every transcription into a DNS
+                # failure; say so plainly instead.
+                recording.transcript_status = "failed"
+                await db.commit()
+                return {"error": "no STT configured (AIOS_VOICE_STT_URL)"}
+
             async with httpx.AsyncClient(timeout=300) as client:
                 files = {"file": (f"recording-{recording.call_sid}.mp3", audio_content, "audio/mpeg")}
                 data = {"language": language, "response_format": "text"}
-                resp = await client.post(f"{whisper_url}/asr", files=files, data=data)
-                
+                resp = await client.post(f"{whisper_url.rstrip('/')}/asr", files=files, data=data)
+
                 if resp.status_code == 200:
-                    transcript = resp.text.strip()
+                    # whisper-asr-webservice answers {"text": ...} as JSON even
+                    # when response_format=text, so storing resp.text verbatim
+                    # put a JSON blob in the transcript field.
+                    raw = resp.text.strip()
+                    transcript = raw
+                    if raw.startswith("{"):
+                        try:
+                            transcript = json.loads(raw).get("text", raw)
+                        except json.JSONDecodeError:
+                            transcript = raw
                     recording.transcript = transcript
                     recording.transcript_status = "completed"
                     recording.transcript_language = language

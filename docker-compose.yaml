@@ -148,7 +148,10 @@ services:
             QRCODE_COLOR: '#00e5a0'
             DATABASE_ENABLED: 'true'
             DATABASE_PROVIDER: postgresql
-            DATABASE_CONNECTION_URI: 'postgresql://supabase_admin:sSpCePJGfhQlE0J6LhFu03pqa01MLwyU@supabase-db:5432/aios'
+            # Credential removed from version control: this was the Supabase
+            # superuser (not a tenant role) against the prod DB backing every
+            # org. Read from the environment instead — and rotate the old one.
+            DATABASE_CONNECTION_URI: "postgresql://${EVOLUTION_DB_USER:-aios}:${EVOLUTION_DB_PASSWORD:?set EVOLUTION_DB_PASSWORD}@postgres:5432/${EVOLUTION_DB_NAME:-evolution}?schema=evolution"
             REDIS_ENABLED: 'true'
             REDIS_URI: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6'
             REDIS_PREFIX_KEY: evolution
@@ -249,7 +252,8 @@ services:
             AIOS_RETELL_API_KEY: ''
             AIOS_RETELL_AGENT_ID: ''
             AIOS_VOICE_TTS_URL: 'http://voice-tts-kokoro:8880/v1'
-            AIOS_VOICE_STT_URL: 'http://voice-stt:9000'
+            # Only reachable with the opt-in voice-stt profile (docker compose --profile voice-stt)
+            AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-}
             AIOS_VOICE_BRIDGE_URL: ''
             AIOS_VOICE_FROM_NUMBER: ''
             AIOS_VOICE_WEBHOOK_SECRET: ''

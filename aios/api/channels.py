@@ -131,7 +131,37 @@ async def toggle_channel(
         raise HTTPException(404)
     channel.is_active = not channel.is_active
     await db.commit()
+    # Start/stop the live adapter. Flipping the flag alone left the poller
+    # running (or never started), so a disabled email channel kept replying and
+    # a newly enabled one received nothing until the next restart.
+    await _sync_channel(channel, channel.is_active, db)
     return {"is_active": channel.is_active}
+
+
+async def _sync_channel(channel: ChannelConnection, is_active: bool, db) -> bool:
+    """Bring a connection's live adapter in line with its DB flag.
+
+    `main.py` starts channels once during lifespan; that is the only place
+    `channel_mgr.start()` was ever called, so anything created or toggled
+    afterwards never got a running adapter. Never raises — a failed start must
+    not fail the API call that toggled the flag.
+    """
+    try:
+        from sqlalchemy.orm import selectinload
+
+        from aios.db.models import Agent, Team
+
+        agent_or_team = None
+        if channel.agent_id:
+            agent_or_team = await db.get(Agent, channel.agent_id)
+        elif channel.team_id:
+            agent_or_team = await db.get(
+                Team, channel.team_id, options=[selectinload(Team.agents)]
+            )
+        return await channel_mgr.sync(channel, is_active, agent_or_team, db)
+    except Exception:
+        logger.exception("channel sync failed for %s", getattr(channel, "id", "?"))
+        return False
 
 
 @router.post("/{channel_id}/start")
@@ -145,7 +175,8 @@ async def start_channel(
         raise HTTPException(404)
     channel.is_active = True
     await db.commit()
-    return {"ok": True}
+    started = await _sync_channel(channel, True, db)
+    return {"ok": True, "running": started}
 
 
 @router.post("/test")

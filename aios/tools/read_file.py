@@ -22,13 +22,16 @@ class ReadFileTool(BaseTool):
     input_model = ReadFileInput
 
     async def run(self, artifact_id: str, max_chars: int = 10000) -> dict:
-        # DB session needed — the tool engine will inject it
-        db = getattr(self, "_db", None)
-        if not db:
-            return {"error": "File reading requires a database session", "content": ""}
-        # Org set by ToolEngine. Without it any artifact UUID is readable
-        # across orgs; with it, foreign rows return "not found" (no oracle).
-        content = await get_artifact_content(artifact_id, db, org_id=getattr(self, "_org_id", None))
+        # The engine injects `_org_id`/`_agent_id`, never a session, so this
+        # waited on `self._db`, which nothing ever set: every call returned
+        # "File reading requires a database session". Open a session here.
+        from aios.db.backend import db_session
+
+        org_id = getattr(self, "_org_id", "") or None
+        async with db_session() as db:
+            # Org set by ToolEngine. Without it any artifact UUID is readable
+            # across orgs; with it, foreign rows return "not found" (no oracle).
+            content = await get_artifact_content(artifact_id, db, org_id=org_id)
         if content is None:
             return {"error": "File not found", "content": ""}
         try:

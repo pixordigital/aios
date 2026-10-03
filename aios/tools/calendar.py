@@ -29,24 +29,44 @@ NOT_CONFIGURED = (
 )
 
 
-def _resolve_google() -> tuple[dict | None, str, str]:
-    """Return (creds_info, calendar_id, error). Error is "" on success."""
-    raw = (
-        os.getenv("GOOGLE_CALENDAR_CREDENTIALS")
-        or os.getenv("AIOS_GOOGLE_CALENDAR_CREDENTIALS")
-        or ""
-    )
-    calendar_id = (
-        os.getenv("GOOGLE_CALENDAR_ID")
-        or os.getenv("AIOS_GOOGLE_CALENDAR_ID")
-        or "primary"
-    )
+async def _resolve_google(org_id: str = "") -> tuple[dict | None, str, str]:
+    """Return (creds_info, calendar_id, error). Error is "" on success.
+
+    The tenant's credential is stored per-org (org_settings.ALLOWED_KEYS holds
+    google_calendar_credentials / google_calendar_id, and the dashboard writes
+    them), but this only ever read env and instance settings — so a self-serve
+    tenant that completed Calendar setup in the dashboard got
+    "not configured" from all three calendar tools, forever.
+    """
+    raw = ""
+    calendar_id = "primary"
+    if org_id:
+        try:
+            from aios.core.org_settings import get_org_secret_async
+
+            raw = (await get_org_secret_async(org_id, "google_calendar_credentials")) or ""
+            calendar_id = (await get_org_secret_async(org_id, "google_calendar_id")) or "primary"
+        except Exception:
+            logger.debug("per-org Google Calendar lookup failed", exc_info=True)
+    if not raw:
+        raw = (
+            os.getenv("GOOGLE_CALENDAR_CREDENTIALS")
+            or os.getenv("AIOS_GOOGLE_CALENDAR_CREDENTIALS")
+            or ""
+        )
+    if not calendar_id or calendar_id == "primary":
+        calendar_id = (
+            os.getenv("GOOGLE_CALENDAR_ID")
+            or os.getenv("AIOS_GOOGLE_CALENDAR_ID")
+            or "primary"
+        )
     if not raw:
         try:
             from aios.config import settings
 
             raw = getattr(settings, "google_calendar_credentials", "") or ""
-            calendar_id = getattr(settings, "google_calendar_id", "") or calendar_id
+            if not calendar_id or calendar_id == "primary":
+                calendar_id = getattr(settings, "google_calendar_id", "") or calendar_id
         except Exception:
             pass
     raw = (raw or "").strip()
@@ -119,7 +139,7 @@ class CalendarTool(BaseTool):
         duration_min = max(5, min(480, int(duration_min or 30)))
         end_dt = start_dt + timedelta(minutes=duration_min)
 
-        creds_info, calendar_id, err = _resolve_google()
+        creds_info, calendar_id, err = await _resolve_google(getattr(self, "_org_id", "") or "")
         if err:
             return {"ok": False, "error": err}
         try:
@@ -175,7 +195,7 @@ class CalendarAvailabilityTool(BaseTool):
         work_start: str = "08:00",
         work_end: str = "18:00",
     ) -> dict:
-        creds_info, calendar_id, err = _resolve_google()
+        creds_info, calendar_id, err = await _resolve_google(getattr(self, "_org_id", "") or "")
         if err:
             return {"ok": False, "error": err}
         try:
@@ -242,7 +262,7 @@ class CalendarListTool(BaseTool):
     input_model = CalendarListInput
 
     async def run(self, time_min: str = "", time_max: str = "", max_results: int = 20) -> dict:
-        creds_info, calendar_id, err = _resolve_google()
+        creds_info, calendar_id, err = await _resolve_google(getattr(self, "_org_id", "") or "")
         if err:
             return {"ok": False, "error": err}
         try:

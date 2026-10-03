@@ -485,9 +485,12 @@ class WorkflowEngine:
                 except Exception:
                     pass
                 return result
+            # `org` first: it is a local, and the ToolEngine line below read it
+            # one statement early — UnboundLocalError on every tool node in
+            # every workflow.
+            org = shared.get("org_id") or shared.get("initial_input_org") or ""
             engine = ToolEngine([node.tool_name], org_id=org or "")
             args_json = json.dumps(rendered_args if isinstance(rendered_args, dict) else (node.tool_args or {}))
-            org = shared.get("org_id") or shared.get("initial_input_org") or ""
             sem = _get_org_semaphore(org or "global")
             try:
                 async with sem:

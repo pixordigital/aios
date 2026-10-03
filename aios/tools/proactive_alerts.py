@@ -160,7 +160,15 @@ class ProactiveAlertsTool(BaseTool):
     name = "proactive_alerts"
     description = "Verifica queda de vendas >12% e envia alerta proativo via WhatsApp (Evolution)."
 
-    async def run(self, org_id: str) -> dict:
+    async def run(self) -> dict:
+        # org_id was a required LLM-supplied argument, so the model was told
+        # the tool takes no arguments (there was no input_model), sent `{}`,
+        # and every call raised TypeError. Worse, a model that guessed a UUID
+        # would read another tenant's deals and write a Memory row into it.
+        # The org always comes from the running agent.
+        org_id = getattr(self, "_org_id", "") or ""
+        if not org_id:
+            return {"ok": False, "error": "sem org no contexto", "alert": None}
         alert = await check_sales_drop(org_id)
         if not alert:
             return {"ok": True, "alert": None, "message": "Nenhum alerta (queda ≤12% ou sem dados)"}

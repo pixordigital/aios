@@ -127,13 +127,27 @@ def _team_compatibility(agents: list) -> dict:
     return {"score": max(score, 0), "issues": issues}
 
 
+# Stateless read/compute tools are designed for sharing across agents —
+# ToolEngine instantiates per call, no locks, no exclusive handles.
+# Flagging them as "contenção" false-positives on every normal team.
+_SHARED_TOOLS = frozenset({
+    "http_request", "http_get", "read_file", "transcribe", "current_datetime",
+    "python_sandbox", "calculator", "sql_query", "rag_search", "web_search",
+    "ask_team_manager", "notify_human", "lead_score", "etl_url", "transform",
+    "if_branch", "wait", "load_project_skills", "crm_pipeline_stats",
+    "crm_list_deals", "crm_stale_deals",
+})
+
+
 def _tool_conflicts(tools_list: list[list[str]]) -> list[str]:
-    """Detect tool conflicts across agents."""
+    """Detect tool conflicts across agents (shared stateless tools excluded)."""
     all_tools = {}
     conflicts = []
     for i, tl in enumerate(tools_list):
         for t in tl:
-            if t in all_tools:
+            if t in _SHARED_TOOLS:
+                continue
+            if t in all_tools and all_tools[t] != i:
                 conflicts.append(f"Ferramenta '{t}' usada por vários agentes — pode causar contenção")
             all_tools[t] = i
     return list(set(conflicts))
@@ -183,7 +197,6 @@ def _channel_type_label(value: str) -> str:
         "evolution": "WhatsApp (Evolution)",
         "slack": "Slack",
         "telegram": "Telegram",
-        "discord": "Discord",
         "email": "E-mail",
         "voice": "Voz",
     }
@@ -241,8 +254,11 @@ async def login_page(request: Request, error: str = ""):
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_action(request: Request, email: str = Form(...), password: str = Form(...), totp_code: str = Form(default="")):
-    from aios.api.auth import _verify_password, _rate_limit
+    from aios.api.auth import (
+        _DUMMY_HASH, _is_allowlisted, _is_login_allowed, _verify_password, _rate_limit,
+    )
     from sqlalchemy import select
+    import logging as _logging
     client_ip = request.client.host if request.client else "unknown"
     try:
         await _rate_limit(f"{email.lower().strip()}:{client_ip}")
@@ -251,9 +267,24 @@ async def login_action(request: Request, email: str = Form(...), password: str =
     async with db_session() as db:
         result = await db.execute(select(User).where(User.email == email.lower().strip()))
         user = result.scalar_one_or_none()
-        if not user or not _verify_password(password, user.hashed_password):
+        # Burn the bcrypt cost for unknown addresses too, matching /api/auth/login:
+        # without it the response time alone reveals which emails are registered.
+        if not user:
+            _verify_password(password, _DUMMY_HASH)
             return await login_page(request, error="E-mail ou senha inválidos")
-        if not user.email_verified and user.role != "superadmin" and not settings.registration_enabled:
+        if not _verify_password(password, user.hashed_password):
+            return await login_page(request, error="E-mail ou senha inválidos")
+        if not _is_login_allowed(user.email):
+            _logging.getLogger(__name__).warning(
+                "dashboard login rejected for non-allowlisted account: %s", user.email
+            )
+            return await login_page(request, error="E-mail ou senha inválidos")
+        if (
+            not user.email_verified
+            and user.role != "superadmin"
+            and not settings.registration_enabled
+            and not _is_allowlisted(user.email)
+        ):
             # em beta fechado, exigir verificação antes de entrar
             return await login_page(request, error="Verifique seu e-mail antes de entrar. Reenviamos o link.")
         if getattr(user, "totp_enabled", False) and user.totp_secret:
@@ -297,6 +328,12 @@ async def register_action(
 ):
     from aios.config import settings as _s
     if not _s.registration_enabled:
+        return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
+    # Same gate as /api/auth/register: even with registration on, only
+    # allowlisted addresses may create accounts — otherwise the first
+    # registrant would mint themselves superadmin below.
+    from aios.api.auth import _is_login_allowed as _allow
+    if not _allow(email):
         return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
     try:
         _validate_password(password)
@@ -878,6 +915,64 @@ async def agent_delete(request: Request, aid: str):
 
 # ─── Team CRUD ───
 
+def _team_graph(teams, agents):
+    """Nodes/edges for the teams map canvas. Pure function (unit-tested).
+
+    Nodes: one per team, one per agent that belongs to a team (or to none —
+    those land in a "Sem equipe" column so orphans are visible). Edges:
+    orchestrator → team, manager → team, team → member. An agent in more
+    than one team is flagged shared and its extra edges render dashed.
+    """
+    by_id = {a.id: a for a in (agents or [])}
+    member_of = {}
+    for t in teams or []:
+        for m in t.agents or []:
+            member_of.setdefault(getattr(m, "id", None), []).append(t.id)
+
+    nodes, edges = [], []
+    for t in teams or []:
+        nodes.append({
+            "id": f"team:{t.id}", "kind": "team", "label": t.name,
+            "strategy": getattr(t, "routing_strategy", "") or "",
+            "url": f"/dashboard/teams/{t.id}/edit",
+        })
+        seen = set()
+        for role, aid in (
+            ("orchestrator", getattr(t, "orchestrator_agent_id", None)),
+            ("manager", getattr(t, "manager_agent_id", None)),
+        ):
+            if aid and by_id.get(aid) and aid not in seen:
+                seen.add(aid)
+                edges.append({"from": f"agent:{aid}", "to": f"team:{t.id}", "kind": role})
+        for m in t.agents or []:
+            mid = getattr(m, "id", None)
+            if not mid or not by_id.get(mid) or mid in seen:
+                continue
+            seen.add(mid)
+            edges.append({"from": f"team:{t.id}", "to": f"agent:{mid}", "kind": "member"})
+    for a in agents or []:
+        teams_of = member_of.get(a.id, [])
+        nodes.append({
+            "id": f"agent:{a.id}", "kind": "agent", "label": a.name,
+            "status": getattr(a, "status", "") or "",
+            "shared": len(teams_of) > 1,
+            "orphan": not teams_of,
+            "url": f"/dashboard/agents/{a.id}/edit",
+        })
+    return {"nodes": nodes, "edges": edges}
+
+
+@router.get("/teams/map", response_class=HTMLResponse)
+async def team_map(request: Request):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        teams = (await db.execute(
+            select(Team).options(selectinload(Team.agents)).where(Team.org_id == org_id).order_by(Team.created_at.desc())
+        )).scalars().all()
+        agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
+    return await _render("teams_map.html", request, title="Mapa de equipes", graph=_team_graph(teams, agents))
+
+
 @router.get("/teams", response_class=HTMLResponse)
 async def team_list(request: Request):
     org_id = await _org_filter(request)
@@ -1229,8 +1324,7 @@ async def channel_edit_form(request: Request, cid: str):
 CHANNEL_CONFIG_FIELDS = {
     "evolution": ["config_evo_server", "config_evo_key", "config_evo_instance", "config_evo_provider", "config_evo_meta_token", "config_evo_meta_phone", "config_evo_meta_waba", "config_evo_meta_template", "config_evo_meta_lang"],
     "slack": ["config_slack_token", "config_slack_secret"],
-    "telegram": ["config_telegram_token"],
-    "discord": ["config_discord_token"],
+    "telegram": ["config_telegram_token", "config_telegram_chat_id"],
     "email": ["config_email_imap", "config_email_smtp", "config_email_addr", "config_email_pass"],
     "voice": ["config_voice_provider", "config_voice_eleven_key", "config_voice_id", "config_voice_vapi_key", "config_voice_vapi_asst", "config_voice_vapi_phone", "config_voice_retell_key", "config_voice_retell_agent", "config_voice_tts", "config_voice_stt", "config_voice_bridge", "config_voice_from"],
 }
@@ -1247,7 +1341,7 @@ async def channel_save(
     config_evo_meta_waba: str = Form(""), config_evo_meta_template: str = Form(""), config_evo_meta_lang: str = Form("pt_BR"),
     config_slack_token: str = Form(""), config_slack_secret: str = Form(""),
     config_slack_channel_id: str = Form(""),
-    config_telegram_token: str = Form(""), config_discord_token: str = Form(""),
+    config_telegram_token: str = Form(""), config_telegram_chat_id: str = Form(""),
     config_email_imap: str = Form(""), config_email_smtp: str = Form(""),
     config_email_addr: str = Form(""), config_email_pass: str = Form(""),
     config_voice_provider: str = Form("selfhosted"),
@@ -1281,8 +1375,8 @@ async def channel_save(
             config["slack_channel_id"] = config_slack_channel_id.strip()
     elif channel_type == "telegram":
         config = {"bot_token": config_telegram_token}
-    elif channel_type == "discord":
-        config = {"bot_token": config_discord_token}
+        if config_telegram_chat_id:
+            config["chat_id"] = config_telegram_chat_id.strip()
     elif channel_type == "email":
         config = {"imap_server": config_email_imap, "smtp_server": config_email_smtp, "email": config_email_addr, "password": config_email_pass}
     elif channel_type == "voice":
@@ -1346,6 +1440,8 @@ async def channel_save(
             )
             db.add(ch)
         await db.commit()
+        if getattr(ch, "is_active", True):
+            await _sync_channel_adapter(ch, True, db)
     if evo_note:
         return RedirectResponse(f"/dashboard/channels?msg={quote(evo_note)}", status_code=303)
     return RedirectResponse("/dashboard/channels", status_code=303)
@@ -1357,8 +1453,33 @@ async def channel_toggle(request: Request, cid: str):
     async with db_session() as db:
         ch = await db.get(ChannelConnection, cid)
         if ch and ch.org_id == org_id:
-            ch.is_active = not ch.is_active; await db.commit()
+            ch.is_active = not ch.is_active
+            await db.commit()
+            # Same as the API route: flipping the flag alone left the poller
+            # running or never started it.
+            await _sync_channel_adapter(ch, ch.is_active, db)
     return RedirectResponse("/dashboard/channels", status_code=303)
+
+
+async def _sync_channel_adapter(ch, is_active: bool, db) -> bool:
+    """Start/stop the live adapter behind a channel row. Never raises."""
+    try:
+        from aios.channels.manager import manager as channel_mgr
+        from sqlalchemy.orm import selectinload
+
+        from aios.db.models import Agent, Team
+
+        agent_or_team = None
+        if ch.agent_id:
+            agent_or_team = await db.get(Agent, ch.agent_id)
+        elif ch.team_id:
+            agent_or_team = await db.get(
+                Team, ch.team_id, options=[selectinload(Team.agents)]
+            )
+        return await channel_mgr.sync(ch, is_active, agent_or_team, db)
+    except Exception:
+        logger.exception("channel sync failed for %s", getattr(ch, "id", "?"))
+        return False
 
 
 @router.get("/channels/{cid}/delete")

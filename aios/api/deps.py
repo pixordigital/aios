@@ -1,5 +1,6 @@
 """Auth deps: JWT validation, dashboard cookie auth."""
 
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -8,10 +9,12 @@ from fastapi import Depends, Header, HTTPException
 from fastapi import Request as FastAPIRequest
 from sqlalchemy import select
 
-from aios.api.auth import _verify_jwt_token, _create_jwt_token
+from aios.api.auth import _is_login_allowed, _verify_jwt_token, _create_jwt_token
 from aios.config import settings
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import User
+
+logger = logging.getLogger(__name__)
 
 
 async def get_current_user(
@@ -31,6 +34,12 @@ async def get_current_user(
 
         user = await db.get(User, payload["sub"])
         if not user:
+            raise HTTPException(401, "Token inválido")
+        # Re-checked on EVERY authenticated request, not just at login: this
+        # is what invalidates existing sessions the moment an address leaves
+        # the allowlist (or was never on it), instead of at token expiry.
+        if not _is_login_allowed(user.email):
+            logger.warning("rejected authenticated request for non-allowlisted account")
             raise HTTPException(401, "Token inválido")
         return user
 
@@ -134,5 +143,9 @@ async def get_dashboard_user(request: FastAPIRequest) -> User | None:
     # Route through FastAPI DI so tests' dependency_overrides apply
     resolver = request.app.dependency_overrides.get(get_db_backend, get_db_backend)
     async for db in resolver():
-        return await db.get(User, payload["sub"])
+        user = await db.get(User, payload["sub"])
+        if user and not _is_login_allowed(user.email):
+            logger.warning("rejected dashboard session for non-allowlisted account")
+            return None
+        return user
     return None

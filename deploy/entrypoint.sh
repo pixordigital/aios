@@ -72,22 +72,45 @@ if [ "$alembic_rc" -ne 0 ]; then
     alembic upgrade heads > /tmp/alembic.log 2>&1
     alembic_rc=$?
     if [ "$alembic_rc" -ne 0 ]; then
-      # Reconcile. This deployment materialises the schema through
-      # init_db() -> Base.metadata.create_all on every container start, so a
-      # database created that way has no alembic_version row and replaying the
-      # whole chain fails on the first already-existing table. That is not a
-      # broken schema -- it is an un-stamped one.
+      # Reconcile, but ONLY for a genuinely un-stamped database.
       #
-      # Stamp head, then re-run the upgrade so any genuinely pending revision
-      # still applies. Only refuse to start if the re-run also fails, which
-      # means something real is wrong.
-      echo "[entrypoint] WARNING: replay failed. Schema is managed by create_all;"
-      echo "[entrypoint]          stamping head and re-running to apply anything pending."
-      alembic stamp head > /tmp/alembic_stamp.log 2>&1 || {
-        echo "[entrypoint] FATAL: alembic stamp head failed."
-        cat /tmp/alembic_stamp.log
+      # init_db() -> Base.metadata.create_all runs on every container start, so
+      # a database created that way has no alembic_version row and replaying the
+      # chain fails on the first already-existing table. That is the one case
+      # where stamping head is correct.
+      #
+      # It is NOT correct when a version row exists and a revision genuinely
+      # failed: stamping head there marks every pending revision as applied
+      # without running it, and create_all never ALTERs an existing table, so
+      # the release ships missing columns with a 200 from /health/ready and an
+      # UndefinedColumnError on first use.
+      # `alembic current` prints the applied revision, or nothing when the
+      # database has no alembic_version row (schema came from create_all).
+      # No inline python here: a heredoc inside $( ) inside `set +e` is a
+      # silent-failure shape, and this only has to distinguish empty from not.
+      _current=$(alembic current 2>/dev/null | tr -d '[:space:]')
+      # "a0deb8aa39f7(head)" -> "a0deb8aa39f7"; "(head)" -> ""
+      _current=${_current%%(*}
+      if [ -z "$_current" ]; then
+        _has_version=0
+      else
+        _has_version=1
+      fi
+
+      if [ "$_has_version" = "0" ]; then
+        echo "[entrypoint] no alembic_version row (schema came from create_all); stamping head."
+        alembic stamp head > /tmp/alembic_stamp.log 2>&1 || {
+          echo "[entrypoint] FATAL: alembic stamp head failed."
+          cat /tmp/alembic_stamp.log
+          exit 1
+        }
+      else
+        echo "[entrypoint] FATAL: migration failed on a stamped database (revision $_current)."
+        echo "[entrypoint]        Refusing to stamp head — that would mark the failed revision"
+        echo "[entrypoint]        applied without running it, leaving the schema incomplete."
+        cat /tmp/alembic.log
         exit 1
-      }
+      fi
       alembic upgrade head > /tmp/alembic.log 2>&1
       alembic_rc=$?
       if [ "$alembic_rc" -ne 0 ]; then

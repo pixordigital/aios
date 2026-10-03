@@ -22,6 +22,12 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 WORKDIR /app
 COPY . .
 
+# Compose mounts the persistent volume at /data; settings.app_data_dir defaulted
+# to "./data" (= /app/data), so artifacts, per-agent vector memory, skill
+# workspace and tracing metrics all landed on the container overlay and were
+# destroyed on every redeploy.
+ENV AIOS_APP_DATA_DIR=/data
+
 RUN mkdir -p /data/artifacts && \
     # non-root user
     groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser && \

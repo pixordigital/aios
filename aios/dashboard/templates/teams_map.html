@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block content %}
+{% include "_teams_tabs.html" %}
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
+    <div><h1>Mapa de equipes</h1><p class="text-sm text-secondary mt-1" id="map-summary"></p></div>
+    <div style="display:flex;gap:0.5rem">
+        <button class="btn btn-ghost btn-sm" id="zoom-in" title="Aproximar">+</button>
+        <button class="btn btn-ghost btn-sm" id="zoom-out" title="Afastar">−</button>
+        <button class="btn btn-ghost btn-sm" id="zoom-reset" title="Enquadrar tudo">⤢</button>
+    </div>
+</div>
+<div class="flex-center gap-3 mb-3" style="flex-wrap:wrap;font-size:0.75rem;color:var(--text-secondary)">
+    <span><span style="color:var(--amber)">━</span> orquestrador</span>
+    <span><span style="color:var(--accent)">━</span> manager</span>
+    <span><span style="color:var(--text-tertiary)">━</span> membro</span>
+    <span><span style="color:var(--amber)">┄</span> agente em 2+ equipes</span>
+    <span><span style="color:var(--green)">●</span> ativo</span>
+</div>
+<div class="card" style="padding:0;overflow:hidden">
+    <svg id="team-map" style="width:100%;height:70vh;display:block;cursor:grab;touch-action:none"></svg>
+</div>
+<p class="text-sm text-secondary mt-2">Arraste para navegar, scroll para zoom, clique num nó para editar.</p>
+<script>
+(function () {
+    const data = {{ graph | tojson }};
+    const svg = document.getElementById("team-map");
+    const NS = "http://www.w3.org/2000/svg";
+    const summary = document.getElementById("map-summary");
+    const teams = data.nodes.filter(n => n.kind === "team");
+    const agentsById = Object.fromEntries(data.nodes.filter(n => n.kind === "agent").map(n => [n.id, n]));
+    summary.textContent = teams.length + " equipe" + (teams.length === 1 ? "" : "s") + " · " +
+        Object.keys(agentsById).length + " agentes · " + data.edges.length + " relações";
+    if (!teams.length && !Object.keys(agentsById).length) {
+        svg.innerHTML = "";
+        const t = document.createElementNS(NS, "text");
+        t.setAttribute("x", 40); t.setAttribute("y", 60);
+        t.setAttribute("fill", "var(--text-secondary)");
+        t.textContent = "Nenhuma equipe ainda — crie uma na aba Equipes.";
+        svg.appendChild(t);
+        return;
+    }
+
+    // ── layout: one column per team, orphans in a dashed "Sem equipe" column
+    const COL_W = 300, TEAM_W = 264, TEAM_H = 64, AG_W = 244, AG_H = 46, GAP = 14, TOP = 24;
+    const memberTeams = {}; // agent node id -> [team node ids]
+    data.edges.forEach(e => {
+        if (e.kind === "member" && agentsById[e.to]) {
+            (memberTeams[e.to] = memberTeams[e.to] || []).push(e.from);
+        }
+    });
+    const orphans = Object.keys(agentsById).filter(id =>
+        !data.edges.some(e => (e.kind !== "member" && (e.from === id || e.to === id)) || (e.kind === "member" && e.to === id)));
+    const cols = teams.map(t => ({ team: t, agents: [] }));
+    const placed = new Set();
+    const colOf = tid => cols.find(c => c.team && ("team:" + c.team.id) === tid);
+    data.edges.forEach(e => {
+        if (e.kind !== "member" || !agentsById[e.to] || placed.has(e.to)) return;
+        const target = colOf(e.from);
+        if (target) { target.agents.push(e.to); placed.add(e.to); }
+    });
+    // leadership edges reference agents too — make sure they render in-column
+    data.edges.forEach(e => {
+        if ((e.kind === "orchestrator" || e.kind === "manager") && agentsById[e.from] && !placed.has(e.from)) {
+            const target = colOf(e.to);
+            if (target) { target.agents.unshift(e.from); placed.add(e.from); }
+        }
+    });
+    if (orphans.length) cols.push({ team: null, agents: orphans });
+
+    const pos = {}; // node id -> {x, y, w, h}
+    let maxH = 0;
+    cols.forEach((col, i) => {
+        const x = 20 + i * COL_W;
+        let y = TOP;
+        if (col.team) {
+            pos["team:" + col.team.id] = { x: x + (COL_W - TEAM_W) / 2, y, w: TEAM_W, h: TEAM_H };
+            y += TEAM_H + 28;
+        } else {
+            y += 8;
+        }
+        col.agents.forEach(aid => {
+            pos[aid] = { x: x + (COL_W - AG_W) / 2, y, w: AG_W, h: AG_H };
+            y += AG_H + GAP;
+        });
+        // orphan agents never placed above (no edges at all) still need a slot
+        if (!col.team) {
+            Object.keys(agentsById).forEach(aid => {
+                if (!pos[aid]) { pos[aid] = { x: x + (COL_W - AG_W) / 2, y, w: AG_W, h: AG_H }; y += AG_H + GAP; }
+            });
+        }
+        maxH = Math.max(maxH, y);
+    });
+    const fullW = 40 + cols.length * COL_W;
+
+    const g = document.createElementNS(NS, "g");
+    svg.appendChild(g);
+    const el = (tag, attrs, parent) => {
+        const n = document.createElementNS(NS, tag);
+        for (const k in attrs) n.setAttribute(k, attrs[k]);
+        (parent || g).appendChild(n);
+        return n;
+    };
+    const esc = s => String(s == null ? "" : s);
+    const EDGE_COLOR = { orchestrator: "var(--amber)", manager: "var(--accent)", member: "var(--text-tertiary)" };
+    const EDGE_LABEL = { orchestrator: "orquestra", manager: "gerencia", member: "membro de" };
+
+    // orphan column header
+    if (orphans.length) {
+        const x = 20 + (cols.length - 1) * COL_W + (COL_W - TEAM_W) / 2;
+        const r = el("rect", { x, y: TOP - 4, width: TEAM_W, height: 30, rx: 8, fill: "none", stroke: "var(--border)", "stroke-dasharray": "5 4" });
+        const t = el("text", { x: x + 12, y: TOP + 16, fill: "var(--text-secondary)", "font-size": 12 });
+        t.textContent = "Sem equipe (" + orphans.length + ")";
+    }
+
+    // edges under nodes
+    data.edges.forEach(e => {
+        const a = pos[e.from], b = pos[e.to];
+        if (!a || !b) return;
+        const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+        const shared = e.kind === "member" && agentsById[e.to] && (memberTeams[e.to] || []).length > 1;
+        // leadership edges run agent(bottom) → team(top); flip so lines flow downward
+        const flip = (e.kind === "orchestrator" || e.kind === "manager");
+        const sx = flip ? x2 : x1, sy = flip ? y2 : y1, ex = flip ? x1 : x2, ey = flip ? y1 : y2;
+        const my = (sy + ey) / 2;
+        const line = el("path", {
+            d: `M ${sx} ${sy} C ${sx} ${my}, ${ex} ${my}, ${ex} ${ey}`,
+            fill: "none", stroke: EDGE_COLOR[e.kind] || "var(--text-tertiary)",
+            "stroke-width": e.kind === "member" ? 1 : 1.75,
+            ...(shared ? { "stroke-dasharray": "5 4" } : {}),
+        });
+        const title = document.createElementNS(NS, "title");
+        const an = agentsById[flip ? e.from : e.to] || agentsById[flip ? e.to : e.from];
+        title.textContent = EDGE_LABEL[e.kind] || e.kind;
+        line.appendChild(title);
+    });
+
+    const label = (x, y, text, size, fill, anchor) => {
+        const t = el("text", { x, y, fill: fill || "var(--text)", "font-size": size || 13, "text-anchor": anchor || "start" });
+        t.textContent = text.length > 30 ? text.slice(0, 29) + "…" : text;
+        const full = document.createElementNS(NS, "title");
+        full.textContent = text;
+        t.appendChild(full);
+        return t;
+    };
+
+    // team nodes
+    teams.forEach(t => {
+        const p = pos["team:" + t.id];
+        if (!p) return;
+        const grp = el("g", { style: "cursor:pointer" });
+        el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 10, fill: "var(--bg-raised)", stroke: "var(--border-accent)", "stroke-width": 1.25 }, grp);
+        label(p.x + 12, p.y + 25, t.label, 14, "var(--text)");
+        label(p.x + 12, p.y + 45, t.strategy || "—", 11, "var(--text-secondary)");
+        grp.addEventListener("click", () => { window.location.href = t.url; });
+    });
+    // agent nodes
+    Object.entries(pos).forEach(([id, p]) => {
+        const n = agentsById[id];
+        if (!n) return;
+        const grp = el("g", { style: "cursor:pointer" });
+        el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 9, fill: "var(--bg-raised)", stroke: "var(--border)", "stroke-width": 1 }, grp);
+        const active = (n.status || "") === "active";
+        el("circle", { cx: p.x + 14, cy: p.y + p.h / 2, r: 4, fill: active ? "var(--green)" : "var(--text-tertiary)" }, grp);
+        label(p.x + 26, p.y + 20, n.label, 12);
+        const tags = [];
+        if (n.shared) tags.push("⧉ 2+ equipes");
+        if (n.orphan) tags.push("sem equipe");
+        if (tags.length) label(p.x + 26, p.y + 35, tags.join(" · "), 10, "var(--amber)");
+        const title = document.createElementNS(NS, "title");
+        title.textContent = n.label + (active ? " (ativo)" : "") + (n.shared ? " — em várias equipes" : "");
+        grp.appendChild(title);
+        grp.addEventListener("click", () => { window.location.href = n.url; });
+    });
+
+    // ── pan & zoom (viewBox; no library)
+    let vx = 0, vy = 0, vw = Math.max(fullW, 300), vh = maxH + 40;
+    const apply = () => svg.setAttribute("viewBox", `${vx} ${vy} ${vw} ${vh}`);
+    const fit = () => { vx = 0; vy = 0; vw = Math.max(fullW, 300); vh = maxH + 40; apply(); };
+    const center = () => {
+        const r = svg.getBoundingClientRect();
+        return [r.left + r.width / 2, r.top + r.height / 2];
+    };
+    fit();
+    let drag = null;
+    svg.addEventListener("pointerdown", ev => {
+        drag = { x: ev.clientX, y: ev.clientY, vx, vy };
+        svg.setPointerCapture(ev.pointerId);
+        svg.style.cursor = "grabbing";
+    });
+    svg.addEventListener("pointermove", ev => {
+        if (!drag) return;
+        const r = svg.getBoundingClientRect();
+        vx = drag.vx - (ev.clientX - drag.x) * (vw / r.width);
+        vy = drag.vy - (ev.clientY - drag.y) * (vh / r.height);
+        apply();
+    });
+    const endDrag = () => { drag = null; svg.style.cursor = "grab"; };
+    svg.addEventListener("pointerup", endDrag);
+    svg.addEventListener("pointercancel", endDrag);
+    const zoomAt = (factor, cx, cy) => {
+        const r = svg.getBoundingClientRect();
+        const px = (cx - r.left) / r.width, py = (cy - r.top) / r.height;
+        const nvW = Math.min(Math.max(vw * factor, 200), fullW * 2);
+        const nvH = nvW * (vh / vw);
+        vx = vx + (vw - nvW) * px;
+        vy = vy + (vh - nvH) * py;
+        vw = nvW; vh = nvH;
+        apply();
+    };
+    svg.addEventListener("wheel", ev => {
+        ev.preventDefault();
+        zoomAt(ev.deltaY > 0 ? 1.15 : 1 / 1.15, ev.clientX, ev.clientY);
+    }, { passive: false });
+    document.getElementById("zoom-in").addEventListener("click", () => { const [x, y] = center(); zoomAt(1 / 1.25, x, y); });
+    document.getElementById("zoom-out").addEventListener("click", () => { const [x, y] = center(); zoomAt(1.25, x, y); });
+    document.getElementById("zoom-reset").addEventListener("click", fit);
+})();
+</script>
+{% endblock %}

@@ -15,6 +15,7 @@ class PythonSandboxInput(BaseModel):
 
 class PythonSandboxTool(BaseTool):
     name = "python_sandbox"
+    input_model = PythonSandboxInput
     description = "Executa Python isolado (pandas, matplotlib, numpy). Use print() para resultado."
 
     async def run(self, code: str) -> dict:

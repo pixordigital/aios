@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import multiprocessing
+import multiprocessing.process
 import time
 from dataclasses import dataclass, field
 
@@ -67,7 +68,7 @@ class SubAgentPool:
 
     def __init__(self, max_concurrent: int = 5):
         self._max = max_concurrent
-        self._active: dict[str, multiprocessing.Process] = {}
+        self._active: dict[str, multiprocessing.process.BaseProcess] = {}
         self._results: dict[str, SubagentResult] = {}
 
     async def spawn(self, agent_config: dict, task_prompt: str,
@@ -77,7 +78,12 @@ class SubAgentPool:
         task_id = str(uuid.uuid4())[:8]
 
         queue = multiprocessing.Queue()
-        p = multiprocessing.Process(
+        # spawn, not fork: a forked child inherits this process's live asyncio
+        # loop and the module-level SQLAlchemy engine/connection pool, then
+        # calls asyncio.run() on top of it. Reusing an inherited pool across
+        # fork corrupts it in both directions. spawn re-imports clean.
+        ctx = multiprocessing.get_context("spawn")
+        p = ctx.Process(
             target=_subagent_worker,
             args=(task_id, agent_config, task_prompt, queue),
             daemon=True,
@@ -89,11 +95,14 @@ class SubAgentPool:
         self._results[task_id] = result
 
         start = time.time()
-        p.join(timeout=timeout)
+        # Off the event loop: a synchronous join parked the whole ARQ worker
+        # for up to `timeout` seconds, so no other inbound message was served
+        # and no websocket heartbeat fired while one subagent ran.
+        await asyncio.to_thread(p.join, timeout)
 
         if p.is_alive():
             p.terminate()
-            p.join(timeout=5)
+            await asyncio.to_thread(p.join, 5)
             result.status = "timeout"
             result.error = f"Subagent timed out after {timeout}s"
         elif not queue.empty():

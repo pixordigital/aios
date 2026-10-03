@@ -39,7 +39,6 @@ File: `tests/test_channel_types.py`
 | whatsapp | 6 |
 | evolution | 6 |
 | voice | 6 |
-| discord | 6 |
 | slack | 6 |
 | email | 6 |
 
@@ -59,7 +58,7 @@ File: `tests/test_channel_types.py`
 - **Alembic autogen:** batch mode for SQLite, single head `c9a1b2c3d4e6` (metrics/versions/datasets/eval_runs)
 
 ### P1: Webhooks + Storage (d6ae12a)
-- **Voice/Discord/Slack/Email webhooks:** inbound dispatch + HMAC verify (`aios/api/*_webhook.py`, registered in `aios/main.py:246-253`)
+- **Voice/Slack/Email webhooks:** inbound dispatch + HMAC verify (`aios/api/*_webhook.py`, registered in `aios/main.py:246-253`)
 - **Supabase/S3 creds:** `secrets API` allows storage+smtp+s3 keys, `get_org_secret` reads both plain + encrypted, `storage` warns if S3 missing bucket/keys
 - **Email SMTP test:** channel test endpoint supports SMTP verification
 - **Migration rebase:** `c9a1b2c3d4e6` rebased to `f9a2b3c4d5e6` — single head, `alembic upgrade head` clean on SQLite
@@ -72,7 +71,7 @@ File: `tests/test_channel_types.py`
 |------|--------|
 | Auth (JWT, refresh, org-scoped) | ✅ |
 | Rate limiting (Redis + memory fallback) | ✅ |
-| Webhook signatures (WA, Evolution, Voice, Discord, Slack) | ✅ |
+| Webhook signatures (WA, Evolution, Voice, Slack) | ✅ |
 | CSRF protection | ✅ |
 | Error schema (RFC 7807) | ✅ |
 | Pagination | ✅ |
@@ -86,7 +85,7 @@ File: `tests/test_channel_types.py`
 | Agent metrics/versions tables | ✅ migrated `c9a1b2c3d4e6` |
 | Datasets/eval_runs tables | ✅ migrated `c9a1b2c3d4e6` |
 | Voice channel webhook | ✅ `POST /api/voice/webhook` |
-| Discord/Slack/Email webhooks | ✅ |
+| Slack/Email webhooks | ✅ |
 | Email channel SMTP test | ✅ |
 
 ---

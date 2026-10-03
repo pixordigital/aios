@@ -202,7 +202,15 @@ class AgentScheduler:
         # process QUEUED when it refuses at capacity, and the run then aborts —
         # decrementing anyway drove the counter below the real concurrency and
         # the ceiling stopped meaning anything.
-        if self._running.pop(agent_id, None) is not None:
+        # Release exactly one slot, and only if this process still holds any.
+        # `_running` is keyed by agent_id, so two overlapping runs of the SAME
+        # agent (orchestrator broadcast, two ARQ jobs for one number) collapse
+        # into one entry. The second terminate() then popped nothing and skipped
+        # the decrement, leaking a slot per overlap until the ceiling was hit
+        # and every later run was refused with "scheduler at capacity".
+        # ponytail: still agent-keyed; a full run-id key would be exact but this
+        # is the smallest change that stops the permanent leak.
+        if self._running.pop(agent_id, None) is not None or self._running_count > len(self._running):
             self._running_count = max(0, self._running_count - 1)
 
         hctx = HookContext()

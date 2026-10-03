@@ -17,20 +17,19 @@ async def ensure_vector_extension():
             await s.commit()
             RAG_STATUS["vector"] = True
             try:
-                await s.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS idx_memories_embedding_hnsw ON memories USING hnsw (embedding vector_cosine_ops) WITH (m=16, ef_construction=64)"
-                    )
-                )
+                # `memories` has no `embedding` column (embeddings live in the
+                # per-agent SQLite store, or in extra_data->'embedding'), so the
+                # HNSW index could never be created and `hnsw` stayed False
+                # forever while claiming readiness. Index what exists.
                 await s.execute(
                     text(
                         "CREATE INDEX IF NOT EXISTS idx_memories_org_id ON memories (org_id)"
                     )
                 )
                 await s.commit()
-                RAG_STATUS["hnsw"] = True
+                RAG_STATUS["hnsw"] = False
                 RAG_STATUS["fallback"] = False
-                logger.info("pgvector HNSW ready")
+                logger.info("vector extension ready; embeddings stored per-agent in SQLite")
             except Exception as e:
                 logger.warning("pgvector HNSW index failed, fallback sqlite: %s", e)
                 RAG_STATUS["fallback"] = True
@@ -40,26 +39,83 @@ async def ensure_vector_extension():
         RAG_STATUS["fallback"] = True
 
 
-async def hybrid_search(org_id: str, query: str, top_k: int = 5):
+async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str = ""):
+    """Semantic search over stored memories.
+
+    Two stores exist and this used to read neither correctly: it selected
+    `memories.embedding` from Postgres, but that column has never existed
+    (`Memory` carries content + extra_data only), so every call raised
+    UndefinedColumn, was swallowed, and returned []. An agent with a knowledge
+    base therefore reported "not found" for everything and hallucinated instead,
+    with ok:true and no error anywhere.
+
+    - agent_id given -> the per-agent SQLite vector store, which is where
+      MemoryManager._store_vector actually writes the embeddings.
+    - no agent_id -> Postgres rows that carry `extra_data->'embedding'`, which
+      is the format etl_url writes. Org-filtered.
+    """
     try:
         from aios.core.memory import _embed
 
         q = _embed(query)
+
+        if agent_id:
+            from aios.core.memory import _vec_db
+
+            conn = _vec_db(agent_id)
+            rows = conn.execute(
+                "SELECT id, content, embedding FROM memories ORDER BY rowid DESC LIMIT 500"
+            ).fetchall()
+            import json as _json
+
+            scored = []
+            for rid, content, emb in rows:
+                if not emb:
+                    continue
+                try:
+                    stored = _json.loads(emb)
+                except (TypeError, ValueError):
+                    continue
+                dot = sum(a * b for a, b in zip(q, stored))
+                scored.append((dot, rid, content))
+            scored.sort(key=lambda x: -x[0])
+            return [
+                {"id": r[1], "content": r[2], "score": round(float(r[0]), 4)}
+                for r in scored[:top_k]
+            ]
+
+        if not org_id:
+            return []
+
         q_str = "[" + ",".join(f"{x:.6f}" for x in q) + "]"
         async with async_session() as s:
-            # tune HNSW recall — ef_search higher = melhor recall para org filtrado
             try:
                 await s.execute(text("SET LOCAL hnsw.ef_search = 100"))
             except Exception:
                 pass
             rows = await s.execute(
                 text(
-                    "SELECT id, content, 1 - (embedding <=> CAST(:q AS vector)) as score "
-                    "FROM memories WHERE org_id=:org ORDER BY embedding <=> CAST(:q AS vector) LIMIT :k"
+                    "SELECT id, content, extra_data->>'embedding' AS emb "
+                    "FROM memories WHERE org_id=:org "
+                    "AND extra_data->>'embedding' IS NOT NULL LIMIT 500"
                 ),
-                {"q": q_str, "org": org_id, "k": top_k},
+                {"org": org_id},
             )
-            return [{"id": r[0], "content": r[1], "score": float(r[2])} for r in rows]
+            import json as _json
+
+            scored = []
+            for rid, content, emb in rows:
+                try:
+                    stored = _json.loads(emb)
+                except (TypeError, ValueError):
+                    continue
+                dot = sum(a * b for a, b in zip(q, stored))
+                scored.append((dot, rid, content))
+            scored.sort(key=lambda x: -x[0])
+            return [
+                {"id": r[1], "content": r[2], "score": round(float(r[0]), 4)}
+                for r in scored[:top_k]
+            ]
     except Exception as e:
-        logger.debug("hybrid_search fallback: %s", e)
+        logger.warning("hybrid_search failed: %s", e)
         return []

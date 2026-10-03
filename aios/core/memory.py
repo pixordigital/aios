@@ -111,11 +111,22 @@ class Extractor:
     identity), or rubric (expectation/standard). Stores type in DB Memory.type.
     """
 
-    KEY_PATTERNS = ["remember", "note", "important", "my name is", "i am",
+    # PT-BR first: the product is Brazilian and every shipped template is in
+    # Portuguese, so an English-only list meant the extractor never fired on real
+    # traffic and long-term memory stayed empty.
+    KEY_PATTERNS = ["lembre", "lembra", "anote", "nota:", "importante", "meu nome",
+                    "meu nome é", "eu sou", "não esqueça", "nao esqueça", "guarde",
+                    "salve", "prefiro", "sempre que", "chave",
+                    "remember", "note", "important", "my name is", "i am",
                     "don't forget", "save this", "key fact", "user prefers"]
-    SKILL_PATTERNS = ["always", "never", "whenever", "how to", "steps", "workflow",
+    SKILL_PATTERNS = ["sempre", "nunca", "jamais", "quando ", "como fazer",
+                      "passo a passo", "etapas", "fluxo", "você deve",
+                      "vc deve", "não esqueça de",
+                      "always", "never", "whenever", "how to", "steps", "workflow",
                       "you should", "make sure to", "remember to"]
-    RUBRIC_PATTERNS = ["should", "must", "expected", "standard", "quality",
+    RUBRIC_PATTERNS = ["deve", "precisa", "esperado", "padrão", "qualidade",
+                       "eu espero", "quero que", "certifique-se",
+                       "should", "must", "expected", "standard", "quality",
                        "i expect", "i want you to", "make sure"]
 
     def extract(self, role: str, content: str) -> dict | None:
@@ -196,11 +207,32 @@ class MemoryManager:
         self._buffers: dict[str, list[dict]] = defaultdict(list)
         self._loaded: set[str] = set()
         self._summary_interval = 20
+        # Count of buffer messages dropped since the last tier-2 summarize.
+        # A per-conversation counter would be more precise, but drops are
+        # serialized per agent and the summarize itself is LLM-batched.
+        self._dropped_since_summary = 0
         # pipeline stages
         self.extractor = Extractor()
         self.injector = Injector()
         self.formatter = Formatter()
         self.write_barrier = WriteBarrier(min_interval=2.0)
+
+    async def note_user_turn(self, conversation_id: str, content: str) -> None:
+        """Extract long-term memory from a user turn without touching the buffer.
+
+        The buffer already holds the user row — it is loaded from the messages
+        table by `_load_from_db` and appended again by `_build_context` — so this
+        only feeds the extractor. Without it `add()` was the sole extraction
+        trigger and every production caller passed "assistant" or "system", while
+        `Extractor.extract` returns None for anything but "user": the vector
+        store stayed empty, `get_context_injections` always returned [], and the
+        whole extract→inject→format pipeline was inert.
+        """
+        if not content:
+            return
+        extracted = self.extractor.extract("user", content)
+        if extracted and self.write_barrier.allow(f"extract:{conversation_id}"):
+            await self._store_vector(f"[{extracted['type']}] {extracted['content']}")
 
     async def add(self, conversation_id: str, role: str, content: str) -> None:
         if not content:
@@ -215,10 +247,15 @@ class MemoryManager:
 
         # tier 1: sliding window
         max_short = 50
-        if len(self._buffers[conversation_id]) > max_short:
+        while len(self._buffers[conversation_id]) > max_short:
             removed = self._buffers[conversation_id].pop(0)
-            # tier 2: auto-summarize when buffer fills
-            if len(self._buffers[conversation_id]) % self._summary_interval == 0:
+            # tier 2: auto-summarize every _summary_interval dropped messages.
+            # The old gate was `len(buffer) % 20 == 0`, but the buffer is popped
+            # back to exactly 50 every time, and 50 % 20 == 10 — never zero, so
+            # summarization never ran once.
+            self._dropped_since_summary += 1
+            if self._dropped_since_summary >= self._summary_interval:
+                self._dropped_since_summary = 0
                 await self._summarize(conversation_id, removed["content"])
 
     async def get_recent(self, conversation_id: str, limit: int = 20,
@@ -396,6 +433,21 @@ class MemoryManager:
     async def _store_vector(self, content: str) -> None:
         """Store content + embedding in vector DB. Also indexes in FTS5."""
         import uuid
+
+        from aios.core.content_scan import check_store_text
+
+        # Single choke point for all vector writes (user turns, extractions,
+        # summaries): a refused write skips persistence only — the reply
+        # already went out, so failing closed here can never break a run.
+        import logging as _logging
+
+        scanned = check_store_text(content or "", source=f"memory:{self.agent_id}")
+        if scanned is None:
+            _logging.getLogger(__name__).warning(
+                "memory store refused for agent %s", self.agent_id
+            )
+            return
+        content = scanned
         conn = _vec_db(self.agent_id)
         vec = _embed(content)
         rid = str(uuid.uuid4())
@@ -438,6 +490,13 @@ class MemoryManager:
             .limit(50)
         )
         for msg in result.scalars().all():
+            # role="tool" rows are an audit trail, not conversation turns. They
+            # were replayed here as plain {"role": "tool"} messages with no
+            # tool_call_id and no preceding assistant.tool_calls, which every
+            # chat-completions API rejects — so any agent that had used one tool
+            # broke on its second turn and the customer got the canned apology.
+            if msg.role == "tool":
+                continue
             self._buffers[conversation_id].append({
                 "role": msg.role,
                 "content": msg.content,

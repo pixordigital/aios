@@ -1,6 +1,7 @@
 """HTTP GET tool — fetch URL content for the agent."""
 
 import logging
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 

@@ -62,12 +62,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env || true
-      - run: docker compose up -d
+      # Pin the file. Bare `docker compose up` resolved to docker-compose.yml
+      # (the dev stack, which needs a pre-existing external Supabase network),
+      # so this job never exercised the Coolify compose that is actually
+      # deployed — every env-var/service-name omission in it shipped green.
+      - run: docker compose -f docker-compose.coolify.yml config -q
+      - run: docker compose -f docker-compose.coolify.yml up -d
       - run: |
           for i in {1..30}; do
             if curl -sf http://localhost:8777/health/ready; then echo "Healthy"; exit 0; fi
             sleep 2
           done
           echo "Timed out"; exit 1
+      # The worker is where agent runs actually happen. An app-only smoke test
+      # passed while the worker was crash-looping on Redis.
+      - run: |
+          for i in {1..30}; do
+            st=$(docker compose -f docker-compose.coolify.yml ps -q worker | head -1)
+            if [ -n "$st" ] && [ "$(docker inspect -f '{{.State.Running}}' "$st")" = "true" ]; then echo "Worker running"; exit 0; fi
+            sleep 2
+          done
+          echo "Worker not running"; exit 1
       - if: failure()
-        run: docker compose logs app
+        run: docker compose -f docker-compose.coolify.yml logs app worker

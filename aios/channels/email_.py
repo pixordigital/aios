@@ -2,6 +2,7 @@
 import asyncio
 import email
 import logging
+import uuid
 from email.mime.text import MIMEText
 
 from aios.channels.base import Channel, OutboundMessage
@@ -19,6 +20,8 @@ class EmailChannel(Channel):
         self._config = connection.config if connection else {}
         self._poll_task: asyncio.Task | None = None
         self._running = False
+        # Redis key currently holding this mailbox's poll lease.
+        self._lock_key = ""
 
     async def send(self, message: OutboundMessage) -> str | None:
         smtp_server = self._config.get("smtp_server", "")
@@ -33,7 +36,20 @@ class EmailChannel(Channel):
             msg = MIMEText(message.text)
             msg["Subject"] = f"Re: {message.conversation_id[:12]}"
             msg["From"] = email_addr
-            to = self._config.get("last_from", "") or email_addr
+            # Reply to the sender recorded on the conversation, not to
+            # `last_from` (written nowhere in the repo) and never to ourselves:
+            # the old fallback addressed every reply to the agent's own mailbox,
+            # so the customer never received it.
+            extra = message.extra_data or {}
+            to = (
+                extra.get("from_email")
+                or extra.get("from")
+                or self._config.get("last_from")
+                or ""
+            )
+            if not to:
+                logger.warning("Email reply has no recipient in extra_data")
+                return None
             msg["To"] = to
 
             await aiosmtplib.send(
@@ -102,6 +118,32 @@ class EmailChannel(Channel):
         overall_ok = all(r.get("ok", False) for r in results.values())
         return {"ok": overall_ok, "message": "Email channel test", "details": results}
 
+    async def _claim_mailbox(self, lock_key: str) -> bool:
+        """Take a short-TTL Redis lock on this mailbox. True when we may poll.
+
+        ponytail: SET NX EX, refreshed every cycle. Fine while the loop is one
+        poller per process; a Redis-native lease (or moving the poller into the
+        ARQ worker) is the upgrade if the TTL ever has to span a restart.
+        """
+        try:
+            from aios.tasks.queue import get_redis_pool
+
+            pool = await get_redis_pool()
+            key = f"{lock_key}:{uuid.uuid4().hex[:8]}"
+            # 60s > the 30s poll interval, so a healthy holder never expires
+            # between cycles and a dead process loses the mailbox in a minute.
+            won = await pool.set(key, 1, nx=True, ex=60)
+            if won:
+                self._lock_key = key
+                return True
+            return False
+        except Exception:
+            # Redis down: the platform cannot run agents anyway, and blocking
+            # here would silently stop email. Let this process poll alone
+            # rather than trading a rare duplicate for guaranteed silence.
+            logger.warning("IMAP lock unavailable; polling without it", exc_info=True)
+            return True
+
     async def _poll_loop(self):
         """Poll IMAP inbox every 30s for new messages."""
         imap_server = self._config.get("imap_server", "")
@@ -112,7 +154,20 @@ class EmailChannel(Channel):
             return
 
         seen_uids: set[str] = set()
+        # One poller per mailbox, not per process. `main.py` starts every active
+        # channel inside the FastAPI lifespan and gunicorn runs --workers 2, so
+        # each worker spawned its own IMAP loop. `seen_uids` is in-process, both
+        # loops SEARCH UNSEEN and saw the same UID, and the customer got two
+        # agent replies and two rounds of LLM spend for one inbound email.
+        # Redis is already required, so claim the mailbox with a short TTL lock.
+        lock_key = f"aios:imap-poll:{email_addr}"
         while self._running:
+            try:
+                if not await self._claim_mailbox(lock_key):
+                    await asyncio.sleep(30)
+                    continue
+            except Exception:
+                logger.debug("IMAP lock check failed", exc_info=True)
             try:
                 import imaplib
 
@@ -145,27 +200,31 @@ class EmailChannel(Channel):
                         body = msg.get_payload(decode=True).decode(errors="replace")
 
                     logger.info("Email from %s: %s", from_addr, subject[:60])
-                    # route to agent
-                    if self.agent_or_team:
-                        try:
-                            if hasattr(self.agent_or_team, "agents"):  # Team
-                                from aios.core.orchestrator import TeamOrchestrator
-                                orch = TeamOrchestrator(self.agent_or_team, list(self.agent_or_team.agents))
-                                reply = await orch.handle_message("email_" + uid_str, body)
-                            else:  # single Agent
-                                from aios.core.agent import AgentRuntime
-                                runtime = AgentRuntime(self.agent_or_team)
-                                reply = await runtime.run("email_" + uid_str, body)
+                    # Route through dispatch_inbound like every other channel.
+                    # This used to call AgentRuntime inline with
+                    # "email_<uid>" as the conversation id: no Conversation row,
+                    # no Message rows, no check_org_limits, no delivery retry
+                    # and no DLQ — a failed reply vanished into a log line, and
+                    # the agent's answers were invisible to the inbox.
+                    from aios.core.dispatch import dispatch_inbound
 
-                            if reply:
-                                outbound = OutboundMessage(
-                                    conversation_id="email_" + uid_str,
-                                    text=reply,
-                                    channel_connection_id=self.connection.id if self.connection else "",
-                                )
-                                await self.send(outbound)
-                        except Exception:
-                            logger.exception("Email routing failed")
+                    await dispatch_inbound(
+                        channel_type="email",
+                        channel_connection_id=(
+                            self.connection.id if self.connection else ""
+                        ),
+                        conversation_id="",
+                        text=body,
+                        user_id=from_addr,
+                        extra_data={
+                            "source": "imap",
+                            "subject": subject,
+                            "from_email": from_addr,
+                            # IMAP UID is this provider's stable message id, so
+                            # it is also the inbound dedup key.
+                            "msg_id": f"imap:{self._config.get('email','')}:{uid_str}",
+                        },
+                    )
 
                 mail.logout()
             except Exception:

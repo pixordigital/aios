@@ -16,6 +16,7 @@ class SQLQueryInput(BaseModel):
 
 class SQLQueryTool(BaseTool):
     name = "sql_query"
+    input_model = SQLQueryInput
     description = "Executa SQL SELECT read-only no Postgres (máx 100 linhas). Bloqueia INSERT/UPDATE/DELETE e tabelas de sistema."
 
     _DENY_TABLES = (
@@ -98,6 +99,31 @@ class SQLQueryTool(BaseTool):
         """
         return cls._COMMENT_RE.sub(lambda m: " " * len(m.group(0)), q)
 
+    # Identifiers may be quoted ("agents") or schema-qualified (public.agents).
+    # Both are valid SQL and both name the same table, so a keyword pattern
+    # matched on the raw text let `SELECT * FROM "messages"` and
+    # `FROM public.users` walk straight past both the org-scope check and the
+    # secret-table deny-list. Normalise the identifier instead of the text.
+    _TABLE_REF_RE = re.compile(
+        r"(?:\bFROM\b|\bJOIN\b|\bINTO\b|\bUPDATE\b)\s+"
+        r"((?:\"[^\"]+\"|[A-Za-z_][\w$]*)"
+        r"(?:\s*\.\s*(?:\"[^\"]+\"|[A-Za-z_][\w$]*))*)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _referenced_tables(cls, q: str) -> set[str]:
+        """Lower-cased bare table names in FROM/JOIN/INTO/UPDATE position.
+
+        Quoting and schema qualification are stripped, so `"agents"`,
+        `public.agents` and `agents` all collapse to `agents`.
+        """
+        names: set[str] = set()
+        for raw in cls._TABLE_REF_RE.findall(q):
+            last = raw.split(".")[-1].strip()
+            names.add(last.strip('"').strip("`").lower())
+        return names
+
     # A WHERE clause that can only ever narrow: it must constrain org_id with a
     # literal comparison, and must not contain OR / UNION / OR-with-true, any of
     # which would let the org_id predicate be bypassed by a sibling condition.
@@ -159,15 +185,15 @@ class SQLQueryTool(BaseTool):
         if self._DENY_PATTERN.search(q):
             return {"error": "acesso a tabelas de sistema bloqueado"}
         # deny pg_* table references in FROM/JOIN
-        if re.search(r"(?:FROM|JOIN)\s+pg_\w+", q, re.I):
+        if any(n.startswith("pg_") for n in self._referenced_tables(self._mask(q))):
             return {"error": "tabelas pg_* bloqueadas"}
         # deny credential/PII tables: no org context, so no safe way to scope rows
-        if self._DENY_APP_PATTERN.search(q):
+        if self._referenced_tables(self._mask(q)) & set(self._DENY_APP_TABLES):
             return {"error": "tabela com segredos/PII bloqueada para SQL direto; use a ferramenta do canal"}
         # org scoping: a query touching org-owned tables must filter to the
         # caller's org and no other. This is a guardrail, not a SQL parser —
         # it kills unscoped whole-table reads, the realistic exfil path.
-        if self._ORG_SCOPED_PATTERN.search(q):
+        if self._referenced_tables(self._mask(q)) & set(self._ORG_SCOPED_TABLES):
             err = self._check_org_scope(q)
             if err:
                 return {"error": err}

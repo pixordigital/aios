@@ -73,18 +73,35 @@ async def list_dlq(limit: int = 50) -> list[dict]:
 
 
 async def retry_dlq(entry_id: str) -> dict:
-    """Re-enqueue a DLQ'd job via ARQ. Payload carries the original job args."""
+    """Re-enqueue a DLQ'd job via ARQ. Payload carries the original job args.
+
+    The stored shape is {"args": [...], "kwargs": {...}}, but this passed it as
+    **payload — so arq received zero positional arguments and pushed "args" and
+    "kwargs" in as job keyword arguments. Every replayed job died on a
+    TypeError, while the status had already been flipped to "retried" and
+    committed, so the UI reported it as recovered.
+    """
     async with db_session() as db:
         entry = await db.get(DeadLetter, entry_id)
         if not entry:
             return {"ok": False, "error": "not found"}
-        entry.retried_at = _now()
-        entry.status = "retried"
-        await db.commit()
 
     from aios.tasks.queue import get_redis_pool
+
+    payload = entry.payload or {}
+    args = list(payload.get("args") or [])
+    kwargs = dict(payload.get("kwargs") or {})
+
     pool = await get_redis_pool()
-    await pool.enqueue_job(entry.job_name, **entry.payload)
+    await pool.enqueue_job(entry.job_name, *args, **kwargs)
+
+    # Only now that the job is really queued.
+    async with db_session() as db:
+        row = await db.get(DeadLetter, entry_id)
+        if row:
+            row.retried_at = _now()
+            row.status = "retried"
+            await db.commit()
     return {"ok": True}
 
 

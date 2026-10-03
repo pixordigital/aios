@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRIES = 3
 _BASE_DELAY_S = 5.0
+# Guard deferrals allowed before the message is dead-lettered.
+_MAX_DEFERS = 10
 
 
 async def deliver_message(
@@ -47,8 +49,20 @@ async def deliver_message(
         # suppress the duplicate it existed to prevent. The hour bucket scopes the
         # suppression to a retry window instead of permanently.
         _bucket = _dt.now(_tz.utc).strftime("%Y%m%d%H")
+        # The INBOUND message id is what distinguishes two genuinely separate
+        # sends. Without it the key was sha256(conversation | text | hour), so a
+        # customer asking the same thing twice in one hour got one answer: the
+        # second reply was byte-identical, hit the pre-check below and was
+        # silently dropped — no send, no error, no DLQ. Retries recompute this
+        # from the same extra_data, so they still share one key.
+        _inbound = ""
+        try:
+            _extra_probe = json.loads(extra_data) if isinstance(extra_data, str) else (extra_data or {})
+            _inbound = str(_extra_probe.get("msg_id") or _extra_probe.get("message_id") or "")
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            _inbound = ""
         idempotency_key = _h.sha256(
-            f"{conversation_id}|{text}|{_bucket}".encode("utf-8")
+            f"{conversation_id}|{text}|{_inbound}|{_bucket}".encode("utf-8")
         ).hexdigest()[:32]
 
     # Skip if this exact logical send already completed. The key is a sha256 of
@@ -103,6 +117,30 @@ async def deliver_message(
                     logger.warning("Guard block %s: %s", contact, reason)
                     if "opt-out" in reason:
                         return
+                    # A defer that does not count as an attempt loops forever:
+                    # the retry hits the same guard, defers again, and the
+                    # message never reaches _MAX_RETRIES, never lands in the
+                    # DLQ and produces no operator-visible signal. Count the
+                    # deferral and DLQ once it is exhausted.
+                    if attempt >= _MAX_DEFERS:
+                        from aios.core.dead_letter import write_dlq
+
+                        await write_dlq(
+                            direction="outbound",
+                            channel_type="guard",
+                            job_name="aios.core.delivery.deliver_message",
+                            payload={
+                                "args": [channel_connection_id, conversation_id, text, extra_data],
+                                "kwargs": {},
+                            },
+                            error=f"guard blocked after {attempt} defers: {reason}",
+                            channel_connection_id=channel_connection_id,
+                            conversation_id=conversation_id or None,
+                        )
+                        logger.error(
+                            "Guard deferrals exhausted for conversation %s", conversation_id
+                        )
+                        return
                     from aios.tasks.queue import get_redis_pool as _pool
 
                     pool = await _pool()
@@ -112,8 +150,8 @@ async def deliver_message(
                         conversation_id,
                         text,
                         extra_data,
-                        attempt,
-                        _defer_by=30,
+                        attempt + 1,  # was unchanged, so the defer never counted
+                        _defer_by=30 * attempt,  # back off, not a fixed 30s
                     )
                     return
             except Exception:

@@ -17,6 +17,7 @@ class LeadScoreInput(BaseModel):
 
 class LeadScoringTool(BaseTool):
     name = "lead_score"
+    input_model = LeadScoreInput
     description = "Score BANT 0-100 para MQL→SQL. Retorna score, stage e recomendação."
 
     async def run(

@@ -18,7 +18,7 @@
                 <div>
                     <label>Tipo</label>
                     <select name="channel_type" class="input" onchange="showChannelCreds(this.value)">
-                        {% set types = ['web', 'evolution', 'slack', 'telegram', 'discord', 'email', 'voice'] %}
+                        {% set types = ['web', 'evolution', 'slack', 'telegram', 'email', 'voice'] %}
                         {% for t in types %}
                         <option value="{{ t }}" {% if channel and channel.channel_type == t %}selected{% endif %}>{{ channel_type_label(t) }}</option>
                         {% endfor %}
@@ -37,9 +37,8 @@
             </div>
             <div id="creds-telegram" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div><label>Token do bot</label><input type="text" name="config_telegram_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123:ABC..."></div>
-            </div>
-            <div id="creds-discord" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
-                <div><label>Token do bot</label><input type="text" name="config_discord_token" value="{{ channel.config.get('bot_token', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="MTIz..."></div>
+                <div><label>Chat ID (opcional)</label><input type="text" name="config_telegram_chat_id" value="{{ channel.config.get('chat_id', '') if channel and channel.config else '' }}" class="input input-mono" placeholder="123456789"></div>
+                <p class="text-xs text-tertiary">Sem chat ID fixo, as respostas voltam para quem mandou a mensagem.</p>
             </div>
             <div id="creds-email" class="channel-creds" style="display:none;flex-direction:column;gap:0.75rem">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">

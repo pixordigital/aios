@@ -65,7 +65,7 @@
 
 **Dados:** `Analyst (gpt-4o)` — `sql_query` + `python_sandbox` + `http_request`, `LIMIT 100`, pandas/matplotlib, salva via `storage_save`, explica PT-BR. `Scientist (o3-mini)` — AutoML sklearn, GridSearch, intervalo confiança, trade-off. Pergunta: `Qual SKU vendeu mais?` → SQL → gráfico. `Preveja churn` → modelo → risco.
 
-**Multi-canal nativo:** Mesmo agente, mesma memória, **WhatsApp hero** via `Evolution API v2.3.7 Cloud API oficial Meta` (QR 30s, template, mídia, botões, grupos, webhook). Voice+Texto no mesmo número. `E-mail, Slack, Telegram, Discord, Web` inclusos. **Evolution instances por plano:** Free 0, Starter 1 nº, Pro 3 nºs, Enterprise 10+.
+**Multi-canal nativo:** Mesmo agente, mesma memória, **WhatsApp hero** via `Evolution API v2.3.7 Cloud API oficial Meta` (QR 30s, template, mídia, botões, grupos, webhook). Voice+Texto no mesmo número. `E-mail, Slack, Telegram, Web` inclusos. **Evolution instances por plano:** Free 0, Starter 1 nº, Pro 3 nºs, Enterprise 10+.
 
 **Plataforma:** Multi-tenant org isolation, governança, event-driven + DLQ, OTEL+Grafana, Stripe fixo+metered `voice_minutes/llm_tokens` + webhook usage, white-label total Enterprise `voz.seudominio.com`.
 

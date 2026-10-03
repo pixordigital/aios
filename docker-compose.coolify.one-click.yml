@@ -107,8 +107,11 @@ services:
       AIOS_LLM_PROVIDER: ${AIOS_LLM_PROVIDER:-openrouter}
       AIOS_LITELLM_BASE_URL: ${AIOS_LITELLM_BASE_URL:-http://litellm:4000}
       AIOS_LITELLM_API_KEY: ${AIOS_LITELLM_API_KEY:-sk-litellm}
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-evolution_secret_change_me}
-      EVOLUTION_SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution:8080}
+      # AIOS_ prefix is required: Settings uses env_prefix="AIOS_". Without it
+      # settings.evolution_api_key stayed "" and the webhook header was sent
+      # empty, so every inbound message returned "unknown_instance".
+      AIOS_EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-evolution_secret_change_me}
+      AIOS_EVOLUTION_SERVER_URL: ${EVOLUTION_SERVER_URL:-http://evolution:8080}
       AIOS_OPENROUTER_API_KEY: ${AIOS_OPENROUTER_API_KEY:-}
       AIOS_OPENAI_API_KEY: ${AIOS_OPENAI_API_KEY:-}
       AIOS_ANTHROPIC_API_KEY: ${AIOS_ANTHROPIC_API_KEY:-}

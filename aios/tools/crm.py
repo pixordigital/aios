@@ -42,6 +42,7 @@ class CRMUpdateDealInput(BaseModel):
 
 class CRMTool(BaseTool):
     name = "crm_create_deal"
+    input_model = CRMCreateDealInput
     description = "Cria deal no CRM interno 100% IA + HubSpot/webhook se configurado. Auto-cria no kanban."
 
     async def run(
@@ -479,6 +480,7 @@ class CRMMergeDealsInput(BaseModel):
 
 class CRMMergeTool(BaseTool):
     name = "crm_merge_deals"
+    input_model = CRMMergeDealsInput
     description = "Mescla deals duplicados do mesmo lead_email na mesma org. Mantém 1 deal e deleta os outros."
 
     async def run(self, lead_email: str, keep_strategy: str = "oldest") -> dict:

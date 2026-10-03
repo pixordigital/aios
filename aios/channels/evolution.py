@@ -13,6 +13,161 @@ from aios.config import settings
 logger = logging.getLogger(__name__)
 
 
+# ─── Outbound bubble batching ───
+#
+# Every send() below was one provider HTTP call = one WhatsApp bubble = one
+# per-message fee, so N quick texts cost N fees. Texts to the same recipient
+# arriving inside a short window are joined with a blank line and sent once.
+#
+# State is module-level, not on the channel: manager.build() constructs a
+# fresh EvolutionChannel per send, so instance state could never accumulate a
+# batch. Keyed by (instance, recipient) so tenants and conversations never mix.
+# Joined by _join_texts: continuations flow with a space, separate messages
+# keep the paragraph break.
+#
+# What never joins a batch: templates, interactive/media/audio (anything whose
+# extra marks a non-text type). Those flush the pending batch first and go
+# alone, preserving order. The guard, humanize delay and presence simulation
+# then run once per bubble instead of once per text — fewer sends is also
+# less spammy, which is what the anti-ban accounting wants.
+#
+# Flushes per recipient are chained: a new flush waits for the previous one,
+# so bubbles always arrive in the order the texts did. Only message *content*
+# is ever merged — no row is deleted and no idempotency key changes, so the
+# delivery layer's retry/DLQ semantics are untouched.
+#
+# Crash exposure: a buffer that has not flushed yet lives only in this
+# process. The window is ~2s; a crash inside it loses those texts exactly as
+# a crash mid-send does today (delivery never stamped them, so the inbound
+# job's retry regenerates and resends).
+
+class _Batch:
+    __slots__ = ("first", "futures", "send_one", "texts")
+
+    def __init__(self, send_one, first):
+        self.texts = [first.text or ""]
+        self.futures = []
+        self.send_one = send_one
+        self.first = first
+
+
+_buffers: dict[tuple[str, str], _Batch] = {}
+_flush_tasks: dict[tuple[str, str], asyncio.Task] = {}
+
+
+def _mergeable(message: OutboundMessage) -> bool:
+    extra = message.extra_data or {}
+    wtype = extra.get("whatsapp_type") or extra.get("type") or "text"
+    return wtype == "text" and not extra.get("is_template")
+
+
+def _join_texts(texts: list[str]) -> str:
+    """Join burst texts into one flowing bubble.
+
+    A bare paragraph join stacks fragments that were one sentence split
+    across sends — "your number is:" / "49349" — which reads broken. So:
+    a part ending in ':' flows into the next with a space (label: value),
+    and a part starting lowercase continues the sentence with a space.
+    Anything else (new sentence, list item, greeting) keeps the paragraph
+    break — merging those would garble, not group. Whitespace-only parts
+    carry no content and are dropped, unless that is all there is (a lone
+    empty send behaves exactly as it does today).
+    """
+    parts = [t for t in (texts or []) if (t or "").strip()]
+    if not parts:
+        parts = texts[:1] if texts else [""]
+    chunks = [parts[0]]
+    for t in parts[1:]:
+        prev = chunks[-1]
+        if prev.rstrip().endswith(":") or t[:1].islower():
+            chunks[-1] = prev.rstrip() + " " + t.lstrip()
+        else:
+            chunks.append(t)
+    return "\n\n".join(chunks)
+
+
+def _merged_message(first: OutboundMessage, texts: list[str]) -> OutboundMessage:
+    return OutboundMessage(
+        conversation_id=first.conversation_id,
+        text=_join_texts(texts),
+        channel_connection_id=first.channel_connection_id,
+        extra_data=first.extra_data,
+    )
+
+
+def _launch_flush(key: tuple[str, str], buf: _Batch) -> asyncio.Task:
+    """Send one batch, chained behind any in-flight flush for the recipient."""
+    prev = _flush_tasks.get(key)
+
+    async def _run():
+        if prev is not None and not prev.done():
+            await asyncio.wait({prev})
+        try:
+            if all(f.done() for f in buf.futures):
+                # Everybody stopped waiting (cancelled jobs whose retry will
+                # resend). Sending now would orphan a bubble AND duplicate it.
+                logger.info("whatsapp batch %s: all waiters gone, dropping %d texts", key[1], len(buf.texts))
+                return
+            merged = _merged_message(buf.first, buf.texts)
+            result = await buf.send_one(merged)
+            logger.info(
+                "whatsapp batch %s: %d texts → 1 bubble (%d chars)",
+                key[1], len(buf.texts), len(merged.text),
+            )
+            for f in buf.futures:
+                if not f.done():
+                    f.set_result(result)
+        except Exception:
+            logger.exception("whatsapp batch %s: flush failed", key[1])
+            for f in buf.futures:
+                if not f.done():
+                    # Delivery treats None as send failure → its retry path.
+                    f.set_result(None)
+
+    task = asyncio.ensure_future(_run())
+    _flush_tasks[key] = task
+
+    def _forget(done):
+        if _flush_tasks.get(key) is done:
+            del _flush_tasks[key]
+
+    task.add_done_callback(_forget)
+    return task
+
+
+async def _flush_now(key: tuple[str, str]) -> None:
+    """Flush the pending batch for a recipient, preserving order.
+
+    Used when a non-mergeable message arrives (it must go after the pending
+    texts) and when a batch hits its caps. Awaiting the chained task also
+    covers the case where a flush is already in flight.
+    """
+    buf = _buffers.get(key)
+    if buf is not None:
+        # No await between get and del: single event loop, nothing interleaves.
+        del _buffers[key]
+        await _launch_flush(key, buf)
+        return
+    task = _flush_tasks.get(key)
+    if task is not None and not task.done():
+        await asyncio.wait({task})
+
+
+async def _timer(key: tuple[str, str], buf: _Batch, delay: float) -> None:
+    try:
+        await asyncio.sleep(delay)
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("whatsapp batch timer failed")
+        return
+    # Pop only if this exact buffer is still pending: an overflow flush may
+    # have replaced it with a newer one, which owns its own timer.
+    if _buffers.get(key) is buf:
+        del _buffers[key]
+        await _launch_flush(key, buf)
+
+
 class EvolutionChannel(Channel):
     """Unified WhatsApp channel via Evolution API.
 
@@ -53,10 +208,62 @@ class EvolutionChannel(Channel):
     def base_url(self) -> str:
         return self._config.get("server_url", "http://evolution:8080").rstrip("/")
 
-    async def send(self, message: OutboundMessage) -> str | None:
+    async def _dispatch(self, message: OutboundMessage) -> str | None:
         if self.provider == "meta":
             return await self._send_meta(message)
         return await self._send_baileys(message)
+
+    def _batch_key(self, message: OutboundMessage) -> tuple[str, str] | None:
+        extra = message.extra_data or {}
+        to = extra.get("from_number") or self._config.get("default_number", "")
+        if not to:
+            return None
+        return (self.instance, to)
+
+    async def send(self, message: OutboundMessage) -> str | None:
+        # Unconfigured or disabled: today's direct behavior, with no pointless
+        # window wait before returning None.
+        if (
+            not self.instance
+            or not self.api_key
+            or not settings.whatsapp_batch_enabled
+        ):
+            return await self._dispatch(message)
+        key = self._batch_key(message)
+        if key is None:
+            return await self._dispatch(message)
+
+        if not _mergeable(message):
+            # Templates / interactive / media go alone, but after whatever is
+            # already pending for this recipient — order is preserved.
+            await _flush_now(key)
+            return await self._dispatch(message)
+
+        buf = _buffers.get(key)
+        if buf is not None:
+            current = sum(len(t) for t in buf.texts) + 2 * len(buf.texts)
+            if (
+                len(buf.texts) >= settings.whatsapp_batch_max_messages
+                or current + len(message.text or "") + 2 > settings.whatsapp_batch_max_chars
+            ):
+                await _flush_now(key)
+                buf = None
+        if buf is None:
+            # _Batch seeds texts with the first message; later ones append below.
+            buf = _Batch(
+                send_one=self._dispatch,
+                first=message,
+            )
+            _buffers[key] = buf
+            asyncio.ensure_future(
+                _timer(key, buf, settings.whatsapp_batch_window_sec)
+            )
+        else:
+            buf.texts.append(message.text or "")
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        buf.futures.append(fut)
+        return await fut
 
     async def _send_baileys(self, message: OutboundMessage) -> str | None:
         """Send via Baileys (WhatsApp Web)."""

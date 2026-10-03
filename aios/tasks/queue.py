@@ -19,16 +19,25 @@ _redis_pool: Optional[ArqRedis] = None
 
 
 def _parse_redis(url: str) -> RedisSettings:
-    """Parse redis:// URL into RedisSettings — SASL (user:pass) + TLS (rediss://)."""
-    parsed = urlparse(url)
+    """Parse redis:// URL into RedisSettings — SASL (user:pass) + TLS (rediss://).
+
+    REDIS_HOST/REDIS_PORT are the fallback when the URL is unset or has no host.
+    Compose sets them (`REDIS_HOST: redis`), so ignoring them pointed both
+    processes at localhost instead of the Redis service.
+    """
+    parsed = urlparse(url) if url else None
+    # No URL at all → REDIS_HOST/PORT are the only signal. Compose sets them,
+    # so the old hardcoded "redis://localhost:6379" default dialled localhost.
+    if parsed is None:
+        parsed = urlparse(f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/0")
     # fallback para envs quando URL sem credenciais (SASL)
     username = parsed.username or settings.redis_username or None
     password = parsed.password or settings.redis_password or None
     # rediss:// → TLS
     is_tls = parsed.scheme == "rediss"
     return RedisSettings(
-        host=parsed.hostname or "localhost",
-        port=parsed.port or 6379,
+        host=parsed.hostname or os.getenv("REDIS_HOST", "localhost"),
+        port=parsed.port or int(os.getenv("REDIS_PORT", "6379")),
         database=int(parsed.path.lstrip("/") or "0"),
         username=username,
         password=password,
@@ -40,7 +49,9 @@ async def get_redis_pool() -> ArqRedis:
     """Return shared ARQ Redis pool — created on first call."""
     global _redis_pool
     if _redis_pool is None:
-        url = settings.redis_url or os.getenv("REDIS_URL", "redis://localhost:6379")
+        # "" when unset, so _parse_redis falls back to REDIS_HOST/PORT instead of
+        # a hardcoded localhost that compose never publishes.
+        url = settings.redis_url or os.getenv("REDIS_URL", "")
         redis_settings = _parse_redis(url)
         _redis_pool = await create_pool(redis_settings)
         logger.info("Redis pool connected to %s:%d", redis_settings.host, redis_settings.port)
