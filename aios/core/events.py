@@ -268,6 +268,23 @@ async def claim_idempotency(ev: EventEnvelope, ttl: int = 86400) -> bool:
         return True
 
 
+async def release_idempotency(ev: EventEnvelope) -> None:
+    """Undo a claim when nothing was actually delivered.
+
+    Claiming before delivery is what stops two concurrent consumers double
+    dispatching, but if every enqueue then failed the retry would be suppressed
+    as a duplicate and the event lost. Releasing on a zero-dispatch outcome
+    keeps that failure recoverable.
+    """
+    try:
+        from aios.tasks.queue import get_redis_pool
+
+        pool = await get_redis_pool()
+        await pool.delete(f"{DEDUPE_PREFIX}{ev.idempotency_key}")
+    except Exception:
+        logger.debug("could not release idempotency key %s", ev.idempotency_key, exc_info=True)
+
+
 async def dispatch_event(ev: EventEnvelope) -> list[str]:
     """Resolve subscribers and enqueue an autonomous run for each.
 
@@ -300,6 +317,13 @@ async def dispatch_event(ev: EventEnvelope) -> list[str]:
         except Exception:
             # One undeliverable subscriber must not block the others.
             logger.exception("dispatch failed agent=%s event=%s", agent.id, ev.event_type)
+
+    # Nothing landed, so the claim must not outlive the failure: the consumer
+    # leaves this entry unacked and retries it, and a stale claim would make
+    # that retry look like a duplicate and drop the event for good.
+    if not dispatched and ev.idempotency_key:
+        await release_idempotency(ev)
+
     logger.info(
         "dispatched %s to %d agent(s) org=%s", ev.event_type, len(dispatched), ev.org_id
     )

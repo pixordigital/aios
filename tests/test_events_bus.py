@@ -717,6 +717,10 @@ class _DedupePool:
         self.keys: dict[str, str] = {}
         self.fail = fail
 
+    async def delete(self, key):
+        self.keys.pop(key, None)
+        return 1
+
     async def set(self, key, value, nx=None, ex=None):
         if self.fail:
             raise RuntimeError("redis down")
@@ -902,3 +906,53 @@ async def test_agent_update_merges_extra_data_instead_of_replacing(test_session,
     # The whole point of the merge: untouched keys survive.
     assert extra["project_path"] == "/srv/keepme"
     assert extra["phone"] == "+5511999999999"
+
+
+async def test_failed_enqueue_releases_the_claim_so_a_retry_still_delivers(monkeypatch):
+    """A dispatch that landed nothing must not be able to lose the event.
+
+    The consumer leaves a failed entry unacked and redelivers it; if the dedupe
+    claim survived, that retry would look like a duplicate and the proactive
+    action would be dropped forever.
+    """
+    o = await _org("ev-claim-release")
+    agent = await _mk_agent(o, ["crm.*"])
+    pool = _DedupePool()
+
+    async def fake_pool():
+        return pool
+
+    monkeypatch.setattr("aios.tasks.queue.get_redis_pool", fake_pool)
+
+    attempts = []
+
+    async def flaky_enqueue(func, payload, **kw):
+        attempts.append(payload["agent_id"])
+        if len(attempts) == 1:
+            raise RuntimeError("redis blip")
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", flaky_enqueue)
+
+    ev = EventEnvelope("crm.stage_changed.won", o, {}, idempotency_key="k-release")
+    assert await dispatch_event(ev) == []
+    # Retry of the same entry must still be able to deliver.
+    assert await dispatch_event(ev) == [agent]
+    assert len(attempts) == 2
+
+
+async def test_successful_dispatch_keeps_the_claim(monkeypatch):
+    """The dedupe key must survive a successful dispatch, or duplicates return."""
+    o = await _org("ev-claim-keep")
+    agent = await _mk_agent(o, ["crm.*"])
+    pool = _DedupePool()
+
+    async def fake_pool():
+        # One pool instance: a fresh one per call would lose the claim.
+        return pool
+
+    monkeypatch.setattr("aios.tasks.queue.get_redis_pool", fake_pool)
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", lambda *a, **k: _noop())
+
+    ev = EventEnvelope("crm.stage_changed.won", o, {}, idempotency_key="k-keep")
+    assert await dispatch_event(ev) == [agent]
+    assert await dispatch_event(ev) == []
