@@ -49,7 +49,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e . pytest pytest-asyncio alembic httpx
-      - run: rm -f ./test.db && AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db alembic upgrade head && AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db alembic check || echo "alembic check: sqlite autogenerate noise ignored"
+      # Quoted: the echo text contains ": ", which is a YAML parse error inside an
+      # unquoted plain scalar. The unquoted form made this file invalid, so GitHub
+      # rejected the whole workflow and every run failed in 0s with no jobs.
+      - run: 'rm -f ./test.db && AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db alembic upgrade head && AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db alembic check || echo "alembic check: sqlite autogenerate noise ignored"'
       - run: AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db pytest -v --tb=short --ignore=aios/templates --ignore=aios/dashboard
   build:
     runs-on: ubuntu-latest
