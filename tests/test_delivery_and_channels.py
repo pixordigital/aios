@@ -228,3 +228,88 @@ def test_flow_palette_only_offers_real_tools():
     offered = set(re.findall(r'data-tool="([\w_]+)"', src))
     missing = sorted(offered - set(TOOL_REGISTRY))
     assert not missing, f"flow palette offers unregistered tools: {missing}"
+
+# ─── inbound email died on a NameError before dispatching ─────────────────
+
+async def test_inbound_email_dispatches_to_the_explicit_channel(
+    test_session, test_org, monkeypatch
+):
+    """_process_inbound_email read `body`, which only exists in its *caller's*
+    scope -- the payload parameter is `email_data`. Every inbound email raised
+    NameError, so the tenant-selection code directly below it (added to stop
+    tenant B's mail being answered by tenant A's agent) had never run once."""
+    from contextlib import asynccontextmanager
+
+    from aios.db.models import ChannelConnection
+
+    conn = ChannelConnection(
+        channel_type="email",
+        label="inbox",
+        config={},
+        is_active=True,
+        org_id=test_org.id,
+    )
+    test_session.add(conn)
+    await test_session.commit()
+
+    @asynccontextmanager
+    async def fake_db_session():
+        yield test_session
+
+    monkeypatch.setattr("aios.db.backend.db_session", fake_db_session)
+
+    seen: list[dict] = []
+
+    async def fake_dispatch(**kw):
+        seen.append(kw)
+
+    monkeypatch.setattr("aios.core.dispatch.dispatch_inbound", fake_dispatch)
+
+    from aios.api.email_webhook import _process_inbound_email
+
+    out = await _process_inbound_email(
+        {"from": "buyer@example.com", "channel_id": str(conn.id)}, "sendgrid"
+    )
+
+    assert len(seen) == 1, f"the explicit channel_id did not reach dispatch_inbound (got {seen})"
+    assert seen[0]["channel_connection_id"] == str(conn.id)
+
+
+async def test_inbound_email_refuses_to_guess_between_two_mailboxes(
+    test_session, test_org, monkeypatch
+):
+    """Auto-resolution is only safe while it is unambiguous. Two active email
+    connections and no channel_id must be refused, not resolved to whichever
+    row the database happened to return first."""
+    from contextlib import asynccontextmanager
+
+    from aios.db.models import ChannelConnection
+
+    for label in ("inbox-a", "inbox-b"):
+        test_session.add(
+            ChannelConnection(
+                channel_type="email",
+                label=label,
+                config={},
+                is_active=True,
+                org_id=test_org.id,
+            )
+        )
+    await test_session.commit()
+
+    @asynccontextmanager
+    async def fake_db_session():
+        yield test_session
+
+    monkeypatch.setattr("aios.db.backend.db_session", fake_db_session)
+
+    async def fake_dispatch(**kw):
+        raise AssertionError("dispatched an ambiguous inbound email")
+
+    monkeypatch.setattr("aios.core.dispatch.dispatch_inbound", fake_dispatch)
+
+    from aios.api.email_webhook import _process_inbound_email
+
+    out = await _process_inbound_email({"from": "buyer@example.com"}, "sendgrid")
+
+    assert out.get("ok") is False, out

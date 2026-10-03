@@ -2169,7 +2169,7 @@ async def sandbox_chat(
 
             import uuid
             cid = conversation_id or f"sandbox_{uuid.uuid4().hex[:12]}"
-            runtime = AgentRuntime(agent, async_session)
+            runtime = AgentRuntime(agent)
             yield "data: " + json.dumps({"conversation_id": cid}) + "\n\n"
 
             from aios.core.tracing import current_trace_id

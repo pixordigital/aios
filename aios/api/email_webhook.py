@@ -146,7 +146,9 @@ async def _process_inbound_email(email_data: dict, provider: str):
         text_content = content[:5000]
 
     # Find active email channel
-    async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
+    from aios.db.backend import db_session
+
+    async with db_session() as db:
         from aios.db.models import ChannelConnection
         from sqlalchemy import select
 
@@ -159,11 +161,11 @@ async def _process_inbound_email(email_data: dict, provider: str):
             ChannelConnection.channel_type == "email",
             ChannelConnection.is_active == True,
         )
-        if body.get("channel_id"):
-            q = q.where(ChannelConnection.id == str(body["channel_id"]))
+        if email_data.get("channel_id"):
+            q = q.where(ChannelConnection.id == str(email_data["channel_id"]))
         candidates = (await db.execute(q.limit(2))).scalars().all()
         conn = candidates[0] if candidates else None
-        if conn is not None and not body.get("channel_id") and len(candidates) > 1:
+        if conn is not None and not email_data.get("channel_id") and len(candidates) > 1:
             return {"ok": False,
                     "error": "more than one active email channel; pass channel_id"}
 
@@ -183,6 +185,14 @@ async def _process_inbound_email(email_data: dict, provider: str):
                     "html_content": html_content[:5000] if html_content else "",
                     "message_id": message_id,
                 },
+            )
+        else:
+            # No active email channel: the message has nowhere to go. Say so,
+            # or the sender's mail vanishes with no trace anywhere.
+            logger.warning(
+                "inbound %s email from %s dropped: no active email channel",
+                provider,
+                from_email or "?",
             )
 
 

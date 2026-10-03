@@ -13,6 +13,8 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+logger = logging.getLogger(__name__)
+
 trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "trace_id", default=""
 )
@@ -427,5 +429,4 @@ async def emit_usage_event(
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(url, json=payload, headers=headers)
     except Exception:
-        logger = logging.getLogger(__name__)
         logger.warning("Usage webhook failed for %s", event)

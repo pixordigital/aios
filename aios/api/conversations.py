@@ -282,7 +282,13 @@ async def send_message(
                         db.add(reply_msg)
                         await db.commit()
                         await db.refresh(reply_msg)
-                        tokens = getattr(runtime, "_last_tokens", len(reply)) if 'runtime' in locals() else len(reply)
+                        # The orchestrator owns its own runtime, so there is no
+                        # `runtime` in this scope to read tokens from -- the old
+                        # `if 'runtime' in locals()` guard was false on every
+                        # path that reaches here. Character count is the honest
+                        # fallback; wire real usage out of the orchestrator to
+                        # replace it.
+                        tokens = len(reply)
                         await track_usage(org_id, db, messages=1, tokens=tokens, llm_calls=1)
                     elif len(available) > 1:
                         # team failed, try each agent individually

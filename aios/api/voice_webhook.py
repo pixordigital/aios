@@ -10,6 +10,7 @@ from urllib.parse import parse_qsl, urlparse, urlunsplit
 from fastapi import APIRouter, HTTPException, Request
 
 from aios.config import settings
+from aios.db.backend import db_session
 from aios.db.models import VoiceRecording
 from sqlalchemy import select
 
@@ -93,7 +94,7 @@ async def voice_webhook(request: Request):
         from_number = body.get("from", body.get("caller_id", ""))
         to_number = body.get("to", body.get("called_number", ""))
 
-        async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
+        async with db_session() as db:
             from aios.db.models import ChannelConnection
 
             # Same tenant-mixing defect as the email webhook: `.first()` picked
@@ -145,7 +146,7 @@ async def voice_webhook(request: Request):
         logger.info("Call ended: %s", call_sid)
         
         # Update recording with duration and recording URL
-        async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
+        async with db_session() as db:
             recording_result = await db.execute(
                 select(VoiceRecording).where(VoiceRecording.call_sid == call_sid)
             )
@@ -172,7 +173,7 @@ async def voice_webhook(request: Request):
         recording_url = body.get("recording_url") or body.get("recording", {}).get("url")
         duration = body.get("duration", 0)
         
-        async with (await __import__("aios.db.backend", fromlist=["db_session"])).db_session() as db:
+        async with db_session() as db:
             recording_result = await db.execute(
                 select(VoiceRecording).where(VoiceRecording.call_sid == call_sid)
             )
