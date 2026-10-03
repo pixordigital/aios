@@ -12,9 +12,9 @@
     "semantic_hash": "370aedb6f360fb8b8884a6e477811f2f"
   },
   "aios/api/agents.py": {
-    "mtime": 1790944056.005211,
-    "seen": 1790966056.4170663,
-    "ast_hash": "f3f1a82db9b11e9718a5ee19a27cc68e",
+    "mtime": 1791051881.216392,
+    "seen": 1791054908.753684,
+    "ast_hash": "95e7462e28394c06b2280b384722d719",
     "semantic_hash": ""
   },
   "aios/api/analytics.py": {
@@ -60,10 +60,10 @@
     "semantic_hash": "61ca4c91dd91bb281d9dbdeba2c26bda"
   },
   "aios/api/crm2.py": {
-    "mtime": 1790681875.585686,
-    "seen": 1790797355.3131292,
-    "ast_hash": "91ac125ee892a384e76cb687649bde9d",
-    "semantic_hash": "91ac125ee892a384e76cb687649bde9d"
+    "mtime": 1791049243.9253201,
+    "seen": 1791054908.7541182,
+    "ast_hash": "5f2dce35764829d42f524f23fbe8591a",
+    "semantic_hash": ""
   },
   "aios/api/deps.py": {
     "mtime": 1791026931.6229067,
@@ -222,10 +222,10 @@
     "semantic_hash": "0288f712121dc36f21851909eae8b648"
   },
   "aios/api/tools.py": {
-    "mtime": 1790771723.666911,
-    "seen": 1790797355.313233,
-    "ast_hash": "027dda632278d34f5c248e7370763b3c",
-    "semantic_hash": "027dda632278d34f5c248e7370763b3c"
+    "mtime": 1791035033.9916437,
+    "seen": 1791035934.2791502,
+    "ast_hash": "c0f9805311214499c1f1dcf503ac4fab",
+    "semantic_hash": ""
   },
   "aios/api/versions.py": {
     "mtime": 1790943996.188627,
@@ -318,9 +318,9 @@
     "semantic_hash": ""
   },
   "aios/config.py": {
-    "mtime": 1791026931.624907,
-    "seen": 1791029136.8688118,
-    "ast_hash": "96f259fe0cf5abef297893175d6009b8",
+    "mtime": 1791035209.0989783,
+    "seen": 1791035934.2801762,
+    "ast_hash": "a8b6a2038a5be62f1362bdbcf107e1df",
     "semantic_hash": ""
   },
   "aios/core/agent.py": {
@@ -384,9 +384,9 @@
     "semantic_hash": "aafd97ef57c501f5115929cdcf510a06"
   },
   "aios/core/cron_scheduler.py": {
-    "mtime": 1790943996.1896272,
-    "seen": 1790966056.4186764,
-    "ast_hash": "6a64b69f8874a28be90d6d13c4912637",
+    "mtime": 1791051101.0864923,
+    "seen": 1791054908.7579248,
+    "ast_hash": "dc1194ab1b118309626b62233f7800a7",
     "semantic_hash": ""
   },
   "aios/core/dead_letter.py": {
@@ -588,9 +588,9 @@
     "semantic_hash": "f5be13fbec6fdd401b2271c3412fe053"
   },
   "aios/core/tools.py": {
-    "mtime": 1791028475.3058496,
-    "seen": 1791029136.8708847,
-    "ast_hash": "28b50a5025ff47e9402ebf2dbd8d67ae",
+    "mtime": 1791035252.2504547,
+    "seen": 1791035934.2839267,
+    "ast_hash": "53bc028cb699c649d8625a9118700495",
     "semantic_hash": ""
   },
   "aios/core/tracing.py": {
@@ -798,9 +798,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/app.py": {
-    "mtime": 1791032469.0673819,
-    "seen": 1791032512.9854407,
-    "ast_hash": "97c66513da6d138c5ed21eca7b87e1ab",
+    "mtime": 1791035419.176575,
+    "seen": 1791035934.2869968,
+    "ast_hash": "8acb9b9b5b5eabd9e60e3b09ca222b5c",
     "semantic_hash": ""
   },
   "aios/db/__init__.py": {
@@ -888,9 +888,9 @@
     "semantic_hash": "dcbd0a6cfd567fcd5f4cea21efd36421"
   },
   "aios/schemas/__init__.py": {
-    "mtime": 1790944056.015212,
-    "seen": 1790966056.4216912,
-    "ast_hash": "96de64d64a791a368d6ec907d2d2c30e",
+    "mtime": 1791051907.5978534,
+    "seen": 1791054908.7642593,
+    "ast_hash": "563908b959ec64538b4949c0a96b6531",
     "semantic_hash": ""
   },
   "aios/sdk/__init__.py": {
@@ -924,9 +924,9 @@
     "semantic_hash": "176aa26e24eb2b8b27ba4513354d3352"
   },
   "aios/tasks/jobs.py": {
-    "mtime": 1791026931.6309075,
-    "seen": 1791029136.8732347,
-    "ast_hash": "6ba1d106ef1b0da1a87244b85559c3fb",
+    "mtime": 1791049256.2284682,
+    "seen": 1791054908.7645664,
+    "ast_hash": "6308ec784c8046c50cb73fd9e9687005",
     "semantic_hash": ""
   },
   "aios/tasks/learning_worker.py": {
@@ -942,9 +942,9 @@
     "semantic_hash": ""
   },
   "aios/tasks/worker.py": {
-    "mtime": 1791026931.6309075,
-    "seen": 1791029136.8732781,
-    "ast_hash": "1101820e0564606097b301450d5f60e1",
+    "mtime": 1791049191.9994752,
+    "seen": 1791054908.7647152,
+    "ast_hash": "5bad3cfddf8a6b926f506be0e9f37536",
     "semantic_hash": ""
   },
   "aios/templates/__init__.py": {
@@ -1032,9 +1032,9 @@
     "semantic_hash": "a52a213c5602dc0705fbf71f5044f3c0"
   },
   "aios/tools/__init__.py": {
-    "mtime": 1791028475.3038492,
-    "seen": 1791029136.8741202,
-    "ast_hash": "ce2be39f909b75f4f7d9e5a390c05478",
+    "mtime": 1791035252.2501657,
+    "seen": 1791035934.291172,
+    "ast_hash": "6aeb17fd9c7120b3052167299746519e",
     "semantic_hash": ""
   },
   "aios/tools/base.py": {
@@ -1452,10 +1452,10 @@
     "semantic_hash": "44a23cff8cea8279c7d8549915d03c67"
   },
   "tests/conftest.py": {
-    "mtime": 1790681875.5896864,
-    "seen": 1790797355.3142242,
-    "ast_hash": "78255eed9f62167662fa119f8b76449b",
-    "semantic_hash": "78255eed9f62167662fa119f8b76449b"
+    "mtime": 1791043334.964369,
+    "seen": 1791054908.772627,
+    "ast_hash": "327a7154b62bda020977beb4604bafce",
+    "semantic_hash": ""
   },
   "tests/test_agent_types.py": {
     "mtime": 1788819766.3131976,
@@ -1950,9 +1950,9 @@
     "semantic_hash": "9f8d0b35fb0c6798e6daf3a6050a462c"
   },
   "aios/dashboard/templates/crm.html": {
-    "mtime": 1790943996.1966279,
-    "seen": 1790966056.4303384,
-    "ast_hash": "4f9438d1af663ffcaeb39c84095d8379",
+    "mtime": 1791035119.4889684,
+    "seen": 1791035934.3105261,
+    "ast_hash": "283fdf8b988cfdb6ed570d815f42bc9f",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/crm_custom_fields.html": {
@@ -1968,9 +1968,9 @@
     "semantic_hash": "6ff05784e6da0928d9a9413537c8627c"
   },
   "aios/dashboard/templates/dashboard.html": {
-    "mtime": 1791026931.6289072,
-    "seen": 1791029136.8830729,
-    "ast_hash": "67bb5cf46047054f4ae61131259d40a4",
+    "mtime": 1791035033.9916437,
+    "seen": 1791035934.3107092,
+    "ast_hash": "45a0c5f5fd33cfa9555d26f05d12fd2b",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/dev.html": {
@@ -1998,9 +1998,9 @@
     "semantic_hash": "866ac345adbc84128c0580bb6c126a1f"
   },
   "aios/dashboard/templates/flow_editor.html": {
-    "mtime": 1791026931.6299074,
-    "seen": 1791029136.883844,
-    "ast_hash": "55474e6e15ae3efcd3c68e65e0aa26a0",
+    "mtime": 1791035033.9926438,
+    "seen": 1791035934.3110101,
+    "ast_hash": "e1630a5f1881474cd3255496dbb17a10",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/knowledge.html": {
@@ -2148,9 +2148,9 @@
     "semantic_hash": ""
   },
   "docker-compose.coolify.yml": {
-    "mtime": 1791026931.6339078,
-    "seen": 1791029136.885185,
-    "ast_hash": "f1bbf816df93dd059407f7baa588b3db",
+    "mtime": 1791035193.4795213,
+    "seen": 1791035934.3134384,
+    "ast_hash": "ae72a4efafecb89a2a046e533af90b92",
     "semantic_hash": ""
   },
   "docker-compose.suite.yml": {
@@ -2934,9 +2934,9 @@
     "semantic_hash": ""
   },
   "tests/test_tool_execution_and_guards.py": {
-    "mtime": 1790983020.8993444,
-    "seen": 1790983373.9550884,
-    "ast_hash": "b2d2e36e994257f4769c6f22067dd429",
+    "mtime": 1791042551.558813,
+    "seen": 1791054908.7764935,
+    "ast_hash": "0abe82bf270560902d45041aeda4ea46",
     "semantic_hash": ""
   },
   "tests/test_webhook_signatures.py": {
@@ -2982,9 +2982,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/templates/teams_map.html": {
-    "mtime": 1791032469.0673819,
-    "seen": 1791032512.9991481,
-    "ast_hash": "354a1787ad85df8b19c031498521ff30",
+    "mtime": 1791035033.9926438,
+    "seen": 1791035934.3122995,
+    "ast_hash": "d3f121274c1aaee0da07a26a5bc6ee4c",
     "semantic_hash": ""
   },
   "aios/core/content_scan.py": {
@@ -3021,6 +3021,42 @@
     "mtime": 1791029141.7200015,
     "seen": 1791031767.1449616,
     "ast_hash": "7ac041bc3a90388d54de11037a98355d",
+    "semantic_hash": ""
+  },
+  "tests/test_tool_registry_api.py": {
+    "mtime": 1791034032.3642087,
+    "seen": 1791034524.3880513,
+    "ast_hash": "1afda84c88f87d20f1561c9e77b9c464",
+    "semantic_hash": ""
+  },
+  "aios/tools/cal_booking.py": {
+    "mtime": 1791035282.690843,
+    "seen": 1791035934.2912464,
+    "ast_hash": "f9b86245b6bc5cd387a8fd4ca476d69c",
+    "semantic_hash": ""
+  },
+  "tests/test_cal_booking.py": {
+    "mtime": 1791035867.305381,
+    "seen": 1791035934.2980242,
+    "ast_hash": "184b62dabeb548314aefcaef2a912857",
+    "semantic_hash": ""
+  },
+  "tests/test_crm_board.py": {
+    "mtime": 1791035512.531076,
+    "seen": 1791035934.2984343,
+    "ast_hash": "16a7478c4172b3e6966cc757c05196ac",
+    "semantic_hash": ""
+  },
+  "aios/core/events.py": {
+    "mtime": 1791051114.3198373,
+    "seen": 1791054908.7582526,
+    "ast_hash": "19d635d168e7afbe5693b6c4f2386805",
+    "semantic_hash": ""
+  },
+  "tests/test_events_bus.py": {
+    "mtime": 1791051924.6758585,
+    "seen": 1791054908.774185,
+    "ast_hash": "95768885f817ee270a86020e22895ca0",
     "semantic_hash": ""
   }
 }
