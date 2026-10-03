@@ -28,11 +28,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    exists = conn.execute(
-        sa.text("SELECT count(*) FROM information_schema.tables "
-                "WHERE table_name = 'channel_connections'")
-    ).scalar()
-    if not exists:
+    # sa.inspect rather than a query against information_schema: that catalog
+    # does not exist in SQLite, so the existence check raised instead of
+    # returning 0 and the migration could not run at all outside Postgres.
+    if "channel_connections" not in sa.inspect(conn).get_table_names():
         return
     conn.execute(sa.text(
         "UPDATE channel_connections SET is_active = false WHERE channel_type = 'discord'"
@@ -43,11 +42,7 @@ def downgrade() -> None:
     """Re-activate. The Discord adapter is gone, so this only restores the flag
     on rows that still exist; re-adding the channel requires the code too."""
     conn = op.get_bind()
-    exists = conn.execute(
-        sa.text("SELECT count(*) FROM information_schema.tables "
-                "WHERE table_name = 'channel_connections'")
-    ).scalar()
-    if not exists:
+    if "channel_connections" not in sa.inspect(conn).get_table_names():
         return
     conn.execute(sa.text(
         "UPDATE channel_connections SET is_active = true WHERE channel_type = 'discord'"

@@ -53,10 +53,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e . pytest pytest-asyncio alembic httpx
-      # Quoted: the echo text contains ": ", which is a YAML parse error inside an
-      # unquoted plain scalar. The unquoted form made this file invalid, so GitHub
-      # rejected the whole workflow and every run failed in 0s with no jobs.
-      - run: 'rm -f ./test.db && AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db alembic upgrade head && AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db alembic check || echo "alembic check: sqlite autogenerate noise ignored"'
+      # Blocking, and deliberately so. This used to be one line ending in
+      # `|| echo "...noise ignored"`, which swallowed the failure: the chain had
+      # two heads, `alembic upgrade head` errored out, and the message said
+      # "ignored" -- so tests ran against a schema built by
+      # Base.metadata.create_all and no migration was ever exercised.
+      # `alembic upgrade head` exits non-zero on multiple heads, which makes it
+      # the guard on its own; a forked chain cannot pass this again.
+      - name: migrations apply from empty to head
+        run: |
+          rm -f ./migrate_check.db
+          AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./migrate_check.db alembic upgrade head
+          AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./migrate_check.db alembic current
+      # Advisory only, and no longer described as noise. The models and the
+      # migrations genuinely disagree today -- a `blacklist` table that exists in
+      # migrations but in no model, plus nullable/index/FK drift across the
+      # whatsapp_* tables -- so this must not gate a commit. It is reported so
+      # the drift stays visible until it is paid down.
+      - name: report model/migration drift
+        run: |
+          AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./migrate_check.db alembic check \
+            || echo "::warning::alembic check: models and migrations have drifted. Known and tracked; not gating."
       - run: AIOS_JWT_SECRET=test-secret AIOS_DATABASE_URL=sqlite+aiosqlite:///./test.db pytest -v --tb=short --ignore=aios/templates --ignore=aios/dashboard
   build:
     runs-on: ubuntu-latest
