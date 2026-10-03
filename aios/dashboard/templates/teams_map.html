@@ -1,12 +1,54 @@
 {% extends "base.html" %}
 {% block content %}
 {% include "_teams_tabs.html" %}
+<style>
+  .map-wrap { position: relative; padding: 0; overflow: hidden; }
+  #team-map { width: 100%; height: 70vh; display: block; cursor: grab; touch-action: none; }
+  #team-map g.node { cursor: pointer; }
+  #team-map g.node:focus { outline: none; }
+  #team-map g.node:focus-visible rect.frame { stroke: var(--accent); stroke-width: 2.5; }
+  #team-map g.node:hover rect.frame { stroke: var(--border-hover); }
+  #team-map g.dim { opacity: .18; transition: opacity .2s ease; }
+  #team-map g.node { transition: opacity .2s ease; }
+  #team-map .flow { stroke-dasharray: 7 7; animation: map-flow 1.1s linear infinite; }
+  #team-map .flow-slow { stroke-dasharray: 3 7; animation: map-flow 2.4s linear infinite; }
+  @keyframes map-flow { to { stroke-dashoffset: -14; } }
+  #team-map .enter { opacity: 0; animation: map-in .38s ease forwards; }
+  @keyframes map-in { from { opacity: 0; } to { opacity: 1; } }
+  #team-map .halo { transition: opacity .3s ease; }
+  #team-map .halo.hot { animation: map-pulse 2s ease-in-out infinite; }
+  @keyframes map-pulse { 0%, 100% { opacity: .55; } 50% { opacity: .15; } }
+  @media (prefers-reduced-motion: reduce) {
+    #team-map .flow, #team-map .flow-slow, #team-map .enter, #team-map .halo.hot { animation: none; }
+    #team-map .enter { opacity: 1; }
+    #team-map g.dim, #team-map g.node { transition: none; }
+  }
+  #map-panel {
+    position: absolute; top: 0; right: 0; width: 300px; max-width: 86%;
+    height: 100%; background: var(--bg-elevated); border-left: 1px solid var(--border);
+    padding: 1rem; overflow-y: auto; z-index: 5;
+  }
+  #map-panel[hidden] { display: none; }
+  .mp-row { display: flex; justify-content: space-between; gap: .5rem; padding: .3rem 0;
+    border-bottom: 1px solid var(--border); font-size: .8125rem; }
+  .mp-row span:first-child { color: var(--text-secondary); }
+  #map-search {
+    background: var(--bg-raised); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: .45rem .7rem; font-size: .8125rem; width: 240px; max-width: 100%;
+  }
+  #map-search:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  @media (max-width: 720px) {
+    #map-panel { top: auto; bottom: 0; right: 0; left: 0; width: auto; max-width: none;
+      max-height: 46%; border-left: none; border-top: 1px solid var(--border); }
+  }
+</style>
 <div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
     <div><h1>Mapa de equipes</h1><p class="text-sm text-secondary mt-1" id="map-summary"></p></div>
-    <div style="display:flex;gap:0.5rem">
-        <button class="btn btn-ghost btn-sm" id="zoom-in" title="Aproximar">+</button>
-        <button class="btn btn-ghost btn-sm" id="zoom-out" title="Afastar">−</button>
-        <button class="btn btn-ghost btn-sm" id="zoom-reset" title="Enquadrar tudo">⤢</button>
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        <span id="map-live" aria-live="polite" class="text-sm text-secondary" title="Atualização de atividade recente">● ligando…</span>
+        <button class="btn btn-ghost btn-sm" id="zoom-in" title="Aproximar" aria-label="Aproximar">+</button>
+        <button class="btn btn-ghost btn-sm" id="zoom-out" title="Afastar" aria-label="Afastar">−</button>
+        <button class="btn btn-ghost btn-sm" id="zoom-reset" title="Enquadrar tudo" aria-label="Enquadrar tudo">⤢</button>
     </div>
 </div>
 <div class="flex-center gap-3 mb-3" style="flex-wrap:wrap;font-size:0.75rem;color:var(--text-secondary)">
@@ -15,78 +57,100 @@
     <span><span style="color:var(--text-tertiary)">━</span> membro</span>
     <span><span style="color:var(--amber)">┄</span> agente em 2+ equipes</span>
     <span><span style="color:var(--green)">●</span> ativo</span>
+    <span><span style="color:var(--accent)">◌</span> atividade recente</span>
 </div>
-<div class="card" style="padding:0;overflow:hidden">
-    <svg id="team-map" style="width:100%;height:70vh;display:block;cursor:grab;touch-action:none"></svg>
+<div class="flex-center gap-2 mb-3" style="flex-wrap:wrap">
+    <input id="map-search" type="search" placeholder="Buscar agente ou equipe…" aria-label="Buscar agente ou equipe" autocomplete="off">
+    <span id="map-matches" class="text-sm text-secondary" aria-live="polite"></span>
 </div>
-<p class="text-sm text-secondary mt-2">Arraste para navegar, scroll para zoom, clique num nó para editar.</p>
+<div class="card map-wrap">
+    <svg id="team-map" role="img" aria-label="Mapa de equipes e agentes" style="width:100%;height:70vh;display:block;cursor:grab;touch-action:none"></svg>
+    <aside id="map-panel" hidden aria-label="Detalhes do nó">
+        <div class="flex-between mb-2">
+            <strong id="mp-title" tabindex="-1"></strong>
+            <button class="btn btn-ghost btn-sm" id="mp-close" aria-label="Fechar painel">✕</button>
+        </div>
+        <div id="mp-sub" class="text-sm text-secondary mb-2"></div>
+        <div id="mp-rows" class="mb-3"></div>
+        <a id="mp-edit" class="btn btn-primary btn-sm" href="#">Editar</a>
+    </aside>
+</div>
+<p class="text-sm text-secondary mt-2">Arraste para navegar, scroll para zoom, clique num nó para detalhes.</p>
 <script>
 (function () {
     const data = {{ graph | tojson }};
     const svg = document.getElementById("team-map");
     const NS = "http://www.w3.org/2000/svg";
     const summary = document.getElementById("map-summary");
+    const livePill = document.getElementById("map-live");
+    const panel = document.getElementById("map-panel");
+    const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const teams = data.nodes.filter(n => n.kind === "team");
     const agentsById = Object.fromEntries(data.nodes.filter(n => n.kind === "agent").map(n => [n.id, n]));
     summary.textContent = teams.length + " equipe" + (teams.length === 1 ? "" : "s") + " · " +
         Object.keys(agentsById).length + " agentes · " + data.edges.length + " relações";
     if (!teams.length && !Object.keys(agentsById).length) {
-        svg.innerHTML = "";
         const t = document.createElementNS(NS, "text");
         t.setAttribute("x", 40); t.setAttribute("y", 60);
         t.setAttribute("fill", "var(--text-secondary)");
         t.textContent = "Nenhuma equipe ainda — crie uma na aba Equipes.";
         svg.appendChild(t);
+        livePill.textContent = "○ sem dados";
         return;
     }
 
-    // ── layout: one column per team, orphans in a dashed "Sem equipe" column
+    // ── layout: one org-chart column per team (team → orchestrator →
+    // manager → members), orphans in a dashed "Sem equipe" column.
+    // A shared agent gets one instance per team column so every tree is
+    // complete on its own — no tracing dashed lines across the canvas.
+    // NOTE: payload ids arrive already prefixed ("team:t1", "agent:a1") —
+    // use them verbatim. Prefixing again ("team:" + t.id) silently breaks
+    // every edge lookup and strands all members outside their teams.
     const COL_W = 300, TEAM_W = 264, TEAM_H = 64, AG_W = 244, AG_H = 46, GAP = 14, TOP = 24;
-    const memberTeams = {}; // agent node id -> [team node ids]
+    const orchOf = {}, mgrOf = {}, membersOf = {}, teamsOfAgent = {};
     data.edges.forEach(e => {
-        if (e.kind === "member" && agentsById[e.to]) {
-            (memberTeams[e.to] = memberTeams[e.to] || []).push(e.from);
+        if (e.kind === "orchestrator" && agentsById[e.from]) orchOf[e.to] = e.from;
+        else if (e.kind === "manager" && agentsById[e.from]) mgrOf[e.to] = e.from;
+        else if (e.kind === "member" && agentsById[e.to]) (membersOf[e.from] = membersOf[e.from] || []).push(e.to);
+        if (agentsById[e.from]) (teamsOfAgent[e.from] = teamsOfAgent[e.from] || []).push(e.to);
+        if (agentsById[e.to]) (teamsOfAgent[e.to] = teamsOfAgent[e.to] || []).push(e.from);
+    });
+    const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+    const orphans = Object.keys(agentsById).filter(id => !hasOwn(teamsOfAgent, id));
+    // rows per team: [orch?, mgr?, ...members] with leaders deduped out of members
+    const cols = teams.map(t => {
+        const tid = t.id;
+        const rows = [];
+        const orch = orchOf[tid], mgr = mgrOf[tid];
+        if (orch) rows.push({ aid: orch, role: "orchestrator" });
+        if (mgr && mgr !== orch) rows.push({ aid: mgr, role: "manager" });
+        for (const aid of membersOf[tid] || []) {
+            if (aid === orch || aid === mgr) continue;
+            if (rows.some(r => r.aid === aid)) continue;
+            rows.push({ aid, role: "member" });
         }
+        return { team: t, rows };
     });
-    const orphans = Object.keys(agentsById).filter(id =>
-        !data.edges.some(e => (e.kind !== "member" && (e.from === id || e.to === id)) || (e.kind === "member" && e.to === id)));
-    const cols = teams.map(t => ({ team: t, agents: [] }));
-    const placed = new Set();
-    const colOf = tid => cols.find(c => c.team && ("team:" + c.team.id) === tid);
-    data.edges.forEach(e => {
-        if (e.kind !== "member" || !agentsById[e.to] || placed.has(e.to)) return;
-        const target = colOf(e.from);
-        if (target) { target.agents.push(e.to); placed.add(e.to); }
-    });
-    // leadership edges reference agents too — make sure they render in-column
-    data.edges.forEach(e => {
-        if ((e.kind === "orchestrator" || e.kind === "manager") && agentsById[e.from] && !placed.has(e.from)) {
-            const target = colOf(e.to);
-            if (target) { target.agents.unshift(e.from); placed.add(e.from); }
-        }
-    });
-    if (orphans.length) cols.push({ team: null, agents: orphans });
+    if (orphans.length) cols.push({ team: null, rows: orphans.map(id => ({ aid: id, role: "none" })) });
 
-    const pos = {}; // node id -> {x, y, w, h}
+    const pos = {}; // instance key ("aid@@tid" or team node id) -> {x, y, w, h}
+    const instOf = {}; // instance key -> {agent, role, team}
     let maxH = 0;
     cols.forEach((col, i) => {
         const x = 20 + i * COL_W;
         let y = TOP;
-        if (col.team) {
-            pos["team:" + col.team.id] = { x: x + (COL_W - TEAM_W) / 2, y, w: TEAM_W, h: TEAM_H };
+        const tid = col.team ? col.team.id : null;
+        if (tid) {
+            pos[tid] = { x: x + (COL_W - TEAM_W) / 2, y, w: TEAM_W, h: TEAM_H };
             y += TEAM_H + 28;
         } else {
             y += 8;
         }
-        col.agents.forEach(aid => {
-            pos[aid] = { x: x + (COL_W - AG_W) / 2, y, w: AG_W, h: AG_H };
+        for (const r of col.rows) {
+            const key = r.aid + "@@" + (tid || "orphan");
+            pos[key] = { x: x + (COL_W - AG_W) / 2, y, w: AG_W, h: AG_H };
+            instOf[key] = { agent: agentsById[r.aid], role: r.role, team: tid };
             y += AG_H + GAP;
-        });
-        // orphan agents never placed above (no edges at all) still need a slot
-        if (!col.team) {
-            Object.keys(agentsById).forEach(aid => {
-                if (!pos[aid]) { pos[aid] = { x: x + (COL_W - AG_W) / 2, y, w: AG_W, h: AG_H }; y += AG_H + GAP; }
-            });
         }
         maxH = Math.max(maxH, y);
     });
@@ -100,42 +164,59 @@
         (parent || g).appendChild(n);
         return n;
     };
-    const esc = s => String(s == null ? "" : s);
+    // dot-grid backdrop
+    const defs = el("defs", {});
+    const pat = el("pattern", { id: "map-grid", width: 28, height: 28, patternUnits: "userSpaceOnUse" }, defs);
+    el("circle", { cx: 1.2, cy: 1.2, r: 1.2, fill: "rgba(255,255,255,0.07)" }, pat);
+    el("rect", { x: -2000, y: -2000, width: 8000, height: 8000, fill: "url(#map-grid)" }, g);
     const EDGE_COLOR = { orchestrator: "var(--amber)", manager: "var(--accent)", member: "var(--text-tertiary)" };
     const EDGE_LABEL = { orchestrator: "orquestra", manager: "gerencia", member: "membro de" };
 
     // orphan column header
     if (orphans.length) {
         const x = 20 + (cols.length - 1) * COL_W + (COL_W - TEAM_W) / 2;
-        const r = el("rect", { x, y: TOP - 4, width: TEAM_W, height: 30, rx: 8, fill: "none", stroke: "var(--border)", "stroke-dasharray": "5 4" });
+        el("rect", { x, y: TOP - 4, width: TEAM_W, height: 30, rx: 8, fill: "none", stroke: "var(--border)", "stroke-dasharray": "5 4" });
         const t = el("text", { x: x + 12, y: TOP + 16, fill: "var(--text-secondary)", "font-size": 12 });
         t.textContent = "Sem equipe (" + orphans.length + ")";
     }
 
-    // edges under nodes
-    data.edges.forEach(e => {
+    // edges under nodes — always drawn parent(bottom) → child(top).
+    // Flow animation runs on delegation edges; shared-membership stays dashed
+    // and still so the two meanings never look alike.
+    const links = [];
+    cols.forEach(col => {
+        if (!col.team) return;
+        const tid = col.team.id;
+        const at = role => col.rows.find(r => r.role === role);
+        const keyOf = r => r.aid + "@@" + tid;
+        const orch = at("orchestrator"), mgr = at("manager");
+        const members = col.rows.filter(r => r.role === "member");
+        if (orch) links.push({ from: tid, to: keyOf(orch), kind: "orchestrator" });
+        if (mgr) links.push({ from: orch ? keyOf(orch) : tid, to: keyOf(mgr), kind: "manager" });
+        const parent = mgr ? keyOf(mgr) : orch ? keyOf(orch) : tid;
+        members.forEach(r => links.push({ from: parent, to: keyOf(r), kind: "member" }));
+    });
+    const agentTeams = aid => [...new Set((teamsOfAgent[aid] || []).map(t => t.replace(/^team:/, "")))];
+    links.forEach(e => {
         const a = pos[e.from], b = pos[e.to];
         if (!a || !b) return;
-        const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
-        const shared = e.kind === "member" && agentsById[e.to] && (memberTeams[e.to] || []).length > 1;
-        // leadership edges run agent(bottom) → team(top); flip so lines flow downward
-        const flip = (e.kind === "orchestrator" || e.kind === "manager");
-        const sx = flip ? x2 : x1, sy = flip ? y2 : y1, ex = flip ? x1 : x2, ey = flip ? y1 : y2;
+        const sx = a.x + a.w / 2, sy = a.y + a.h, ex = b.x + b.w / 2, ey = b.y;
         const my = (sy + ey) / 2;
+        const sharedChild = e.kind === "member" && agentTeams(e.to.split("@@")[0]).length > 1;
         const line = el("path", {
             d: `M ${sx} ${sy} C ${sx} ${my}, ${ex} ${my}, ${ex} ${ey}`,
             fill: "none", stroke: EDGE_COLOR[e.kind] || "var(--text-tertiary)",
             "stroke-width": e.kind === "member" ? 1 : 1.75,
-            ...(shared ? { "stroke-dasharray": "5 4" } : {}),
+            "class": sharedChild ? "" : (e.kind === "member" ? "flow-slow" : "flow"),
+            ...(sharedChild ? { "stroke-dasharray": "5 4" } : {}),
         });
         const title = document.createElementNS(NS, "title");
-        const an = agentsById[flip ? e.from : e.to] || agentsById[flip ? e.to : e.from];
         title.textContent = EDGE_LABEL[e.kind] || e.kind;
         line.appendChild(title);
     });
 
-    const label = (x, y, text, size, fill, anchor) => {
-        const t = el("text", { x, y, fill: fill || "var(--text)", "font-size": size || 13, "text-anchor": anchor || "start" });
+    const label = (x, y, text, size, fill) => {
+        const t = el("text", { x, y, fill: fill || "var(--text)", "font-size": size || 13 });
         t.textContent = text.length > 30 ? text.slice(0, 29) + "…" : text;
         const full = document.createElementNS(NS, "title");
         full.textContent = text;
@@ -144,33 +225,211 @@
     };
 
     // team nodes
+    const teamGroups = {};
     teams.forEach(t => {
-        const p = pos["team:" + t.id];
+        const p = pos[t.id];
         if (!p) return;
-        const grp = el("g", { style: "cursor:pointer" });
-        el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 10, fill: "var(--bg-raised)", stroke: "var(--border-accent)", "stroke-width": 1.25 }, grp);
+        const grp = el("g", {
+            "class": "node" + (reduceMotion ? "" : " enter"),
+            tabindex: "0", role: "button",
+            "aria-label": "Equipe " + t.label, style: "cursor:pointer",
+        });
+        el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 10, fill: "var(--bg-raised)", stroke: "var(--border-accent)", "stroke-width": 1.25, "class": "frame" }, grp);
         label(p.x + 12, p.y + 25, t.label, 14, "var(--text)");
         label(p.x + 12, p.y + 45, t.strategy || "—", 11, "var(--text-secondary)");
-        grp.addEventListener("click", () => { window.location.href = t.url; });
+        grp.addEventListener("click", () => openPanel("team", t.id));
+        grp.addEventListener("keydown", ev => {
+            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openPanel("team", t.id); }
+        });
+        teamGroups[t.id] = grp;
     });
-    // agent nodes
-    Object.entries(pos).forEach(([id, p]) => {
-        const n = agentsById[id];
-        if (!n) return;
-        const grp = el("g", { style: "cursor:pointer" });
-        el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 9, fill: "var(--bg-raised)", stroke: "var(--border)", "stroke-width": 1 }, grp);
+    // agent instances (one per team tree, so every hierarchy is complete)
+    const ROLE_TAG = { orchestrator: "★ orquestrador", manager: "◆ manager" };
+    const instGroups = {}; // instance key -> <g>
+    let colIdx = 0;
+    Object.entries(instOf).forEach(([key, inst]) => {
+        const n = inst.agent, p = pos[key];
+        if (!n || !p) return;
+        const grp = el("g", {
+            "class": "node" + (reduceMotion ? "" : " enter"),
+            tabindex: "0", role: "button",
+            "aria-label": "Agente " + n.label,
+            style: "cursor:pointer" + (reduceMotion ? "" : ";animation-delay:" + (Math.min(colIdx, 12) * 60) + "ms"),
+        });
+        colIdx++;
+        el("rect", {
+            x: p.x - 5, y: p.y - 5, width: p.w + 10, height: p.h + 10, rx: 13,
+            fill: "none", stroke: "var(--accent)", "stroke-width": 1.5,
+            "class": "halo", opacity: "0", "data-halo": key,
+        }, grp);
+        el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 9, fill: "var(--bg-raised)", stroke: "var(--border)", "stroke-width": 1, "class": "frame" }, grp);
         const active = (n.status || "") === "active";
-        el("circle", { cx: p.x + 14, cy: p.y + p.h / 2, r: 4, fill: active ? "var(--green)" : "var(--text-tertiary)" }, grp);
-        label(p.x + 26, p.y + 20, n.label, 12);
+        const cx = p.x + 24, cy = p.y + p.h / 2;
+        el("circle", { cx, cy, r: 13, fill: "var(--bg-hover)", stroke: active ? "var(--green)" : "var(--text-tertiary)", "stroke-width": 1.5 }, grp);
+        const initial = el("text", { x: cx, y: cy + 4.5, fill: "var(--text)", "font-size": 12, "text-anchor": "middle" });
+        initial.textContent = (n.label || "?").trim().charAt(0).toUpperCase() || "?";
+        label(p.x + 46, p.y + 20, n.label, 12);
         const tags = [];
-        if (n.shared) tags.push("⧉ 2+ equipes");
-        if (n.orphan) tags.push("sem equipe");
-        if (tags.length) label(p.x + 26, p.y + 35, tags.join(" · "), 10, "var(--amber)");
+        if (ROLE_TAG[inst.role]) tags.push(ROLE_TAG[inst.role]);
+        const others = agentTeams(n.id).filter(t => t !== (inst.team || ""));
+        if (others.length) tags.push("⧉ +" + others.length + " equipe" + (others.length === 1 ? "" : "s"));
+        if (inst.role === "none") tags.push("sem equipe");
+        if (tags.length) label(p.x + 46, p.y + 35, tags.join(" · "), 10, inst.role === "member" && !others.length ? "var(--text-secondary)" : "var(--amber)");
         const title = document.createElementNS(NS, "title");
-        title.textContent = n.label + (active ? " (ativo)" : "") + (n.shared ? " — em várias equipes" : "");
+        title.textContent = n.label + (active ? " (ativo)" : "") +
+            (ROLE_TAG[inst.role] ? " — " + ROLE_TAG[inst.role] : "") +
+            (others.length ? " — também em: " + others.map(t => t.replace(/^team:/, "")).join(", ") : "");
         grp.appendChild(title);
-        grp.addEventListener("click", () => { window.location.href = n.url; });
+        grp.addEventListener("click", () => openPanel("agent", key));
+        grp.addEventListener("keydown", ev => {
+            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openPanel("agent", key); }
+        });
+        instGroups[key] = grp;
     });
+
+    // ── detail panel
+    const mpTitle = document.getElementById("mp-title");
+    const mpSub = document.getElementById("mp-sub");
+    const mpRows = document.getElementById("mp-rows");
+    const mpEdit = document.getElementById("mp-edit");
+    const mpClose = document.getElementById("mp-close");
+    let lastFocus = null;
+    const row = (k, v) => {
+        const d = document.createElement("div");
+        d.className = "mp-row";
+        const a = document.createElement("span"); a.textContent = k;
+        const b = document.createElement("span"); b.textContent = v;
+        d.appendChild(a); d.appendChild(b);
+        mpRows.appendChild(d);
+    };
+    const ago = iso => {
+        if (!iso) return "sem atividade recente";
+        const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+        if (m < 1) return "agora mesmo";
+        if (m < 60) return "há " + m + " min";
+        return "há " + Math.round(m / 60) + " h";
+    };
+    let activity = {};
+    function openPanel(kind, id) {
+        lastFocus = document.activeElement;
+        mpRows.innerHTML = "";
+        if (kind === "team") {
+            const disp = teams.find(x => x.id === id);
+            if (!disp) return;
+            mpTitle.textContent = disp.label;
+            mpSub.textContent = "Equipe · " + (disp.strategy || "—");
+            const col = cols.find(c => c.team && c.team.id === disp.id);
+            const counts = { orchestrator: 0, manager: 0, member: 0 };
+            (col ? col.rows : []).forEach(r => { counts[r.role] = (counts[r.role] || 0) + 1; });
+            row("Orquestrador", (col && col.rows.find(r => r.role === "orchestrator")
+                ? agentsById[col.rows.find(r => r.role === "orchestrator").aid].label : "—"));
+            row("Manager", (col && col.rows.find(r => r.role === "manager")
+                ? agentsById[col.rows.find(r => r.role === "manager").aid].label : "—"));
+            row("Membros", String(counts.member || 0));
+            mpEdit.href = disp.url;
+        } else {
+            const inst = instOf[id];
+            if (!inst || !inst.agent) return;
+            const n = inst.agent;
+            mpTitle.textContent = n.label;
+            mpSub.textContent = "Agente · " + (n.status || "—");
+            if (ROLE_TAG[inst.role]) row("Papel aqui", ROLE_TAG[inst.role].replace(/^★ |^◆ /, ""));
+            const otherNames = agentTeams(n.id)
+                .filter(t => t !== inst.team)
+                .map(t => { const tm = teams.find(x => ("team:" + x.id) === t); return tm ? tm.label : t; });
+            if (otherNames.length) row("Também em", otherNames.join(", "));
+            row("Última atividade", ago(activity[n.id]));
+            mpEdit.href = n.url;
+        }
+        panel.hidden = false;
+        mpClose.focus();
+    }
+    function closePanel() {
+        panel.hidden = true;
+        if (lastFocus && lastFocus.focus) lastFocus.focus();
+    }
+    mpClose.addEventListener("click", closePanel);
+    document.addEventListener("keydown", ev => {
+        if (ev.key === "Escape") {
+            if (!panel.hidden) closePanel();
+            else { searchInput.value = ""; applySearch(""); }
+        }
+    });
+
+    // ── search
+    const searchInput = document.getElementById("map-search");
+    const searchMatches = document.getElementById("map-matches");
+    const allGroups = () => [...Object.values(teamGroups), ...Object.values(instGroups)];
+    function applySearch(q) {
+        q = (q || "").trim().toLowerCase();
+        if (!q) {
+            allGroups().forEach(gr => gr.classList.remove("dim"));
+            searchMatches.textContent = "";
+            return [];
+        }
+        const hits = [];
+        const matchNode = (grp, text, key) => {
+            const hit = text.toLowerCase().includes(q);
+            grp.classList.toggle("dim", !hit);
+            if (hit) hits.push(key);
+        };
+        teams.forEach(t => { if (teamGroups["team:" + t.id]) matchNode(teamGroups["team:" + t.id], t.label, "team:" + t.id); });
+        Object.entries(instOf).forEach(([key, inst]) => {
+            if (instGroups[key]) matchNode(instGroups[key], inst.agent.label, key);
+        });
+        searchMatches.textContent = hits.length ? hits.length + " resultado" + (hits.length === 1 ? "" : "s") : "nada encontrado";
+        return hits;
+    }
+    searchInput.addEventListener("input", () => applySearch(searchInput.value));
+    searchInput.addEventListener("keydown", ev => {
+        if (ev.key !== "Enter") return;
+        const hits = applySearch(searchInput.value);
+        if (!hits.length) return;
+        const p = pos[hits[0]];
+        if (!p) return;
+        vw = Math.min(fullW, 900); vh = vw * 0.6;
+        vx = p.x + p.w / 2 - vw / 2; vy = p.y + p.h / 2 - vh / 2;
+        apply();
+    });
+
+    // ── live activity (polls map/data; structure stays put so pan/zoom survive)
+    const POLL_MS = 15000;
+    const setLive = (ok, when) => {
+        livePill.innerHTML = "";
+        const dot = document.createElement("span");
+        dot.style.color = ok ? "var(--green)" : "var(--red)";
+        dot.textContent = "● ";
+        livePill.appendChild(dot);
+        livePill.appendChild(document.createTextNode(ok ? "ao vivo · " + when : "atualização pausada"));
+    };
+    const fmtClock = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    function paintActivity() {
+        const now = Date.now();
+        document.querySelectorAll("[data-halo]").forEach(h => {
+            const inst = instOf[h.getAttribute("data-halo")];
+            const ts = inst && inst.agent && activity[inst.agent.id];
+            const mins = ts ? (now - new Date(ts).getTime()) / 60000 : Infinity;
+            h.setAttribute("opacity", mins <= 30 ? "1" : "0");
+            h.classList.toggle("hot", mins <= 5);
+        });
+    }
+    async function poll() {
+        if (document.hidden) return;
+        try {
+            const res = await fetch("map/data", { headers: { Accept: "application/json" } });
+            if (!res.ok) throw new Error("http " + res.status);
+            const payload = await res.json();
+            activity = payload.activity || {};
+            paintActivity();
+            setLive(true, fmtClock());
+        } catch (e) {
+            setLive(false);
+        }
+    }
+    setLive(true, fmtClock());
+    paintActivity();
+    setInterval(poll, POLL_MS);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 
     // ── pan & zoom (viewBox; no library)
     let vx = 0, vy = 0, vw = Math.max(fullW, 300), vh = maxH + 40;

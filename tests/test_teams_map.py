@@ -5,6 +5,7 @@ pinned here: leadership edges, membership edges, shared agents, orphans.
 """
 
 import types
+from datetime import UTC
 
 from aios.dashboard.app import _team_graph
 
@@ -90,3 +91,59 @@ def test_nodes_carry_links_and_labels():
     agent = _by_id(g, "agent", "a1")
     assert agent["label"] == "SDR" and agent["status"] == "active"
     assert agent["url"] == "/dashboard/agents/a1/edit"
+
+
+# ─── live payload ─────────────────────────────────────────────────────────
+
+async def test_recent_activity_groups_by_agent():
+    """One grouped query: agent_id -> latest message time inside the window.
+    Read from message rows (true cross-process) rather than in-process
+    scheduler/health state the dashboard process never sees."""
+    from datetime import datetime, timedelta
+
+    from aios.dashboard.app import _recent_activity
+    from aios.db.backend import db_session
+    from aios.db.models import Conversation, Message, Organization
+
+    now = datetime.now(UTC)
+    async with db_session() as db:
+        db.add(Organization(id="o9", name="O", slug="o9"))
+        db.add(Conversation(id="c9", org_id="o9", agent_id="a9"))
+        await db.flush()
+        db.add(Message(conversation_id="c9", org_id="o9", role="user",
+                       content="oi", agent_id="a9", created_at=now))
+        db.add(Message(conversation_id="c9", org_id="o9", role="user",
+                       content="velha", agent_id="a8",
+                       created_at=now - timedelta(hours=2)))
+        await db.commit()
+        act = await _recent_activity(db, "o9", minutes=30)
+    assert set(act) == {"a9"}
+    # outside the window the agent is simply absent, not "inactive"
+    assert "a8" not in act
+
+
+async def test_recent_activity_never_raises():
+    from aios.dashboard.app import _recent_activity
+
+    assert await _recent_activity(None, "nope") == {}
+
+
+async def test_map_data_route_shape():
+    """The poll payload: graph for structure, activity for liveness."""
+    import types
+
+    import aios.dashboard.app as app_mod
+    from aios.db.backend import db_session
+    from aios.db.models import Agent, Organization, Team
+
+    async with db_session() as db:
+        db.add(Organization(id="o7", name="O", slug="o7"))
+        db.add(Agent(id="a7", name="Ag", org_id="o7", status="active"))
+        await db.flush()
+        db.add(Team(id="t7", name="T", org_id="o7", agents=[]))
+        await db.commit()
+    req = types.SimpleNamespace(state=types.SimpleNamespace(org_id="o7"))
+    out = await app_mod.team_map_data(req)
+    assert out["ok"] is True
+    assert {n["id"] for n in out["graph"]["nodes"]} >= {"team:t7", "agent:a7"}
+    assert out["activity"] == {}

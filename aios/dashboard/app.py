@@ -973,6 +973,50 @@ async def team_map(request: Request):
     return await _render("teams_map.html", request, title="Mapa de equipes", graph=_team_graph(teams, agents))
 
 
+async def _recent_activity(db, org_id: str, minutes: int = 30) -> dict[str, str]:
+    """agent_id -> ISO timestamp of its latest message in the window.
+
+    Read from the messages table (not scheduler/health procesos state) so it
+    is correct across processes: the dashboard process never sees worker runs
+    in its own memory, but every run leaves message rows. Never raises.
+    """
+    try:
+        from aios.db.models import Message
+
+        since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        rows = (await db.execute(
+            select(Message.agent_id, func.max(Message.created_at))
+            .where(
+                Message.org_id == org_id,
+                Message.agent_id.is_not(None),
+                Message.created_at >= since,
+            )
+            .group_by(Message.agent_id)
+        )).all()
+        return {aid: ts.isoformat() for aid, ts in rows if aid and ts}
+    except Exception:
+        logger.debug("recent activity failed", exc_info=True)
+        return {}
+
+
+@router.get("/teams/map/data")
+async def team_map_data(request: Request):
+    """Live payload for the map canvas: structure + recent activity.
+
+    The page embeds the initial graph in HTML; it polls here (~15s) for
+    freshness. Structure changes apply on reload — this endpoint only moves
+    the activity timestamps, so polling never yanks the user's pan/zoom.
+    """
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        teams = (await db.execute(
+            select(Team).options(selectinload(Team.agents)).where(Team.org_id == org_id).order_by(Team.created_at.desc())
+        )).scalars().all()
+        agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
+        activity = await _recent_activity(db, org_id)
+    return {"ok": True, "graph": _team_graph(teams, agents), "activity": activity}
+
+
 @router.get("/teams", response_class=HTMLResponse)
 async def team_list(request: Request):
     org_id = await _org_filter(request)
