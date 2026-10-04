@@ -589,7 +589,10 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
         logger.warning("refresh rejected: unknown or missing jti for user %s", user_id)
         raise HTTPException(401, "Token de atualização inválido ou expirado")
     now = datetime.now(timezone.utc)
-    if _as_utc(row.expires_at) <= now:
+    # A row with no expires_at is corrupt; treat it as expired rather than
+    # letting None through the comparison.
+    expires = _as_utc(row.expires_at)
+    if expires is None or expires <= now:
         raise HTTPException(401, "Token de atualização inválido ou expirado")
     if row.revoked_at is not None or row.replaced_by is not None:
         # A consumed token being replayed means it was captured. Revoke the

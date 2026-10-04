@@ -385,3 +385,93 @@ def test_expired_at_normalises_naive_datetimes():
     aware = datetime(2030, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     assert _as_utc(aware) == aware
     assert _as_utc(None) is None
+
+
+# --- CRM kanban must not be hidden behind the paid flag --------------------
+
+def _template_ast():
+    from jinja2 import Environment, nodes
+
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1] / "aios/dashboard/templates/crm.html"
+    ).read_text()
+    return Environment().parse(src)
+
+
+def _gated_markers(ast):
+    """Map each literal marker in crm.html to whether it sits in a crm_enabled branch."""
+    from jinja2 import nodes
+
+    def has_name(n, name):
+        for x in n.iter_child_nodes():
+            if isinstance(x, nodes.Name) and x.name == name:
+                return True
+            if has_name(x, name):
+                return True
+        return False
+
+    def walk(n, gated=False):
+        if isinstance(n, nodes.If) and has_name(n.test, "crm_enabled"):
+            gated = True
+        yield n, gated
+        for c in n.iter_child_nodes():
+            yield from walk(c, gated)
+
+    out: dict[str, bool] = {}
+    for n, g in walk(ast):
+        d = getattr(n, "data", None)
+        if isinstance(d, str):
+            for key in ("crm-board", "Total de negócios", "HITL"):
+                if key in d:
+                    out[key] = out.get(key, False) or g
+    return out
+
+
+def test_crm_kanban_board_is_not_behind_the_paid_flag():
+    """The board and the pipeline totals used to render only when crm_enabled,
+    so an org without the paid flag got the upsell banner and no view of its own
+    pipeline at all. Reading your own CRM is not the upsell; only the agents
+    operating it are."""
+    marks = _gated_markers(_template_ast())
+    assert marks.get("crm-board") is False
+    assert marks.get("Total de negócios") is False
+    # The HITL approval queue IS the paid agent-operating feature: it stays gated.
+    assert marks.get("HITL") is True
+
+
+def test_crm_page_loads_deals_regardless_of_the_flag():
+    """The query itself was behind the flag, so ungating the template alone
+    would render an empty board. This is the guard on that."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1] / "aios/dashboard/app.py"
+    ).read_text()
+    i_deals = src.index("_query = select(CrmDeal).where(CrmDeal.org_id == org_id)")
+    i_flag = src.index("if crm_enabled:", i_deals)
+    assert i_deals < i_flag, "the deals query must not be inside the crm_enabled branch"
+
+
+def test_cal_booking_is_granted_to_both_sales_templates():
+    """The cal_booking tool was registered and the Cal.com stack self-hosted,
+    but no sales template granted it, so it was reachable by nobody."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "aios/templates"
+    for name in ("sdr.py", "closer.py"):
+        assert "cal_booking" in (root / name).read_text(), f"{name} lacks cal_booking"
+
+
+def test_google_calendar_card_only_exists_in_settings():
+    """Asked twice, so pin it: the Google Calendar connect card belongs to the
+    settings page and must not reappear on the dashboard home."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "aios/dashboard/templates"
+    hits = [
+        p.name for p in root.glob("*.html")
+        if "google/calendar/login" in p.read_text() or "Google Calendar — Agendamento" in p.read_text()
+    ]
+    assert hits == ["settings.html"], f"calendar card leaked into {hits}"

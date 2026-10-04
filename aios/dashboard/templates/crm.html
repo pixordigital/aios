@@ -19,10 +19,13 @@
   {% endif %}
 </div>
 {% else %}
+{% endif %}
 <div class="grid-4 mb-4">
   <div class="stat-card"><p class="stat-label">Total de negócios</p><p class="stat-value">{{stats.total}}</p><span class="text-xs text-tertiary">R$ {{ "%.0f"|format(stats.total_value) }} pipeline</span></div>
   <div class="stat-card"><p class="stat-label">Custo IA</p><p class="stat-value">R$ {{ "%.2f"|format(stats.total_cost_brl) }}</p><span class="text-xs text-tertiary">{{stats.by_stage.mql}} mql • {{stats.by_stage.sql}} sql</span></div>
   <div class="stat-card"><p class="stat-label">Taxa</p><p class="stat-value">{{ stats.by_stage.closed_won }}/{{stats.total}}</p><span class="text-xs text-tertiary">ganhos</span></div>
+</div>
+{% if crm_enabled %}
   <div class="stat-card"><p class="stat-label">HITL pendentes</p><p class="stat-value">{{pending|length}}</p><a href="#pending" class="stat-link">Ver aprovações</a></div>
 </div>
 {% if pipeline_stats %}
@@ -79,6 +82,11 @@
   <button class="btn btn-ghost btn-sm" onclick="location.href='/dashboard/crm?q='+encodeURIComponent(document.getElementById('crm-q').value)+'&pipeline='+document.getElementById('crm-pipeline').value+'&agent_id='+document.getElementById('crm-agent').value+'&sort='+document.getElementById('crm-sort').value">Filtrar</button>
   <a class="btn btn-ghost btn-sm" href="/dashboard/crm/export?q={{q}}&pipeline={{pipeline}}&agent_id={{agent_id}}&sort={{sort}}">⬇ CSV</a>
 </div>
+{% endif %}
+{#- The board is NOT behind the paid flag: reading your own pipeline is not the
+    upsell, only the agents operating it are. It renders above whether or not
+    CRM IA is activated. -#}
+{% if crm_enabled %}
 {#- Kanban board: one stable column per canonical stage (plus any extra
     stages present in the data), so columns never appear/disappear with the
     data and empty stages stay valid drop targets. Cards drag between columns;

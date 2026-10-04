@@ -3260,69 +3260,55 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
         pending = []
         agents = (await db.execute(select(_Ag).where(_Ag.org_id==org_id).order_by(_Ag.name))).scalars().all()
         pipeline_stats: dict[str, dict[str, float | None]] = {}
+
+        # Always load this org's own deals. The kanban board and the stat cards
+        # used to sit behind `crm_enabled`, so an org without the paid flag got
+        # nothing but the upsell banner and no view of its own pipeline at all.
+        # Read access to your own CRM is not the paid feature; the agents
+        # operating it are. _load_pipeline_stats below is shared by both.
+        _query = select(CrmDeal).where(CrmDeal.org_id == org_id)
+        deals = (await db.execute(_query.limit(200))).scalars().all()
+        stats["truncated"] = len(deals) >= 200
+        for _d in deals:
+            by_stage[_d.stage] = by_stage.get(_d.stage, 0) + 1
+            total_value += _d.value or 0
+            total_cost += _d.cost_usd or 0  # column is cost_usd
+        stats["total"] = len(deals)
+        stats["total_value"] = total_value
+        stats["total_cost"] = total_cost
+        stats["total_cost_brl"] = round(total_cost * 5.5, 2)
+        if deals:
+            _pf: dict[str, dict[str, float | None]] = {}
+            for _d in deals:
+                _pn = _d.pipeline or "default"
+                _pf.setdefault(
+                    _pn,
+                    {"prospection": 0, "mql": 0, "sql": 0, "opportunity": 0,
+                     "closed_won": 0, "closed_lost": 0, "total_value": 0.0},
+                )
+                _pf[_pn][_d.stage] = (_pf[_pn].get(_d.stage) or 0) + 1
+                _pf[_pn]["total_value"] = (_pf[_pn].get("total_value") or 0) + (_d.value or 0)
+            for _pn, _v in _pf.items():
+                _won, _lost = _v.get("closed_won", 0) or 0, _v.get("closed_lost", 0) or 0
+                _closed = _won + _lost
+                _v["conversion"] = round(_won / _closed * 100, 1) if _closed else None
+                # Needs the audit trail for "ever reached MQL"; a point-in-time
+                # stage count reports nonsense as the pipeline advances.
+                _v["mql_to_won"] = None
+                _v["mql_sample"] = _v.get("mql", 0) or 0
+            pipeline_stats = _pf
+        if deals:
+            pipelines = sorted({d.pipeline or "default" for d in deals})
+        else:
+            pipelines = ["default"]
+        for d in deals:
+            if d.agent_id:
+                d.agent = next((a for a in agents if a.id == d.agent_id), None)
+        # Agent-operated CRM is the paid feature, so the HITL queue and the
+        # ranked next-actions list stay behind the flag. The board and the
+        # pipeline totals above do not: reading your own CRM is not the upsell.
         if crm_enabled:
-            query = select(CrmDeal).where(CrmDeal.org_id==org_id)
-            if agent_id:
-                query = query.where(CrmDeal.agent_id==agent_id)
-            if pipeline:
-                query = query.where(CrmDeal.pipeline==pipeline)
-            if q:
-                query = query.where((CrmDeal.lead_name.ilike(f"%{q}%")) | (CrmDeal.lead_email.ilike(f"%{q}%")) | (CrmDeal.lead_phone.ilike(f"%{q}%")))
-            # ordenação
-            if sort == "value_desc":
-                query = query.order_by(CrmDeal.value.desc())
-            elif sort == "value_asc":
-                query = query.order_by(CrmDeal.value.asc())
-            elif sort == "score_desc":
-                query = query.order_by(CrmDeal.score.desc())
-            else:
-                query = query.order_by(CrmDeal.updated_at.desc())
-            deals = (await db.execute(query.limit(200))).scalars().all()
-            # stats is computed from this list and rendered as totals. Without
-            # telling the template the query was capped, a tenant with more than
-            # 200 deals saw a total_value that silently excluded the rest while
-            # reading as the whole pipeline.
-            stats["truncated"] = len(deals) >= 200
-            # pipelines distintos para filtro
-            # select(CrmDeal.pipeline) yields plain strings, not rows — the old
-            # `{d.pipeline ...}` raised AttributeError on any non-empty
-            # pipeline, 500ing the entire CRM page (board included).
-            pipelines = sorted({d for d in (await db.execute(select(CrmDeal.pipeline).where(CrmDeal.org_id==org_id).distinct())).scalars().all() if d}) or ["default"]
-            for d in deals:
-                by_stage[d.stage] = by_stage.get(d.stage,0)+1
-                total_value += d.value or 0
-                total_cost += d.cost_usd or 0
-                # C5: pipeline conversion stats
-                p = d.pipeline or "default"
-                if p not in pipeline_stats:
-                    pipeline_stats[p] = {"prospection":0,"mql":0,"sql":0,"opportunity":0,"closed_won":0,"closed_lost":0,"total_value":0.0}
-                pipeline_stats[p][d.stage] = (pipeline_stats[p].get(d.stage) or 0)+1
-                pipeline_stats[p]["total_value"] = (pipeline_stats[p].get("total_value") or 0) + (d.value or 0)
-            stats["total"] = len(deals)
-            stats["total_value"] = total_value
-            stats["total_cost"] = total_cost
-            stats["total_cost_brl"] = round(total_cost*5.5,2)
-            # compute conversion per pipeline
-            for p, ps in pipeline_stats.items():
-                mql = ps.get("mql",0) or 0
-                won = ps.get("closed_won",0) or 0
-                lost = ps.get("closed_lost",0) or 0
-                total_closed = won + lost
-                # None, not 0: with nothing closed yet, "0% win rate" reads as
-                # "every deal is failing" when the truth is "no data yet".
-                ps["conversion"] = round(won/total_closed*100, 1) if total_closed else None
-                # mql_to_won was `won / count(stage='mql' right now)`. Deals that
-                # passed MQL are no longer sitting in MQL, so that denominator
-                # shrinks as the pipeline progresses -- 10 through MQL, 5 won, 0
-                # left at MQL reported 0% instead of 50%. It needs the audit trail
-                # for "ever reached MQL"; without it, report nothing.
-                ps["mql_to_won"] = None
-                ps["mql_sample"] = mql
             pending = (await db.execute(select(PendingAction).where(PendingAction.org_id==org_id, PendingAction.status=="pending").order_by(PendingAction.created_at.desc()).limit(20))).scalars().all()
-            # enrich agent
-            for d in deals:
-                if d.agent_id:
-                    d.agent = next((a for a in agents if a.id==d.agent_id), None)
             from aios.core.signals import rank_queue
             queue = [{"id": r["deal"].id, "name": r["deal"].lead_name or r["deal"].lead_email, "phone": r["deal"].lead_phone, "stage": r["deal"].stage, "timing": r["timing"], "reasons": r["reasons"]} for r in rank_queue(deals, 10)]
         else:
