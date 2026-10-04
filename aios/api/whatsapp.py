@@ -58,8 +58,30 @@ async def whatsapp_health(
     instance: str,
     provider: str = "baileys",
     user=Depends(get_current_user),
+    org_id: str = Depends(get_org_id),
 ):
+    from sqlalchemy import select
+
     from aios.core.whatsapp.provider.factory import get_provider
+    from aios.db.backend import db_session
+    from aios.db.models import ChannelConnection
+
+    # Instance names are not unique across tenants, and the provider probes by
+    # name alone. Without this check any authenticated user could read any
+    # tenant's connection state by naming their instance.
+    async with db_session() as db:
+        mine = (
+            await db.execute(
+                select(ChannelConnection.id).where(
+                    ChannelConnection.org_id == org_id,
+                    ChannelConnection.config["instance"].as_string() == instance,
+                ).limit(1)
+            )
+        ).first()
+    if not mine:
+        from fastapi import HTTPException
+
+        raise HTTPException(404, "instance not found")
     from aios.core.whatsapp.anti_ban.health_monitor import compute
     p = get_provider(provider if provider in ("baileys","cloud","coexistence") else "baileys")
     h = await p.health(instance)

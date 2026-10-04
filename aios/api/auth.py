@@ -51,7 +51,11 @@ def _load_ed25519_keys() -> tuple[ed25519.Ed25519PrivateKey | None, ed25519.Ed25
             logger.info("Loaded Ed25519 JWT keys from config")
             return _JWT_PRIVATE_KEY, _JWT_PUBLIC_KEY, _JWT_KEY_ID
         except Exception as e:
-            logger.warning("Failed to load Ed25519 keys from config: %s", e)
+            # Configured but unloadable. Minting an ephemeral pair here would
+            # silently invalidate every outstanding session AND change the key
+            # id, so verification of old tokens fails in a confusing way.
+            # Refuse instead; the operator fixes the config and restarts.
+            raise RuntimeError(f"Ed25519 JWT keys are configured but unloadable: {e}") from e
     
     # Generate new key pair if not configured
     _JWT_PRIVATE_KEY = ed25519.Ed25519PrivateKey.generate()

@@ -160,7 +160,10 @@ class CalendarTool(BaseTool):
                     .execute()
                 )
 
-            created = await asyncio.to_thread(_insert)
+            # A deadline, because to_thread without one parks the worker forever
+            # on a hung Google call and the job hits ARQ's timeout instead of
+            # failing fast with a message the agent can act on.
+            created = await asyncio.wait_for(asyncio.to_thread(_insert), timeout=60)
             return {
                 "ok": True,
                 "provider": "google_calendar",

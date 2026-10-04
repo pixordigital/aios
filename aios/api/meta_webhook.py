@@ -15,6 +15,7 @@ so `aios/tasks/jobs.py:template_status_reconcile_job` re-pulls anything that has
 been PENDING for a while.
 """
 
+import hashlib
 import hmac
 import logging
 
@@ -84,8 +85,27 @@ async def meta_template_status_webhook(request: Request):
 
         expected = _expected_secret(conn)
         got = request.headers.get("x-aios-webhook-secret") or ""
+        internal_ok = bool(expected) and hmac.compare_digest(got, expected)
+
+        # Meta itself signs with the App Secret as X-Hub-Signature-256. The
+        # custom header above only works for callers we control, and Meta is
+        # not one of them — without this branch every real Meta callback 401s
+        # and template statuses update only via the reconcile cron.
+        meta_ok = False
+        hub_sig = request.headers.get("x-hub-signature-256") or ""
+        try:
+            from aios.config import settings as _settings
+
+            app_secret = (_settings.whatsapp_app_secret or "").strip()
+        except Exception:
+            app_secret = ""
+        if app_secret and hub_sig.startswith("sha256="):
+            raw = await request.body()
+            digest = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
+            meta_ok = hmac.compare_digest(hub_sig, "sha256=" + digest)
+
         # Fail closed: no configured secret means nobody may set our state.
-        if not expected or not hmac.compare_digest(got, expected):
+        if not (internal_ok or meta_ok):
             logger.error("template webhook auth failed for waba %s", waba_id)
             raise HTTPException(401, "invalid webhook secret")
 

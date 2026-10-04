@@ -136,6 +136,11 @@ async def send_alert_via_evolution(org_id: str, alert: dict) -> bool:
             from aios.channels.evolution import EvolutionChannel
             from aios.channels.base import OutboundMessage
 
+            from aios.core.secrets import decrypt_channel_config as _dec
+
+            _cfg = conn.config or {}
+            if _cfg and any(str(v).startswith("enc:") for v in _cfg.values() if isinstance(v, str)):
+                conn.config = _dec(_cfg)
             channel = EvolutionChannel(connection=conn, db=sess)
             if not channel.instance or not channel.api_key:
                 logger.warning("Evolution not configured for org %s", org_id)

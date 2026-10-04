@@ -45,6 +45,10 @@ def current_trace_id() -> str:
 class TraceSpan:
     trace_id: str
     span_type: str  # "llm", "tool", "agent_run"
+    # Owner of the run that produced this span. Empty for system spans that
+    # predate scoping; get_trace_api treats those as unscoped for backward
+    # compatibility rather than locking out every existing dashboard.
+    org_id: str = ""
     start: float = 0.0
     end: float = 0.0
     model: str = ""
@@ -301,6 +305,23 @@ def _log_span_event(event: str, span: TraceSpan) -> None:
     except Exception:
         pass
     logging.getLogger("aios.tracing").info(json.dumps(record))
+
+
+def get_trace_scoped(trace_id: str, org_id: str) -> list[dict] | None:
+    """Spans for one trace, visible only to the org that produced them.
+
+    Returns None when the trace exists but belongs to another org. Spans that
+    carry no org (system spans predating scoping) stay visible, so existing
+    dashboards do not go dark; spans stamped with a *different* org hide the
+    whole trace rather than leaking which parts are foreign.
+    """
+    spans = [sp for sp in TRACES.values() if sp.trace_id == trace_id]
+    if not spans:
+        return []
+    stamped = [sp for sp in spans if sp.org_id]
+    if stamped and all(sp.org_id != org_id for sp in stamped):
+        return None
+    return [sp.to_dict() for sp in spans if not sp.org_id or sp.org_id == org_id]
 
 
 def get_trace(trace_id: str) -> list[dict]:

@@ -438,7 +438,7 @@ async def dashboard_home(request: Request):
         ac = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
         tc = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
         cc = (await db.execute(select(func.count(Conversation.id)).where(Conversation.org_id == org_id))).scalar() or 0
-        mc = (await db.execute(select(func.count(Message.id)))).scalar() or 0
+        mc = (await db.execute(select(func.count(Message.id)).where(Message.org_id == org_id))).scalar() or 0
         teams = (await db.execute(
             select(Team).options(selectinload(Team.agents)).where(Team.org_id == org_id).order_by(Team.created_at.desc())
         )).scalars().all()
@@ -1466,6 +1466,11 @@ async def channel_save(
             _c = _C()
             _c.config = config
             _c.channel_type = "evolution"
+            from aios.core.secrets import decrypt_channel_config as _dec
+
+            _cfg = _c.config or {}
+            if _cfg and any(str(v).startswith("enc:") for v in _cfg.values() if isinstance(v, str)):
+                _c.config = _dec(_cfg)
             res = await EvolutionChannel(connection=_c).reconcile_provider()
             if res.get("ok"):
                 config["instance"] = res["instance"]
@@ -2309,16 +2314,25 @@ async def lab_tool_run(request: Request):
 @router.get("/lab/traces/{trace_id}")
 async def lab_trace_proxy(request: Request, trace_id: str):
     from fastapi.responses import JSONResponse
-    from aios.core.tracing import get_trace, TRACES
+    from aios.core.tracing import TRACES, get_trace_scoped
+
+    org_id = await _org_filter(request)
+
+    def _recent():
+        out = []
+        for k, v in list(TRACES.items())[-30:]:
+            if v.org_id and v.org_id != org_id:
+                continue
+            out.append({"key": k, "trace_id": v.trace_id, "span_type": v.span_type, "model": v.model, "duration_ms": round((v.end - v.start)*1000,1) if v.end else 0})
+        return out
+
     if trace_id == "recent":
-        recent = [{"key": k, "trace_id": v.trace_id, "span_type": v.span_type, "model": v.model, "duration_ms": round((v.end - v.start)*1000,1) if v.end else 0}
-                  for k, v in list(TRACES.items())[-30:]]
-        return JSONResponse({"trace_id": "recent", "spans": [], "recent": recent})
-    spans = get_trace(trace_id)
+        return JSONResponse({"trace_id": "recent", "spans": [], "recent": _recent()})
+    spans = get_trace_scoped(trace_id, org_id)
+    if spans is None:
+        return JSONResponse({"trace_id": trace_id, "spans": [], "recent": _recent()})
     if not spans:
-        recent = [{"key": k, "trace_id": v.trace_id, "span_type": v.span_type, "model": v.model, "duration_ms": round((v.end - v.start)*1000,1) if v.end else 0}
-                  for k, v in list(TRACES.items())[-30:]]
-        return JSONResponse({"trace_id": trace_id, "spans": [], "recent": recent})
+        return JSONResponse({"trace_id": trace_id, "spans": [], "recent": _recent()})
     return JSONResponse({"trace_id": trace_id, "spans": spans})
 
 

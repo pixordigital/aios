@@ -10,6 +10,8 @@ Usage:
 """
 
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 from arq import cron
 from arq.connections import RedisSettings
@@ -112,6 +114,10 @@ async def canary_rollback_job(ctx):
                         if dt > cutoff:
                             continue
                 except Exception:
+                    logger.warning(
+                        "canary %s has an unparseable deployed_at; skipping rollback check",
+                        getattr(inst, "id", "?"),
+                    )
                     continue
                 metrics = (
                     await sess.execute(
@@ -158,8 +164,11 @@ async def _learning_job_wrapper(ctx, job_fn_name: str):
             "eval_review": eval_review_job,
         }
         fn = mapping.get(job_fn_name)
-        if fn:
-            await fn(ctx)
+        if fn is None:
+            # An unknown learning job used to return success without doing
+            # anything, so a typo in the cron table looked like a healthy run.
+            raise ValueError(f"unknown learning job: {job_fn_name!r}")
+        await fn(ctx)
     except Exception:
         import logging
         logging.getLogger(__name__).exception("learning job %s failed", job_fn_name)
@@ -271,7 +280,11 @@ class WorkerSettings:
         try:
             await init_db()
         except Exception:
-            pass
+            logging.getLogger(__name__).exception(
+                "worker startup: init_db failed; refusing to boot a worker "
+                "whose every job would fail"
+            )
+            raise
         # Same registration the API process does in its lifespan. Without it
         # every syscall dispatched from a worker hit "No handler" and silently
         # fell back to the direct provider, losing per-org secret resolution —
@@ -295,11 +308,24 @@ class WorkerSettings:
             pass
 
 
-# ponytail: async def run() kept for backward compat with aios-worker script
 async def run():
-    """Entry point for ``aios-worker`` script — blocks on event loop."""
+    """Entry point for ``aios-worker`` script — blocks on event loop.
+
+    Uses the full WorkerSettings, not just functions: an earlier version built
+    a bare Worker here, which silently dropped every cron job and the on_startup
+    registration for anyone running the installed script instead of
+    `python -m aios.tasks.worker`.
+    """
     from arq.worker import Worker
-    worker = Worker(functions=WorkerSettings.functions, redis_settings=WorkerSettings.redis_settings)
+    worker = Worker(
+        functions=WorkerSettings.functions,
+        redis_settings=WorkerSettings.redis_settings,
+        cron_jobs=WorkerSettings.cron_jobs,
+        on_startup=WorkerSettings.on_startup,
+        on_shutdown=WorkerSettings.on_shutdown,
+        max_jobs=WorkerSettings.max_jobs,
+        job_timeout=WorkerSettings.job_timeout,
+    )
     await worker.run()
 
 

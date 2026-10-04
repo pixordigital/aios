@@ -29,7 +29,13 @@ async def evolution_webhook(instance: str, request: Request):
     Handles both Baileys (WhatsApp Web) and Meta Cloud API events.
     Routes by instance name — single webhook endpoint for all providers.
     """
-    body = await request.json()
+    try:
+        parsed = await request.json()
+        body = parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        # Form posts, empty bodies and truncated chunks used to 500 here before
+        # authentication was even reached.
+        body = {}
     request.state.aios_body = body
 
     # Authenticate FIRST, before looking at the payload at all. Parsing before
@@ -57,13 +63,15 @@ async def evolution_webhook(instance: str, request: Request):
             "Evolution webhook: instance %r has no configured channel or api_key "
             "— rejecting", instance
         )
-        return {"status": "ignored", "reason": "unknown_instance"}
+        # Same shape as an auth failure. Distinct reasons let anyone enumerate
+        # which instance names exist by watching which error comes back.
+        return {"status": "ignored", "reason": "unauthorized"}
 
     if not _verify_request(request, instance_key):
         logger.error(
             "Evolution webhook: auth failed for instance %r — rejecting", instance
         )
-        return {"status": "ignored", "reason": "auth_failed"}
+        return {"status": "ignored", "reason": "unauthorized"}
 
     # normalize event (Baileys and Meta have different event names)
     event = body.get("event", "")
@@ -101,13 +109,28 @@ async def evolution_webhook(instance: str, request: Request):
 
     # dispatch to ARQ worker
     from aios.core.dispatch import dispatch_inbound
+    _extra = {"from_number": msg_from, "instance": instance, "msg_id": msg_id}
+    # Voice notes arrive as "[áudio]" text; without the media key the bytes are
+    # unrecoverable and the transcribe tool has nothing to fetch. Stash what a
+    # download needs so the capability actually exists.
+    try:
+        _audio = (data.get("message") or {}).get("audioMessage") or {}
+        if isinstance(_audio, dict) and (_audio.get("url") or _audio.get("mediaKey")):
+            _extra["audio_media"] = {
+                "url": _audio.get("url", ""),
+                "media_key": _audio.get("mediaKey", ""),
+                "mimetype": _audio.get("mimetype", ""),
+                "seconds": _audio.get("seconds", 0),
+            }
+    except Exception:
+        pass
     await dispatch_inbound(
         channel_type="evolution",
         channel_connection_id=channel_id,
         conversation_id="",
         text=msg_text,
         user_id=msg_from,
-        extra_data={"from_number": msg_from, "instance": instance, "msg_id": msg_id},
+        extra_data=_extra,
     )
 
     return {"status": "ok"}

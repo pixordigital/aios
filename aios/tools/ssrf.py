@@ -35,16 +35,23 @@ def is_private_host(host: str) -> bool:
     if not host:
         return True
     try:
-        addr = socket.getaddrinfo(host, 80)[0][4][0]
+        infos = socket.getaddrinfo(host, 80)
     except Exception:
         return True
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
+    if not infos:
         return True
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
-        ip = ip.ipv4_mapped
-    return any(ip in net for net in _PRIVATE_BLOCKS)
+    # Every address, not just [0]. Checking only the first lets a hostile DNS
+    # answer [public, private] through when the client dials the second.
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return True
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if any(ip in net for net in _PRIVATE_BLOCKS):
+            return True
+    return False
 
 
 def check_url(url: str, *, allow_private: bool = False) -> str | None:

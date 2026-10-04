@@ -5,7 +5,7 @@ from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, Conversation, Message, Organization, Memory, ChannelConnection
 from aios.schemas import BaseModel
 from aios.core.cache import cache
-from aios.core.tracing import get_trace, METRICS
+from aios.core.tracing import METRICS
 from aios.core.agent_health import health_tracker
 from .deps import get_current_user, get_org_id
 
@@ -47,9 +47,20 @@ async def overview(
 
 
 @router.get("/trace/{trace_id}")
-async def get_trace_api(trace_id: str, user=Depends(get_current_user)):
-    """Return all spans for a given trace ID."""
-    return {"trace_id": trace_id, "spans": get_trace(trace_id)}
+async def get_trace_api(
+    trace_id: str,
+    user=Depends(get_current_user),
+    org_id: str = Depends(get_org_id),
+):
+    """Return all spans for a given trace ID, scoped to the caller's org."""
+    from fastapi import HTTPException
+
+    from aios.core.tracing import get_trace_scoped
+
+    spans = get_trace_scoped(trace_id, org_id)
+    if spans is None:
+        raise HTTPException(404, "trace not found")
+    return {"trace_id": trace_id, "spans": spans}
 
 
 @router.get("/metrics")

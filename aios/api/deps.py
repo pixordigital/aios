@@ -136,6 +136,11 @@ async def get_dashboard_user(request: FastAPIRequest) -> User | None:
     payload = _verify_jwt_token(token)
     if not payload:
         return None
+    # Sessions are access tokens, not refresh tokens. Without this a stolen
+    # 30-day refresh token worked as a dashboard cookie, bypassing the much
+    # shorter access-token lifetime. Same enforcement get_current_user applies.
+    if payload.get("type") != "access":
+        return None
     # Route through FastAPI DI so tests' dependency_overrides apply
     resolver = request.app.dependency_overrides.get(get_db_backend, get_db_backend)
     async for db in resolver():

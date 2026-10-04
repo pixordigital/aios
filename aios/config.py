@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = 30
     jwt_ed25519_private_key: str = ""  # Ed25519 private key (base64) for JWT signing
     jwt_ed25519_public_key: str = ""   # Ed25519 public key (base64) for JWT verification
+    encryption_key: str = ""  # at-rest secret encryption; when empty, derived from jwt_secret (legacy)
     jwt_key_rotation_days: int = 90    # days before JWT key rotation
     log_format: str = "json"  # "text" | "json"
     https_only: bool = True

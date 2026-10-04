@@ -120,11 +120,32 @@ async def import_skill_from_url(
         # try to fetch raw via skills.sh API or direct
         pass
 
+    from aios.tools.ssrf import check_url
+
+    # Redirects are followed manually so every hop is SSRF-checked. httpx with
+    # follow_redirects=True would happily follow a github URL to
+    # 169.254.169.254 and hand cloud credentials to whoever imported the skill.
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": "AIOS-Skill-Importer/1.0"})
-            if resp.status_code != 200:
-                raise HTTPException(400, f"Falha ao buscar URL: {resp.status_code} {resp.text[:500]}")
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+            current = url
+            resp = None
+            for _ in range(5):
+                blocked = check_url(current)
+                if blocked:
+                    raise HTTPException(400, f"URL bloqueada: {blocked}")
+                resp = await client.get(current, headers={"User-Agent": "AIOS-Skill-Importer/1.0"})
+                if resp.status_code not in (301, 302, 303, 307, 308):
+                    break
+                nxt = resp.headers.get("location", "")
+                if not nxt:
+                    break
+                from urllib.parse import urljoin
+
+                current = urljoin(current, nxt)
+            else:
+                raise HTTPException(400, "redirecionamentos demais")
+            if resp is None or resp.status_code != 200:
+                raise HTTPException(400, f"Falha ao buscar URL: {resp.status_code if resp else '?'} {(resp.text[:500] if resp else '')}")
             raw = resp.text
             # limit size
             if len(raw) > 200000:

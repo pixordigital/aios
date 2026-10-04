@@ -8,7 +8,10 @@ from aios.config import settings
 
 
 def _key() -> bytes:
-    raw = settings.jwt_secret.encode()
+    # A dedicated key when the operator sets one. Otherwise the legacy
+    # derivation from jwt_secret, because every already-stored credential was
+    # encrypted that way and changing the default would orphan them all.
+    raw = (getattr(settings, "encryption_key", "") or settings.jwt_secret).encode()
     digest = hashlib.sha256(raw).digest()
     return base64.urlsafe_b64encode(digest)
 
@@ -16,9 +19,23 @@ def encrypt_secret(plain: str) -> str:
     from cryptography.fernet import Fernet
     return Fernet(_key()).encrypt(plain.encode()).decode()
 
+def _legacy_key() -> bytes:
+    digest = hashlib.sha256(settings.jwt_secret.encode()).digest()
+    return base64.urlsafe_b64encode(digest)
+
+
 def decrypt_secret(token: str) -> str:
+    from cryptography import fernet as _fernet_mod
     from cryptography.fernet import Fernet
-    return Fernet(_key()).decrypt(token.encode()).decode()
+
+    try:
+        return Fernet(_key()).decrypt(token.encode()).decode()
+    except _fernet_mod.InvalidToken:
+        # Rows written before a dedicated encryption_key was set used the
+        # legacy jwt_secret derivation. Trying it here makes rotation a
+        # config change instead of a data loss event; anything else still
+        # raises, because swallowing it would return wrong secrets silently.
+        return Fernet(_legacy_key()).decrypt(token.encode()).decode()
 
 def get_org_secrets(org_extra: dict) -> dict:
     enc = (org_extra or {}).get("_secrets_enc", {})

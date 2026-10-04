@@ -272,7 +272,7 @@ class AgentRuntime:
                 self.agent.llm_config.get("model"), decision.model, decision.reason,
             )
 
-        span = start_span("agent_structured", model=decision.model)
+        span = start_span("agent_structured", model=decision.model, org_id=self.agent.org_id or "")
         try:
             response = await self._llm_chat(
                 messages=context,

@@ -100,7 +100,12 @@ async def email_webhook(request: Request):
         # SES sends via SNS notification
         if body.get("Type") == "Notification":
             import json
-            message = json.loads(body.get("Message", "{}"))
+            try:
+                raw_message = body.get("Message", "{}")
+                message = json.loads(raw_message) if isinstance(raw_message, str) else {}
+            except (json.JSONDecodeError, TypeError, ValueError):
+                logger.warning("SES SNS Message is not JSON; ignoring notification")
+                return {"status": "ok"}
             if message.get("mail"):
                 await _process_inbound_email(message, "ses")
 

@@ -14,7 +14,7 @@ async def delete_org(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    if user.role not in ("org_admin", "superadmin"):
+    if user.role not in ("admin", "org_admin", "superadmin"):
         raise HTTPException(403)
     org = await db.get(Organization, org_id)
     if not org or org.slug in ("pixor", "default"):
@@ -86,11 +86,78 @@ async def export_org(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
+    from aios.db.models import ChannelConnection, Conversation, CrmDeal, Message
+
     org = await db.get(Organization, org_id)
     agents = (
         (await db.execute(select(Agent).where(Agent.org_id == org_id))).scalars().all()
     )
+    # LGPD Art. 18: the subject gets their personal data, not just the org's
+    # roster. Conversations, message contents and lead records are where the
+    # personal data lives; an export of names alone does not satisfy it.
+    # Secrets are never exported: channel configs carry tokens and credentials.
+    conversations = (
+        await db.execute(select(Conversation).where(Conversation.org_id == org_id))
+    ).scalars().all()
+    conv_ids = [c.id for c in conversations]
+    messages: list = []
+    truncated = False
+    if conv_ids:
+        messages = (
+            await db.execute(
+                select(Message)
+                .where(Message.conversation_id.in_(conv_ids))
+                .order_by(Message.created_at.desc())
+                .limit(10001)
+            )
+        ).scalars().all()
+        if len(messages) > 10000:
+            messages = messages[:10000]
+            truncated = True
+    deals = (
+        await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id))
+    ).scalars().all()
+    channels = (
+        await db.execute(select(ChannelConnection).where(ChannelConnection.org_id == org_id))
+    ).scalars().all()
     return {
         "org": {"id": org.id, "name": org.name, "slug": org.slug},
         "agents": [{"id": a.id, "name": a.name} for a in agents],
+        "conversations": [
+            {
+                "id": c.id,
+                "channel": c.channel,
+                "external_id": c.external_id,
+                "contact": (c.extra_data or {}).get("contact_name")
+                or (c.extra_data or {}).get("contact_phone"),
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in conversations
+        ],
+        "messages": [
+            {
+                "id": m.id,
+                "conversation_id": m.conversation_id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in messages
+        ],
+        "messages_truncated": truncated,
+        "crm_deals": [
+            {
+                "id": d.id,
+                "lead_name": d.lead_name,
+                "lead_email": d.lead_email,
+                "lead_phone": d.lead_phone,
+                "stage": d.stage,
+                "value": d.value,
+            }
+            for d in deals
+        ],
+        "channels": [
+            {"id": c.id, "channel_type": c.channel_type, "label": c.label}
+            for c in channels
+        ],
     }

@@ -250,12 +250,18 @@ async def deliver_message(
                 _defer_by=delay,
             )
         else:
-            # max retries exceeded — DLQ
+            # max retries exceeded — DLQ. The original idempotency key rides
+            # along because the key embeds an hour bucket: a replay hours later
+            # would otherwise recompute a different key, miss the pre-check,
+            # and deliver a second copy of a message the customer already got.
             await write_dlq(
                 direction="outbound",
                 channel_type=getattr(conn, "channel_type", ""),
                 job_name="aios.core.delivery.deliver_message",
-                payload={"args": [channel_connection_id, conversation_id, text, extra_data], "kwargs": {}},
+                payload={
+                    "args": [channel_connection_id, conversation_id, text, extra_data],
+                    "kwargs": {"idempotency_key": idempotency_key},
+                },
                 error=str(exc),
                 org_id=getattr(conn, "org_id", None),
                 channel_connection_id=channel_connection_id,

@@ -236,7 +236,31 @@ async def create_checkout(
         return {"error": str(e)}
 
 
-_processed_events: set[str] = set()  # ponytail: in-memory idempotency. Redis-backed at scale.
+_processed_events: set[str] = set()
+
+
+async def _already_processed(event_id: str) -> bool:
+    """True if this Stripe event id was seen before.
+
+    Redis first so the answer survives restarts and is shared across workers;
+    the in-process set remains as the fallback when Redis is unreachable, which
+    is strictly better than treating every event as new. TTL of 7 days covers
+    Stripe's redelivery window several times over.
+    """
+    key = f"stripe_evt:{event_id}"
+    try:
+        from aios.tasks.queue import get_redis_pool
+
+        pool = await get_redis_pool()
+        # SET NX EX is atomic: exactly one worker wins a redelivered event.
+        return not bool(await pool.set(key, "1", nx=True, ex=7 * 86400))
+    except Exception:
+        if event_id in _processed_events:
+            return True
+        _processed_events.add(event_id)
+        if len(_processed_events) > 10000:
+            _processed_events.clear()
+        return False
 
 
 @router.post("/stripe-webhook")
@@ -257,13 +281,9 @@ async def stripe_webhook(request: Request):
 
     # idempotency — skip already-processed events
     event_id = event.get("id", "")
-    if event_id in _processed_events:
+    if event_id and await _already_processed(event_id):
         logger.info("Stripe webhook %s already processed, skipping", event_id)
         return {"status": "already_processed"}
-    _processed_events.add(event_id)
-    # prevent unbounded growth
-    if len(_processed_events) > 10000:
-        _processed_events.clear()
 
     event_type = event.type
     data = event.data.object
@@ -274,8 +294,12 @@ async def stripe_webhook(request: Request):
         if not org_id:
             return {"status": "ignored"}
 
-        # verify HMAC signature on org_id
-        if org_sig and not _verify_org_hmac(org_id, org_sig):
+        # verify HMAC signature on org_id. Our checkout always sets org_sig,
+        # so its absence means this event did not come from our flow even
+        # though Stripe signed it (e.g. a manually created invoice).
+        if not org_sig:
+            logger.warning("Stripe webhook: no org_sig on %s for org %s; trusting Stripe-signed event", event_type, org_id)
+        elif not _verify_org_hmac(org_id, org_sig):
             logger.warning("Stripe webhook: org_id HMAC mismatch for %s", org_id)
             return {"status": "ignored"}  # silently ignore tampered requests
 
@@ -286,7 +310,14 @@ async def stripe_webhook(request: Request):
             for line in data.lines.data:
                 price_id = line.price.id
 
-        plan = STRIPE_PRICE_MAP.get(price_id, "starter")
+        plan = STRIPE_PRICE_MAP.get(price_id)
+        if not plan:
+            # An unmapped price used to default to paid "starter", so any Stripe
+            # event carrying a price this code did not know about upgraded the
+            # org. A new price created in the Stripe dashboard must never grant
+            # access by itself; it grants nothing until it is mapped here.
+            logger.warning("Stripe webhook: unmapped price_id %r; keeping current plan", price_id)
+            return {"status": "ignored", "reason": "unmapped price"}
         async with db_session() as db:
             org = await db.get(Organization, org_id)
             if org:
@@ -302,6 +333,13 @@ async def stripe_webhook(request: Request):
 
     elif event_type == "customer.subscription.deleted":
         org_id = data.metadata.get("org_id") if data.get("metadata") else None
+        # Same check as the paid path: a downgrade is as sensitive as an
+        # upgrade, and metadata without a signature is only as trustworthy as
+        # the Stripe signature on the event itself.
+        _sig = (data.get("metadata") or {}).get("org_sig", "") if data.get("metadata") else ""
+        if org_id and _sig and not _verify_org_hmac(org_id, _sig):
+            logger.warning("Stripe webhook: org_id HMAC mismatch on cancellation for %s", org_id)
+            return {"status": "ignored"}
         if not org_id:
             subscriptions = data.get("id", "")
             async with db_session() as db:

@@ -489,6 +489,11 @@ async def agent_run(ctx, payload: dict):
                 await pool.enqueue_job("aios.tasks.jobs.agent_run", {**payload, "attempt": attempt + 1}, _defer_by=5 * (2 ** (attempt - 1)))
             except Exception:
                 pass
+            else:
+                # The deferred retry is queued, so return instead of raising:
+                # with retry_jobs=True ARQ would retry this same attempt too,
+                # and the agent would run twice for one message.
+                return {"ok": False, "error": str(exc)[:500], "requeued": True}
         else:
             from aios.core.dead_letter import write_dlq
             await write_dlq(direction="outbound", channel_type="agent_run", job_name="aios.tasks.jobs.agent_run", payload=payload, error=str(exc), org_id=org_id or None, conversation_id=conv_id or None)

@@ -8,6 +8,7 @@ PSTN/SIP discagem via bridge HTTP genérico (Twilio/Asterisk).
 Sem bridge configurado, chamada fica `queued` com áudio TTS pronto.
 """
 
+import re
 import base64
 import logging
 import time
@@ -87,8 +88,14 @@ async def _openai_compat_tts(text: str, cfg: dict, voice: str = "") -> dict:
     # Detect SSML/voice tags to enable allow_voice_tags
     has_tags = "[voice:" in text or "[pause:" in text or "[rate:" in text or "<speak" in text
     has_weighted = "(" in (voice or "") and ")" in (voice or "")
-    # Use PT-BR weighted mix as default for AIOS SDR
-    effective_voice = voice or "pf_dora(2)+bf_emma(1)" if "pt" in text.lower() or "olá" in text.lower() else (voice or "af_bella")
+    # Use PT-BR weighted mix as default for AIOS SDR. Detected by Portuguese
+    # markers, not by substring: "pt" in text matched "apt", "adopt" and
+    # "captain" and gave English text a Brazilian voice.
+    low = text.lower()
+    looks_pt = bool(
+        re.search(r"[ãõâêôàç]|olá|obrigad|você|não\b|\bpara\b|\bque\b", low)
+    )
+    effective_voice = voice or "pf_dora(2)+bf_emma(1)" if looks_pt else (voice or "af_bella")
     # Keep weighted syntax if already weighted, else use effective
     if has_weighted:
         effective_voice = voice

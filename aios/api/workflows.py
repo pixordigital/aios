@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -6,6 +7,8 @@ from sqlalchemy.orm import selectinload
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Workflow, WorkflowNode, WorkflowRun, Agent
 from aios.schemas import BaseModel, PageResponse
+
+logger = logging.getLogger(__name__)
 from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -493,7 +496,11 @@ async def run_workflow(
             await db.commit()
             return {"run_id": run.id, "status": "running", "async": True}
         except Exception:
-            pass
+            # The queue is down, so the run executes inline in this request.
+            # That is the recovery path, not a silent choice: without this log
+            # a saturated queue looks identical to a healthy one, and a long
+            # workflow can outlive the HTTP timeout with no trace of why.
+            logger.exception("workflow run %s: async enqueue failed, running inline", run.id)
     engine = WorkflowEngine()
     try:
         run.status = "running"

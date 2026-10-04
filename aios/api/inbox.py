@@ -203,12 +203,19 @@ async def get_inbox_conversation(
     channel = None
     if conv.channel_connection_id:
         channel = await db.get(ChannelConnection, conv.channel_connection_id)
+        # conv itself is org-checked above; this keeps a row that somehow points
+        # outside the tenant from leaking another tenant's channel label.
+        if channel is not None and channel.org_id != org_id:
+            channel = None
     
     # Get assignee
     assigned_to = conv.extra_data.get("assigned_to") if conv.extra_data else None
     assignee = None
     if assigned_to:
         assignee = await db.get(User, assigned_to)
+        if assignee is not None and assignee.org_id != org_id:
+            assignee = None
+            assigned_to = None
     
     result = {
         "id": conv.id,

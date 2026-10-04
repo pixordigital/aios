@@ -296,6 +296,11 @@ async def _try_singleton_lock():
     except Exception:
         # SQLite (tests/local) has no advisory locks. Fall back to allowing it;
         # SQLite is single-process anyway.
+        try:
+            if _lock_sess is not None:
+                await _lock_sess.close()
+        except Exception:
+            pass
         _lock_sess = None
         return True
 

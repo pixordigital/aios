@@ -16,7 +16,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["license"])
 
 EXPECTED_DIGEST = ""  # set via env AIOS_IMAGE_DIGEST no Control Plane build
-EXPECTED_FP = hashlib.sha256((settings.jwt_secret or "change-me").encode()).hexdigest()[:16]
+# A weak or default secret would make this fingerprint publicly guessable
+# (sha256("change-me") is known to everyone), so anyone could present it and
+# pass. Fail closed instead: with no strong secret, nothing matches.
+_WEAK_SECRETS = ("", "change-me", "change-me-in-production", "test-secret")
+EXPECTED_FP = (
+    hashlib.sha256(settings.jwt_secret.encode()).hexdigest()[:16]
+    if (settings.jwt_secret or "") not in _WEAK_SECRETS
+    else None
+)
+if EXPECTED_FP is None:
+    logger.error("license fingerprint disabled: JWT secret is missing or a known default")
 
 @router.post("/heartbeat")
 async def heartbeat(request: Request, _: None = Depends(require_admin_key)):

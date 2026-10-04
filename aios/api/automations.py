@@ -1,3 +1,4 @@
+import logging
 import uuid
 import json
 from datetime import datetime, timezone
@@ -8,6 +9,8 @@ from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Workflow, WorkflowRun, Credential
 from aios.core.secrets import encrypt_secret
 from .deps import get_current_user, get_org_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/automations", tags=["automations"])
 
@@ -190,7 +193,16 @@ async def webhook_dispatch(path: str, request: Request):
                 j = await request.json()
             except Exception:
                 j = None
-            headers = dict(request.headers)
+            headers = {
+                k: v
+                for k, v in request.headers.items()
+                # Authorization, cookies and signatures identify the caller, not
+                # the event. Persisting them writes one tenant's (or an
+                # attacker's) secrets into a workflow run row that other code
+                # paths read back out.
+                if k.lower() not in ("authorization", "cookie", "x-hub-signature-256",
+                                     "x-slack-signature", "x-twilio-signature", "x-mailgun-signature")
+            }
             query = dict(request.query_params)
         except Exception:
             body, j, headers, query = b"", None, {}, {}
@@ -322,4 +334,7 @@ async def fire_event_triggers(event_type: str, org_id: str, payload: dict):
                 from aios.tasks.queue import enqueue_job
                 await enqueue_job("aios.tasks.jobs.workflow_run_job", {"workflow_id": wf.id, "run_id": run.id})
             except Exception:
-                pass
+                logger.exception("workflow run %s: enqueue failed", run.id)
+                run.status = "failed"
+                run.error = "enqueue failed; see server log"
+                await sess.commit()

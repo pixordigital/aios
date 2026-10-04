@@ -41,7 +41,11 @@ def _verify_slack_signature(request: Request, body: bytes, secret: str = "") -> 
         return False
 
     # Prevent replay attacks (5 min window)
-    if abs(time.time() - int(timestamp)) > 300:
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        return False
+    if abs(time.time() - ts) > 300:
         logger.warning("Slack webhook timestamp too old")
         return False
 
@@ -75,7 +79,13 @@ async def _find_connection(db, slack_channel_id: str = ""):
             cfg = c.config or {}
             if isinstance(cfg, dict) and cfg.get("slack_channel_id") == slack_channel_id:
                 return c
-    return conns[0] if conns else None
+    # No fallback to another tenant's connection. The previous `conns[0]` handed
+    # an unmatched event to whichever tenant's row the database returned first;
+    # the per-connection signature check downstream rejected it, but resolving
+    # to a foreign row at all was the same defect class as the email `.first()`
+    # bug. Unmatched events authenticate against the global secret and are
+    # refused at the handler when no connection matches.
+    return None
 
 
 def _channel_id_of(event: dict) -> str:

@@ -230,11 +230,11 @@ async def deploy_agent(
             },
         )
     except Exception:
-        pass
+        logger.warning("agent %s: health-check enqueue failed", agent_id, exc_info=True)
     try:
         health_tracker.record_success(agent_id)
     except Exception:
-        pass
+        logger.warning("agent %s: health tracker write failed", agent_id, exc_info=True)
     return agent
 
 

@@ -205,9 +205,12 @@ async def test_channel(body: dict = Body(...), user=Depends(get_current_user)):
         ch = channel_mgr.build(dummy)
         result = await ch.test()
         return result
-    except Exception as e:
+    except Exception:
+        # The raw text can embed URLs, tokens or credentials from the user's own
+        # config, so it goes to the server log only. The caller gets a generic
+        # failure rather than a reflection of their secrets.
         logger.exception("Channel test failed")
-        return {"ok": False, "message": str(e)}
+        return {"ok": False, "message": "teste de canal falhou; veja o log do servidor"}
 
 
 @router.post("/evolution/create-instance")
@@ -235,6 +238,29 @@ async def create_evolution_instance(
     if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
         return {"ok": False, "message": "Invalid Evolution channel"}
 
+    # Instance names are resolved globally by the inbound webhook (it has no org
+    # context until it finds the channel), and a collision resolves to the
+    # lowest id — so two orgs sharing a name silently deliver one tenant's
+    # messages to the other's agent. Refuse the collision at creation, when it
+    # is still cheap to pick another name.
+    from sqlalchemy import select
+
+    from aios.db.models import ChannelConnection as _CC
+
+    clash = (
+        await db.execute(
+            select(_CC.id, _CC.org_id).where(
+                _CC.channel_type == "evolution",
+                _CC.id != channel_id,
+                _CC.config["instance"].as_string() == instance_name,
+            ).limit(1)
+        )
+    ).first()
+    if clash:
+        _clash_id, _clash_org = clash
+        if _clash_org == org_id:
+            return {"ok": False, "message": f"instance name {instance_name!r} is already in use in this organization"}
+        return {"ok": False, "message": f"instance name {instance_name!r} is already taken; pick another"}
     from aios.channels.manager import manager as channel_mgr
     ch = channel_mgr.build(channel, db=db)
     result = await ch.create_instance(instance_name, provider)

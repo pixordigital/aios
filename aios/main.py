@@ -432,6 +432,7 @@ _DASHBOARD_MUTATING_GET_PREFIXES = (
     "/dashboard/conversations/",  # delete
     "/dashboard/channels/",  # toggle/delete
     "/dashboard/crm/",  # approve/reject
+    "/dashboard/automations/",  # duplicate/delete/trigger-delete (GET mutations)
     "/dashboard/members/",  # invite revoke / remove
     "/dashboard/admin/orgs/",  # suspend/unsuspend/remove
     "/dashboard/admin/fleet/",  # remove

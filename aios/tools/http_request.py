@@ -19,6 +19,12 @@ _PRIVATE_BLOCKS = [
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
+    # Gaps that used to be open: 0.0.0.0 routes to localhost on Linux, CGNAT
+    # space is operator-internal, and mapped IPv6 reaches the same v4 targets
+    # through a different spelling.
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("::ffff:0:0/96"),
 ]
 
 

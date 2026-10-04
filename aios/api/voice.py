@@ -119,9 +119,14 @@ async def call(
 @router.post("/webhook")
 async def webhook(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
     """Inbound do bridge SIP: {from, text?, audio_base64?, agent_id?, channel_id?}."""
-    secret = request.query_params.get("secret") or request.headers.get("x-voice-secret")
+    secret = request.headers.get("x-voice-secret") or request.query_params.get("secret")
     if not settings.voice_webhook_secret or not secret or secret != settings.voice_webhook_secret:
         raise HTTPException(401, "secret inválido")
+    if request.query_params.get("secret"):
+        # The query string survives into access logs, so a shared secret sent
+        # that way is written to disk on every call. Still accepted for bridge
+        # compatibility; prefer the x-voice-secret header.
+        logger.warning("voice bridge secret arrived in query string; use x-voice-secret header")
     try:
         body = await request.json()
     except Exception:
@@ -154,13 +159,19 @@ async def webhook(request: Request, db: DatabaseBackend = Depends(get_db_backend
         if ch and ch.channel_type == "voice" and ch.is_active and (not agent_org or ch.org_id == agent_org):
             channel_connection_id = ch.id
     if not channel_connection_id:
-        q = select(ChannelConnection).where(ChannelConnection.channel_type == "voice", ChannelConnection.is_active == True)  # noqa: E712
-        if agent_org:
-            q = q.where(ChannelConnection.org_id == agent_org)
+        if not agent_org:
+            raise HTTPException(
+                400,
+                "channel_id ou agent_id válido é obrigatório: sem eles não há "
+                "tenant para atribuir a chamada",
+            )
+        q = select(ChannelConnection).where(ChannelConnection.channel_type == "voice", ChannelConnection.is_active == True, ChannelConnection.org_id == agent_org)  # noqa: E712,E501
         result = await db.execute(q.limit(1))
         first = result.scalars().first()
         if first:
             channel_connection_id = first.id
+        else:
+            raise HTTPException(400, "nenhum canal de voz ativo para este tenant")
     from aios.core.dispatch import dispatch_inbound
 
     await dispatch_inbound(

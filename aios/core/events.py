@@ -22,9 +22,9 @@ in ``Agent.extra_data["event_subscriptions"]``. Grow it when a second consumer
 pattern actually shows up.
 """
 
-import asyncio
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -44,6 +44,11 @@ STREAM = "aios:events"
 
 GROUP = "aios-dispatchers"
 
+# One name per process. Every replica previously claimed as "dispatcher", so a
+# live consumer's entries looked abandoned to whichever replica ran XAUTOCLAIM
+# next and two processes could work the same delivery. Dispatch is idempotent
+# per agent, so nothing double-sent — but the reclaim accounting lied.
+_CONSUMER = f"dispatcher-{os.getpid()}"
 # Namespace for "already dispatched" markers. Separate keyspace from the stream
 # so trimming the stream never deletes dedupe state.
 DEDUPE_PREFIX = "aios:evt:idem:"
@@ -393,7 +398,9 @@ async def consume_once(pool=None, block_ms: int = 1000, count: int = 10) -> int:
             await pool.xack(STREAM, GROUP, msg_id)
             handled += 1
     except Exception:
-        logger.debug("xautoclaim failed (older redis?)", exc_info=True)
+        # Warning, not debug: without reclaim, events abandoned by a crashed
+        # consumer sit unacked until they age out instead of being redelivered.
+        logger.warning("xautoclaim failed (older redis?)", exc_info=True)
 
     try:
         entries = await pool.xreadgroup(
@@ -415,21 +422,3 @@ async def consume_once(pool=None, block_ms: int = 1000, count: int = 10) -> int:
             await pool.xack(STREAM, GROUP, msg_id)
             handled += 1
     return handled
-
-
-async def run_consumer(stop: asyncio.Event | None = None) -> None:
-    """Consumer loop for the ARQ worker. Runs until ``stop`` is set or cancelled."""
-    from aios.tasks.queue import get_redis_pool
-
-    logger.info("event consumer started stream=%s group=%s", STREAM, GROUP)
-    pool = await get_redis_pool()
-    await ensure_group(pool)
-    while stop is None or not stop.is_set():
-        try:
-            await consume_once(pool)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # Back off on a failing bus instead of hot-looping on the error.
-            logger.exception("event consumer iteration failed")
-            await asyncio.sleep(1)

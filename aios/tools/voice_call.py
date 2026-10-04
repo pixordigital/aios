@@ -36,8 +36,6 @@ class VoiceCallTool(BaseTool):
                             cfg["_org_id"] = ch.org_id
             except Exception:
                 pass
-            except Exception:
-                pass
         res = await place_call(to, script, cfg, {"via": "tool"})
         try:
             # place_call returns {"status": "queued"} and only flips to

@@ -20,18 +20,20 @@ class TranscribeTool(BaseTool):
             # Evolution credentials may be used, so refuse instead of trying
             # every tenant's channel until one yields the media.
             return {"error": "sem org_id"}
-        # tenta baixar via WhatsAppChannel helper
+        # aios.channels.whatsapp never existed, so the previous code raised
+        # ImportError on every call and the tool could never work. Audio bytes
+        # are fetched from the media metadata stashed at ingest (see
+        # evolution_webhook), or from a direct URL when the caller has one.
         try:
             from aios.db.backend import db_session
             from aios.db.models import ChannelConnection
             from sqlalchemy import select
             async with db_session() as db:
                 chans = (await db.execute(select(ChannelConnection).where(ChannelConnection.channel_type=="whatsapp", ChannelConnection.org_id==mine))).scalars().all()
+                audio_meta = await _resolve_audio_meta(db, mine, media_id)
                 for ch in chans:
                     try:
-                        from aios.channels.whatsapp import WhatsAppChannel
-                        w = WhatsAppChannel(connection=ch)
-                        data = await w.download_media(media_id)
+                        data = await _download_audio(ch, audio_meta, media_id)
                         if data:
                             # whisper via openai
                             import httpx
@@ -71,5 +73,81 @@ class TranscribeTool(BaseTool):
             return {"error": "não baixou media"}
         except Exception as e:
             return {"error": str(e)}
+
+async def _resolve_audio_meta(db, org_id: str, media_id: str) -> dict:
+    """Find the stored audio metadata for a message reference.
+
+    The tool receives whatever identifier the agent has: a direct media URL, or
+    a message id whose row carries the audio key stashed at ingest. A bare
+    WhatsApp media id with no stored row cannot be resolved to bytes, and
+    pretending otherwise is how this tool stayed broken.
+    """
+    text = (media_id or "").strip()
+    if text.startswith(("http://", "https://")):
+        return {"url": text}
+    if not text:
+        return {}
+    from sqlalchemy import select
+
+    from aios.db.models import Message
+
+    row = (
+        await db.execute(
+            select(Message).where(
+                Message.org_id == org_id,
+                (Message.channel_message_id == text) | (Message.id == text),
+            )
+        )
+    ).scalars().first()
+    if row is not None:
+        meta = (row.extra_data or {}).get("audio_media") or {}
+        if isinstance(meta, dict) and (meta.get("url") or meta.get("media_key")):
+            return meta
+    return {}
+
+
+async def _download_audio(ch, audio_meta: dict, media_id: str) -> bytes | None:
+    """Fetch audio bytes, preferring a direct URL over the Evolution API."""
+    import httpx
+
+    url = (audio_meta or {}).get("url", "")
+    if url:
+        try:
+            async with httpx.AsyncClient(timeout=30) as c:
+                r = await c.get(url)
+                if r.status_code == 200 and r.content:
+                    return r.content
+        except Exception:
+            pass
+
+    # Fallback: Evolution's media endpoint. Shape follows the instance API;
+    # unverified against a live Evolution here, so a failure returns None and
+    # the caller reports honestly rather than raising.
+    cfg = ch.config or {}
+    base = str(cfg.get("server_url", "http://evolution:8080")).rstrip("/")
+    api_key = str(cfg.get("api_key", ""))
+    instance = str(cfg.get("instance", ""))
+    media_key = (audio_meta or {}).get("media_key", "")
+    if not (base and api_key and instance and media_key):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(
+                f"{base}/chat/getBase64FromMediaMessage/{instance}",
+                headers={"apikey": api_key, "Content-Type": "application/json"},
+                json={"message": {"key": {"id": media_id}, "mediaKey": media_key}},
+            )
+            if r.status_code != 200:
+                return None
+            payload = r.json()
+            b64 = (payload or {}).get("base64", "") if isinstance(payload, dict) else ""
+            if not b64:
+                return None
+            import base64 as _b64
+
+            return _b64.b64decode(b64)
+    except Exception:
+        return None
+
 
 TOOL_REGISTRY["transcribe"] = {"code_reference": "aios.tools.transcribe.TranscribeTool"}

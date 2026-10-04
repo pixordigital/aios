@@ -60,6 +60,40 @@ def _verify_twilio_signature(request: Request, body: bytes) -> bool:
     return hmac.compare_digest(header, expected)
 
 
+def _twilio_form_to_body(form) -> dict:
+    """Normalize Twilio's form fields into this webhook's vocabulary.
+
+    Twilio sends CallSid/From/To/CallStatus/RecordingUrl; the handler below
+    speaks call.started/call.ended/recording.completed with snake_case fields.
+    Mapping is conservative: only statuses with an unambiguous equivalent set
+    `event`, everything else keeps the raw fields so the recording branches can
+    still match on call_sid.
+    """
+    get = lambda k, default="": (form.get(k) or default)  # noqa: E731
+    body = {
+        "call_sid": get("CallSid"),
+        "from": get("From", get("Caller")),
+        "to": get("To", get("Called")),
+        "channel_id": get("channel_id"),
+        "duration": get("RecordingDuration", get("CallDuration", get("Duration"))),
+        "recording_url": get("RecordingUrl"),
+    }
+    status = (get("CallStatus") or "").lower()
+    if status in ("in-progress", "ringing", "queued"):
+        body["event"] = "call.started"
+    elif status in ("completed", "busy", "failed", "no-answer", "canceled"):
+        body["event"] = "call.ended"
+    elif get("RecordingUrl"):
+        body["event"] = "recording.completed"
+    elif get("event"):
+        body["event"] = get("event")
+    # Twilio recording callbacks carry no explicit event; the presence of a
+    # recording URL on a completed call is the signal.
+    if not body.get("event") and body.get("recording_url"):
+        body["event"] = "recording.completed"
+    return {k: v for k, v in body.items() if v not in ("", None, 0, {})}
+
+
 @router.post("/webhook")
 async def voice_webhook(request: Request):
     """Receive voice events from Twilio → dispatch to agent."""
@@ -77,10 +111,24 @@ async def voice_webhook(request: Request):
         logger.warning("Voice webhook signature rejected")
         raise HTTPException(401, "Invalid signature")
 
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
+    # Twilio posts application/x-www-form-urlencoded with PascalCase fields,
+    # not the JSON vocabulary below. Reading only json() made every real Twilio
+    # callback parse to {} and fall through silently — authenticated but inert.
+    body: dict = {}
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "form-" in content_type or "urlencoded" in content_type:
+        try:
+            form = await request.form()
+            body = _twilio_form_to_body(form)
+        except Exception:
+            logger.warning("voice webhook: form parse failed", exc_info=True)
+            body = {}
+    else:
+        try:
+            parsed = await request.json()
+            body = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            body = {}
 
     event = body.get("event", "")
     call_sid = body.get("call_sid", body.get("call", {}).get("sid", ""))
