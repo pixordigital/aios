@@ -5,6 +5,7 @@ Each phase produces output consumed by the next; loop up to N iterations.
 """
 
 from __future__ import annotations
+import builtins
 
 import logging
 from datetime import datetime, timezone
@@ -126,7 +127,7 @@ class SparcEngine:
             await db.refresh(wf)
             return wf
 
-    async def logs(self, workflow_id: str, limit: int = 50) -> list[SparcPhaseLog]:
+    async def logs(self, workflow_id: str, limit: int = 50) -> builtins.list[SparcPhaseLog]:
         async with db_session() as db:
             result = await db.execute(
                 select(SparcPhaseLog).where(SparcPhaseLog.sparc_workflow_id == workflow_id)

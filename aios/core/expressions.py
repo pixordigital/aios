@@ -1,10 +1,11 @@
 import json
 import re
+from typing import Any
 
 _EXPR_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 
 def _get_path(ctx: dict, path: str):
-    cur = ctx
+    cur: Any = ctx
     for part in path.split("."):
         if isinstance(cur, dict):
             cur = cur.get(part)
@@ -42,10 +43,9 @@ def _eval_expr(expr: str, ctx: dict):
 def render_template(template: str, ctx: dict) -> str:
     if not isinstance(template, str):
         return template
-    if not _EXPR_RE.search(template):
-        return template
-    if re.fullmatch(r"\{\{\s*.+?\s*\}\}", template.strip()):
-        inner = _EXPR_RE.search(template).group(1)
+    whole = _EXPR_RE.fullmatch(template.strip())
+    if whole:
+        inner = whole.group(1)
         v = _eval_expr(inner, ctx)
         if v is not None:
             return v if not isinstance(v, str) else v

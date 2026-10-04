@@ -168,7 +168,10 @@ async def _require_auth(request: Request) -> None:
     ts = request.headers.get("x-service-timestamp")
     nonce = request.headers.get("x-service-nonce")
     sig = request.headers.get("x-service-signature")
-    if not all([kid, ts, nonce, sig]):
+    # Spelled as `or` rather than `all([...])` so the type checker narrows
+    # each header to str; all() does not narrow, and verify_request must not
+    # receive None.
+    if not kid or not ts or not nonce or not sig:
         raise HTTPException(401, "Missing service signature")
     if kid != settings.arvo_service_key_id:
         raise HTTPException(401, "Unknown service key id")

@@ -69,13 +69,11 @@ async def audit_deal_change(deal, new_value: float, new_extra: dict | None, org,
             context_summary=f"Alerta: possível desvio {discount:.1f}% > política {plan} ~{max_disc}% em {deal.lead_name} — exposição estimada R${exposure:.2f} (confiança 0.88). Evidence: CrmDealVersion + AuditLog. Validação humana obrigatória. Expira em {expiry_days}d. Este alerta é informativo e não constitui determinação legal. Requer validação humana. Sem responsabilidade civil/criminal da plataforma.",
             status="pending",
         )
-        # guarda expiração em extra_data para cron
-        try:
-            from datetime import datetime, timedelta, timezone
+        # Expiry rides in tool_args: PendingAction has no extra_data column, so
+        # assigning one evaporated and the cron-facing comment above it was a lie.
+        from datetime import datetime, timedelta, timezone
 
-            pa.extra_data = {"expires_at": (datetime.now(timezone.utc) + timedelta(days=expiry_days)).isoformat(), "expiry_days": expiry_days, "disclaimer_version": "v1-long", "generic_rule": f"política {plan} ~{max_disc}%"}
-        except Exception:
-            pass
+        pa.tool_args = {**(pa.tool_args or {}), "expires_at": (datetime.now(timezone.utc) + timedelta(days=expiry_days)).isoformat(), "expiry_days": expiry_days}
         db.add(pa)
         await db.flush()
         return False, pa, exposure
@@ -87,12 +85,9 @@ async def check_human_deviation(deal, body: dict, org, db, user_id: str):
     if body.get("stage") == "opportunity" and deal.stage == "prospection":
         expiry_days = _expiry_days_for_org(org)
         pa = PendingAction(org_id=deal.org_id or "", agent_id=deal.agent_id or deal.id, conversation_id=deal.id, tool_name="human_deviation", tool_args={"deal_id": deal.id, "deviation": "stage_skip", "from": deal.stage, "to": body["stage"], "generic_rule": "SOP stage", "disclaimer_version": "v1-long", "human_decision_required": True, "alert_only": True}, context_summary=f"Alerta: possível desvio humano {user_id} pulou {deal.stage}→{body['stage']} fora SOP. Validação humana obrigatória. Expira em {expiry_days}d. Alerta informativo.", status="pending")
-        try:
-            from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta, timezone
 
-            pa.extra_data = {"expires_at": (datetime.now(timezone.utc) + timedelta(days=expiry_days)).isoformat(), "expiry_days": expiry_days, "disclaimer_version": "v1-long"}
-        except Exception:
-            pass
+        pa.tool_args = {**(pa.tool_args or {}), "expires_at": (datetime.now(timezone.utc) + timedelta(days=expiry_days)).isoformat(), "expiry_days": expiry_days}
         db.add(pa)
         await db.flush()
         return pa

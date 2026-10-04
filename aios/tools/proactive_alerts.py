@@ -152,7 +152,12 @@ async def send_alert_via_evolution(org_id: str, alert: dict) -> bool:
                 logger.warning("No default_number configured for Evolution channel org %s", org_id)
                 return False
 
-            msg = OutboundMessage(text=alert["message"], extra_data={"from_number": default_number})
+            msg = OutboundMessage(
+                text=alert["message"],
+                conversation_id="",
+                channel_connection_id=conn.id,
+                extra_data={"from_number": default_number},
+            )
             result = await channel.send(msg)
             return result is not None
 

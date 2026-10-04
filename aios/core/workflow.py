@@ -17,6 +17,10 @@ from sqlalchemy import text
 
 from aios.core.agent import AgentRuntime
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from aios.core.autonomous_agent import AutonomousAgent
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,7 +61,7 @@ class WorkflowResult:
 
 class WorkflowPlanner:
     """LLM Planner — decompose goal into subtasks (HITL: Planner pattern)."""
-    async def plan(self, goal: str, available_tools: list[str] = None) -> list[dict]:
+    async def plan(self, goal: str, available_tools: list[str] | None = None) -> list[dict]:
         try:
             from aios.core.providers import get_provider
             llm = get_provider("openai/gpt-4o-mini")
@@ -131,7 +135,7 @@ class WorkflowEngine:
             shared.update(resume_outputs)
         if resume_status:
             result.node_status = dict(resume_status)
-        ready = asyncio.Queue()
+        ready: asyncio.Queue[str] = asyncio.Queue()
         pending = set(workflow.nodes.keys())
         if resume_status:
             for nid, st in resume_status.items():
@@ -225,19 +229,10 @@ class WorkflowEngine:
         except Exception:
             logger.debug("WorkflowRun create failed", exc_info=True)
 
-        try:
-            from aios.tasks.queue import enqueue
-
-            await enqueue(
-                "workflow_checkpoint",
-                workflow_id=workflow.id,
-                conv_id=conv_id,
-                input=initial_input,
-                run_id=run_id,
-            )
-        except Exception:
-            pass
-
+        # Async offload lives in aios.tasks.jobs.workflow_run_job, enqueued by
+        # the API layer. A "workflow_checkpoint" enqueue used to sit here, but it
+        # imported a name that does not exist and named a job that is not
+        # registered, so it raised on every run and the except-pass hid it.
         for nid, node in workflow.nodes.items():
             if nid not in pending:
                 result.node_status[nid] = result.node_status.get(nid, "done")
@@ -279,6 +274,12 @@ class WorkflowEngine:
                         nid = next(k for k, v in running.items() if v is d)
                         running.pop(nid)
                         pending.discard(nid)
+                        # Looked up fresh: `node` here used to be a stale binding
+                        # leaked from the dispatch loop above, so a completed
+                        # task's result was attributed to whichever node ran last.
+                        node = workflow.nodes.get(nid)
+                        if node is None:
+                            continue
                         try:
                             node_result = d.result()
                             if node_result.ok:
@@ -413,7 +414,7 @@ class WorkflowEngine:
                 _is_auto = True
             if _is_auto:
                 from aios.core.autonomous_agent import AutonomousAgent
-                runtime = AutonomousAgent(agent_model, self._db_factory)
+                runtime: AutonomousAgent | AgentRuntime = AutonomousAgent(agent_model, self._db_factory)
             else:
                 runtime = AgentRuntime(agent_model, self._db_factory)
             msg = shared.get(node.output_key, shared.get("initial_input", ""))
@@ -443,7 +444,7 @@ class WorkflowEngine:
                         continue
                     else:
                         raise
-            result.outputs[node.id] = output
+            result.outputs[node.id] = output or ""
             result.node_status[node.id] = "done"
             try:
                 shared[node.output_key] = output
@@ -496,7 +497,7 @@ class WorkflowEngine:
                     output = await asyncio.wait_for(
                         engine.execute(node.tool_name, args_json), timeout=node.timeout
                     )
-                result.outputs[node.id] = output
+                result.outputs[node.id] = output or ""
                 result.node_status[node.id] = "done"
                 try:
                     parsed = json.loads(output) if isinstance(output, str) and output.strip().startswith("{") else output

@@ -118,6 +118,10 @@ def route(
     `model` is what the operator configured. It is returned unchanged unless
     every signal says the work is small.
     """
+    # None means "no model configured". Normalizing once here keeps every
+    # RouteDecision str-typed downstream instead of sprinkling guards.
+    if model is None:
+        model = ""
     tool_names = {t.get("function", {}).get("name", "") for t in (tools or [])}
     signals = {
         "context_tokens": context_tokens,
@@ -201,6 +205,8 @@ def should_escalate(
     observed failure, never a guess, so a run that succeeds on the cheap tier
     keeps the saving and a run that did not gets repaired instead of shipped.
     """
+    if model is None:
+        model = ""
     reasons = []
     if empty_response:
         reasons.append("empty response")
@@ -262,6 +268,8 @@ def floor_from_extra(extra: dict | None) -> str | None:
     floor = entry.get("floor")
     at = entry.get("at")
     if not floor or not is_routable(floor):
+        return None
+    if not isinstance(at, (int, float, str)):
         return None
     try:
         age = time.time() - float(at)

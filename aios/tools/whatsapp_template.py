@@ -23,7 +23,7 @@ class WhatsAppTemplateTool(BaseTool):
         "required": ["number", "template"],
     }
 
-    async def run(self, number: str, template: str = "aios_reengajamento_1", language: str = "pt_BR", params: list = None, instance: str = "") -> dict:
+    async def run(self, number: str, template: str = "aios_reengajamento_1", language: str = "pt_BR", params: list | None = None, instance: str = "") -> dict:
         params = params or []
         # Build Evolution API payload for template
         # Evolution expects: number, text, template params via components

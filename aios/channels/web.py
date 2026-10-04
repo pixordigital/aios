@@ -7,6 +7,7 @@ Event-driven: incoming messages dispatch to ARQ worker.
 import logging
 
 from aios.channels.base import Channel, OutboundMessage
+from starlette.websockets import WebSocket
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ class WebChannel(Channel):
     """
 
     channel_type = "web"
-    _connections: dict[str, object] = {}
+    _connections: dict[str, WebSocket] = {}
 
     def __init__(self, connection=None, agent_or_team=None, db=None):
         self.connection = connection
@@ -70,12 +71,12 @@ class WebChannel(Channel):
         return f"dropped:{message.conversation_id}"
 
     @classmethod
-    def attach(cls, ws, conversation_id: str) -> None:
+    def attach(cls, ws: WebSocket, conversation_id: str) -> None:
         """Register a live socket. Without this the map is always empty."""
         cls._connections[conversation_id] = ws
 
     @classmethod
-    def detach(cls, ws, conversation_id: str) -> None:
+    def detach(cls, ws: WebSocket, conversation_id: str) -> None:
         if cls._connections.get(conversation_id) is ws:
             cls._connections.pop(conversation_id, None)
 
@@ -107,5 +108,5 @@ class WebChannel(Channel):
 
 
 # global connections dict
-_connections: dict[str, object] = {}
+_connections: dict[str, WebSocket] = {}
 WebChannel._connections = _connections

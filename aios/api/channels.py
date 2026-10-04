@@ -6,6 +6,7 @@ from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
 
+from aios.channels.evolution import EvolutionChannel
 from aios.channels.manager import manager as channel_mgr
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
@@ -263,6 +264,9 @@ async def create_evolution_instance(
         return {"ok": False, "message": f"instance name {instance_name!r} is already taken; pick another"}
     from aios.channels.manager import manager as channel_mgr
     ch = channel_mgr.build(channel, db=db)
+    # channel_type == "evolution" was verified above; without narrowing, the
+    # base Channel type hides the Evolution-only methods below.
+    assert isinstance(ch, EvolutionChannel), f"expected EvolutionChannel for {channel.id}"
     result = await ch.create_instance(instance_name, provider)
 
     if result["ok"]:
@@ -302,6 +306,9 @@ async def delete_evolution_instance(
 
     from aios.channels.manager import manager as channel_mgr
     ch = channel_mgr.build(channel, db=db)
+    # channel_type == "evolution" was verified above; without narrowing, the
+    # base Channel type hides the Evolution-only methods below.
+    assert isinstance(ch, EvolutionChannel), f"expected EvolutionChannel for {channel.id}"
     result = await ch.delete_instance(instance_name)
 
     if result["ok"]:
@@ -323,6 +330,9 @@ async def list_evolution_instances(
 
     from aios.channels.manager import manager as channel_mgr
     ch = channel_mgr.build(channel, db=db)
+    # channel_type == "evolution" was verified above; without narrowing, the
+    # base Channel type hides the Evolution-only methods below.
+    assert isinstance(ch, EvolutionChannel), f"expected EvolutionChannel for {channel.id}"
     return await ch.list_instances()
 
 
@@ -340,6 +350,9 @@ async def get_evolution_qrcode(
 
     from aios.channels.manager import manager as channel_mgr
     ch = channel_mgr.build(channel, db=db)
+    # channel_type == "evolution" was verified above; without narrowing, the
+    # base Channel type hides the Evolution-only methods below.
+    assert isinstance(ch, EvolutionChannel), f"expected EvolutionChannel for {channel.id}"
     return await ch.get_instance_qrcode(instance_name)
 
 

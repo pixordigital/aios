@@ -96,12 +96,15 @@ async def wired(test_session):
                 "Esforço 3 dias. Risco baixo. Não vai resolver o abandono no mobile."
             )
 
-    async def fake_post(text, targets):
-        posted.append({"text": text, "targets": targets})
+    # Same shapes as the real meetings module: targets carry token+channel,
+    # and post_to_slack is sync. A fake with any other signature would hide a
+    # call-shape mismatch like the one that shipped here once already.
+    def fake_post(token, channel, text):
+        posted.append({"token": token, "channel": channel, "text": text})
         return True
 
     async def no_targets(org_id, team_id=""):
-        return ["U0OWNER"]
+        return [{"token": "xoxb-test", "channel": "DOWNER", "is_1on1": True}]
 
     import aios.core.orchestrator as orch
 
@@ -239,7 +242,7 @@ class TestFailsClosed:
     async def test_slack_failure_fails_the_request(self, wired):
         import aios.core.meetings as meetings
 
-        async def dead(text, targets):
+        def dead(token, channel, text):
             return False
 
         meetings.post_to_slack = dead
@@ -248,12 +251,12 @@ class TestFailsClosed:
             revenue_justification="R$ 40k de pipeline parado",
         )
         assert out["ok"] is False
-        assert "owner was NOT reached" in out["error"]
+        assert "NOT delivered" in out["error"]
 
     async def test_slack_exception_fails_the_request(self, wired):
         import aios.core.meetings as meetings
 
-        async def boom(text, targets):
+        def boom(token, channel, text):
             raise RuntimeError("slack down")
 
         meetings.post_to_slack = boom
@@ -433,12 +436,12 @@ class TestWorkdayDigest:
 
         posted: list[str] = []
 
-        async def fake_post(text, targets):
+        def fake_post(token, channel, text):
             posted.append(text)
             return True
 
         async def targets(org_id, team_id=""):
-            return ["UOWNER"]
+            return [{"token": "xoxb-test", "channel": "DOWNER", "is_1on1": True}]
 
         import aios.core.meetings as meetings
 
@@ -457,12 +460,12 @@ class TestWorkdayDigest:
 
         posted: list[str] = []
 
-        async def fake_post(text, targets):
+        def fake_post(token, channel, text):
             posted.append(text)
             return True
 
         async def targets(org_id, team_id=""):
-            return ["UOWNER"]
+            return [{"token": "xoxb-test", "channel": "DOWNER", "is_1on1": True}]
 
         import aios.core.meetings as meetings
 

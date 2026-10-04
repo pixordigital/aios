@@ -758,7 +758,7 @@ class EvolutionChannel(Channel):
             # limit check fail-opened for every org.
             plan_name = (org.extra_data or {}).get("plan", "free")
             plan = PLANS.get(plan_name, PLANS["free"])
-            max_instances = plan.get("max_evolution_instances", 0)
+            max_instances = int(plan.get("max_evolution_instances") or 0)
 
             if max_instances > 0 and current_count >= max_instances:
                 return {

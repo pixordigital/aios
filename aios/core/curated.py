@@ -143,7 +143,7 @@ def _now() -> str:
 
 async def load_blocks(agent_id: str, org_id: str) -> dict[str, list[str]]:
     """Read both blocks. Never raises (hot path) — failures read as empty."""
-    out = {"memory": [], "user": []}
+    out: dict[str, list] = {"memory": [], "user": []}
     try:
         from aios.db.backend import db_session
         from aios.db.models import Agent, Organization

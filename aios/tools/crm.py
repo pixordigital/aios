@@ -800,7 +800,9 @@ class CRMPipelineStatsTool(BaseTool):
                     q = q.where(CrmDeal.pipeline == pipeline)
                 rows = (await s.execute(q)).scalars().all()
 
-            by_stage, value_by_stage, source_mix = {}, {}, {}
+            by_stage: dict[str, int] = {}
+            value_by_stage: dict[str, float] = {}
+            source_mix: dict[str, int] = {}
             won = lost = 0
             won_value = 0.0
             total_cost = 0.0

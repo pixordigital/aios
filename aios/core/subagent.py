@@ -77,7 +77,7 @@ class SubAgentPool:
         import uuid
         task_id = str(uuid.uuid4())[:8]
 
-        queue = multiprocessing.Queue()
+        queue: multiprocessing.Queue = multiprocessing.Queue()
         # spawn, not fork: a forked child inherits this process's live asyncio
         # loop and the module-level SQLAlchemy engine/connection pool, then
         # calls asyncio.run() on top of it. Reusing an inherited pool across

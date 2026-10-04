@@ -1,6 +1,7 @@
 """HTTP client for AIOS API."""
 
-from __future__ import annotations  # noqa: F401  (list[str] would collide with the .list() methods below)
+from __future__ import annotations
+import builtins  # the .list() methods below shadow the builtin in class-body annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
@@ -141,5 +142,5 @@ class TeamsAPI:
     async def list(self) -> list[dict]:
         return await self._c._get("/api/teams")
 
-    async def assign_agents(self, team_id: str, agent_ids: list[str]) -> dict:
+    async def assign_agents(self, team_id: str, agent_ids: builtins.list[str]) -> dict:
         return await self._c._post(f"/api/teams/{team_id}/agents", json={"agent_ids": agent_ids})

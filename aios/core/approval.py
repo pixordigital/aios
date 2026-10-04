@@ -119,9 +119,9 @@ class ApprovalManager:
                 from aios.db.models import PendingAction as DBAction
 
                 async with async_session() as sess:
-                    db_pa = await sess.get(DBAction, action_id)
-                    if db_pa and db_pa.status == "pending":
-                        db_pa.status = "expired"
+                    row = await sess.get(DBAction, action_id)
+                    if row and row.status == "pending":
+                        row.status = "expired"
                         await sess.commit()
             except Exception:
                 pass
@@ -133,13 +133,13 @@ class ApprovalManager:
                 from aios.db.models import PendingAction as DBAction
 
                 async with async_session() as sess:
-                    db_pa = await sess.get(DBAction, action_id)
-                    if db_pa:
-                        db_pa.status = pa.status
+                    row = await sess.get(DBAction, action_id)
+                    if row:
+                        row.status = pa.status
                         if pa.status in ("approved", "rejected"):
                             from datetime import datetime, timezone
 
-                            db_pa.decided_at = datetime.now(timezone.utc)
+                            row.decided_at = datetime.now(timezone.utc)
                         await sess.commit()
         except Exception:
             pass

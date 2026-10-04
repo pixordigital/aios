@@ -109,7 +109,7 @@ async def evolution_webhook(instance: str, request: Request):
 
     # dispatch to ARQ worker
     from aios.core.dispatch import dispatch_inbound
-    _extra = {"from_number": msg_from, "instance": instance, "msg_id": msg_id}
+    _extra: dict[str, object] = {"from_number": msg_from, "instance": instance, "msg_id": msg_id}
     # Voice notes arrive as "[áudio]" text; without the media key the bytes are
     # unrecoverable and the transcribe tool has nothing to fetch. Stash what a
     # download needs so the capability actually exists.

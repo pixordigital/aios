@@ -77,7 +77,10 @@ def test_deactivation_migration_exists():
     """A still-active row would log a traceback on every restart, because
     main.py starts every active channel and build() raises on an unknown type.
     Credentials stay in the row, deactivated, rather than being dropped."""
-    migrations = list((ROOT / "alembic/versions").glob("*discord*.py"))
+    # Skip the no-op merge revision: it matches the glob but contains no DDL,
+    # and it sorted first, so the assertion below read the wrong file.
+    migrations = [p for p in (ROOT / "alembic/versions").glob("*discord*.py")
+                  if "merge" not in p.name]
     assert migrations, "no migration deactivates existing discord channel rows"
     body = migrations[0].read_text()
     assert "is_active = false" in body

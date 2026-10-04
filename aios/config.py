@@ -1,3 +1,4 @@
+from typing import Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -178,7 +179,7 @@ if settings.stripe_price_pro:
 # ─── Plan limits ───
 # max_cost_brl: teto estimado em BRL (USD×5.5) para guardrail — P0-15. Ilimitado = sem teto.
 # sla_minutes: tempo máximo humano assumir sem estouro
-PLANS = {
+PLANS: dict[str, dict[str, Any]] = {
     "free": {
         "name": "Gratuito",
         "max_agents": 2,

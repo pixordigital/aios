@@ -28,7 +28,7 @@ class RubricManager:
         self._rubrics: dict[str, Rubric] = {}
 
     def create(self, name: str, description: str = "",
-               criteria: list[str] = None, weights: dict = None) -> Rubric:
+               criteria: list[str] | None = None, weights: dict | None = None) -> Rubric:
         import uuid
         rubric = Rubric(
             id=str(uuid.uuid4())[:8],

@@ -36,6 +36,33 @@ from aios.db.models import Organization, User
 from aios.main import app
 
 
+@pytest.fixture(autouse=True)
+def _restore_direct_module_patches():
+    """Undo patches that tests assign onto modules instead of monkeypatching.
+
+    Several tests do `meetings.post_to_slack = fake` / `orch._get_runtime = ...`
+    rather than monkeypatch.setattr, so the fake stayed installed for every
+    later test module. The notify_human tests then ran against a
+    human_slack_targets stub that ignores org_id and team_id, and failed only in
+    a full-suite run -- order-dependent, invisible in isolation.
+    """
+    import aios.core.meetings as meetings
+    import aios.core.orchestrator as orch
+
+    targets = {
+        meetings: ("post_to_slack", "human_slack_targets"),
+        orch: ("_get_runtime",),
+    }
+    saved = {
+        mod: {name: getattr(mod, name) for name in names if hasattr(mod, name)}
+        for mod, names in targets.items()
+    }
+    yield
+    for mod, values in saved.items():
+        for name, value in values.items():
+            setattr(mod, name, value)
+
+
 @pytest_asyncio.fixture(loop_scope="function", autouse=True)
 async def _fresh_db():
     async with engine.begin() as conn:

@@ -29,8 +29,8 @@ class SkillStore:
 
     async def create(self, *, agent_id: str, org_id: str, name: str,
                      description: str = "", skill_type: str = "tool_pattern",
-                     content: str = "", input_schema: dict = None,
-                     tags: list[str] = None, source_conversation_id: str = None) -> Skill:
+                     content: str = "", input_schema: dict | None = None,
+                     tags: list[str] | None = None, source_conversation_id: str | None = None) -> Skill:
         # Stored content is re-injected into future prompts, so scan at the
         # store: a refused write raises here (dashboard/API surface it), while
         # the fire-and-forget auto-extractor just drops that row.

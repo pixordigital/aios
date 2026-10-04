@@ -276,6 +276,8 @@ async def patch_workflow(
     await db.refresh(wf)
     # reload nodes
     wf2 = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+    if not wf2:
+        raise HTTPException(404, "workflow not found")
     return {
         "id": wf2.id,
         "name": wf2.name,
@@ -431,7 +433,7 @@ async def delete_node(
     if not node or node.workflow_id != wf_id:
         raise HTTPException(404)
     wf = await db.get(Workflow, wf_id)
-    if wf.org_id != org_id:
+    if not wf or wf.org_id != org_id:
         raise HTTPException(404)
     await db.delete(node)
     await db.commit()
@@ -460,6 +462,8 @@ async def run_workflow(
         async_mode = async_mode.lower() not in ("false", "0", "no")
     from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
 
+    if not wf or wf.org_id != org_id:
+        raise HTTPException(404, "workflow not found")
     wdef = WorkflowDef(
         id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id
     )
@@ -603,6 +607,8 @@ async def resume_run(
     from sqlalchemy.orm import selectinload
 
     wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+    if not wf or wf.org_id != org_id:
+        raise HTTPException(404, "workflow not found")
     wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id)
     for n in wf.nodes:
         wdef.nodes[n.id] = WNode(
@@ -707,6 +713,8 @@ async def replay_run(
         from sqlalchemy.orm import selectinload
 
         wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+        if not wf or wf.org_id != org_id:
+            raise HTTPException(404, "workflow not found")
         wdef = WorkflowDef(
             id=wf.id,
             name=wf.name,

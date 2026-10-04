@@ -8,6 +8,7 @@ PSTN/SIP discagem via bridge HTTP genérico (Twilio/Asterisk).
 Sem bridge configurado, chamada fica `queued` com áudio TTS pronto.
 """
 
+from typing import Any
 import re
 import base64
 import logging
@@ -135,7 +136,7 @@ async def transcribe_audio(audio: bytes, channel_config: dict | None = None, lan
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             if base:
-                files = {"file": ("audio.mp3", audio, "audio/mpeg"), "model": (None, "whisper-1"), "language": (None, language)}
+                files: dict[str, Any] = {"file": ("audio.mp3", audio, "audio/mpeg"), "model": (None, "whisper-1"), "language": (None, language)}
                 r = await client.post(f"{base}/v1/audio/transcriptions", files=files)
                 if r.status_code == 404:
                     r = await client.post(f"{base}/asr?language={language}&output=json", files={"audio_file": ("audio.mp3", audio, "audio/mpeg")})

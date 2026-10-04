@@ -137,8 +137,7 @@ def report_targets(conns, team_id: str) -> list[dict]:
     as fallback is deliberate — a report with nowhere to go is worse than one
     in the wrong room.
     """
-    mine = [_target_of(c) for c in conns if getattr(c, "team_id", None) == team_id]
-    mine = [t for t in mine if t]
+    mine = [t for t in (_target_of(c) for c in conns if getattr(c, "team_id", None) == team_id) if t is not None]
     dm = [t for t in mine if t["is_1on1"]]
     room = [t for t in mine if not t["is_1on1"]]
     return dm or room
@@ -281,12 +280,16 @@ _STATUS_PT = {
 def _goal_block(goal: dict | None) -> list[str]:
     if not goal or not goal.get("target_brl"):
         return ["*Meta* — sem meta cadastrada para este periodo."]
+    assert goal is not None
+    # str() once: goal is an untyped dict from the sales layer, so every .get
+    # is Any and the status lookup below would not narrow.
+    status = str(goal.get("status") or "")
     return [
         f"*Meta {goal['year_month']}*",
         (
             f"R${goal['won_brl']:.2f} de R${goal['target_brl']:.2f} ({goal['pct']}%) · "
             f"esperado R${goal['expected_brl']:.2f} · {goal['deals_won']} negocio(s) · "
-            f"status *{_STATUS_PT.get(goal.get('status'), goal.get('status'))}*"
+            f"status *{_STATUS_PT.get(status, status)}*"
         ),
         f"Projecao: R${goal['projected_brl']:.2f} · falta R${goal['remaining_brl']:.2f}",
     ]

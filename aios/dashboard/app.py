@@ -14,14 +14,17 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 from urllib.parse import quote
+
+from aios.dashboard.forms import ffile, fstr
 
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import func, select
+from sqlalchemy import delete as _sa_delete, func, select
 from sqlalchemy.orm import selectinload
 
 from aios.db.backend import db_session
@@ -140,7 +143,7 @@ _SHARED_TOOLS = frozenset({
 
 def _tool_conflicts(tools_list: list[list[str]]) -> list[str]:
     """Detect tool conflicts across agents (shared stateless tools excluded)."""
-    all_tools = {}
+    all_tools: dict[str, int] = {}
     conflicts = []
     for i, tl in enumerate(tools_list):
         for t in tl:
@@ -166,7 +169,7 @@ def _strategy_label(value: str) -> str:
 def _plan_label(value: str) -> str:
     """Human-readable label for a plan key."""
     from aios.config import PLANS
-    return PLANS.get(value, {}).get("name", value)
+    return str(PLANS.get(value, {}).get("name", value))
 
 
 def _agent_type_label(value: str) -> str:
@@ -563,7 +566,7 @@ async def agent_list(request: Request):
     org_id = await _org_filter(request)
     async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.created_at.desc()))).scalars().all()
-        teams_map = {}
+        teams_map: dict[str, list[str]] = {}
         result = await db.execute(
             select(Team).options(selectinload(Team.agents)).where(Team.org_id == org_id)
         )
@@ -705,7 +708,7 @@ async def agent_save(
         }
         # autonomous governance
         is_autonomous = autonomous is not None and autonomous in ("1", "on", "true", "True")
-        governance_config = {
+        governance_config: dict[str, object] = {
             "autonomous": is_autonomous,
             "autonomy": "autonomous" if is_autonomous else "draft",
             "max_trials": max(1, min(5, int(max_trials or 3))),
@@ -772,7 +775,7 @@ async def agent_deploy(request: Request, aid: str):
                 if _plan not in ("unlimited",):
                     _limits = PLANS.get(_plan, PLANS["free"])
                     _cnt = (await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active"))).scalars().all()
-                    if len(_cnt) >= _limits.get("max_agents", 2):
+                    if len(_cnt) >= cast(int, _limits.get("max_agents", 2)):
                         return HTMLResponse(f"<h2>quota max_agents {_limits['max_agents']} para {_plan}</h2>", status_code=403)
             agent.status = "active" if agent.status != "active" else "draft"
             await db.commit()
@@ -872,7 +875,7 @@ async def voice_create(request: Request, name: str = Form(...), agent_type: str 
         system_prompt = (system_prompt.rstrip() + "\n\n[Instruções extras do usuário]\n" + extra_prompt.strip())
     llm_config = {"model": model, "temperature": 0.6 if agent_type != "support" else 0.4, "max_tokens": 4096}
     tools = tpl.get("tools", []) if tpl else []
-    memory_config = tpl.get("memory_config", {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}})
+    memory_config = tpl.get("memory_config", {"short_term": {"max_messages": 50}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 10}}) if tpl else {"short_term": {"max_messages": 50}}
     # store voice choice in governance_config (Agent has no extra_data)
     # tts_model: kokoro | tts-1 | tts-1-hd | gpt-4o-mini-tts | eleven_turbo_v2 | eleven_multilingual_v2 | cartesia/sonic-3
     tts_engine = "kokoro" if tts_model in ("kokoro","kokoro-int8","piper","xtts","tts-1","tts-1-hd","gpt-4o-mini-tts","gpt-4o-tts","gpt-4o-tts-mini") else ("elevenlabs" if "eleven" in tts_model else "cartesia" if "cartesia" in tts_model else "kokoro")
@@ -1160,7 +1163,7 @@ async def team_quick_create(request: Request, template: str = Form(...)):
     async with db_session() as db:
         # find agents by type
         agents = (await db.execute(select(Agent).where(Agent.org_id==org_id))).scalars().all()
-        by_type = {}
+        by_type: dict[str, list] = {}
         for a in agents:
             by_type.setdefault(a.agent_type, []).append(a)
         # also check Follow-up by name
@@ -1191,12 +1194,12 @@ async def team_quick_create(request: Request, template: str = Form(...)):
         # orchestrator: prefer Follow-up for followup, else type
         if template=="followup" and followup:
             orch_id = followup.id
-        elif by_type.get(cfg["orchestrator_type"]):
-            orch_id = by_type[cfg["orchestrator_type"]][0].id
+        elif by_type.get(str(cfg["orchestrator_type"])):
+            orch_id = by_type[str(cfg["orchestrator_type"])][0].id
         elif member_ids:
             orch_id = member_ids[0]
-        if by_type.get(cfg["manager_type"]):
-            mgr_id = by_type[cfg["manager_type"]][0].id
+        if by_type.get(str(cfg["manager_type"])):
+            mgr_id = by_type[str(cfg["manager_type"])][0].id
         if not mgr_id:
             # todo time tem manager — quick-create nao pode contornar a regra
             return RedirectResponse("/dashboard/teams/new?error=manager-required", status_code=303)
@@ -1284,7 +1287,7 @@ async def conversation_human_reply(request: Request, conv_id: str, content: str 
                 ch = _mgr.build(ch_conn)
                 from aios.channels.base import OutboundMessage
 
-                await ch.send(OutboundMessage(text=content, conversation_id=conv_id, extra_data={"from_number": (conv.extra_data or {}).get("from_number", "")}))
+                await ch.send(OutboundMessage(text=content, conversation_id=conv_id, channel_connection_id=ch_conn.id, extra_data={"from_number": (conv.extra_data or {}).get("from_number", "")}))
         except Exception:
             pass
     return RedirectResponse(f"/dashboard/conversations/{conv_id}", status_code=303)
@@ -1314,7 +1317,7 @@ async def conversation_handover_status(request: Request, conv_id: str):
             from aios.config import PLANS
             org = await db.get(Organization, org_id)
             plan = (org.extra_data or {}).get("plan", "free") if org else "free"
-            sla_minutes = PLANS.get(plan, PLANS["free"]).get("sla_minutes", 5)
+            sla_minutes = cast(int, PLANS.get(plan, PLANS["free"]).get("sla_minutes", 5))
         except Exception:
             pass
         return JSONResponse({"handover": h, "pending": pending, "sla_minutes": sla_minutes})
@@ -1327,7 +1330,7 @@ async def conversation_delete(request: Request, conv_id: str):
         conv = await db.get(Conversation, conv_id)
         if conv and conv.org_id == org_id:
             # delete associated messages first
-            await db.execute(Message.__table__.delete().where(Message.conversation_id == conv.id))
+            await db.execute(_sa_delete(Message).where(Message.conversation_id == conv.id))
             await db.delete(conv)
             await db.commit()
     return RedirectResponse("/dashboard/conversations", status_code=303)
@@ -1460,17 +1463,14 @@ async def channel_save(
         try:
             from aios.channels.evolution import EvolutionChannel
 
-            class _C:
-                pass
+            from types import SimpleNamespace
 
-            _c = _C()
-            _c.config = config
-            _c.channel_type = "evolution"
             from aios.core.secrets import decrypt_channel_config as _dec
 
-            _cfg = _c.config or {}
+            _cfg = config or {}
             if _cfg and any(str(v).startswith("enc:") for v in _cfg.values() if isinstance(v, str)):
-                _c.config = _dec(_cfg)
+                _cfg = _dec(_cfg)
+            _c = SimpleNamespace(config=_cfg, channel_type="evolution")
             res = await EvolutionChannel(connection=_c).reconcile_provider()
             if res.get("ok"):
                 config["instance"] = res["instance"]
@@ -1814,7 +1814,7 @@ async def admin_fleet_view(request: Request, fid: str):
         # proxy to client instance for live data
         agents = []
         teams = []
-        conversations = []
+        conversations: list = []
         health = inst.extra_data.get("health", {})
         try:
             import httpx
@@ -1965,7 +1965,7 @@ async def _list_backups() -> list[dict]:
     return unique[:50]
 
 
-def _human_size(size: int) -> str:
+def _human_size(size: float) -> str:
     for unit in ["B", "KB", "MB", "GB"]:
         if size < 1024:
             return f"{size:.1f} {unit}"
@@ -2225,12 +2225,12 @@ async def files_upload(request: Request):
     from aios.core.storage import save_artifact
     from aios.core.file_validation import validate_file
     form = await request.form()
-    file_field = form.get("file")
+    file_field = ffile(form, "file")
     if not file_field:
         return RedirectResponse("/dashboard/files", status_code=303)
 
     content = await file_field.read()
-    description = form.get("description", "")
+    description = fstr(form, "description")
 
     valid, content_type = validate_file(file_field.filename or "file", bytes(content))
     if not valid:
@@ -2387,7 +2387,7 @@ async def lab_agent_publish(request: Request, agent_id: str):
 
     form = await request.form()
     note = form.get("note") or ""
-    judge_model = form.get("judge_model") or "openai/gpt-4o-mini"
+    judge_model = fstr(form, "judge_model", "openai/gpt-4o-mini")
 
     async with db_session() as db:
         ag = await db.get(Agent, agent_id)
@@ -2456,7 +2456,7 @@ async def lab_agent_publish(request: Request, agent_id: str):
                 })
 
             # calcular média
-            valid_scores = [r["score"] for r in results if r["score"] is not None]
+            valid_scores: list[float] = [float(r["score"]) for r in results if r["score"] is not None]
             avg_score = round(sum(valid_scores) / max(1, len(valid_scores)), 3) if valid_scores else 0.0
             eval_results = results
 
@@ -2512,7 +2512,7 @@ async def automations_list(request: Request, filter: str = "all"):
     async with db_session() as db:
         wfs = (await db.execute(select(Workflow).where(Workflow.org_id == org_id).order_by(Workflow.created_at.desc()))).scalars().all()
         trigs = (await db.execute(select(AutomationTrigger).where(AutomationTrigger.org_id == org_id))).scalars().all()
-        triggers_map = {}
+        triggers_map: dict[str, list] = {}
         for t in trigs:
             triggers_map.setdefault(t.workflow_id, []).append(t)
         # filter
@@ -2523,7 +2523,7 @@ async def automations_list(request: Request, filter: str = "all"):
                 failed_ids = set((await db.execute(select(WorkflowRun.workflow_id).where(WorkflowRun.org_id==org_id, WorkflowRun.status=="failed"))).scalars().all())
                 wfs = [w for w in wfs if w.id in failed_ids]
         # Last run per workflow in two queries instead of one query per workflow.
-        runs_map = {}
+        runs_map: dict[str, list] = {}
         if wfs:
             wf_ids = [w.id for w in wfs]
             latest = dict((await db.execute(
@@ -2608,13 +2608,13 @@ async def automations_from_template(request: Request, tid: str):
         db.add(wf)
         await db.flush()
         prev_id = None
-        for nd in tpl.get("nodes", []):
-            deps = [prev_id] if nd.get("depends_on")==["__prev__"] and prev_id else []
+        for nd in cast(list, tpl.get("nodes", [])):
+            deps: list[str] = [prev_id] if nd.get("depends_on")==["__prev__"] and prev_id else []
             node = WorkflowNode(workflow_id=wf.id, label=nd.get("label",""), tool_name=nd.get("tool_name"), tool_args=nd.get("tool_args",{}), depends_on=deps, condition=nd.get("condition"), output_key=nd.get("output_key","result"))
             db.add(node)
             await db.flush()
             prev_id = node.id
-        trig = tpl.get("trigger", {})
+        trig = cast(dict, tpl.get("trigger", {}))
         ttype = trig.get("type","webhook")
         if ttype == "webhook":
             db.add(AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="webhook", name=trig.get("name",""), config={}, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True))
@@ -2690,9 +2690,9 @@ async def automations_delete_trigger(request: Request, wf_id: str, tid: str):
 async def automations_add_node(request: Request, wf_id: str):
     org_id = await _org_filter(request)
     form = await request.form()
-    label = form.get("label") or ""
-    tool_val = form.get("tool_name") or ""
-    deps_raw = form.get("depends_on") or ""
+    label = fstr(form, "label")
+    tool_val = fstr(form, "tool_name")
+    deps_raw = fstr(form, "depends_on")
     from aios.db.models import Workflow, WorkflowNode
     async with db_session() as db:
         wf = await db.get(Workflow, wf_id)
@@ -2714,7 +2714,7 @@ async def automations_add_node(request: Request, wf_id: str):
                 if not part:
                     continue
                 depends.append(label_map.get(part, part))
-        default_args = {}
+        default_args: dict = {}
         if tool_name == "http_request":
             default_args = {"url": "https://httpbin.org/post", "method": "POST", "body": {"msg": "hello {{json.input}}"}, "headers": {}}
         elif tool_name == "wait":
@@ -2797,7 +2797,7 @@ async def automations_duplicate(request: Request, wf_id: str):
 async def automations_run(request: Request, wf_id: str):
     org_id = await _org_filter(request)
     form = await request.form()
-    inp = form.get("input") or form.get("message") or "{}"
+    inp = fstr(form, "input") or fstr(form, "message") or "{}"
     from aios.db.models import Workflow, WorkflowRun
     from sqlalchemy.orm import selectinload
     async with db_session() as db:
@@ -3219,7 +3219,7 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
         crm_enabled = False
         if org:
             d = org.extra_data or {}
-            crm_enabled = d.get("crm_enabled") or d.get("plan") in ("unlimited","enterprise") or (d.get("trial") and d.get("plan")=="pro")
+            crm_enabled = bool(d.get("crm_enabled") or d.get("plan") in ("unlimited","enterprise") or (d.get("trial") and d.get("plan")=="pro"))
             # monitoramas superadmin tem sempre
             from aios.api.deps import get_dashboard_user
             try:
@@ -3229,10 +3229,13 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
             except Exception:
                 pass
         deals = []
-        stats = {"total":0,"by_stage":{},"total_value":0,"total_cost":0,"total_cost_brl":0,"truncated":False}
+        by_stage: dict[str, int] = {}
+        total_value = 0.0
+        total_cost = 0.0
+        stats: dict[str, object] = {"total":0,"by_stage":by_stage,"total_value":total_value,"total_cost":total_cost,"total_cost_brl":0.0,"truncated":False}
         pending = []
         agents = (await db.execute(select(_Ag).where(_Ag.org_id==org_id).order_by(_Ag.name))).scalars().all()
-        pipeline_stats = {}
+        pipeline_stats: dict[str, dict[str, float | None]] = {}
         if crm_enabled:
             query = select(CrmDeal).where(CrmDeal.org_id==org_id)
             if agent_id:
@@ -3262,22 +3265,24 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
             # pipeline, 500ing the entire CRM page (board included).
             pipelines = sorted({d for d in (await db.execute(select(CrmDeal.pipeline).where(CrmDeal.org_id==org_id).distinct())).scalars().all() if d}) or ["default"]
             for d in deals:
-                stats["by_stage"][d.stage] = stats["by_stage"].get(d.stage,0)+1
-                stats["total_value"] += d.value or 0
-                stats["total_cost"] += d.cost_usd or 0
+                by_stage[d.stage] = by_stage.get(d.stage,0)+1
+                total_value += d.value or 0
+                total_cost += d.cost_usd or 0
                 # C5: pipeline conversion stats
                 p = d.pipeline or "default"
                 if p not in pipeline_stats:
                     pipeline_stats[p] = {"prospection":0,"mql":0,"sql":0,"opportunity":0,"closed_won":0,"closed_lost":0,"total_value":0.0}
-                pipeline_stats[p][d.stage] = pipeline_stats[p].get(d.stage,0)+1
-                pipeline_stats[p]["total_value"] += d.value or 0
+                pipeline_stats[p][d.stage] = (pipeline_stats[p].get(d.stage) or 0)+1
+                pipeline_stats[p]["total_value"] = (pipeline_stats[p].get("total_value") or 0) + (d.value or 0)
             stats["total"] = len(deals)
-            stats["total_cost_brl"] = round(stats["total_cost"]*5.5,2)
+            stats["total_value"] = total_value
+            stats["total_cost"] = total_cost
+            stats["total_cost_brl"] = round(total_cost*5.5,2)
             # compute conversion per pipeline
             for p, ps in pipeline_stats.items():
-                mql = ps.get("mql",0)
-                won = ps.get("closed_won",0)
-                lost = ps.get("closed_lost",0)
+                mql = ps.get("mql",0) or 0
+                won = ps.get("closed_won",0) or 0
+                lost = ps.get("closed_lost",0) or 0
                 total_closed = won + lost
                 # None, not 0: with nothing closed yet, "0% win rate" reads as
                 # "every deal is failing" when the truth is "no data yet".
@@ -3325,6 +3330,8 @@ async def crm_create(request: Request, lead_name: str = Form(...), lead_email: s
     from aios.db.models import CrmDeal, Organization
     async with db_session() as db:
         org = await db.get(Organization, org_id)
+        if not org:
+            return RedirectResponse("/dashboard/crm", status_code=303)
         # C9: collect custom fields for this pipeline
         custom_defs = (org.extra_data or {}).get("crm_custom_fields", {}).get(pipeline or "default", [])
         extra = {}
@@ -3486,6 +3493,8 @@ async def crm_deal_detail(request: Request, deal_id: str):
         
         # C9: Load custom field definitions for this deal's pipeline
         org = await db.get(Organization, org_id)
+        if not org:
+            return RedirectResponse("/dashboard/crm", status_code=303)
         custom_fields = (org.extra_data or {}).get("crm_custom_fields", {}).get(deal.pipeline or "default", [])
         
         return await _render("crm_deal_detail.html", request, title=f"Deal {deal_id[:8]}", deal=deal, versions=versions, agent_name=agent_name, notes=notes, custom_fields=custom_fields)
@@ -3495,7 +3504,7 @@ async def crm_deal_notes(request: Request, deal_id: str):
     """C7: Append notes to deal"""
     org_id = await _org_filter(request)
     form = await request.form()
-    note = form.get("note", "").strip()
+    note = fstr(form, "note", "")
     if not note:
         return RedirectResponse("/dashboard/crm", status_code=303)
     async with db_session() as db:
@@ -3523,6 +3532,8 @@ async def crm_deal_custom_fields(request: Request, deal_id: str):
         
         # Get field definitions for this pipeline
         org = await db.get(Organization, org_id)
+        if not org:
+            return RedirectResponse("/dashboard/crm", status_code=303)
         custom_defs = (org.extra_data or {}).get("crm_custom_fields", {}).get(deal.pipeline or "default", [])
         
         extra = dict(deal.extra_data or {})
@@ -3580,7 +3591,7 @@ async def crm_merge(request: Request):
     """C8: Merge deals duplicados por lead_email"""
     org_id = await _org_filter(request)
     form = await request.form()
-    lead_email = form.get("lead_email", "").strip()
+    lead_email = fstr(form, "lead_email", "")
     keep_strategy = form.get("keep_strategy", "oldest")
     if not lead_email:
         return RedirectResponse("/dashboard/crm", status_code=303)
@@ -3630,8 +3641,8 @@ async def knowledge_page(request: Request):
 async def knowledge_ingest(request: Request):
     org_id = await _org_filter(request)
     form = await request.form()
-    file = form.get("file")
-    agent_id = form.get("agent_id") or None
+    file = ffile(form, "file")
+    agent_id = fstr(form, "agent_id") or None
     if not file:
         return RedirectResponse("/dashboard/knowledge", status_code=303)
     content = (await file.read()).decode(errors="ignore")[:20000]
@@ -3844,7 +3855,7 @@ async def settings_page(request: Request):
     async with db_session() as db:
         from aios.db.models import Organization
         org = await db.get(Organization, org_id)
-        secrets = {}
+        secrets: dict[str, str] = {}
         pending_expiry_days = 7
         if org and isinstance(org.extra_data, dict):
             secrets = org.extra_data.get("secrets", {}) if isinstance(org.extra_data.get("secrets"), dict) else {}
@@ -3893,7 +3904,7 @@ async def settings_save(request: Request):
         data = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
         secrets = dict(data.get("secrets", {})) if isinstance(data.get("secrets"), dict) else {}
         for k in ALLOWED_KEYS:
-            val = form.get(k, "")
+            val = fstr(form, k)
             if val is not None:
                 val = val.strip()
                 if val == "" or val.startswith("••••"):
@@ -3908,7 +3919,7 @@ async def settings_save(request: Request):
         data["secrets"] = secrets
         # expiry per org (default 7, 1-60)
         try:
-            exp = int(form.get("pending_expiry_days", "7"))
+            exp = int(fstr(form, "pending_expiry_days", "7"))
             data["pending_expiry_days"] = exp if 1 <= exp <= 60 else 7
         except Exception:
             data["pending_expiry_days"] = 7
@@ -3949,16 +3960,16 @@ async def settings_test(request: Request):
     from fastapi.responses import JSONResponse
     org_id = await _org_filter(request)
     form = await request.form()
-    provider = form.get("provider", "openrouter")
+    provider = fstr(form, "provider", "openrouter")
     key_map = {"openrouter": "openrouter_api_key", "openai": "openai_api_key", "anthropic": "anthropic_api_key"}
     skey = key_map.get(provider, "openrouter_api_key")
-    test_key = form.get(skey, "").strip()
+    test_key = fstr(form, skey)
     if not test_key or test_key.startswith("••••"):
         async with db_session() as db:
             from aios.db.models import Organization
             from aios.core.org_settings import get_org_secret
             org = await db.get(Organization, org_id)
-            test_key = get_org_secret(org.extra_data if org else {}, skey) if org else ""
+            test_key = get_org_secret(org.extra_data if org else {}, skey) or ""
     if not test_key:
         return JSONResponse({"ok": False, "error": "Chave vazia"})
     try:
@@ -3990,14 +4001,14 @@ async def settings_test_calendar(request: Request):
     from fastapi.responses import JSONResponse
     org_id = await _org_filter(request)
     form = await request.form()
-    creds = form.get("google_calendar_credentials", "").strip()
-    calendar_id = form.get("google_calendar_id", "").strip() or "primary"
+    creds = fstr(form, "google_calendar_credentials", "")
+    calendar_id = fstr(form, "google_calendar_id", "") or "primary"
     if not creds or creds.startswith("••••"):
         async with db_session() as db:
             from aios.db.models import Organization
             from aios.core.org_settings import get_org_secret
             org = await db.get(Organization, org_id)
-            creds = get_org_secret(org.extra_data if org else {}, "google_calendar_credentials") if org else ""
+            creds = get_org_secret(org.extra_data if org else {}, "google_calendar_credentials") or ""
             if not calendar_id or calendar_id=="primary":
                 cid = get_org_secret(org.extra_data if org else {}, "google_calendar_id") if org else ""
                 if cid: calendar_id=cid
@@ -4108,7 +4119,7 @@ async def wa_templates_page(request: Request, status: str = ""):
             select(WhatsappConnection).where(WhatsappConnection.org_id == org_id)
         )).scalars().all()
         conn = conns[0] if conns else None
-    counts = {}
+    counts: dict[str, int] = {}
     for t in tpls:
         counts[t.status] = counts.get(t.status, 0) + 1
     from aios.db.models import TEMPLATE_STATUSES
@@ -4142,10 +4153,10 @@ async def wa_templates_connect_save(request: Request):
     from aios.core.secrets import encrypt_secret
     from aios.db.models import WhatsappConnection
     form = await request.form()
-    waba_id = (form.get("waba_id") or "").strip()
-    token = (form.get("access_token") or "").strip()
-    phone = (form.get("phone_number_id") or "").strip()
-    display = (form.get("display_name") or "").strip()
+    waba_id = fstr(form, "waba_id").strip()
+    token = fstr(form, "access_token").strip()
+    phone = fstr(form, "phone_number_id").strip()
+    display = fstr(form, "display_name").strip()
     if not waba_id or not token:
         return RedirectResponse("/dashboard/whatsapp/templates/connect?error=missing", status_code=303)
     import secrets as _secrets
@@ -4265,12 +4276,12 @@ async def wa_template_save(request: Request):
     org_id = await _org_filter(request)
     from aios.db.models import WhatsappTemplate
     form = await request.form()
-    name = (form.get("name") or "").strip()
-    language = (form.get("language") or "pt_BR").strip()
-    category = (form.get("category") or "UTILITY").strip().upper()
-    tpl_id = (form.get("tpl_id") or "").strip()
+    name = fstr(form, "name").strip()
+    language = fstr(form, "language", "pt_BR").strip()
+    category = fstr(form, "category", "UTILITY").strip().upper()
+    tpl_id = fstr(form, "tpl_id").strip()
     try:
-        examples = json.loads(form.get("examples") or "{}")
+        examples = json.loads(fstr(form, "examples", "{}"))
     except (json.JSONDecodeError, TypeError):
         examples = {}
     if not isinstance(examples, dict):
@@ -4288,18 +4299,18 @@ async def wa_template_save(request: Request):
             if not tpl:
                 return HTMLResponse("<h2>Template não encontrado</h2>", status_code=404)
             tpl.name = name; tpl.language = language; tpl.category = category
-            tpl.header_text = (form.get("header_text") or "").strip()
-            tpl.body = (form.get("body") or "").strip()
-            tpl.footer = (form.get("footer") or "").strip()
+            tpl.header_text = fstr(form, "header_text").strip()
+            tpl.body = fstr(form, "body").strip()
+            tpl.footer = fstr(form, "footer").strip()
             tpl.examples_json = examples
             tpl.edit_count = (tpl.edit_count or 0) + 1
         else:
             tpl = WhatsappTemplate(
                 org_id=org_id, connection_id=conn.id, waba_id=conn.waba_id,
                 name=name, language=language, category=category,
-                header_text=(form.get("header_text") or "").strip(),
-                body=(form.get("body") or "").strip(),
-                footer=(form.get("footer") or "").strip(),
+                header_text=fstr(form, "header_text").strip(),
+                body=fstr(form, "body").strip(),
+                footer=fstr(form, "footer").strip(),
                 examples_json=examples, status="DRAFT",
             )
             db.add(tpl)
@@ -4315,12 +4326,12 @@ async def wa_template_lint_ajax(request: Request):
     org_id = await _org_filter(request)
     from aios.core.template_lint import TemplateDraft, can_submit, lint_template, summarise
     try:
-        examples = json.loads(form.get("examples") or "{}")
+        examples = json.loads(fstr(form, "examples", "{}"))
     except (json.JSONDecodeError, TypeError):
         examples = {}
     if not isinstance(examples, dict):
         examples = {}
-    tpl_id = (form.get("tpl_id") or "").strip()
+    tpl_id = fstr(form, "tpl_id").strip()
     existing = []
     if org_id:
         async with db_session() as db:
@@ -4330,12 +4341,12 @@ async def wa_template_lint_ajax(request: Request):
                 q = q.where(WhatsappTemplate.id != tpl_id)
             existing = [b for b in (await db.execute(q)).scalars().all() if b]
     findings = lint_template(TemplateDraft(
-        name=(form.get("name") or "").strip(),
-        language=(form.get("language") or "pt_BR").strip(),
-        category=(form.get("category") or "UTILITY").strip().upper(),
-        header_text=(form.get("header_text") or "").strip(),
-        body=(form.get("body") or "").strip(),
-        footer=(form.get("footer") or "").strip(),
+        name=fstr(form, "name").strip(),
+        language=fstr(form, "language", "pt_BR").strip(),
+        category=fstr(form, "category", "UTILITY").strip().upper(),
+        header_text=fstr(form, "header_text").strip(),
+        body=fstr(form, "body").strip(),
+        footer=fstr(form, "footer").strip(),
         examples=examples, existing_bodies=existing,
     ))
     return JSONResponse({
@@ -4439,7 +4450,7 @@ async def wa_template_sync(request: Request, tpl_id: str):
             return RedirectResponse(f"/dashboard/whatsapp/templates/{tpl_id}/edit", status_code=303)
         try:
             info = await _wa_meta_client(conn).get_template(tpl.meta_template_id)
-            await _wa_apply_meta_state(tpl, info)
+            _wa_apply_meta_state(tpl, info)
             tpl.last_synced_at = datetime.now(timezone.utc).replace(tzinfo=None)
             await db.commit()
         except MetaAPIError as e:

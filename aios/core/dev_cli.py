@@ -74,25 +74,31 @@ async def run_codex_review(cwd: str = "") -> dict:
 async def dual_review(prompt: str, cwd: str = "") -> dict:
     claude_p = f"Review caveman: Uma linha por achado L<linha>: <severidade> <problema>. <fix>. Severidade 🔴/🟡/🟢. Código:\n{prompt[:12000]}"
     codex_p = f"Review conciso 1 linha por achado: L<linha>: severidade problema. fix. Código:\n{prompt[:12000]}"
-    a, b = await asyncio.gather(
+    pair: tuple[dict | BaseException, dict | BaseException] = await asyncio.gather(
         run_claude(claude_p, cwd=cwd, timeout=120),
         run_codex(codex_p, cwd=cwd, timeout=120),
         return_exceptions=True,
     )
-    def norm(x):
+    a, b = pair
+    def norm(x: object) -> dict:
         if isinstance(x, Exception):
             return {"ok": False, "error": str(x)}
-        return x
+        if isinstance(x, dict):
+            return x
+        return {"ok": False, "error": f"unexpected result: {x!r}"}
     return {"claude": norm(a), "codex": norm(b), "ok": True}
 
 async def dual_build(prompt: str, cwd: str = "") -> dict:
-    a, b = await asyncio.gather(
+    pair: tuple[dict | BaseException, dict | BaseException] = await asyncio.gather(
         run_claude(f"Construa: {prompt[:12000]}", cwd=cwd, timeout=180, allowed_tools="Read,Write,Edit,Grep,Glob,Bash(git :*)"),
         run_codex(f"Construa: {prompt[:12000]}", cwd=cwd, timeout=180),
         return_exceptions=True,
     )
-    def norm(x):
+    a, b = pair
+    def norm(x: object) -> dict:
         if isinstance(x, Exception):
             return {"ok": False, "error": str(x)}
-        return x
+        if isinstance(x, dict):
+            return x
+        return {"ok": False, "error": f"unexpected result: {x!r}"}
     return {"claude": norm(a), "codex": norm(b), "ok": True}

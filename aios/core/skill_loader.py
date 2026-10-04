@@ -59,7 +59,7 @@ class SkillLoader:
         self.workspace_root = Path(workspace_root or settings.app_data_dir).resolve()
         self._cache: dict[str, list[LoadedSkill]] = {}
 
-    def find_skill_files(self, project_path: str | None = None) -> list[Path]:
+    def find_skill_files(self, project_path: str | None = None) -> tuple[list[Path], Path]:
         """Find all skill files in project workspace."""
         root = Path(project_path) if project_path else self.workspace_root
         base_root = root
@@ -139,7 +139,7 @@ class SkillLoader:
         lines = content.split("\n")
         sections = []
         current_heading = ""
-        current_content = []
+        current_content: list[str] = []
 
         for line in lines:
             heading_match = SECTION_PATTERN.match(line)

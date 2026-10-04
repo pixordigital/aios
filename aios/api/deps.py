@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 async def get_current_user(
-    request: FastAPIRequest = None,
+    # FastAPI injects Request by annotation and rejects `Request | None` as a
+    # Pydantic field, so the default stays None and only the type is relaxed.
+    request: FastAPIRequest = None,  # type: ignore[assignment]
     db: DatabaseBackend = Depends(get_db_backend),
     authorization: str = Header(None),
 ) -> User:

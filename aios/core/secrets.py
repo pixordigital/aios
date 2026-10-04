@@ -1,3 +1,4 @@
+from typing import Any
 import base64
 import hashlib
 import logging
@@ -82,7 +83,8 @@ def encrypt_channel_config(config: dict) -> dict:
     return out
 
 def decrypt_channel_config(config: dict) -> dict:
-    out = {}
+    # values can be str or a nested dict (this recurses), so not dict[str, str]
+    out: dict[str, Any] = {}
     for k,v in (config or {}).items():
         if isinstance(v, str) and v.startswith("enc:"):
             try:

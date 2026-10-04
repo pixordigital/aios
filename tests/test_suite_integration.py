@@ -1,20 +1,39 @@
 """Suite AIOS+ARVO — HMAC cross, events, suite health."""
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
+# The sibling checkout is an environment fact, not a constant. CI and fresh
+# machines do not have it; skipping there is honest, while a hardcoded path
+# that can never exist fails the suite for reasons that have nothing to do
+# with the code.
+ARVO_REPO = os.environ.get(
+    "ARVO_REPO_PATH", "/home/pixor/ai_projects/claude_projects/arvo"
+)
+needs_arvo = pytest.mark.skipif(
+    not os.path.isdir(ARVO_REPO), reason="sibling ARVO checkout not present"
+)
 
+
+def _arvo_auth_path() -> str:
+    return os.path.join(ARVO_REPO, "app", "integrations", "aios", "auth.py")
+
+
+@needs_arvo
 def test_suite_imports():
     """Both services importable as suite."""
     import aios.main  # noqa: F401
     import importlib.util
     import pathlib
 
-    arvo_main = pathlib.Path("/home/pixor/ai_projects/claude_projects/arvo/app/main.py")
+    arvo_main = pathlib.Path(ARVO_REPO, "app", "main.py")
     assert arvo_main.exists()
     assert importlib.util.find_spec("aios.integrations.arvo.auth") is not None
 
 
+@needs_arvo
 def test_suite_hmac_cross():
     """AIOS signs with arvo key, ARVO verifies and vice-versa (shared kid)."""
     from aios.integrations.arvo.auth import sign_request as aios_sign, verify_request as aios_verify, _clear_nonces as aios_clear
@@ -23,7 +42,7 @@ def test_suite_hmac_cross():
     # load ARVO auth without importing app (avoid env)
     import importlib.machinery
 
-    loader = importlib.machinery.SourceFileLoader("arvo_auth", "/home/pixor/ai_projects/claude_projects/arvo/app/integrations/aios/auth.py")
+    loader = importlib.machinery.SourceFileLoader("arvo_auth", _arvo_auth_path())
     arvo_auth = loader.load_module()
 
     aios_clear()

@@ -89,6 +89,10 @@ async def export_org(
     from aios.db.models import ChannelConnection, Conversation, CrmDeal, Message
 
     org = await db.get(Organization, org_id)
+    if not org:
+        from fastapi import HTTPException
+
+        raise HTTPException(404, "organization not found")
     agents = (
         (await db.execute(select(Agent).where(Agent.org_id == org_id))).scalars().all()
     )

@@ -74,7 +74,7 @@ async def _retry(fn, provider_cls: type, model: str, *args, **kw):
     if not _circuit_allowed(ck):
         raise LLMError(f"Circuit breaker open for {model}")
 
-    last_err = None
+    last_err: Exception | None = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
             result = await fn(*args, **kw)
@@ -274,7 +274,7 @@ class OpenRouterProvider(LLMProvider):
                 json=body,
             ) as resp:
                 if resp.status_code != 200:
-                    text = await resp.aread()
+                    text = (await resp.aread()).decode(errors="replace")
                     if resp.status_code == 401:
                         yield {"type": STREAM_ERROR, "error": "OpenRouter auth failed"}
                     elif resp.status_code == 429:
@@ -393,7 +393,7 @@ class OpenAIProvider(LLMProvider):
                 json=body,
             ) as resp:
                 if resp.status_code != 200:
-                    text = await resp.aread()
+                    text = (await resp.aread()).decode(errors="replace")
                     yield {"type": STREAM_ERROR, "error": f"OpenAI HTTP {resp.status_code}: {text[:200]}"}
                     return
 
@@ -520,14 +520,16 @@ class AnthropicProvider(LLMProvider):
             resp.raise_for_status()
             data = resp.json()
 
-            choice = {"role": "assistant", "content": ""}
+            choice: dict[str, object] = {"role": "assistant", "content": ""}
             for block in data.get("content", []):
                 if block["type"] == "text":
                     choice["content"] = block["text"]
                 elif block["type"] == "tool_use":
-                    if "tool_calls" not in choice:
-                        choice["tool_calls"] = []
-                    choice["tool_calls"].append({
+                    calls = choice.get("tool_calls")
+                    if not isinstance(calls, list):
+                        calls = []
+                        choice["tool_calls"] = calls
+                    calls.append({
                         "id": block["id"],
                         "type": "function",
                         "function": {
@@ -574,7 +576,7 @@ class AnthropicProvider(LLMProvider):
                 json=body,
             ) as resp:
                 if resp.status_code != 200:
-                    text = await resp.aread()
+                    text = (await resp.aread()).decode(errors="replace")
                     yield {"type": STREAM_ERROR, "error": f"Anthropic HTTP {resp.status_code}: {text[:200]}"}
                     return
 
@@ -703,7 +705,7 @@ class OllamaProvider(LLMProvider):
                 json=body,
             ) as resp:
                 if resp.status_code != 200:
-                    text = await resp.aread()
+                    text = (await resp.aread()).decode(errors="replace")
                     yield {"type": STREAM_ERROR, "error": f"Ollama HTTP {resp.status_code}: {text[:200]}"}
                     return
 

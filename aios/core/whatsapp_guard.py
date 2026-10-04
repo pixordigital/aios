@@ -21,7 +21,7 @@ _last_numbers: dict[str, deque] = defaultdict(lambda: deque(maxlen=50))
 
 def _remember_contact(key: str) -> None:
     """Track LRU access and evict the oldest contact past the cap."""
-    _last_text[key] = _last_text.pop(key, (0.0, 0.0))
+    _last_text[key] = _last_text.pop(key, ("", 0.0))
     while len(_last_text) > _GUARD_MAX_CONTACTS:
         _last_text.popitem(last=False)
 

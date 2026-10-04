@@ -35,8 +35,10 @@ def _parse_redis(url: str) -> RedisSettings:
     password = parsed.password or settings.redis_password or None
     # rediss:// → TLS
     is_tls = parsed.scheme == "rediss"
+    # host is a plain str here. RedisSettings widens it to str | cluster-list, so
+    # consumers have to narrow it back; this function is the single source.
     return RedisSettings(
-        host=parsed.hostname or os.getenv("REDIS_HOST", "localhost"),
+        host=parsed.hostname or os.getenv("REDIS_HOST") or "localhost",
         port=parsed.port or int(os.getenv("REDIS_PORT", "6379")),
         database=int(parsed.path.lstrip("/") or "0"),
         username=username,

@@ -534,7 +534,7 @@ async def workflow_run_job(ctx, payload: dict):
 async def quota_alert_job(ctx, payload: dict):
     from aios.core.limits import _send_quota_alert
 
-    await _send_quota_alert(payload.get("org_id"), payload.get("pct", 0), payload.get("plan", ""))
+    await _send_quota_alert(str(payload.get("org_id") or ""), payload.get("pct", 0), payload.get("plan", ""))
 
 
 def render_event_instruction(ev) -> str:
@@ -806,10 +806,21 @@ async def _notify_owner_digest(by_org: dict):
         if stats.get("paused"):
             body += "\n\n_Organizações com a jornada pausada: este turno foi menor._"
 
+        import asyncio
+
         try:
-            await post_to_slack(body, targets)
+            for t in targets:
+                try:
+                    await asyncio.to_thread(
+                        post_to_slack, t["token"], t["channel"], body
+                    )
+                except Exception:
+                    logger.warning(
+                        "workday digest post failed org=%s channel=%s",
+                        org_id, t.get("channel"), exc_info=True,
+                    )
         except Exception:
-            logger.warning("workday digest post failed org=%s", org_id, exc_info=True)
+            logger.warning("workday digest loop failed org=%s", org_id, exc_info=True)
 
 
 async def budget_alert_job(ctx, payload: dict):
@@ -821,7 +832,7 @@ async def budget_alert_job(ctx, payload: dict):
     from aios.core.limits import _send_budget_alert
 
     await _send_budget_alert(
-        payload.get("org_id"),
+        str(payload.get("org_id") or ""),
         payload.get("budget_id", ""),
         payload.get("pct", 0),
         payload.get("spent_brl", 0.0),

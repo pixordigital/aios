@@ -1,5 +1,6 @@
 import logging
 import uuid
+from typing import cast
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -14,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/automations", tags=["automations"])
 
-AUTOMATION_TEMPLATES = {
+# Heterogeneous template config (names, descriptions, node lists, triggers).
+# Annotated once here so every consumer sees dicts instead of mypy inferring
+# Collection[str] from the first entry and flagging every .get below.
+AUTOMATION_TEMPLATES: dict[str, dict[str, object]] = {
     "webhook_to_slack": {
         "name": "Webhook → Slack",
         "description": "Recebe webhook e notifica no Slack",
@@ -286,7 +290,7 @@ async def create_from_template(tpl_id: str, body: dict = {}, db: DatabaseBackend
     db.add(wf)
     await db.flush()
     prev_id = None
-    for nd in tpl.get("nodes", []):
+    for nd in cast(list, tpl.get("nodes", [])):
         deps = []
         if nd.get("depends_on") == ["__prev__"] and prev_id:
             deps = [prev_id]
@@ -296,7 +300,7 @@ async def create_from_template(tpl_id: str, body: dict = {}, db: DatabaseBackend
         db.add(node)
         await db.flush()
         prev_id = node.id
-    trig_cfg = dict(tpl.get("trigger", {}))
+    trig_cfg = dict(cast(dict, tpl.get("trigger", {})))
     ttype = trig_cfg.pop("type", "webhook")
     if ttype == "webhook":
         trig = AutomationTrigger(workflow_id=wf.id, org_id=org_id, type="webhook", name=trig_cfg.get("name",""), config=trig_cfg, webhook_path=f"wh_{uuid.uuid4().hex[:16]}", is_active=True)

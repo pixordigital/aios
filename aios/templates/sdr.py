@@ -45,6 +45,6 @@ L2 Manager se desconto/reembolso/incerteza alta. L3 humano se pediu humano, repe
 Fala curta, sem listas/markdown. "R$2.500,00" → "dois mil e quinhentos reais". "2026-09-10" → "dez de setembro". Interrupção = cut-in. Finalize sempre com pergunta única ou ação única.
 """,
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.6, "max_tokens": 4096},
-    "tools": ["lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_pipeline_stats"],
+    "tools": ["lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_pipeline_stats", "cal_booking"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }

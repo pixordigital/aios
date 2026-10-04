@@ -26,7 +26,7 @@ class LibraryIndex:
 
         async with db_session() as db:
             if item_type in ("", "artifact"):
-                stmt = select(Artifact).where(
+                stmt_art = select(Artifact).where(
                     Artifact.org_id == org_id,
                     or_(
                         Artifact.filename.ilike(lower_q),
@@ -34,7 +34,7 @@ class LibraryIndex:
                         Artifact.searchable_content.ilike(lower_q),
                     )
                 ).limit(limit)
-                for art in (await db.execute(stmt)).scalars().all():
+                for art in (await db.execute(stmt_art)).scalars().all():
                     results.append({
                         "type": "artifact",
                         "id": art.id,
@@ -44,14 +44,14 @@ class LibraryIndex:
                     })
 
             if item_type in ("", "skill"):
-                stmt = select(Skill).where(
+                stmt_skill = select(Skill).where(
                     Skill.org_id == org_id,
                     or_(
                         Skill.name.ilike(lower_q),
                         Skill.description.ilike(lower_q),
                     )
                 ).limit(limit)
-                for sk in (await db.execute(stmt)).scalars().all():
+                for sk in (await db.execute(stmt_skill)).scalars().all():
                     results.append({
                         "type": "skill",
                         "id": sk.id,
@@ -61,11 +61,11 @@ class LibraryIndex:
                     })
 
             if item_type in ("", "message"):
-                stmt = select(Message).where(
+                stmt_msg = select(Message).where(
                     Message.org_id == org_id,
                     Message.content.ilike(lower_q),
                 ).order_by(Message.created_at.desc()).limit(limit)
-                for msg in (await db.execute(stmt)).scalars().all():
+                for msg in (await db.execute(stmt_msg)).scalars().all():
                     results.append({
                         "type": "message",
                         "id": msg.id,
@@ -81,16 +81,16 @@ class LibraryIndex:
         results = []
         async with db_session() as db:
             # artifacts
-            stmt = select(Artifact).where(Artifact.org_id == org_id).order_by(Artifact.created_at.desc()).limit(limit // 3)
-            for art in (await db.execute(stmt)).scalars().all():
+            stmt_art = select(Artifact).where(Artifact.org_id == org_id).order_by(Artifact.created_at.desc()).limit(limit // 3)
+            for art in (await db.execute(stmt_art)).scalars().all():
                 results.append({"type": "artifact", "id": art.id, "title": art.filename, "created_at": str(art.created_at) if art.created_at else ""})
             # skills
-            stmt = select(Skill).where(Skill.org_id == org_id).order_by(Skill.created_at.desc()).limit(limit // 3)
-            for sk in (await db.execute(stmt)).scalars().all():
+            stmt_skill = select(Skill).where(Skill.org_id == org_id).order_by(Skill.created_at.desc()).limit(limit // 3)
+            for sk in (await db.execute(stmt_skill)).scalars().all():
                 results.append({"type": "skill", "id": sk.id, "title": sk.name, "created_at": str(sk.created_at) if sk.created_at else ""})
             # messages
-            stmt = select(Message).where(Message.org_id == org_id).order_by(Message.created_at.desc()).limit(limit // 3)
-            for msg in (await db.execute(stmt)).scalars().all():
+            stmt_msg = select(Message).where(Message.org_id == org_id).order_by(Message.created_at.desc()).limit(limit // 3)
+            for msg in (await db.execute(stmt_msg)).scalars().all():
                 results.append({"type": "message", "id": msg.id, "title": msg.content[:80], "created_at": str(msg.created_at) if msg.created_at else ""})
 
         results.sort(key=lambda x: x.get("created_at", ""), reverse=True)

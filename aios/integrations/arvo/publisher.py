@@ -87,7 +87,7 @@ async def _claim_rows(
                 )
                 .values(status="processing", attempts=IntegrationOutbox.attempts + 1)
             )
-            if result.rowcount:
+            if getattr(result, "rowcount", 0):
                 claimed_ids.append(candidate_id)
         await session.commit()
         if not claimed_ids:
@@ -115,7 +115,7 @@ async def _notify_exhausted(row: IntegrationOutbox, error: Exception) -> None:
 
         async with db_session() as db:
             await db.execute(
-                IntegrationEvent.__table__.update()
+                update(IntegrationEvent)
                 .where(IntegrationEvent.idempotency_key == row.idempotency_key)
                 .values(response={
                     "delivered": False,

@@ -88,8 +88,9 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     start_month = date.today().replace(day=1).isoformat()
 
     max_msgs = limits.get("max_messages_per_day", 99999)
-    max_tokens = limits.get("max_tokens_per_month", 999999999)
-    max_cost_brl = limits.get("max_cost_brl")
+    max_tokens: int = limits.get("max_tokens_per_month", 999999999)
+    _mc = limits.get("max_cost_brl")
+    max_cost_brl: float | None = float(_mc) if isinstance(_mc, (int, float)) else None
 
     if max_msgs != 99999 or max_tokens != 999999999 or (max_cost_brl and max_cost_brl != 999999):
         # Lock the current day's usage row (creates if missing) to prevent races.
@@ -130,7 +131,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
 
         # Check monthly token limit (sum from start of month)
         if max_tokens != 999999999:
-            monthly_tokens = (await db.execute(
+            monthly_tokens: int = (await db.execute(
                 select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(
                     UsageRecord.org_id == org_id, UsageRecord.date >= start_month
                 )
@@ -359,7 +360,7 @@ async def get_monthly_usage(org_id: str, db) -> dict:
     org = await db.get(Organization, org_id)
     plan_name = (org.extra_data or {}).get("plan", DEFAULT_PLAN) if org else DEFAULT_PLAN
     limits = PLANS.get(plan_name, PLANS[DEFAULT_PLAN])
-    max_tokens = limits.get("max_tokens_per_month", 999999999)
+    max_tokens: int = limits.get("max_tokens_per_month", 999999999)
     max_msgs_day = limits.get("max_messages_per_day", 99999)
     pct_tokens = round(total_tokens / max_tokens * 100, 1) if max_tokens and max_tokens != 999999999 else 0
     pct_cost_vs_plan = pct_tokens

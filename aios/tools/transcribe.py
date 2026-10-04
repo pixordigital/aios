@@ -1,3 +1,4 @@
+from typing import Any
 from pydantic import BaseModel, Field
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY
@@ -44,7 +45,7 @@ class TranscribeTool(BaseTool):
                                 return {"error": "sem chave openai", "bytes": len(data)}
                             # use openai whisper
                             async with httpx.AsyncClient(timeout=30) as c:
-                                files = {"file": ("audio.ogg", data, "audio/ogg"), "model": (None, "whisper-1"), "language": (None, language)}
+                                files: dict[str, Any] = {"file": ("audio.ogg", data, "audio/ogg"), "model": (None, "whisper-1"), "language": (None, language)}
                                 if diarize:
                                     files["response_format"] = (None, "verbose_json")
                                 r = await c.post("https://api.openai.com/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"}, files=files)

@@ -68,7 +68,7 @@ _TOOL_NON_IDEMPOTENT = {
 }
 _TOOL_MAX_OUTPUT = 100_000  # chars
 _TOOL_MAX_INPUT_ARGS = 50_000  # chars
-_TOOL_CALL_TRACKING = {}  # tool_name -> count for audit
+_TOOL_CALL_TRACKING: dict[str, int] = {}  # tool_name -> count for audit
 
 # ponytail: in-memory tool audit. DB-backed when observability scales.
 
@@ -213,7 +213,7 @@ class ToolEngine:
 
     @staticmethod
     def register_runtime_tool(
-        name: str, description: str, code: str, input_schema: dict = None
+        name: str, description: str, code: str, input_schema: dict | None = None
     ):
         from aios.tools.dynamic import register_dynamic_tool
 

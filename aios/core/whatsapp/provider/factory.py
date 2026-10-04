@@ -1,15 +1,18 @@
-from .base import WhatsAppProvider, ProviderType
+from .base import WhatsAppProvider
 from .evolution_baileys import EvolutionBaileysProvider
 from .evolution_cloud import EvolutionCloudProvider
 from .evolution_coexistence import EvolutionCoexistenceProvider
 
-_providers: dict[ProviderType, WhatsAppProvider] = {
+# Keyed by plain str, not ProviderType: get_provider defaults unknown names to
+# baileys, so a Literal key type would force every caller to pre-validate what
+# this function already handles.
+_providers: dict[str, WhatsAppProvider] = {
     "baileys": EvolutionBaileysProvider(),
     "cloud": EvolutionCloudProvider(),
     "coexistence": EvolutionCoexistenceProvider(),
 }
 
-def get_provider(provider: ProviderType = "baileys") -> WhatsAppProvider:
+def get_provider(provider: str = "baileys") -> WhatsAppProvider:
     return _providers.get(provider, _providers["baileys"])
 
 def get_provider_for_instance(instance_cfg: dict | None) -> WhatsAppProvider:

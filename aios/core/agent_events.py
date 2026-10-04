@@ -21,6 +21,7 @@ Deliberately not built: persistence/replay. ``aios.core.tracing.get_trace`` is
 the path if that is ever wanted.
 """
 
+from typing import cast
 import asyncio
 import json
 import logging
@@ -215,7 +216,8 @@ async def init() -> bool:
 
         rs = _parse_redis(url)  # same SASL/TLS parsing as the ARQ pool
         _subscriber = Redis(
-            host=rs.host, port=rs.port, db=rs.database, username=rs.username,
+            # _parse_redis only ever builds a single-host RedisSettings.
+            host=cast(str, rs.host), port=rs.port, db=rs.database, username=rs.username,
             password=rs.password, ssl=rs.ssl, socket_connect_timeout=1,
         )
         _subscriber_task = asyncio.create_task(_subscribe())

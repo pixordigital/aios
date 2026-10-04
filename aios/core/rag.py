@@ -92,7 +92,7 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
                 await s.execute(text("SET LOCAL hnsw.ef_search = 100"))
             except Exception:
                 pass
-            rows = await s.execute(
+            result = await s.execute(
                 text(
                     "SELECT id, content, extra_data->>'embedding' AS emb "
                     "FROM memories WHERE org_id=:org "
@@ -103,7 +103,7 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
             import json as _json
 
             scored = []
-            for rid, content, emb in rows:
+            for rid, content, emb in result:
                 try:
                     stored = _json.loads(emb)
                 except (TypeError, ValueError):

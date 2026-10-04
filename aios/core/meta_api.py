@@ -66,7 +66,7 @@ class MetaAPIError(Exception):
         self.code = code
         self.raw_message = message
         self.http_status = http_status
-        self.hint = ERROR_HINTS.get(code)
+        self.hint = ERROR_HINTS.get(code) if code is not None else None
         super().__init__(f"[{code}] {message}" if code else message)
 
 
@@ -80,12 +80,12 @@ class TemplateComponents:
     examples: dict = field(default_factory=dict)
 
     def to_meta(self) -> list:
-        comps = []
+        comps: list[dict[str, object]] = []
         if (self.header_text or "").strip():
             comps.append({"type": "HEADER", "format": "TEXT", "text": self.header_text})
         body_text = (self.body or "").strip()
         if body_text:
-            body_comp = {"type": "BODY", "text": body_text}
+            body_comp: dict[str, object] = {"type": "BODY", "text": body_text}
             example = _meta_examples(self.examples)
             if example:
                 # Omit the key entirely when there are no examples. Sending
@@ -248,7 +248,7 @@ class MetaWhatsAppClient:
         Review is asynchronous and can take up to 24h; the returned status is
         PENDING, not a verdict.
         """
-        body = {
+        body: dict[str, object] = {
             "name": name,
             "language": language,
             "category": category,

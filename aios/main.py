@@ -18,7 +18,7 @@ from aios.core.storage import ensure_storage
 try:
     from prometheus_fastapi_instrumentator import Instrumentator
 except ImportError:  # pragma: no cover
-    class Instrumentator:
+    class Instrumentator:  # type: ignore[no-redef]
         def __init__(self, *args, **kwargs):
             pass
         def instrument(self, app):
@@ -204,7 +204,7 @@ async def lifespan(app: FastAPI):
         )).scalars().all()
         for conn in active:
             try:
-                agent_or_team = None
+                agent_or_team: object = None
                 if conn.agent_id:
                     from aios.db.models import Agent
                     agent_or_team = await sess.get(Agent, conn.agent_id)

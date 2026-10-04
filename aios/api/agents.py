@@ -31,9 +31,10 @@ async def create_agent(
     plan = ((org.extra_data or {}).get("plan", "free") if org else "free")
     if not settings.internal_mode and plan not in ("unlimited",):
         limits = PLANS.get(plan, PLANS["free"])
+        max_agents: int = limits.get("max_agents", 2)
         total_cnt = (await db.execute(select(_func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
-        if total_cnt >= limits.get("max_agents", 2):
-            raise HTTPException(403, detail=f"quota max_agents {limits['max_agents']} for {plan}")
+        if total_cnt >= max_agents:
+            raise HTTPException(403, detail=f"quota max_agents {max_agents} for {plan}")
     # per-field template fallback (ponytail: minimal, no nested get truthy bug)
     from aios.schemas import _AGENT_LLM_CONFIG_DEFAULT, _AGENT_MEMORY_DEFAULT
     tpl = apply_template(body.agent_type) if body.agent_type != "custom" else None
@@ -171,14 +172,15 @@ async def deploy_agent(
     plan = ((org.extra_data or {}).get("plan", "free") if org else "free")
     if plan not in ("unlimited",):
         limits = PLANS.get(plan, PLANS["free"])
+        max_agents: int = limits.get("max_agents", 2)
         cnt = (
             await db.execute(
                 select(Agent).where(Agent.org_id == org_id, Agent.status == "active")
             )
         ).scalars().all()
-        if len(cnt) >= limits.get("max_agents", 2) and agent.status != "active":
+        if len(cnt) >= max_agents and agent.status != "active":
             raise HTTPException(
-                403, detail=f"quota max_agents {limits['max_agents']} for {plan}"
+                403, detail=f"quota max_agents {max_agents} for {plan}"
             )
     prev_active = agent.status == "active"
     agent.status = "active"
@@ -404,7 +406,7 @@ async def push_agent_to_fleet(
         raise HTTPException(404)
 
     from aios.db.models import RemoteInstance
-    results = []
+    results: list[dict[str, object]] = []
 
     for instance_id in target_instance_ids:
         inst = await db.get(RemoteInstance, instance_id)
@@ -651,7 +653,7 @@ async def business_setup(
     from aios.core.org_bootstrap import ensure_business_setup
 
     result = await ensure_business_setup(org_id)
-    log_audit(
+    await log_audit(
         db,
         org_id,
         "business.setup",

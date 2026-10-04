@@ -31,6 +31,12 @@ dependencies = [
     "qrcode[pil]>=8.0",
     "google-api-python-client>=2.0.0",
     "google-auth>=2.0.0",
+    # Promised to agents by python_sandbox ("pandas/matplotlib") and by the
+    # data_analyst/data_scientist templates, asserted by
+    # test_legitimate_data_analysis_still_runs, and executed by the sandbox via
+    # sys.executable — so they are declared here rather than assumed present.
+    "pandas>=2.0.0",
+    "matplotlib>=3.8.0",
 ]
 
 [project.scripts]
@@ -80,6 +86,15 @@ python_version = "3.14"
 ignore_missing_imports = true
 explicit_package_bases = true
 namespace_packages = true
+
+# The tools layer intentionally narrows BaseTool.run(self, **kwargs) to named
+# parameters per tool. That is an LSP violation by design: the dispatcher
+# genuinely calls each tool with keywords matching its own signature, and
+# unifying 33 tools onto one signature (or tagging 41 sites) would be churn
+# that obscures the real errors. Scoped here, documented here, nowhere else.
+[[tool.mypy.overrides]]
+module = "aios.tools.*"
+disable_error_code = ["override"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

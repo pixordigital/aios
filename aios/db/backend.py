@@ -102,7 +102,7 @@ class BackendRegistry:
                 return True
             elif self._replica and self._failed_over and self._active is self._replica:
                 # check if primary recovered
-                if await self._primary.health():
+                if self._primary and await self._primary.health():
                     logger.info("Primary backend recovered — switching back")
                     self._active = self._primary
                     self._failed_over = False

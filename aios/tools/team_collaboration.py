@@ -313,9 +313,8 @@ class NotifyHumanTool(BaseTool):
             if caller is not None:
                 team_name = caller.name
 
-        targets = await human_slack_targets(
-            org_id, team_id=(await _team_id(org_id, team_name)) if team_name else ""
-        )
+        resolved_team_id = await _team_id(org_id, team_name) if team_name else None
+        targets = await human_slack_targets(org_id, team_id=resolved_team_id or "")
         if not targets:
             return {
                 "ok": False,
@@ -641,21 +640,29 @@ class RequestBuildTool(BaseTool):
             f"{evidence_line}\n\n"
             f"_Aprovação no /dashboard/approvals. Thread: {conv_id}_"
         )
+        # post_to_slack is sync urllib — keep it off the event loop, same as
+        # notify_human. One failed target must not hide the others.
+        import asyncio
+
+        sent: list[str] = []
         try:
-            posted = await post_to_slack(text, targets)
+            for t in targets:
+                try:
+                    ok = await asyncio.to_thread(
+                        post_to_slack, t["token"], t["channel"], text
+                    )
+                except Exception:
+                    logger.exception("request_build: slack post failed conv=%s", conv_id)
+                    continue
+                if ok:
+                    sent.append(t["channel"])
         except Exception:
-            logger.exception("request_build: slack post failed conv=%s", conv_id)
+            logger.exception("request_build: slack loop failed conv=%s", conv_id)
+
+        if not sent:
             return {
                 "ok": False,
                 "error": "Slack delivery to the owner failed; the request was NOT delivered",
-                "conversation_id": conv_id,
-                "feasibility": feasibility[:2000],
-            }
-
-        if not posted:
-            return {
-                "ok": False,
-                "error": "Slack rejected the message; the owner was NOT reached",
                 "conversation_id": conv_id,
                 "feasibility": feasibility[:2000],
             }

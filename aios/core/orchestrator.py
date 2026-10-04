@@ -608,7 +608,7 @@ Respond with JSON:
 
             q = _embed(msg)
             best = None
-            best_score = -1
+            best_score = -1.0
             for a in self.agents:
                 e = _embed((a.system_prompt or "")[:500])
                 dot = sum(x * y for x, y in zip(q, e))
@@ -629,7 +629,7 @@ Respond with JSON:
 
             q = _embed(msg)
             best = None
-            best_score = -1
+            best_score = -1.0
             for a in self.agents:
                 e = _embed((a.system_prompt or "")[:500])
                 dot = sum(x * y for x, y in zip(q, e))

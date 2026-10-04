@@ -26,7 +26,7 @@ async def create_team(
     if not settings.internal_mode and plan not in ("unlimited",):
         limits = PLANS.get(plan, PLANS["free"])
         cnt = (await db.execute(select(_func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
-        if cnt >= limits.get("max_teams", 1):
+        if cnt >= int(limits.get("max_teams") or 1):
             raise HTTPException(403, detail=f"quota max_teams {limits['max_teams']} for {plan}")
     # todo time tem manager: sem lider nao ha como coordenar nem escalar
     if not body.manager_agent_id:

@@ -1,5 +1,6 @@
 """Channel lifecycle manager — start/stop channel adapters."""
 
+from typing import Any
 import logging
 from aios.channels.base import Channel
 from aios.channels.web import WebChannel
@@ -11,7 +12,7 @@ from aios.channels.voice import VoiceChannel
 
 logger = logging.getLogger(__name__)
 
-CHANNEL_REGISTRY = {
+CHANNEL_REGISTRY: dict[str, Any] = {
     "web": WebChannel,
     "slack": SlackChannel,
     "telegram": TelegramChannel,

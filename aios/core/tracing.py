@@ -163,7 +163,7 @@ async def _persist_span(span: TraceSpan):
             err = 1 if span.error else 0
             tc = 1 if span.span_type == "tool" else 0
             msgs = 1 if span.span_type == "agent_run" else 0
-            _ins, AgentMetric = _metric_upsert_stmt()
+            _ins, _metric_model = _metric_upsert_stmt()
 
             # Atomic upsert. The old SELECT-then-INSERT had no unique constraint,
             # so two concurrent spans for the same agent/hour both inserted, after
@@ -172,7 +172,7 @@ async def _persist_span(span: TraceSpan):
             # was then lost forever, silently, and the duplicate rows double-counted
             # every dashboard total.
             await sess.execute(
-                _ins(AgentMetric).values(
+                _ins(_metric_model).values(
                     agent_id=agent_id, org_id=org_id, hour=hour,
                     tokens=tok, errors=err, tool_calls=tc, messages=msgs,
                     avg_response_ms=dur, samples=1,
@@ -298,8 +298,9 @@ def _log_span_event(event: str, span: TraceSpan) -> None:
             if "messages" in span.extra:
                 record["messages"] = redact_pii_obj(span.extra.get("messages"))
         # também redact error/messages caso contenham PII solto
-        if isinstance(record.get("error"), str) and record["error"]:
-            record["error"] = redact_pii(record["error"])
+        _err = record.get("error")
+        if isinstance(_err, str) and _err:
+            record["error"] = redact_pii(_err)
         if "messages" in record and isinstance(record["messages"], str):
             record["messages"] = redact_pii(record["messages"])  # type: ignore
     except Exception:

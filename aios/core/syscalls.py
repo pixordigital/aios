@@ -8,10 +8,11 @@ ponytail: in-process dispatch. Remote syscalls (RPC/gRPC) when
 agents run in separate processes.
 """
 
+from collections.abc import Callable
+from typing import Any
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from aios.core.hooks import HookContext, HookPoint, hooks
 
@@ -60,7 +61,7 @@ class SyscallError(Exception):
 
 
 # Type for handler functions
-SyscallHandler = callable  # (SyscallRequest) -> SyscallResponse | Any
+SyscallHandler = Callable[..., Any]  # (SyscallRequest) -> SyscallResponse | Any
 
 
 class SyscallDispatcher:

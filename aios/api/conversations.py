@@ -188,13 +188,27 @@ async def human_reply(conversation_id: str, body: dict, db: DatabaseBackend = De
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
-    # deliver via channel if exists
-    try:
-        from aios.core.dispatch import dispatch_outbound
+    # deliver via channel if exists. This used to call a dispatch_outbound
+    # that does not exist, so the except-pass below swallowed the AttributeError
+    # and every human reply saved fine while never reaching the customer.
+    if conv.channel_connection_id:
+        try:
+            from aios.core.delivery import deliver_message
 
-        await dispatch_outbound(conv, text)
-    except Exception:
-        pass
+            # The dedupe key is sha256(conversation | text | inbound id | hour).
+            # A bare "{}" leaves the inbound id empty, so an agent repeating the
+            # same text twice in an hour had its second reply dropped as a
+            # duplicate. This Message row's id is stable across retries of this
+            # send and unique per reply.
+            await deliver_message(
+                None,
+                conv.channel_connection_id,
+                conv.id,
+                text,
+                json.dumps({"message_id": msg.id}),
+            )
+        except Exception:
+            logger.exception("human reply delivery failed conv=%s", conv.id)
     return msg
 
 
@@ -243,6 +257,7 @@ async def send_message(
     db.add(msg)
     await db.commit()
     await db.refresh(msg)
+    reply_msg: Message | None = None
 
     # check org limits before routing
     allowed, reason = await check_org_limits(org_id, db)
@@ -256,13 +271,12 @@ async def send_message(
         db.add(reply_msg)
         await db.commit()
         await db.refresh(reply_msg)
-        return SendMessageResponse(user_message=msg, reply=reply_msg)
+        return SendMessageResponse(user_message=MessageOut.model_validate(msg), reply=MessageOut.model_validate(reply_msg) if reply_msg else None)
 
     if (conv.extra_data or {}).get("handover", {}).get("status") == "human":
-        return SendMessageResponse(user_message=msg, reply=None)
+        return SendMessageResponse(user_message=MessageOut.model_validate(msg), reply=None)
 
     # route to agent or team if assigned, with retry + failover
-    reply_msg: Message | None = None
     try:
         from aios.core.agent_health import health_tracker
         if conv.team_id:
@@ -329,7 +343,7 @@ async def send_message(
     except Exception:
         logger.exception("Agent/team routing failed for conversation %s", conversation_id)
 
-    return SendMessageResponse(user_message=msg, reply=reply_msg)
+    return SendMessageResponse(user_message=MessageOut.model_validate(msg), reply=MessageOut.model_validate(reply_msg) if reply_msg else None)
 
 
 @router.post("/{conversation_id}/messages/stream")

@@ -29,7 +29,7 @@ def _validate_ast(code: str):
                 raise ValueError(f"blocked call: {func.id}")
 
 class DynamicTool(BaseTool):
-    def __init__(self, name: str, description: str, code: str, input_schema: dict = None):
+    def __init__(self, name: str, description: str, code: str, input_schema: dict | None = None):
         _validate_ast(code)
         self.name = name
         self.description = description
@@ -62,7 +62,7 @@ class DynamicTool(BaseTool):
             return {"error": str(e)}
 
 
-def register_dynamic_tool(name: str, description: str, code: str, input_schema: dict = None):
+def register_dynamic_tool(name: str, description: str, code: str, input_schema: dict | None = None):
     tool = DynamicTool(name, description, code, input_schema)
     TOOL_REGISTRY[name] = {"code_reference": f"aios.tools.dynamic.{name}", "description": description, "input_schema": input_schema or {}, "dynamic": True, "instance": tool}
     return tool

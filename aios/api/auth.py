@@ -32,7 +32,7 @@ _JWT_PUBLIC_KEY: ed25519.Ed25519PublicKey | None = None
 _JWT_KEY_ID: str = ""
 
 
-def _load_ed25519_keys() -> tuple[ed25519.Ed25519PrivateKey | None, ed25519.Ed25519PublicKey | None, str]:
+def _load_ed25519_keys() -> tuple[ed25519.Ed25519PrivateKey, ed25519.Ed25519PublicKey, str]:
     """Load or generate Ed25519 key pair for JWT signing."""
     global _JWT_PRIVATE_KEY, _JWT_PUBLIC_KEY, _JWT_KEY_ID
     
@@ -62,6 +62,7 @@ def _load_ed25519_keys() -> tuple[ed25519.Ed25519PrivateKey | None, ed25519.Ed25
     _JWT_PUBLIC_KEY = _JWT_PRIVATE_KEY.public_key()
     _JWT_KEY_ID = f"ed25519-gen-{secrets.token_hex(4)}"
     logger.warning("Generated ephemeral Ed25519 JWT keys — set AIOS_JWT_ED25519_PRIVATE_KEY and AIOS_JWT_ED25519_PUBLIC_KEY for persistence")
+    assert _JWT_PRIVATE_KEY is not None and _JWT_PUBLIC_KEY is not None
     return _JWT_PRIVATE_KEY, _JWT_PUBLIC_KEY, _JWT_KEY_ID
 
 
@@ -78,7 +79,7 @@ def _get_jwt_signing_key() -> tuple[bytes | ed25519.Ed25519PrivateKey, str, str]
     return settings.jwt_secret.encode(), "HS256", "hs256-v1"
 
 
-def _get_jwt_verification_key(algorithm: str = None) -> bytes | ed25519.Ed25519PublicKey:
+def _get_jwt_verification_key(algorithm: str | None = None) -> bytes | ed25519.Ed25519PublicKey:
     """Get the appropriate verification key."""
     if algorithm == "EdDSA" or (algorithm is None and settings.jwt_ed25519_public_key):
         _, public_key, _ = _load_ed25519_keys()
@@ -200,7 +201,7 @@ async def _send_email(to: str, subject: str, body: str) -> bool:
             port=settings.smtp_port,
             username=settings.smtp_user or None,
             password=settings.smtp_password or None,
-            starttls=True,
+            start_tls=True,
         )
         return True
     except Exception:

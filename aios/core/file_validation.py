@@ -5,7 +5,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 # (magic_bytes, offset, mime_type, is_blocked, extra_check)
-_MAGIC_SIGNATURES = [
+# Rows are (magic, offset, mime, blocked[, validator]). Heterogeneous by
+# nature — a validator callable rides along only on rows that need one — so a
+# precise tuple type would be a lie that rots. Bare tuple is the honest type.
+_MAGIC_SIGNATURES: list[tuple] = [
     (b"\x89PNG\r\n\x1a\n", 0, "image/png", False),
     (b"\xff\xd8\xff", 0, "image/jpeg", False),
     (b"GIF87a", 0, "image/gif", False),
