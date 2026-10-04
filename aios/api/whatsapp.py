@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from pydantic import BaseModel
 from typing import Optional
 
 from .deps import get_current_user, get_org_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
 
@@ -122,7 +126,37 @@ async def evolution_webhook(instance: str, request: Request, x_hub_signature_256
     if txt.strip() in ("stop","parar","cancelar"):
         from aios.core.whatsapp.lgpd.consent import record_consent
         phone = body.get("data",{}).get("key",{}).get("remoteJid","")
-        await record_consent(phone, "marketing", False, org_id="unknown")
+        # Resolve the org from the instance name. Recording against "unknown"
+        # used to silently drop the consent (no such org), so STOP requests
+        # were never persisted and the business kept messaging people who
+        # opted out. Unresolvable instances log instead of misattributing.
+        try:
+            from sqlalchemy import select
+
+            from aios.db.backend import db_session
+            from aios.db.models import ChannelConnection
+
+            async with db_session() as _db:
+                _conn = (
+                    await _db.execute(
+                        select(ChannelConnection)
+                        .where(
+                            ChannelConnection.channel_type == "evolution",
+                            ChannelConnection.is_active == True,  # noqa: E712
+                            ChannelConnection.config["instance"].as_string() == instance,
+                        )
+                        .order_by(ChannelConnection.id)
+                        .limit(1)
+                    )
+                ).scalars().first()
+                _org = _conn.org_id if _conn else ""
+        except Exception:
+            logger.exception("consent org resolution failed instance=%s", instance)
+            _org = ""
+        if _org:
+            await record_consent(phone, "marketing", False, org_id=_org)
+        else:
+            logger.warning("STOP from %s not recorded: no org for instance %s", phone, instance)
     return {"ok": True, "instance": instance}
 
 # Voice Phase B
