@@ -3704,6 +3704,13 @@ async def whatsapp_gateway_page(request: Request):
         inst["_name"] = name
         inst["_channel"] = chan_map.get(name)
         inst["_state"] = inst.get("state") or inst.get("instance",{}).get("state","")
+    # The gateway is shared, so evo_fetch_instances() returns every tenant's
+    # instances. Rendering them all disclosed each customer's WhatsApp instance
+    # names and state, and handed over the exact names the /evolution/{name}
+    # routes act on. Show only this org's.
+    if not settings.internal_mode:
+        mine = {c.config.get("instance") for c in chans if c.config}
+        instances = [i for i in instances if i.get("_name") in mine]
     gateway = {"mode": "unificado"}
     return await _render("whatsapp_instances.html", request, title="WhatsApp", instances=instances, chan_map=chan_map, gateway=gateway)
 
@@ -3829,14 +3836,40 @@ async def evolution_create(request: Request, instanceName: str = Form(...), agen
 
 @router.get("/evolution/{name}/connect")
 async def evolution_connect_page(request: Request, name: str):
+    if not await _evolution_owned(request, name):
+        return HTMLResponse("<h2>Instância não encontrada</h2>", status_code=404)
     from aios.core.evolution_api import evo_connect, evo_status
     conn = await evo_connect(name)
     st = await evo_status(name)
     from fastapi.responses import JSONResponse
     return JSONResponse({"connect": conn, "status": st})
 
+async def _evolution_owned(request: Request, name: str) -> bool:
+    """Is this Evolution instance name bound to the caller's org?
+
+    The Evolution gateway is shared by every tenant and `name` arrives in the
+    URL, so without this any authenticated user could restart, log out, read the
+    pairing QR of, or DELETE another customer's WhatsApp instance.
+    """
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        from aios.db.models import ChannelConnection
+
+        rows = (
+            await db.execute(
+                select(ChannelConnection).where(
+                    ChannelConnection.org_id == org_id,
+                    ChannelConnection.channel_type == "evolution",
+                )
+            )
+        ).scalars().all()
+    return any((c.config or {}).get("instance") == name for c in rows)
+
+
 @router.get("/evolution/{name}/qrcode")
 async def evolution_qrcode(request: Request, name: str):
+    if not await _evolution_owned(request, name):
+        return HTMLResponse("<h2>Instância não encontrada</h2>", status_code=404)
     from aios.core.evolution_api import evo_connect
     data = await evo_connect(name)
     # evolution returns base64 qrcode in data
@@ -3845,12 +3878,16 @@ async def evolution_qrcode(request: Request, name: str):
 
 @router.post("/evolution/{name}/logout")
 async def evolution_logout(request: Request, name: str):
+    if not await _evolution_owned(request, name):
+        return HTMLResponse("<h2>Instância não encontrada</h2>", status_code=404)
     from aios.core.evolution_api import evo_logout
     await evo_logout(name)
     return RedirectResponse("/dashboard/evolution", status_code=303)
 
 @router.post("/evolution/{name}/delete")
 async def evolution_delete(request: Request, name: str):
+    if not await _evolution_owned(request, name):
+        return HTMLResponse("<h2>Instância não encontrada</h2>", status_code=404)
     from aios.core.evolution_api import evo_delete
     await evo_delete(name)
     # remove canal
@@ -3866,6 +3903,8 @@ async def evolution_delete(request: Request, name: str):
 
 @router.post("/evolution/{name}/restart")
 async def evolution_restart(request: Request, name: str):
+    if not await _evolution_owned(request, name):
+        return HTMLResponse("<h2>Instância não encontrada</h2>", status_code=404)
     from aios.core.evolution_api import evo_restart
     await evo_restart(name)
     return RedirectResponse("/dashboard/evolution", status_code=303)

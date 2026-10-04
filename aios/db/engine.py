@@ -20,7 +20,15 @@ _pool_kwargs = (
     if _is_postgres()
     else {}
 )
-_connect_kwargs = {"server_settings": {"search_path": "public,aios"}} if _is_postgres() else {}
+# statement_timeout caps server-side. Without it a runaway query (pg_sleep, a
+# cartesian join, a missing index on a growing table) holds a pooled connection
+# indefinitely; an application-side timeout only cancels the client, it does not
+# release the backend. 15s is well above any legitimate query here.
+_connect_kwargs = (
+    {"server_settings": {"search_path": "public,aios", "statement_timeout": "15s"}}
+    if _is_postgres()
+    else {}
+)
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,

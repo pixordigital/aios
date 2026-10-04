@@ -6,6 +6,7 @@ import base64
 import logging
 import re
 import secrets
+import uuid
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -346,13 +347,67 @@ def _create_access_token(user_id: str, org_id: str) -> str:
     return token
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Normalise a datetime read back from the DB to timezone-aware UTC.
+
+    refresh_tokens.expires_at is a plain DateTime column, so both SQLite and
+    Postgres hand it back naive. Comparing that to datetime.now(timezone.utc)
+    raised TypeError on every /refresh. Everything is written in UTC, so
+    attaching the zone is correct rather than a guess.
+    """
+    if dt is None:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _new_jti() -> str:
+    return uuid.uuid4().hex
+
+
+async def _issue_refresh(db, user_id: str) -> str:
+    """Mint a refresh token and record its jti so it can be revoked later."""
+    from aios.db.models import RefreshToken
+
+    jti = _new_jti()
+    expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_expire_days)
+    token, _ = _create_jwt_token(
+        {"sub": user_id, "jti": jti, "iat": datetime.now(timezone.utc), "exp": expire},
+        token_type="refresh",
+    )
+    db.add(RefreshToken(jti=jti, user_id=user_id, expires_at=expire))
+    await db.commit()
+    return token
+
+
 def _create_refresh_token(user_id: str) -> str:
+    """Unsigned issuance for call sites that have no db handle.
+
+    Every authenticated path uses _issue_refresh; this stays only so nothing
+    that imports it breaks, and it deliberately produces a token whose jti was
+    never persisted -- /refresh rejects those, which fails closed rather than
+    minting an unrevocable credential.
+    """
     expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_expire_days)
     token, _ = _create_jwt_token(
         {"sub": user_id, "iat": datetime.now(timezone.utc), "exp": expire},
-        token_type="refresh"
+        token_type="refresh",
     )
     return token
+
+
+async def _revoke_all_for_user(db, user_id: str) -> int:
+    """Kill every outstanding refresh token. Used by logout and password reset."""
+    from sqlalchemy import update as _update
+
+    from aios.db.models import RefreshToken
+
+    res = await db.execute(
+        _update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(timezone.utc))
+    )
+    await db.commit()
+    return int(res.rowcount or 0)
 
 
 def _verify_jwt_token(token: str) -> dict | None:
@@ -449,7 +504,7 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
     await _send_email(user.email, "Verifique seu e-mail — AIOS", html_body or f"Bem-vindo! Verifique seu e-mail: {verify_url}\n\nO link expira em 24h.")
 
     token = _create_access_token(user.id, org.id)
-    refresh = _create_refresh_token(user.id)
+    refresh = await _issue_refresh(db, user.id)
     return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=org.id)
 
 
@@ -502,7 +557,7 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
                 raise HTTPException(401, "Código 2FA inválido")
 
     token = _create_access_token(user.id, user.org_id)
-    refresh = _create_refresh_token(user.id)
+    refresh = await _issue_refresh(db, user.id)
     return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=user.org_id)
 
 
@@ -521,6 +576,28 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
         raise HTTPException(401, "Tipo de token inválido")
 
     user_id = payload["sub"]
+
+    # A refresh token is only honoured if its jti is in the table, unexpired and
+    # not already consumed. Before this, refresh tokens were stateless: a leaked
+    # one stayed valid for 30 days and survived logout and password reset, and
+    # a replayed one minted unlimited new sessions.
+    from aios.db.models import RefreshToken
+
+    jti = payload.get("jti")
+    row = await db.get(RefreshToken, jti) if jti else None
+    if row is None or row.user_id != user_id:
+        logger.warning("refresh rejected: unknown or missing jti for user %s", user_id)
+        raise HTTPException(401, "Token de atualização inválido ou expirado")
+    now = datetime.now(timezone.utc)
+    if _as_utc(row.expires_at) <= now:
+        raise HTTPException(401, "Token de atualização inválido ou expirado")
+    if row.revoked_at is not None or row.replaced_by is not None:
+        # A consumed token being replayed means it was captured. Revoke the
+        # whole family: the legitimate client may still be holding the newest.
+        logger.warning("refresh replay detected for user %s; revoking all tokens", user_id)
+        await _revoke_all_for_user(db, user_id)
+        raise HTTPException(401, "Token de atualização inválido ou expirado")
+
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(401, "Usuário não encontrado")
@@ -531,8 +608,30 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
         raise HTTPException(401, "Token de atualização inválido ou expirado")
 
     token = _create_access_token(user.id, user.org_id)
-    refresh = _create_refresh_token(user.id)
+    # Rotate: consume this jti and issue a fresh one.
+    refresh = await _issue_refresh(db, user.id)
+    row.revoked_at = now
+    row.replaced_by = _new_jti()
+    await db.commit()
     return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=user.org_id)
+
+
+@router.post("/logout")
+async def logout(request: Request, db: DatabaseBackend = Depends(get_db_backend)):
+    """Revoke every outstanding refresh token for the caller.
+
+    Refresh tokens used to be stateless, so logout was cosmetic: the client
+    dropped its copy while a captured one kept minting sessions for 30 days.
+    """
+    from aios.api.deps import get_current_user
+
+    try:
+        user = await get_current_user(request, db)
+    except HTTPException:
+        # Nothing to revoke if we cannot identify the caller.
+        return {"ok": True, "revoked": 0}
+    revoked = await _revoke_all_for_user(db, user.id)
+    return {"ok": True, "revoked": revoked}
 
 
 @router.post("/verify-email")
@@ -597,6 +696,11 @@ async def reset_password(body: ResetPasswordRequest, db: DatabaseBackend = Depen
 
     user.hashed_password = _hash_password(body.new_password)
     await db.commit()
+    # A password reset is the user's way of saying "assume I was compromised".
+    # Every existing session has to die with it, or the attacker's refresh token
+    # outlives the reset.
+    revoked = await _revoke_all_for_user(db, user.id)
+    logger.info("password reset for %s: revoked %d refresh token(s)", user.email, revoked)
     return {"message": "Senha redefinida com sucesso"}
 
 
@@ -1010,7 +1114,7 @@ async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_
         user = await db.get(User, oa.user_id)
         if user:
             token = _create_access_token(user.id, user.org_id)
-            refresh = _create_refresh_token(user.id)
+            refresh = await _issue_refresh(db, user.id)
             return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=user.org_id)
 
     # Check if user exists by email
@@ -1041,5 +1145,5 @@ async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_
     await db.commit()
 
     token = _create_access_token(user.id, user.org_id)
-    refresh = _create_refresh_token(user.id)
+    refresh = await _issue_refresh(db, user.id)
     return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=user.org_id)

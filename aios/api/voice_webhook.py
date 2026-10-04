@@ -133,6 +133,21 @@ async def voice_webhook(request: Request):
     event = body.get("event", "")
     call_sid = body.get("call_sid", body.get("call", {}).get("sid", ""))
 
+    # Twilio's signature scheme has no timestamp or nonce, so a captured valid
+    # request replays forever. CallSid is stable across a call's events, so it
+    # is the only dedupe key available -- and it is exactly what we need: a
+    # replayed event would otherwise create a duplicate VoiceRecording and
+    # dispatch the agent twice.
+    if call_sid:
+        async with db_session() as db:
+            seen = (
+                await db.execute(
+                    select(VoiceRecording.id).where(VoiceRecording.call_sid == str(call_sid)).limit(1)
+                )
+            ).first()
+        if seen:
+            return {"ok": True, "status": "duplicate", "call_sid": call_sid}
+
     # Handle different event types
     if event in ("call.started", "call.incoming"):
         # Dispatch to agent for handling
@@ -150,13 +165,18 @@ async def voice_webhook(request: Request):
                 ChannelConnection.channel_type == "voice",
                 ChannelConnection.is_active == True,
             )
-            if body.get("channel_id"):
-                q = q.where(ChannelConnection.id == str(body["channel_id"]))
+            # The caller-supplied channel_id override is gone. The webhook
+            # secret is global (one AIOS_VOICE_WEBHOOK_SECRET for every tenant),
+            # so honouring a body-supplied id let any tenant's provider name
+            # another tenant's channel and have their agent answer and be billed
+            # for it. There is no tenant identity in the request to bind the id
+            # to, so resolution is refused when it is not unambiguous. Serving
+            # multiple tenants properly needs a per-tenant webhook URL.
             candidates = (await db.execute(q.limit(2))).scalars().all()
             conn = candidates[0] if candidates else None
-            if conn is not None and not body.get("channel_id") and len(candidates) > 1:
+            if conn is not None and len(candidates) > 1:
                 return {"ok": False,
-                        "error": "more than one active voice channel; pass channel_id"}
+                        "error": "more than one active voice channel; cannot resolve unambiguously"}
 
             if conn:
                 # Create voice recording entry

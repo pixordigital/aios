@@ -1135,3 +1135,22 @@ class WhatsappEvent(Base, OrgScopedMixin):
     kind: Mapped[str] = mapped_column(String(30), index=True)  # sent|blocked|ban_signal|http_403|http_429|disconnect|opted_out
     detail: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
+
+
+class RefreshToken(Base):
+    """Issued refresh tokens, so they can be revoked.
+
+    Refresh tokens were stateless and unrotated: a 30-day token stayed valid
+    after logout and after a password reset, so a leaked one could not be
+    killed. Each refresh now consumes its `jti` and issues a new one, and
+    logout/password-reset revoke every outstanding row for the user.
+    """
+    __tablename__ = "refresh_tokens"
+    jti: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), index=True)
+    expires_at: Mapped[datetime] = mapped_column(index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(default=None)
+    # Set when this token is rotated or explicitly invalidated. Lets us reuse a
+    # jti (an attacker replaying a consumed token) be told apart from theft.
+    replaced_by: Mapped[str | None] = mapped_column(String(36), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=_now, index=True)

@@ -1,6 +1,7 @@
 """Email webhook — inbound emails from SendGrid/Mailgun/SES/AWS."""
 
 import hashlib
+import time
 import hmac
 import logging
 
@@ -39,6 +40,16 @@ def _verify_email_signature(request: Request, body: bytes, provider: str) -> boo
             logger.warning("mailgun signature missing or malformed")
             return False
         ts, _, signature = header.partition(",")
+        # Mailgun signs ts+body but the timestamp was never checked against the
+        # clock, so a captured request replayed forever and re-dispatched the
+        # same inbound mail to the agent on every retry.
+        try:
+            if abs(time.time() - int(ts)) > 300:
+                logger.warning("mailgun signature timestamp outside the 300s window")
+                return False
+        except (TypeError, ValueError):
+            logger.warning("mailgun signature timestamp unparseable")
+            return False
         expected = hmac.new(
             secret.encode(), ts.encode() + body, hashlib.sha256
         ).hexdigest()
@@ -166,13 +177,14 @@ async def _process_inbound_email(email_data: dict, provider: str):
             ChannelConnection.channel_type == "email",
             ChannelConnection.is_active == True,
         )
-        if email_data.get("channel_id"):
-            q = q.where(ChannelConnection.id == str(email_data["channel_id"]))
+        # Body-supplied channel_id removed for the same reason as the voice
+        # webhook: one global Mailgun secret for all tenants, so a caller-chosen
+        # id crossed tenants and billed the wrong org.
         candidates = (await db.execute(q.limit(2))).scalars().all()
         conn = candidates[0] if candidates else None
-        if conn is not None and not email_data.get("channel_id") and len(candidates) > 1:
+        if conn is not None and len(candidates) > 1:
             return {"ok": False,
-                    "error": "more than one active email channel; pass channel_id"}
+                    "error": "more than one active email channel; cannot resolve unambiguously"}
 
         if conn:
             await dispatch_inbound(

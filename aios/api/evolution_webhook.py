@@ -1,6 +1,7 @@
 """Evolution API webhook — unified inbound for Baileys + Meta Cloud API."""
 
 import hashlib
+import time
 import hmac
 import json
 import logging
@@ -30,7 +31,15 @@ async def evolution_webhook(instance: str, request: Request):
     Routes by instance name — single webhook endpoint for all providers.
     """
     try:
-        parsed = await request.json()
+        raw = await request.body()
+    except Exception:
+        raw = b""
+    # Starlette caches the body, so this costs nothing and gives the verifier
+    # the exact bytes Evolution signed. Signing a re-serialised dict instead
+    # changed whitespace and key order and broke every proxy-fronted deployment.
+    request.state.aios_raw = raw
+    try:
+        parsed = json.loads(raw or b"{}")
         body = parsed if isinstance(parsed, dict) else {}
     except Exception:
         # Form posts, empty bodies and truncated chunks used to 500 here before
@@ -272,17 +281,27 @@ def _verify_request(request, api_key: str) -> bool:
         if got and hmac.compare_digest(got, api_key):
             return True
 
+    # Replay window. Evolution sends x-evolution-timestamp; without this a
+    # single captured request replays forever and bills agent runs for messages
+    # that never existed.
+    ts = request.headers.get("x-evolution-timestamp", "")
+    if ts:
+        try:
+            if abs(time.time() - int(ts)) > 300:
+                return False
+        except (TypeError, ValueError):
+            return False
+
     sig = request.headers.get("x-evolution-signature", "")
     if sig and isinstance(getattr(request, "state", None), object):
-        body = getattr(request.state, "aios_body", None)
-        if isinstance(body, dict):
-            return _verify_evolution_sig(sig, body, api_key)
+        raw = getattr(request.state, "aios_raw", None)
+        if isinstance(raw, bytes):
+            return _verify_evolution_sig(sig, raw, api_key)
 
     return False
 
 
-def _verify_evolution_sig(signature: str, body: dict, api_key: str) -> bool:
-    """Verify HMAC-SHA256 over the canonical body (proxy-fronted deployments)."""
-    raw = json.dumps(body, separators=(",", ":"), sort_keys=True)
-    expected = hmac.new(api_key.encode(), raw.encode(), hashlib.sha256).hexdigest()
+def _verify_evolution_sig(signature: str, raw: bytes, api_key: str) -> bool:
+    """Verify HMAC-SHA256 over the raw request bytes (proxy-fronted deployments)."""
+    expected = hmac.new(api_key.encode(), raw, hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature, expected)

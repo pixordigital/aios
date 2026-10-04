@@ -182,7 +182,15 @@ class AskTeamManagerTool(BaseTool):
             # decision, not a question, and it has to reach the owner with both
             # sides on it. ask_team_manager cannot guarantee that, so it hands
             # build-shaped asks over instead of quietly delivering them.
-            if _looks_like_build_request(question):
+            # Default-deny for teams that can build: refuse unless the ask is
+            # recognisably informational, on top of the keyword guard. Both
+            # layers are heuristics, so this is defence in depth around
+            # request_build rather than a proof -- but it means an oblique
+            # phrasing now fails closed instead of open.
+            if _looks_like_build_request(question) or (
+                _is_build_capable(getattr(target, "name", ""))
+                and not _looks_like_information_request(question)
+            ):
                 return {
                     "ok": False,
                     "error": (
@@ -406,7 +414,20 @@ _METRIC_HINTS = (
 # something up.
 _BUILD_STEMS = (
     "constru", "implement", "adicion", "arrum", "arranj", "desenvolv",
-    "codific", "automatiz", "refator", "integr", "deploy", "criar", "cria",
+    "codific", "automatiz", "refator", "integr", "criar", "cria",
+    # "montar" was missing, and "voces conseguem me ajudar a montar uma tela de
+    # checkout?" is the most natural phrasing of the bypass this guards.
+    # "mont" covers montar/monta/montem/montar.
+    "mont", "precisamos de", "precisa de", "precisar de",
+    "e que tal", "vamos fazer", "tem como fazer",
+)
+
+# Inquiries that merely NAME a build word. Same suppression as _PAST_REF: the
+# ask is for information about work, not for the work itself.
+_QUESTION_FRAMES = (
+    "status", "situacao", "andamento", "progresso", "como esta", "como vai",
+    "como estao", "qual o", "qual a", "me passar", "tem pronto", "ja ficou",
+    "funcionando", "funciona", "document",
 )
 
 # References to work that already exists. "como está a integração que vocês
@@ -434,6 +455,42 @@ def _fold(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", stripped)
 
 
+# Teams that can be asked to BUILD. For these, ask_team_manager is
+# default-deny: anything that is not clearly an information request is refused
+# and pointed at request_build. A keyword denylist alone was never a boundary --
+# "voces conseguem me ajudar a montar uma tela de checkout?" carries no stem
+# from _BUILD_STEMS and walked straight through.
+_BUILD_CAPABLE_TEAMS = ("dev", "devops", "engineering", "tecnologia", "ti")
+
+# Markers of an information request. Deliberately generous: the cost of a false
+# negative is a confusing refusal with a clear instruction, while the cost of a
+# false positive is a build reaching dev with no owner notification.
+_INFO_MARKERS = (
+    "como ", "como?", "qual ", "quais ", "quanto ", "quanta ", "quando ",
+    "onde ", "quem ", "status", "situacao", "andamento", "progresso",
+    "existe", "tem ", "tendo", "funciona", "funcionando", "erro",
+    "erros", "bug", "incidente", "capacity", "capacidade", "load",
+    "latencia", "custo", "preco", "document", "doc", "explic", "ajuda",
+    # failure states are information asks, not build asks
+    "quebr", "falhou", "falha", "parou", "caiu", "voltou", "voltando",
+    "subiu", "subindo", "deu erro", "travou", "travando",
+    # inspection requests. "revisa a migration?" asks dev to look at existing
+    # work, which is not a build and must not demand a revenue justification.
+    "revisa", "revisar", "review", "olha", "confere", "checa", "verifica",
+    "da um pulso", "status do",
+    "sabe", "podem me passar", "me passar", "confirm", "valid",
+)
+
+
+def _looks_like_information_request(text: str) -> bool:
+    folded = " " + _fold(text) + " "
+    return any(m in folded for m in _INFO_MARKERS)
+
+
+def _is_build_capable(team_name: str) -> bool:
+    return any(t in _fold(team_name or "") for t in _BUILD_CAPABLE_TEAMS)
+
+
 def _looks_like_build_request(text: str) -> bool:
     """Whether a cross-team ask is asking for work rather than information.
 
@@ -443,6 +500,8 @@ def _looks_like_build_request(text: str) -> bool:
     """
     folded = " " + _fold(text) + " "
     if any(w in folded for w in _PAST_REF):
+        return False
+    if any(q in folded for q in _QUESTION_FRAMES):
         return False
     return any(stem in folded for stem in _BUILD_STEMS)
 

@@ -229,3 +229,159 @@ def test_fleet_admin_routes_require_superadmin():
         assert "request: Request" in m.group(1), f"{route} takes no request"
         tail = src[m.end(): m.end() + 400]
         assert "_require_superadmin" in tail, f"{route} has no superadmin gate"
+
+
+# --- sandbox: the AST allowlist and the alias bypass ------------------------
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'e = exec\ne("import os")',
+        'o = open\no("/etc/passwd")',
+        'i = __import__\ni("os")',
+        'f = lambda: open',
+        'for open in [1]: pass',
+        'import os',
+        'import subprocess',
+        '__import__("os").system("id")',
+        'eval("1+1")',
+        'from os import path',
+    ],
+)
+def test_sandbox_blocks_escape_attempts(code):
+    """The denylist only matched syntactic call names, so aliasing a banned name
+    to a variable bypassed it completely. It is now an import allowlist plus a
+    rule that denied names cannot be bound or referenced at all."""
+    from aios.core.sandbox import validate_code
+
+    assert validate_code(code) is not None
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "import pandas as pd\nprint(pd.DataFrame({'a': [1]}).a.sum())",
+        "from collections import Counter\nprint(Counter('aab').most_common(1))",
+        "import math, json\nprint(math.sqrt(9), json.dumps({'a': 1}))",
+    ],
+)
+def test_sandbox_still_allows_data_analysis(code):
+    from aios.core.sandbox import validate_code
+
+    assert validate_code(code) is None
+
+
+def test_sandbox_default_memory_fits_pandas():
+    """RLIMIT_AS of 128MB killed the interpreter at `import pandas`, so the
+    documented data-analysis support could not run at the old default."""
+    import inspect
+
+    from aios.core.sandbox import run_isolated
+
+    default = inspect.signature(run_isolated).parameters["max_memory_mb"].default
+    assert default >= 512
+
+
+def test_sandbox_timeout_kills_the_process_group():
+    """A forked grandchild inherited nothing useful from RLIMIT_CPU and used to
+    keep running after the caller was already told `timeout`."""
+    import time
+
+    import pytest as _pytest
+
+    from aios.core.sandbox import run_isolated
+
+    @_pytest.mark.asyncio
+    async def _run():
+        started = time.time()
+        res = await run_isolated("while True: pass", timeout=2.0)
+        return res, time.time() - started
+
+    import asyncio
+
+    res, elapsed = asyncio.run(_run())
+    assert elapsed < 20
+    assert res["ok"] is False
+
+
+# --- build-request guard ----------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("text", "blocked"),
+    [
+        ("voces conseguem me ajudar a montar uma tela de checkout?", True),
+        ("montem um formulario de lead", True),
+        ("construam um checkout", True),
+        ("precisamos de uma nova tela de checkout para o funil", True),
+        # information and inspection asks must still get through
+        ("revisa a migration?", False),
+        ("como esta a integracao que voces construiram?", False),
+        ("qual o status do deploy?", False),
+        ("podem me passar o schema do banco?", False),
+        ("o deploy quebrou?", False),
+        ("confere o erro de prod?", False),
+    ],
+)
+def test_build_guard_classification(text, blocked):
+    """ask_team_manager is default-deny for build-capable teams: only a
+    recognisably informational ask passes. A bare keyword denylist let
+    "montar uma tela" through, and "montar" was not even a recognised stem."""
+    from aios.tools.team_collaboration import (
+        _is_build_capable,
+        _looks_like_build_request,
+        _looks_like_information_request,
+    )
+
+    refused = _looks_like_build_request(text) or (
+        _is_build_capable("Dev") and not _looks_like_information_request(text)
+    )
+    assert refused is blocked
+
+
+# --- refresh token revocation ------------------------------------------------
+
+async def test_refresh_token_carries_a_persisted_jti():
+    """Refresh tokens were stateless: 30 days, unrotated, and valid after both
+    logout and a password reset."""
+    from sqlalchemy import select
+
+    from aios.api import auth as A
+    from aios.db.models import RefreshToken
+
+    class _Row:
+        id = "u1"
+        email = "a@b.c"
+
+    class _DB:
+        def __init__(self):
+            self.added = []
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def commit(self):
+            pass
+
+        async def get(self, model, ident):
+            return None
+
+    db = _DB()
+    token = await A._issue_refresh(db, "u1")
+    payload = A._verify_jwt_token(token)
+    assert payload.get("jti")
+    assert len(db.added) == 1
+    assert isinstance(db.added[0], RefreshToken)
+
+
+def test_expired_at_normalises_naive_datetimes():
+    """DateTime columns come back naive from both SQLite and Postgres, and
+    comparing that to an aware now() raised TypeError on every /refresh."""
+    from datetime import datetime, timezone
+
+    from aios.api.auth import _as_utc
+
+    naive = datetime(2030, 1, 1, 12, 0, 0)
+    assert _as_utc(naive).tzinfo is timezone.utc
+    aware = datetime(2030, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    assert _as_utc(aware) == aware
+    assert _as_utc(None) is None
