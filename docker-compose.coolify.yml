@@ -218,6 +218,14 @@ services:
       AIOS_VOICE_BRIDGE_URL: ${AIOS_VOICE_BRIDGE_URL:-}
       AIOS_VOICE_FROM_NUMBER: ${AIOS_VOICE_FROM_NUMBER:-}
       AIOS_VOICE_WEBHOOK_SECRET: ${AIOS_VOICE_WEBHOOK_SECRET:-}
+      # Cal.com (self-hosted). These were documented in .env.example but never
+      # listed here, so cal_booking read an empty key inside the container and
+      # every action failed closed — the integration was unreachable in prod.
+      AIOS_CALCOM_API_URL: ${AIOS_CALCOM_API_URL:-http://calcom-api:80}
+      AIOS_CALCOM_API_KEY: ${AIOS_CALCOM_API_KEY:-}
+      AIOS_CALCOM_API_VERSION: ${AIOS_CALCOM_API_VERSION:-2024-08-13}
+      AIOS_CALCOM_EVENT_TYPE_ID: ${AIOS_CALCOM_EVENT_TYPE_ID:-0}
+      AIOS_CALCOM_TIMEZONE: ${AIOS_CALCOM_TIMEZONE:-America/Sao_Paulo}
       # Whisper STT config (profile voice-stt)
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
@@ -264,6 +272,13 @@ services:
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
       AIOS_LOG_FORMAT: "json"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318"
+      # Cal.com: the worker runs agent turns too, so a booking made by an
+      # automated SDR needs the same credentials the dashboard has.
+      AIOS_CALCOM_API_URL: ${AIOS_CALCOM_API_URL:-http://calcom-api:80}
+      AIOS_CALCOM_API_KEY: ${AIOS_CALCOM_API_KEY:-}
+      AIOS_CALCOM_API_VERSION: ${AIOS_CALCOM_API_VERSION:-2024-08-13}
+      AIOS_CALCOM_EVENT_TYPE_ID: ${AIOS_CALCOM_EVENT_TYPE_ID:-0}
+      AIOS_CALCOM_TIMEZONE: ${AIOS_CALCOM_TIMEZONE:-America/Sao_Paulo}
     volumes:
       - app-data:/data
     depends_on:
