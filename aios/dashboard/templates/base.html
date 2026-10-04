@@ -440,6 +440,15 @@
 
     {% include "quick_agent_modal.html" %}
     <script>
+    // One HTML-escape helper for every template. Jinja autoescaping does NOT
+    // cover values interpolated into JS template literals and then written via
+    // innerHTML, which is how most of the dashboard renders JSON. Five
+    // templates had their own private copy of this; they now share this one.
+    window.esc = window.esc || function(s){
+      var d = document.createElement('div');
+      d.textContent = (s === null || s === undefined) ? '' : String(s);
+      return d.innerHTML;
+    };
     // Sidebar collapse/expand
     (function() {
         const sidebar = document.querySelector('.sidebar');

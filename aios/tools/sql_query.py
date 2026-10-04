@@ -68,6 +68,35 @@ class SQLQueryTool(BaseTool):
         r"(?:FROM|JOIN)\s+(" + "|".join(_ORG_SCOPED_TABLES) + r")\b",
         re.IGNORECASE,
     )
+
+    # Server-side functions that read or write the host filesystem or block
+    # forever. The pg_ *table* check never looked at call position, so these
+    # passed validation: SELECT pg_read_file('/app/.env'), lo_export(...),
+    # pg_copy_file(...), pg_sleep(600).
+    _DENY_FUNCTIONS = re.compile(
+        r"\b(pg_[a-z_]+|lo_[a-z_]+|dblink[a-z_]*|dblink|copy)\s*\(", re.IGNORECASE
+    )
+
+    _ORG_TABLE_CACHE: set[str] | None = None
+
+    @classmethod
+    def _org_scoped_tables(cls) -> set[str]:
+        """Every table that has an org_id column is tenant data.
+
+        This replaces a hand-maintained tuple that had drifted: 30 org_id
+        tables (pending_actions, audit_logs, swarm_messages, crm_deal_versions,
+        remote_instances, ...) were in neither list, so _check_org_scope never
+        ran for them and any tenant could SELECT every org's rows. Deriving it
+        from the models means a new tenant table cannot ship unenforced.
+        """
+        if cls._ORG_TABLE_CACHE is None:
+            from aios.db.models import Base
+
+            cls._ORG_TABLE_CACHE = {
+                t.name for t in Base.metadata.sorted_tables
+                if "org_id" in {c.name for c in t.columns}
+            }
+        return cls._ORG_TABLE_CACHE
     _ORG_LITERAL_PATTERN = re.compile(r"org_id\s*=\s*'([^']+)'", re.IGNORECASE)
 
     # Guards below run against a sanitised copy of the query. A naive regex over
@@ -187,13 +216,16 @@ class SQLQueryTool(BaseTool):
         # deny pg_* table references in FROM/JOIN
         if any(n.startswith("pg_") for n in self._referenced_tables(self._mask(q))):
             return {"error": "tabelas pg_* bloqueadas"}
+        # deny filesystem/blocking server functions in CALL position
+        if self._DENY_FUNCTIONS.search(self._mask(q)):
+            return {"error": "funcoes de servidor (pg_*/lo_*/dblink) bloqueadas"}
         # deny credential/PII tables: no org context, so no safe way to scope rows
         if self._referenced_tables(self._mask(q)) & set(self._DENY_APP_TABLES):
             return {"error": "tabela com segredos/PII bloqueada para SQL direto; use a ferramenta do canal"}
         # org scoping: a query touching org-owned tables must filter to the
         # caller's org and no other. This is a guardrail, not a SQL parser —
         # it kills unscoped whole-table reads, the realistic exfil path.
-        if self._referenced_tables(self._mask(q)) & set(self._ORG_SCOPED_TABLES):
+        if self._referenced_tables(self._mask(q)) & self._org_scoped_tables():
             err = self._check_org_scope(q)
             if err:
                 return {"error": err}

@@ -16,10 +16,18 @@ async def validate(request, secret: str, redis_url: str | None = None) -> dict:
             # treated as fresh, so a garbage ts skipped the 300s replay window.
             return {"ok": False, "reason": "invalid timestamp"}
     # hmac
-    if secret and sig:
-        exp = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(exp, sig):
-            return {"ok": False, "reason": "invalid signature"}
+    # This was `if secret and sig:`, which meant a request with NO signature
+    # header skipped verification entirely and returned ok=True -- any
+    # unauthenticated caller could drive the LGPD-consent write below and pick
+    # the target org from the instance name in the URL. Both a missing secret
+    # and a missing signature must reject.
+    if not secret:
+        return {"ok": False, "reason": "webhook secret not configured"}
+    if not sig:
+        return {"ok": False, "reason": "missing signature"}
+    exp = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(exp, sig):
+        return {"ok": False, "reason": "invalid signature"}
     # nonce dedup via redis
     nonce = request.headers.get("x-nonce") or request.headers.get("x-idempotency-key")
     if nonce and redis_url:

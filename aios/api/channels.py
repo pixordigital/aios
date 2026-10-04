@@ -36,11 +36,16 @@ async def create_channel(
         t = await db.get(Team, body.team_id)
         if not t or t.org_id != org_id:
             raise HTTPException(400, "team_id inválido")
+    # config carries the provider credentials (bot tokens, API keys). It was
+    # persisted verbatim, so a Slack bot token POSTed here sat in cleartext in
+    # the DB while every other path encrypted it.
+    from aios.core.secrets import encrypt_channel_config
+
     channel = ChannelConnection(
         org_id=org_id,
         channel_type=body.channel_type,
         label=body.label,
-        config=body.config,
+        config=encrypt_channel_config(body.config or {}),
         agent_id=body.agent_id,
         team_id=body.team_id,
     )
@@ -115,6 +120,10 @@ async def update_channel(
         raise HTTPException(404)
     update_data = body.model_dump(exclude_unset=True)
     for key, val in update_data.items():
+        if key == "config" and val:
+            from aios.core.secrets import encrypt_channel_config
+
+            val = encrypt_channel_config(val)
         setattr(channel, key, val)
     await db.commit()
     await db.refresh(channel)

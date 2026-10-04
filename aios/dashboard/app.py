@@ -1569,9 +1569,21 @@ async def member_list(request: Request):
     return await _render("members.html", request, title="Membros", users=users, invites=invites, current_user_email=current_email)
 
 
+# Roles an invitation may grant. Previously `role` came straight off the form
+# with no allowlist, so any member could POST role=admin, accept it from a
+# second mailbox, and walk up the privilege ladder.
+_INVITABLE_ROLES = {"member", "admin", "org_admin"}
+
+
 @router.post("/members/invite")
 async def member_invite(request: Request, email: str = Form(...), role: str = Form("member")):
     org_id = await _org_filter(request)
+    if role not in _INVITABLE_ROLES:
+        return RedirectResponse("/dashboard/members?error=invalid-role", status_code=303)
+    from aios.api.deps import get_dashboard_user
+    inviter = await get_dashboard_user(request)
+    if not inviter or inviter.role not in ("admin", "org_admin", "superadmin"):
+        return RedirectResponse("/dashboard/members?error=forbidden", status_code=303)
     # rate-limit invites: max 10/dia por org
     from datetime import datetime, timedelta, timezone
     async with db_session() as db:
@@ -1631,8 +1643,8 @@ async def accept_invite(request: Request, token: str = ""):
             if user:
                 if user.email.lower() != inv.email.lower():
                     return HTMLResponse("<h2>Este convite é para outro e-mail</h2><p>Sai da conta e aceite-o com o endereço convidado.</p>")
-                if inv.role == "superadmin":
-                    return HTMLResponse("<h2>Convite inválido</h2><p>Convites não podem conceder superadmin.</p>")
+                if inv.role not in _INVITABLE_ROLES:
+                    return HTMLResponse("<h2>Convite inválido</h2><p>Este convite concede um papel não permitido.</p>")
                 user.org_id = inv.org_id
                 user.role = inv.role
                 inv.accepted = True
@@ -1845,7 +1857,13 @@ async def admin_fleet_view(request: Request, fid: str):
 
 
 @router.get("/admin/fleet/{fid}/open")
-async def admin_fleet_open(fid: str):
+async def admin_fleet_open(request: Request, fid: str):
+    # This route had no request param and no superadmin gate, so any
+    # authenticated member of any org could redirect to a customer's internal
+    # base_url and read their infrastructure topology.
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
     from aios.db.models import RemoteInstance
     async with db_session() as db:
         inst = await db.get(RemoteInstance, fid)
@@ -1856,7 +1874,13 @@ async def admin_fleet_open(fid: str):
 
 
 @router.get("/admin/fleet/{fid}/remove")
-async def admin_fleet_remove(fid: str):
+async def admin_fleet_remove(request: Request, fid: str):
+    # Unauthenticated by role: this deleted any RemoteInstance by id, taking
+    # another tenant's fleet entry and its api_key with it. Every sibling admin
+    # route calls _require_superadmin; these two did not.
+    denied = await _require_superadmin(request)
+    if denied and isinstance(denied, HTMLResponse):
+        return denied
     from aios.db.models import RemoteInstance
     async with db_session() as db:
         inst = await db.get(RemoteInstance, fid)
@@ -3851,14 +3875,14 @@ async def evolution_restart(request: Request, name: str):
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     org_id = await _org_filter(request)
-    from aios.core.org_settings import ALLOWED_KEYS, mask_key
+    from aios.core.org_settings import ALLOWED_KEYS, all_org_secrets, mask_key
     async with db_session() as db:
         from aios.db.models import Organization
         org = await db.get(Organization, org_id)
         secrets: dict[str, str] = {}
         pending_expiry_days = 7
         if org and isinstance(org.extra_data, dict):
-            secrets = org.extra_data.get("secrets", {}) if isinstance(org.extra_data.get("secrets"), dict) else {}
+            secrets = all_org_secrets(org.extra_data)
             try:
                 pending_expiry_days = int(org.extra_data.get("pending_expiry_days", 7))
                 if not 1 <= pending_expiry_days <= 60:
@@ -3895,28 +3919,47 @@ async def settings_page(request: Request):
 async def settings_save(request: Request):
     org_id = await _org_filter(request)
     form = await request.form()
-    from aios.core.org_settings import ALLOWED_KEYS
+    from aios.core.org_settings import ALLOWED_KEYS, all_org_secrets
     async with db_session() as db:
         from aios.db.models import Organization
         org = await db.get(Organization, org_id)
         if not org:
             return RedirectResponse("/dashboard/settings", status_code=303)
         data = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
-        secrets = dict(data.get("secrets", {})) if isinstance(data.get("secrets"), dict) else {}
+        # Secrets now live encrypted in _secrets_enc. This loop used to assign
+        # them into extra_data["secrets"] verbatim, so every API key, SMTP
+        # password and service-account JSON an operator typed sat in cleartext
+        # and a single DB dump exposed every tenant's credentials.
+        from aios.core.secrets import encrypt_secret
+
+        merged = all_org_secrets(data)
         for k in ALLOWED_KEYS:
             val = fstr(form, k)
             if val is not None:
                 val = val.strip()
-                if val == "" or val.startswith("••••"):
-                    continue
-                if val:
-                    secrets[k] = val
-                elif k in secrets:
-                    del secrets[k]
-            clear_key = f"clear_{k}"
-            if form.get(clear_key):
-                secrets.pop(k, None)
-        data["secrets"] = secrets
+                # The masked placeholder means "unchanged", not "set to dots".
+                if val and not val.startswith("\u2022"):
+                    merged[k] = val
+                elif val == "" and not form.get(f"clear_{k}"):
+                    merged.pop(k, None)
+            if form.get(f"clear_{k}"):
+                merged.pop(k, None)
+
+        enc = {k: encrypt_secret(v) for k, v in merged.items() if isinstance(v, str) and v}
+        if enc:
+            data["_secrets_enc"] = enc
+        else:
+            data.pop("_secrets_enc", None)
+        # Purge the cleartext copies of every key that is now encrypted, so a
+        # save also migrates the row instead of leaving the secret readable.
+        legacy = {
+            k: v for k, v in (data.get("secrets") or {}).items()
+            if isinstance(v, str) and k not in enc
+        }
+        if legacy:
+            data["secrets"] = legacy
+        else:
+            data.pop("secrets", None)
         # expiry per org (default 7, 1-60)
         try:
             exp = int(fstr(form, "pending_expiry_days", "7"))

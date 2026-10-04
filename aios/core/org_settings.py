@@ -58,25 +58,38 @@ def model_to_secret_key(model: str) -> str | None:
     return "openrouter_api_key"
 
 
-def get_org_secret(org_extra: dict | None, key: str) -> str | None:
-    if not org_extra or not isinstance(org_extra, dict):
-        return None
-    # 1) plain secrets (dashboard — stored as cleartext in extra_data["secrets"])
-    plain = org_extra.get(SECRETS_KEY, {})
-    if isinstance(plain, dict) and plain.get(key):
-        val = plain.get(key)
-        if val:
-            return val
-    # 2) encrypted secrets (API /api/org/secrets — stored in _secrets_enc)
-    enc = org_extra.get("_secrets_enc", {})
-    if isinstance(enc, dict) and enc.get(key):
-        try:
-            from aios.core.secrets import decrypt_secret
+def all_org_secrets(org_extra: dict | None) -> dict[str, str]:
+    """Every stored org secret, decrypted.
 
-            return decrypt_secret(enc[key])
-        except Exception:
-            return None
-    return None
+    Encrypted `_secrets_enc` wins over the legacy cleartext `secrets` dict, so
+    rows written before encryption was enforced keep working while any key that
+    has since been rewritten comes from the ciphertext store. A single DB dump
+    of a new org yields no credentials in the clear.
+    """
+    if not org_extra or not isinstance(org_extra, dict):
+        return {}
+    out: dict[str, str] = {}
+    plain = org_extra.get(SECRETS_KEY)
+    if isinstance(plain, dict):
+        out.update({k: v for k, v in plain.items() if isinstance(v, str)})
+    enc = org_extra.get("_secrets_enc")
+    if isinstance(enc, dict):
+        from aios.core.secrets import decrypt_secret
+
+        for k, v in enc.items():
+            try:
+                out[k] = decrypt_secret(v)
+            except Exception:
+                # Fail closed on one bad key rather than dropping the whole map.
+                out[k] = ""
+    return out
+
+
+def get_org_secret(org_extra: dict | None, key: str) -> str | None:
+    # This used to check the cleartext dict FIRST, so a legacy cleartext value
+    # shadowed the encrypted one and the encryption was decorative. Read order
+    # now lives in all_org_secrets: ciphertext first, cleartext as fallback.
+    return all_org_secrets(org_extra).get(key) or None
 
 
 async def get_org_secret_async(org_id: str, key: str) -> str | None:
