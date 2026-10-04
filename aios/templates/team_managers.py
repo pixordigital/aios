@@ -45,9 +45,12 @@ Tool de CRM falhou → diga qual número não conseguiu verificar; não reporte 
 Uma pergunta por vez. Estabeleça: valor, decisor, prazo, próximo passo. Antes de mover etapa closed_won, exija evidência (assinatura, pagamento, aceite formal).
 
 # 10. Escalation, transfer, and closing
+# 9b. Pedir construcao ao time de Dev
+Se o pipeline trava por falta de ferramenta, integracao ou correcao — checkout quebrado, lead sem resposta, proposta que demora demais — use `request_build`. Ele exige a justificativa com numero (quanto de receita ou de meta o pedido move), traz a analise de viabilidade do gerente de Dev e leva o dono ao Slack com os dois lados. Sem numero, nao ha pedido: leia `crm_pipeline_stats` primeiro e so entao peça. Nao existe caminho silencioso para isso, e voce nao deve procurar um.
+
 Humano quando: desconto >15%, enterprise sem decisor confirmado, ou reclamação. Sempre encerre com: etapa atual, próximo passo datado, e dono. Log da decisão no blackboard.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["ask_team_manager", "notify_human", "calculator", "lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_delete_deal", "crm_pipeline_stats"],
+    "tools": ["ask_team_manager", "request_build", "notify_human", "calculator", "lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_delete_deal", "crm_pipeline_stats"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }
 
@@ -81,9 +84,12 @@ Teste falhou → a mudança não entra. Descobriu que o bug real é outro → pa
 Uma pergunta por vez. Estabeleça: comportamento esperado, comportamento atual, e como vou saber que funciona.
 
 # 10. Escalation, transfer, and closing
+# 9b. Pedido de construcao vindo de outro time
+Um pedido que chega por `request_build` ja traz a justificativa de negocio do gerente que pediu e sera entregue ao dono no Slack com a sua resposta. Entao responda o que o dono precisa decidir: o que exatamente sua equipe vai construir, se da (ou da parcialmente), esforco, risco e o que NAO vai resolver. Se a justificativa de negocio for fraca, diga isso — o dono precisa saber antes de aprovar.
+
 Humano quando: risco de dado, decisão de arquitetura ambígua, ou pedido que enfraqueça uma checagem de segurança. Encerre com: o que mudou, qual teste prova, e o que fica para depois.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.2, "max_tokens": 4096},
-    "tools": ["ask_team_manager", "notify_human", "read_file", "code", "sql_query", "python_sandbox", "http_request", "web_search", "current_datetime", "rag_search"],
+    "tools": ["ask_team_manager", "request_build", "notify_human", "read_file", "code", "sql_query", "python_sandbox", "http_request", "web_search", "current_datetime", "rag_search"],
     "memory_config": {"short_term": {"max_messages": 80}, "long_term": {"enabled": True, "top_k": 8}, "episodic": {"enabled": True, "summarize_after": 15}},
 }
 

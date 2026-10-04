@@ -8,8 +8,27 @@
         <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="comercial"><button class="btn btn-ghost btn-sm" title="SDR → Closer → Manager (Manager + Closer orquestrador)">💼 Comercial</button></form>
         <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="suporte"><button class="btn btn-ghost btn-sm" title="Support → Manager (Manager orquestrador)">🎧 Suporte</button></form>
         <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="dados"><button class="btn btn-ghost btn-sm" title="Analyst → Scientist → Manager (Manager orquestrador)">📊 Dados</button></form>
+        <form method="POST" action="/dashboard/teams/business-setup" style="display:inline"
+              onsubmit="return confirm('Criar o Coordenador Geral e as equipes de Marketing, Customer Success e Receita?\\n\\nOs agentes serão criados ativos. A jornada diária continua desligada até você ligar em Configurações.')">
+          <button type="submit" class="btn btn-ghost">Montar empresa</button>
+        </form>
         <a href="/dashboard/teams/new" class="btn btn-primary">Nova equipe</a>
     </div>
+
+{% set bs = request.query_params.get('business_setup') %}
+{% if bs is not none %}
+  <div class="card" style="border-left:3px solid var(--green)">
+    <p class="text-sm" style="margin:0">
+      Empresa montada: {{ bs }} equipe{{ 's' if bs != '1' }} criada{{ 's' if bs != '1' }} e o Coordenador Geral pronto.
+      Os agentes já estão ativos — ligue a jornada diária em <a href="/dashboard/settings" style="color:var(--border-accent)">Configurações</a> quando quiser que eles trabalhem sozinhos.
+    </p>
+  </div>
+{% endif %}
+{% if request.query_params.get('error') == 'business-setup' %}
+  <div class="card" style="border-left:3px solid var(--red)">
+    <p class="text-sm" style="margin:0">Não foi possível montar a empresa. Veja o log.</p>
+  </div>
+{% endif %}
 </div>
 
 <div class="flex-col gap-3">

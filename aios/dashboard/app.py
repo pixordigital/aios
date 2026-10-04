@@ -1026,6 +1026,22 @@ async def team_list(request: Request):
     return await _render("teams.html", request, title="Equipes", teams=teams, agents=agents, compat_scores=compat_scores)
 
 
+@router.post("/teams/business-setup")
+async def team_business_setup(request: Request):
+    """Create the coordinator and the missing business functions. Idempotent."""
+    org_id = await _org_filter(request)
+    from aios.core.org_bootstrap import ensure_business_setup
+
+    try:
+        result = await ensure_business_setup(org_id)
+    except Exception:
+        logger.exception("business setup failed org=%s", org_id)
+        return RedirectResponse("/dashboard/teams?error=business-setup", status_code=303)
+    return RedirectResponse(
+        f"/dashboard/teams?business_setup={result['created_teams']}", status_code=303
+    )
+
+
 @router.get("/teams/new", response_class=HTMLResponse)
 async def team_new_form(request: Request):
     org_id = await _org_filter(request)

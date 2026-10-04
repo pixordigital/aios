@@ -16,6 +16,15 @@ from aios.templates.frontend import FRONTEND_TEMPLATE
 from aios.templates.backend import BACKEND_TEMPLATE
 from aios.templates.red import RED_TEMPLATE
 from aios.templates.blue import BLUE_TEMPLATE
+from aios.templates.business_teams import (
+    ORCHESTRATOR_BUSINESS_TEMPLATE,
+    MARKETING_TEMPLATE,
+    MARKETING_MANAGER_TEMPLATE,
+    CUSTOMER_SUCCESS_TEMPLATE,
+    CS_MANAGER_TEMPLATE,
+    REVOPS_TEMPLATE,
+    REVOPS_MANAGER_TEMPLATE,
+)
 from aios.templates.team_managers import (
     SALES_MANAGER_TEMPLATE,
     DEV_MANAGER_TEMPLATE,
@@ -33,6 +42,15 @@ TEMPLATES = {
     "manager_red": RED_MANAGER_TEMPLATE,
     "manager_blue": BLUE_MANAGER_TEMPLATE,
     "manager_data": DATA_MANAGER_TEMPLATE,
+    # Cross-team coordination and the three functions a business runs without
+    # that Sales, Support, Data and Dev do not cover.
+    "orchestrator_business": ORCHESTRATOR_BUSINESS_TEMPLATE,
+    "manager_marketing": MARKETING_MANAGER_TEMPLATE,
+    "marketing": MARKETING_TEMPLATE,
+    "manager_cs": CS_MANAGER_TEMPLATE,
+    "customer_success": CUSTOMER_SUCCESS_TEMPLATE,
+    "manager_revops": REVOPS_MANAGER_TEMPLATE,
+    "revops": REVOPS_TEMPLATE,
     "sdr": SDR_TEMPLATE,
     "closer": CLOSER_TEMPLATE,
     "support": SUPPORT_TEMPLATE,

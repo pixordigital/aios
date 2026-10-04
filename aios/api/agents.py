@@ -634,3 +634,67 @@ async def workday_status(
         "open_deals_owned": deals_with_work,
         "key": WORKDAY_ENABLED_KEY,
     }
+
+
+@router.post("/business-setup")
+async def business_setup(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Stand up the cross-team coordinator and the functions Sales/Support/Data/Dev
+    do not cover: Marketing, Customer Success, Finance.
+
+    Idempotent — it checks for what it created last time and only adds what is
+    missing, so it is safe to call repeatedly and safe to call on an org that is
+    already fully set up. Returns what it created and what it left alone.
+    """
+    from aios.core.org_bootstrap import ensure_business_setup
+
+    result = await ensure_business_setup(org_id)
+    log_audit(
+        db,
+        org_id,
+        "business.setup",
+        "organization",
+        resource_id=org_id,
+        details={"created_teams": result["created_teams"], "orchestrator": result["orchestrator_created"]},
+    )
+    return result
+
+
+@router.get("/business-setup/status")
+async def business_setup_status(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Which of the business pieces exist, without creating anything."""
+    from sqlalchemy import select
+
+    from aios.core.org_bootstrap import BUSINESS_TEAMS, ORCHESTRATOR_MARKER
+    from aios.db.models import Agent, Team
+
+    teams = (
+        await db.execute(select(Team).where(Team.org_id == org_id))
+    ).scalars().all()
+    existing = {t.name for t in teams}
+    agents = (
+        await db.execute(select(Agent).where(Agent.org_id == org_id))
+    ).scalars().all()
+    orchestrators = [
+        a for a in agents
+        if (a.extra_data or {}).get("business_setup") == ORCHESTRATOR_MARKER
+    ]
+
+    return {
+        "orchestrator": bool(orchestrators),
+        "orchestrator_agent_id": orchestrators[0].id if orchestrators else None,
+        "teams": [
+            {
+                "key": spec["key"],
+                "name": spec["name"],
+                "exists": spec["name"] in existing,
+            }
+            for spec in BUSINESS_TEAMS
+        ],
+        "team_count": len(teams),
+    }
