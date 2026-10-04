@@ -9,7 +9,7 @@ The behaviours that must not regress:
 
 import pytest
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from aios.core.events import (
     CLAIM_IDLE_MS,
@@ -587,7 +587,7 @@ def _freeze_cron_clock(monkeypatch, cron, hour: int, minute: int = 1):
     so a test run at any other time would assert on a no-op.
     """
     import aios.core.cron_scheduler as cron_mod
-    from datetime import datetime as real_datetime, timedelta as real_timedelta
+    from datetime import datetime as real_datetime
 
     frozen = real_datetime(2026, 1, 15, hour, minute, tzinfo=timezone.utc)
 
@@ -748,7 +748,7 @@ async def test_duplicate_event_is_dispatched_only_once(monkeypatch):
     monkeypatch.setattr("aios.tasks.queue.enqueue_job", fake_enqueue)
 
     ev = EventEnvelope(
-        "crm.deal_stalled", o, {"deal_id": "d1"}, idempotency_key=f"crm-stalled:d1:2026-01-15"
+        "crm.deal_stalled", o, {"deal_id": "d1"}, idempotency_key="crm-stalled:d1:2026-01-15"
     )
     assert await dispatch_event(ev) == [agent]
     # Same fact re-published (worker restart, retried tick) — must be suppressed.
@@ -955,4 +955,39 @@ async def test_successful_dispatch_keeps_the_claim(monkeypatch):
 
     ev = EventEnvelope("crm.stage_changed.won", o, {}, idempotency_key="k-keep")
     assert await dispatch_event(ev) == [agent]
+    assert await dispatch_event(ev) == []
+
+
+async def test_partial_failure_retries_only_the_missed_subscriber(monkeypatch):
+    """One bad enqueue must not cost the other agents their dispatch, and the
+    failed one must still get its retry.
+
+    With a single per-event claim the first dispatch kept it for both, so the
+    failed subscriber was never retried while the consumer considered the event
+    delivered. Per-agent claims let the retry deliver exactly who missed out.
+    """
+    o = await _org("ev-partial")
+    a1 = await _mk_agent(o, ["crm.*"])
+    a2 = await _mk_agent(o, ["crm.*"])
+    pool = _DedupePool()
+
+    async def fake_pool():
+        return pool
+
+    monkeypatch.setattr("aios.tasks.queue.get_redis_pool", fake_pool)
+
+    calls: list[str] = []
+
+    async def flaky_enqueue(func, payload, **kw):
+        calls.append(payload["agent_id"])
+        if payload["agent_id"] == a2 and calls.count(a2) == 1:
+            raise RuntimeError("redis blip")
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", flaky_enqueue)
+
+    ev = EventEnvelope("crm.stage_changed.won", o, {}, idempotency_key="k-partial")
+    assert await dispatch_event(ev) == [a1]
+    # Retry: the delivered agent stays suppressed, the missed one dispatches.
+    assert await dispatch_event(ev) == [a2]
+    # And a third delivery attempt dispatches to nobody.
     assert await dispatch_event(ev) == []

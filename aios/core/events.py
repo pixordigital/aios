@@ -257,32 +257,34 @@ async def claim_idempotency(ev: EventEnvelope, ttl: int = 86400) -> bool:
     key store as "already sent" — silently drops every proactive action, which
     is the failure this whole system exists to prevent.
     """
-    key = f"{DEDUPE_PREFIX}{ev.idempotency_key}"
+    return await _claim(ev.idempotency_key, ttl)
+
+
+async def _claim(idempotency_key: str, ttl: int = 86400) -> bool:
+    key = f"{DEDUPE_PREFIX}{idempotency_key}"
     try:
         from aios.tasks.queue import get_redis_pool
 
         pool = await get_redis_pool()
         return bool(await pool.set(key, "1", nx=True, ex=ttl))
     except Exception:
-        logger.warning("idempotency check failed for %s, allowing dispatch", ev.idempotency_key)
+        logger.warning("idempotency check failed for %s, allowing dispatch", idempotency_key)
         return True
 
 
 async def release_idempotency(ev: EventEnvelope) -> None:
-    """Undo a claim when nothing was actually delivered.
+    """Undo a claim when nothing was actually delivered."""
+    await _release(ev.idempotency_key)
 
-    Claiming before delivery is what stops two concurrent consumers double
-    dispatching, but if every enqueue then failed the retry would be suppressed
-    as a duplicate and the event lost. Releasing on a zero-dispatch outcome
-    keeps that failure recoverable.
-    """
+
+async def _release(idempotency_key: str) -> None:
     try:
         from aios.tasks.queue import get_redis_pool
 
         pool = await get_redis_pool()
-        await pool.delete(f"{DEDUPE_PREFIX}{ev.idempotency_key}")
+        await pool.delete(f"{DEDUPE_PREFIX}{idempotency_key}")
     except Exception:
-        logger.debug("could not release idempotency key %s", ev.idempotency_key, exc_info=True)
+        logger.debug("could not release idempotency key %s", idempotency_key, exc_info=True)
 
 
 async def dispatch_event(ev: EventEnvelope) -> list[str]:
@@ -290,11 +292,14 @@ async def dispatch_event(ev: EventEnvelope) -> list[str]:
 
     Returns the agent ids dispatched to, so callers/tests can assert routing
     without reading ARQ internals.
-    """
-    if ev.idempotency_key and not await claim_idempotency(ev):
-        logger.info("duplicate %s suppressed key=%s", ev.event_type, ev.idempotency_key)
-        return []
 
+    Claims are per agent, not per event. Claiming once for the whole event
+    meant a partial failure — A enqueued, B's enqueue raised — kept the claim
+    for both, so B was never retried while the consumer considered the event
+    delivered. Per-agent claims keep the duplicate protection (two racing
+    consumers still cannot double-dispatch the same agent) and let a retry
+    deliver exactly the subscribers that missed out.
+    """
     agents = await matching_agents(ev.org_id, ev.event_type)
     if not agents:
         logger.debug("no subscribers for %s org=%s", ev.event_type, ev.org_id)
@@ -304,6 +309,13 @@ async def dispatch_event(ev: EventEnvelope) -> list[str]:
 
     dispatched: list[str] = []
     for agent in agents:
+        key = f"{ev.idempotency_key}:{agent.id}" if ev.idempotency_key else ""
+        if key and not await _claim(key):
+            logger.info(
+                "duplicate %s suppressed agent=%s key=%s",
+                ev.event_type, agent.id, ev.idempotency_key,
+            )
+            continue
         try:
             await enqueue_job(
                 "aios.tasks.jobs.proactive_event_job",
@@ -315,14 +327,13 @@ async def dispatch_event(ev: EventEnvelope) -> list[str]:
             )
             dispatched.append(agent.id)
         except Exception:
-            # One undeliverable subscriber must not block the others.
+            # One undeliverable subscriber must not block the others, and its
+            # claim must not outlive the failure: the consumer leaves this
+            # entry unacked and retries it, and a stale claim would make that
+            # retry look like a duplicate and drop this agent for good.
             logger.exception("dispatch failed agent=%s event=%s", agent.id, ev.event_type)
-
-    # Nothing landed, so the claim must not outlive the failure: the consumer
-    # leaves this entry unacked and retries it, and a stale claim would make
-    # that retry look like a duplicate and drop the event for good.
-    if not dispatched and ev.idempotency_key:
-        await release_idempotency(ev)
+            if key:
+                await _release(key)
 
     logger.info(
         "dispatched %s to %d agent(s) org=%s", ev.event_type, len(dispatched), ev.org_id

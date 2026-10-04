@@ -657,8 +657,12 @@ async def workday_job(ctx):
     the board reflects yesterday simply because yesterday was recorded.
 
     One agent failing must not cost the others their morning, so each run is
-    isolated. Failures are logged and dead-lettered rather than raised: a raise
-    here would abandon every agent after the first.
+    isolated and failures are logged rather than raised: a raise here would
+    abandon every agent after the first. They are not dead-lettered, deliberately
+    — a DLQ entry implies the work should be retried, and tomorrow's board is
+    derived from the same CRM state, so the retry happens naturally. What the
+    owner needs instead is to hear about it, which is what the digest below is
+    for.
     """
     from sqlalchemy import select
 
