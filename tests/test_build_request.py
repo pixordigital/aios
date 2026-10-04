@@ -12,7 +12,7 @@ dev and never mentioning it. These tests pin the guarantees that replaced it:
 
 import pytest
 
-from aios.db.models import Agent, Organization, PendingAction, Team, team_agents
+from aios.db.models import Agent, CrmDeal, Organization, PendingAction, Team, team_agents
 
 
 async def _org() -> str:
@@ -47,6 +47,25 @@ async def _team(org_id: str, name: str, manager_id: str, member_id: str):
             await sess.execute(team_agents.insert().values(team_id=t.id, agent_id=aid, priority=pri))
         await sess.commit()
         return t.id
+
+
+async def _deal(org_id: str, agent_id: str, **kw):
+    from aios.db.engine import async_session
+
+    fields = dict(
+        org_id=org_id,
+        lead_name=kw.pop("lead_name", "Lead"),
+        lead_phone=kw.pop("lead_phone", ""),
+        stage=kw.pop("stage", "opportunity"),
+        value=kw.pop("value", 1000.0),
+        source=kw.pop("source", "whatsapp"),
+    )
+    fields.update(kw)
+    async with async_session() as sess:
+        d = CrmDeal(agent_id=agent_id, **fields)
+        sess.add(d)
+        await sess.commit()
+        return d.id
 
 
 @pytest.fixture
@@ -312,3 +331,143 @@ class TestNoSilentPath:
 
         assert "request_build" in TOOL_REGISTRY
         assert TOOL_REGISTRY["request_build"]["code_reference"].endswith("RequestBuildTool")
+
+
+# ─── the rules cannot be walked around ─────────────────────────────────────
+
+class TestNoBypass:
+    """`request_build` is enforced, but a sales manager could still ask dev
+    directly through ask_team_manager and never mention it. That is the same
+    outcome the owner ruled out, reached one tool over."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "voce consegue construir um checkout com Pix?",
+            "precisa que a gente implemente integracao com o RDStation",
+            "da para voces criarem um relatorio novo?",
+            "adiciona um endpoint de webhook",
+            "arruma a automacao de follow-up",
+            "consegue desenvolver uma tela de proposta?",
+        ],
+    )
+    def test_build_shaped_asks_are_refused(self, wired, text):
+        from aios.tools.team_collaboration import _looks_like_build_request
+
+        assert _looks_like_build_request(text) is True, text
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "como esta a integracao que voces construiram?",
+            "o que voces ja implementaram no checkout?",
+            "qual o endpoint que voces usam?",
+            "qual a taxa de conversao atual?",
+            "quantos deals estao stalled?",
+            "qual o relatorio que voces criaram ontem?",
+        ],
+    )
+    def test_questions_pass_through(self, text):
+        """Routing trivia into the enforced door would train the owner to ignore
+        it, which loses the signal that matters."""
+        from aios.tools.team_collaboration import _looks_like_build_request
+
+        assert _looks_like_build_request(text) is False, text
+
+    async def test_the_refusal_names_the_right_door(self, wired):
+        """A refusal that does not say where to go leaves the agent stuck."""
+        from aios.tools.team_collaboration import AskTeamManagerTool
+
+        tool = AskTeamManagerTool()
+        tool._org_id = wired["org"]
+        tool._agent_id = wired["caller_id"]
+        out = await tool.run(
+            to_team="Dev",
+            question="voce consegue construir um checkout com Pix?",
+        )
+        assert out["ok"] is False
+        assert out.get("suggested_tool") == "request_build"
+        assert "request_build" in out["error"]
+        # And nothing reached dev.
+        assert wired["posted"] == []
+
+    async def test_a_question_still_reaches_the_other_manager(self, wired):
+        """The guard must not cost the teams their normal conversation."""
+        from aios.tools.team_collaboration import AskTeamManagerTool
+
+        tool = AskTeamManagerTool()
+        tool._org_id = wired["org"]
+        tool._agent_id = wired["caller_id"]
+        out = await tool.run(to_team="Dev", question="qual o endpoint que voces usam?")
+        assert out["ok"] is True, out
+        assert out["team"] == "Dev"
+
+
+# ─── the owner hears about the workday ─────────────────────────────────────
+
+class TestWorkdayDigest:
+    async def test_digest_reports_failures_first(self, test_session, monkeypatch):
+        from aios.core.workday import WORKDAY_ENABLED_KEY
+        from aios.db.engine import async_session
+        from aios.tasks import jobs as J
+
+        org = await _org()
+        # The master switch is off by default, and an empty board skips the run
+        # entirely, so both have to be arranged for the agent to fail at all.
+        async with async_session() as sess:
+            o = await sess.get(Organization, org)
+            o.extra_data = {WORKDAY_ENABLED_KEY: True}
+            await sess.commit()
+
+        bot = await _agent(org, "broken-bot")
+        await _deal(org, bot, lead_name="needs work")
+
+        class _Boom:
+            def __init__(self, agent):
+                pass
+
+            async def run(self, conv, msg, db=None, emit=None):
+                raise RuntimeError("model timeout")
+
+        monkeypatch.setattr("aios.core.autonomous_agent.AutonomousAgent", _Boom)
+
+        posted: list[str] = []
+
+        async def fake_post(text, targets):
+            posted.append(text)
+            return True
+
+        async def targets(org_id, team_id=""):
+            return ["UOWNER"]
+
+        import aios.core.meetings as meetings
+
+        meetings.post_to_slack = fake_post
+        meetings.human_slack_targets = targets
+
+        result = await J.workday_job(None)
+        assert result["failed"] == 1
+        assert len(posted) == 1
+        assert "falharam" in posted[0]
+        assert "model timeout" in posted[0]
+
+    async def test_no_digest_when_nothing_happened(self, test_session, monkeypatch):
+        """A daily "nothing happened" is how people learn to ignore a channel."""
+        from aios.tasks import jobs as J
+
+        posted: list[str] = []
+
+        async def fake_post(text, targets):
+            posted.append(text)
+            return True
+
+        async def targets(org_id, team_id=""):
+            return ["UOWNER"]
+
+        import aios.core.meetings as meetings
+
+        meetings.post_to_slack = fake_post
+        meetings.human_slack_targets = targets
+
+        await J.workday_job(None)
+        assert posted == []

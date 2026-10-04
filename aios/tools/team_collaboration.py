@@ -16,6 +16,7 @@ every lookup here is by name/id and a name is guessable.
 """
 
 import logging
+import re
 from contextvars import ContextVar
 from typing import Any
 
@@ -175,6 +176,23 @@ class AskTeamManagerTool(BaseTool):
                     "ok": False,
                     "error": f"{target.name!r} is your own team — delegate internally "
                     "instead of asking your own manager",
+                }
+
+            # The bypass guard. Asking another team to *build* something is a
+            # decision, not a question, and it has to reach the owner with both
+            # sides on it. ask_team_manager cannot guarantee that, so it hands
+            # build-shaped asks over instead of quietly delivering them.
+            if _looks_like_build_request(question):
+                return {
+                    "ok": False,
+                    "error": (
+                        "that reads as a build request, not a question. "
+                        "Use `request_build` instead: it requires the revenue "
+                        "justification, collects the other manager's feasibility "
+                        "analysis, and notifies the owner. Going around it is how "
+                        "a build reaches dev without the owner ever hearing."
+                    ),
+                    "suggested_tool": "request_build",
                 }
 
             manager = await sess.get(Agent, target.manager_agent_id)
@@ -368,6 +386,66 @@ _METRIC_HINTS = (
     "cac", "l tv", "ltv", "churn", "pipeline", "forecast", "meta", "receita",
     "faturamento", "upsell", "win rate", "agenda", "agendamento",
 )
+
+
+# Commands work, as opposed to asking for information. `ask_team_manager` is a
+# question tool; "build me X" is a decision tool, and the owner's rule is that
+# both managers and the owner see it. So a build-shaped cross-team ask is
+# refused here and pointed at request_build, which enforces the notification.
+#
+# Honest limit: this is a keyword guard, not a proof. It routes obvious
+# build-shaped asks into the enforced door and lets genuine questions through,
+# and a sufficiently oblique phrasing would still get through. It closes the
+# easy bypass; it does not make the informal path impossible.
+
+# Stems, matched against accent-stripped lowercase. Stems rather than words,
+# because Portuguese runs the endings off the stem ("construir", "construa",
+# "construem") and an exact-word list misses the imperative that matters most.
+# Verbs only. Bare nouns were tried and removed: "qual o endpoint que voces
+# usam?" is a question about infrastructure that exists, and routing it into
+# request_build would ping the owner about trivia every time someone looked
+# something up.
+_BUILD_STEMS = (
+    "constru", "implement", "adicion", "arrum", "arranj", "desenvolv",
+    "codific", "automatiz", "refator", "integr", "deploy", "criar", "cria",
+)
+
+# References to work that already exists. "como está a integração que vocês
+# construíram?" mentions a build verb but asks for information, and routing
+# that into request_build would spam the owner every time someone checked on a
+# past change.
+_PAST_REF = (
+    "construiram", "construiu", "construida", "construido", "construcao",
+    "implementaram", "implementou", "implementada", "implementado",
+    "feito", "feita", "existente", "ja foi", "ja existe", "rodando",
+    "criaram", "criou", "criamos", "usam", "usando", "usado",
+)
+
+
+def _fold(text: str) -> str:
+    """Lowercase and strip accents.
+
+    Without this "construí" and "construir" collide on a shared substring, so a
+    past-tense reference to past work reads as a request to build something.
+    """
+    import unicodedata
+
+    decomposed = unicodedata.normalize("NFD", (text or "").lower())
+    stripped = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    return re.sub(r"[^a-z0-9]+", " ", stripped)
+
+
+def _looks_like_build_request(text: str) -> bool:
+    """Whether a cross-team ask is asking for work rather than information.
+
+    A question mark is deliberately NOT a tiebreaker: "voce consegue construir
+    um checkout?" is the most natural way to phrase the exact bypass this
+    guards, and a trailing "?" would wave it through.
+    """
+    folded = " " + _fold(text) + " "
+    if any(w in folded for w in _PAST_REF):
+        return False
+    return any(stem in folded for stem in _BUILD_STEMS)
 
 
 def _has_evidence(text: str) -> bool:

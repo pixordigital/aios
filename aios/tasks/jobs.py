@@ -672,6 +672,9 @@ async def workday_job(ctx):
     from aios.db.models import Agent, Organization
 
     worked, empty, failed, paused = 0, 0, 0, 0
+    # Per-org, because each org has its own owner to tell. A single global
+    # digest would report another tenant's numbers to whoever reads it.
+    by_org: dict[str, dict] = {}
 
     async with db_session() as db:
         orgs = (
@@ -717,6 +720,8 @@ async def workday_job(ctx):
 
                     out = await AgentRuntime(fresh).run("", instruction)
                 worked += 1
+                _stats = by_org.setdefault(fresh.org_id, {"worked": 0, "failed": 0, "failures": []})
+                _stats["worked"] += 1
 
                 from aios.core.events import publish as publish_event
 
@@ -738,13 +743,64 @@ async def workday_job(ctx):
                 )
         except Exception as exc:
             failed += 1
+            _stats = by_org.setdefault(agent.org_id, {"worked": 0, "failed": 0, "failures": []})
+            _stats["failed"] += 1
+            _stats["failures"].append((agent.name or agent.id, str(exc)))
             logger.exception("workday failed for agent %s: %s", agent.id, exc)
+
+    # The owner asked to be kept aware, and a workday that runs silently is the
+    # one thing worse than no workday: agents act and nobody hears about it.
+    # Failures lead the message, because "3 agents failed" buried under deal
+    # counts is the part that actually matters.
+    try:
+        await _notify_owner_digest(by_org)
+    except Exception:
+        logger.exception("workday digest failed")
 
     logger.info(
         "workday: %d worked, %d empty board, %d failed, %d org(s) opted out",
         worked, empty, failed, paused,
     )
     return {"worked": worked, "empty": empty, "failed": failed, "orgs_paused": paused}
+
+
+async def _notify_owner_digest(by_org: dict):
+    """One Slack message per org: who worked their board, and what broke.
+
+    Failures lead the message. "3 agents failed" buried under deal counts is the
+    part that actually matters, and a digest that only reports the good news is
+    how a channel stops being read.
+    """
+    from aios.core.meetings import human_slack_targets, post_to_slack
+
+    for org_id, stats in (by_org or {}).items():
+        worked = stats.get("worked", 0)
+        failed = stats.get("failed", 0)
+        failures = stats.get("failures", [])
+        if worked == 0 and failed == 0:
+            # Nothing happened. A daily "nothing happened" is how people learn
+            # to ignore the channel.
+            continue
+
+        targets = await human_slack_targets(org_id, team_id="")
+        if not targets:
+            logger.info("workday digest skipped for org %s: no owner Slack DM", org_id)
+            continue
+
+        plural = "s" if worked != 1 else ""
+        body = f"*Jornada diária* — {worked} agente{plural} trabalharam a fila"
+        if failed:
+            body += f"\n:rotating_light: *{failed} falharam* e precisam de olhada"
+        if failures:
+            rows = "\n".join(f"• `{name}`: {err[:140]}" for name, err in failures[:10])
+            body += f"\n\n*Falhas:*\n{rows}"
+        if stats.get("paused"):
+            body += "\n\n_Organizações com a jornada pausada: este turno foi menor._"
+
+        try:
+            await post_to_slack(body, targets)
+        except Exception:
+            logger.warning("workday digest post failed org=%s", org_id, exc_info=True)
 
 
 async def budget_alert_job(ctx, payload: dict):
