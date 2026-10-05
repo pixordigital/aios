@@ -93,12 +93,29 @@ services:
         reservations: { cpus: "0.2", memory: 256M }
 
   # Cal.com self-hosted scheduling for sales agents (v6.2.0 pinned).
-  # First run: open https://<CALCOM_HOST>, create the admin user + org, add an
-  # event type (e.g. "Visita comercial 30min"), then create an API key in
-  # Settings > Security and set AIOS_CALCOM_API_KEY (+ event type id) for the
-  # app below. The cal_booking agent tool talks to calcom-api over the
-  # internal network — no public exposure needed for the API container.
+  #
+  # PROFILE-GATED ("calcom") — do not remove without reading this.
+  #
+  # calcom-api builds from a remote git context (apps/api/v2/Dockerfile at
+  # v6.2.0), so every deploy produced a fresh 2.47GB image with ZERO layer
+  # sharing. Worse, the deploy then FAILED: neither calcom/cal.com:v6.2.0 nor
+  # postgres:16-alpine could be pulled, and compose aborted before creating any
+  # calcom container. That is why Cal.com had never actually run, and why a
+  # 2.47GB image was burned on every single deploy for a service that never
+  # started. Gating it behind a profile stops both problems at once.
+  #
+  # To enable (once you are ready to actually configure it):
+  #   1. Coolify -> this app -> General -> add profile "calcom"
+  #   2. Set CALCOM_DB_PASSWORD, CALCOM_NEXTAUTH_SECRET and CALCOM_JWT_SECRET
+  #      to real values (the defaults are literally "changeme")
+  #   3. Deploy, open https://<CALCOM_HOST>, create the admin user + org,
+  #      add an event type, then create an API key in Settings > Security and
+  #      set AIOS_CALCOM_API_KEY (+ AIOS_CALCOM_EVENT_TYPE_ID) for the app.
+  #
+  # Until then the cal_booking tool fails closed with a clear message, which is
+  # the correct behaviour for an unconfigured scheduler.
   calcom-db:
+    profiles: ["calcom"]
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ${CALCOM_DB:-calcom}
@@ -115,6 +132,7 @@ services:
     restart: unless-stopped
 
   calcom:
+    profiles: ["calcom"]
     # Pinned to the official image and to the same version calcom-api builds
     # from below. The previous `calcom.docker.scarf.sh/calcom/cal.diy` was a
     # Scarf vanity-registry mirror that no longer resolves -- Docker reported
@@ -140,6 +158,7 @@ services:
         reservations: { cpus: "0.2", memory: 512M }
 
   calcom-api:
+    profiles: ["calcom"]
     build:
       context: https://github.com/calcom/cal.com.git#v6.2.0
       dockerfile: apps/api/v2/Dockerfile
