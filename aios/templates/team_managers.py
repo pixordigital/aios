@@ -33,10 +33,10 @@ Nunca aprove desconto acima de 15% sozinho — isso vai para aprovação humana.
 Use histórico da conversa, valor do deal, motivo da escalada. Antes de responder, confirme qual oportunidade e qual etapa. Se um deal não tem próxima ação datada, ele não está pipelinesado.
 
 # 6. Workflow and intent routing
-Novo lead inbound no WhatsApp → SDR qualifica (MQL→SQL). Lead com valor e decisor identificado → closer. Lead frio sem sinal → nurture, não closer. Dúvida de CRMs externos (HubSpot/Pipedrive/RDStation) → você tem acesso direto; se divergirem do CRM interno, o interno manda. Escalar para humano: enterprise sem decisor econômico confirmado, ou desconto >15%.
+Novo lead inbound no WhatsApp → SDR qualifica (MQL→SQL). Lead com valor e decisor identificado → closer. Lead frio sem sinal → nurture, não closer. Lote de prospecção do Prospector entra com status `new`: revise ICP, contato público e evidência antes de aprovar. Só `approved` vira `sent_to_sdr`; aprovado sem contato público volta para o Prospector, não para o SDR. Dúvida de CRMs externos (HubSpot/Pipedrive/RDStation) → você tem acesso direto; se divergirem do CRM interno, o interno manda. Escalar para humano: enterprise sem decisor econômico confirmado, ou desconto >15%.
 
 # 7. Tool-use rules
-`crm_list_deals` e `crm_stale_deals` para ver o pipeline real antes de falar. `crm_create_deal`/`crm_update_deal` para criar e mover etapa. `crm_set_follow_up` para agendar. `crm_merge_deals` só para duplicata clara. HubSpot/Pipedrive/RDStation para checar o que foi espelhado. A aprovação humana NÃO é um tool: mudança crítica cria PendingAction e você aponta /dashboard/approvals.
+`crm_list_deals` e `crm_stale_deals` para ver o pipeline real antes de falar. `lead_list` para auditar o lote do Prospector (filtre por batch/status, confira score e evidência); `lead_review` para aprovar, rejeitar com motivo ou mandar ao SDR. `crm_create_deal`/`crm_update_deal` para criar e mover etapa. `crm_set_follow_up` para agendar. `crm_merge_deals` só para duplicata clara. HubSpot/Pipedrive/RDStation para checar o que foi espelhado. A aprovação humana NÃO é um tool: mudança crítica cria PendingAction e você aponta /dashboard/approvals.
 
 # 8. Error handling and recovery
 Tool de CRM falhou → diga qual número não conseguiu verificar; não reporte arredondado. Incerteza sobre etapa → pergunte a evidência, não presuma. Time parado → pergunte o bloqueio.
@@ -50,7 +50,7 @@ Se o pipeline trava por falta de ferramenta, integracao ou correcao — checkout
 
 Humano quando: desconto >15%, enterprise sem decisor confirmado, ou reclamação. Sempre encerre com: etapa atual, próximo passo datado, e dono. Log da decisão no blackboard.""",
     "llm_config": {"model": "openai/gpt-4o", "temperature": 0.3, "max_tokens": 4096},
-    "tools": ["ask_team_manager", "request_build", "notify_human", "calculator", "lead_score", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_delete_deal", "crm_pipeline_stats"],
+    "tools": ["ask_team_manager", "request_build", "notify_human", "calculator", "lead_score", "lead_list", "lead_review", "web_search", "rag_search", "crm_create_deal", "crm_list_deals", "crm_update_deal", "crm_set_follow_up", "crm_stale_deals", "crm_merge_deals", "hubspot", "pipedrive", "rdstation", "send_email", "transcribe", "http_request", "current_datetime", "crm_delete_deal", "crm_pipeline_stats", "cal_booking"],
     "memory_config": {"short_term": {"max_messages": 100}, "long_term": {"enabled": True, "top_k": 5}, "episodic": {"enabled": True, "summarize_after": 20}},
 }
 

@@ -765,49 +765,44 @@ async def health_live():
 
 @app.get("/health/ready")
 async def health_ready():
-    """Readiness — DB + Redis + RAG must be reachable, else 503."""
+    """Readiness — DB, migrations and Redis are checked honestly.
+
+    Redis falls back to in-process state, which is usable, so it does not fail
+    readiness. A migration that is *behind* head does: the app would answer 200
+    while the first query on a missing column explodes (the failure mode the
+    entrypoint comment describes).
+    """
     from fastapi.responses import JSONResponse
+
+    from aios.core.deployment import migration_state, redis_state
+
     checks = {}
     ok = True
-    # DB
     try:
         checks["db"] = "ok" if await registry.active.health() else "down"
-        if checks["db"] != "ok":
-            ok = False
     except Exception as e:
         checks["db"] = f"error: {e}"
+    if checks["db"] != "ok":
         ok = False
-    # Redis
-    try:
-        from aios.tasks.queue import get_redis_pool
-        pool = await get_redis_pool()
-        await pool.ping() if hasattr(pool, "ping") else None
-        checks["redis"] = "ok"
-    except Exception:
-        # fallback: try direct redis
-        try:
-            import redis.asyncio as aioredis
-            r = aioredis.from_url(settings.redis_url or "redis://localhost:6379", decode_responses=True)
-            await r.ping()
-            await r.close()
-            checks["redis"] = "ok"
-        except Exception as e:
-            checks["redis"] = f"down: {e}"
-            # redis down is not fatal for readiness in fallback mode
-            checks["redis"] = "fallback"
-    # RAG
+    checks["migrations"] = await migration_state()
+    if checks["migrations"].startswith("behind"):
+        ok = False
+    checks["redis"] = await redis_state()
     try:
         from aios.core.rag import RAG_STATUS
         checks["rag"] = "ok" if RAG_STATUS.get("hnsw") else "fallback"
     except Exception:
         checks["rag"] = "unknown"
-    status = "ready" if ok else "not_ready"
-    code = 200 if ok else 503
-    return JSONResponse(status_code=code, content={"status": status, "checks": checks})
+    # fallback is degraded but the app still runs; only down would be fatal
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={"status": "ready" if ok else "not_ready", "checks": checks},
+    )
 
 
 @app.get("/health")
 async def health():
+    """Overall status. `ready` reflects DB + migrations, not a hardcoded True."""
     db_status = "unknown"
     try:
         db_status = "ok" if await registry.active.health() else "down"
@@ -820,13 +815,18 @@ async def health():
         rag_status = dict(RAG_STATUS)
     except Exception:
         pass
+    from aios.core.deployment import migration_state
+
+    migrations = await migration_state()
+    ready = db_status == "ok" and not migrations.startswith("behind")
     return {
         "live": True,
-        "ready": True,
-        "status": "ok",
+        "ready": ready,
+        "status": "ok" if ready else "degraded",
         "version": "0.1.0",
         "requests": REQUEST_COUNT,
         "db": db_status,
+        "migrations": migrations,
         "rag": rag_status,
         "backend": registry.summary(),
         "scheduler": scheduler.summary(),

@@ -30,6 +30,7 @@ _ALLOWED_MODULES = {
     "aios.tools.dynamic",
     "aios.tools.crm",
     "aios.tools.lead_scoring",
+    "aios.tools.leads",
     "aios.tools.sql_query",
     "aios.tools.python_sandbox",
     "aios.tools.rag_search",

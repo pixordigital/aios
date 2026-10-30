@@ -3,6 +3,7 @@
 import asyncio
 import os
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -65,18 +66,16 @@ def _restore_direct_module_patches():
 
 @pytest_asyncio.fixture(loop_scope="function", autouse=True)
 async def _fresh_db():
+    # A leftover file from an aborted run, or a session leaked by an earlier
+    # test, leaves SQLite locked or half-migrated: drop_all used to fail and be
+    # swallowed, then create_all hit "table already exists" and later tests saw
+    # "no such table". Start each test on a file nobody has open.
+    await engine.dispose()
+    for suffix in ("", "-journal", "-wal", "-shm"):
+        Path(TEST_DB_PATH + suffix).unlink(missing_ok=True)
     async with engine.begin() as conn:
-        try:
-            await conn.run_sync(Base.metadata.drop_all)
-        except Exception:
-            pass
         await conn.run_sync(Base.metadata.create_all)
     yield
-    async with engine.begin() as conn:
-        try:
-            await conn.run_sync(Base.metadata.drop_all)
-        except Exception:
-            pass
 
 
 @pytest_asyncio.fixture(loop_scope="function")
@@ -189,4 +188,23 @@ def _reset_tool_registry():
     yield
     TOOL_REGISTRY.clear()
     TOOL_REGISTRY.update(original)
+
+
+@pytest.fixture(autouse=True)
+def _stub_deploy_probe(monkeypatch):
+    """Deploy now spends a real provider call; tests must never hit a paid API.
+
+    Deliberate seam: `tests/test_deployment.py` overrides this to prove the
+    failure path, and calls the real `probe_agent` with the provider patched.
+    """
+    import aios.core.deployment as deployment
+
+    async def _ok(agent, timeout=None):
+        return {
+            "model": (agent.llm_config or {}).get("model", "test/model"),
+            "latency_ms": 1,
+            "reply": "OK",
+        }
+
+    monkeypatch.setattr(deployment, "probe_agent", _ok)
 

@@ -87,6 +87,41 @@ async def list_agents(
     return PageResponse(items=items, next_cursor=next_cursor, has_more=has_more, total=total)
 
 
+@router.post("/verify-fleet")
+async def verify_fleet(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Kick off background verification of every active agent in the org."""
+    from aios.core.fleet_verify import FleetVerifyError, start_fleet_verification
+
+    try:
+        state = await start_fleet_verification(db, org_id, user_id=user.id)
+    except FleetVerifyError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+    return {"ok": True, "state": state}
+
+
+@router.get("/verify-fleet")
+async def verify_fleet_status(
+    org_id: str = Depends(get_org_id),
+):
+    """Poll the current fleet verification run for this org."""
+    from aios.core.fleet_verify import get_fleet_state
+
+    return {"ok": True, "state": await get_fleet_state(org_id)}
+
+
+@router.post("/verify-fleet/cancel")
+async def verify_fleet_cancel(
+    org_id: str = Depends(get_org_id),
+):
+    from aios.core.fleet_verify import cancel_fleet_verification
+
+    return {"ok": True, "state": await cancel_fleet_verification(org_id)}
+
+
 @router.get("/{agent_id}", response_model=AgentOut)
 async def get_agent(
     agent_id: str,
@@ -158,86 +193,33 @@ async def deploy_agent(
     agent = await db.get(Agent, agent_id)
     if not agent or agent.org_id != org_id:
         raise HTTPException(404)
-    from aios.core.agent_health import health_tracker
+    from aios.core.deployment import DeploymentError, deploy_and_verify
 
-    if not health_tracker.is_available(agent_id):
-        raise HTTPException(
-            409,
-            detail=f"agent {agent.name} circuit breaker open (stopped). Reset health first.",
-        )
-    from aios.config import PLANS
-    from aios.db.models import Organization
-
-    org = await db.get(Organization, org_id)
-    plan = ((org.extra_data or {}).get("plan", "free") if org else "free")
-    if plan not in ("unlimited",):
-        limits = PLANS.get(plan, PLANS["free"])
-        max_agents: int = limits.get("max_agents", 2)
-        cnt = (
-            await db.execute(
-                select(Agent).where(Agent.org_id == org_id, Agent.status == "active")
-            )
-        ).scalars().all()
-        if len(cnt) >= max_agents and agent.status != "active":
-            raise HTTPException(
-                403, detail=f"quota max_agents {max_agents} for {plan}"
-            )
-    prev_active = agent.status == "active"
-    agent.status = "active"
-    import datetime
-
-    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    if not prev_active:
-        instance = AgentInstance(
-            agent_id=agent_id,
-            org_id=org_id,
-            status="running",
-            extra_data={"deploy": "blue", "deployed_at": now_iso, "deployed_by": user.id},
-        )
-        db.add(instance)
-    else:
-        instance = AgentInstance(
-            agent_id=agent_id,
-            org_id=org_id,
-            status="running",
-            extra_data={
-                "deploy": "green",
-                "canary": True,
-                "deployed_at": now_iso,
-                "deployed_by": user.id,
-            },
-        )
-        db.add(instance)
-    await log_audit(
-        db,
-        org_id,
-        "agent.deploy",
-        "agent",
-        user_id=user.id,
-        resource_id=agent_id,
-        details={"name": agent.name, "blue_green": "green" if prev_active else "blue"},
-    )
-    await db.commit()
-    await db.refresh(agent)
     try:
-        from aios.tasks.queue import enqueue_task
-
-        await enqueue_task(
-            "aios.tasks.jobs.agent_run",
-            {
-                "agent_id": agent_id,
-                "conv_id": f"health_{agent_id}",
-                "text": "health check",
-                "org_id": org_id,
-            },
-        )
-    except Exception:
-        logger.warning("agent %s: health-check enqueue failed", agent_id, exc_info=True)
-    try:
-        health_tracker.record_success(agent_id)
-    except Exception:
-        logger.warning("agent %s: health tracker write failed", agent_id, exc_info=True)
+        await deploy_and_verify(db, agent, org_id, user_id=user.id)
+    except DeploymentError as exc:
+        raise HTTPException(exc.status_code, detail=str(exc)) from exc
     return agent
+
+
+@router.post("/{agent_id}/verify")
+async def verify_agent_endpoint(
+    agent_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Re-probe a live agent without changing its deployment state."""
+    agent = await db.get(Agent, agent_id)
+    if not agent or agent.org_id != org_id:
+        raise HTTPException(404)
+    from aios.core.deployment import DeploymentError, verify_agent
+
+    try:
+        result = await verify_agent(db, agent, org_id, user_id=user.id)
+    except DeploymentError as exc:
+        raise HTTPException(exc.status_code, detail=str(exc)) from exc
+    return {"ok": True, "status": agent.status, "evidence": result["evidence"]}
 
 
 @router.post("/{agent_id}/canary/promote")

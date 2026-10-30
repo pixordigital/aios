@@ -28,7 +28,8 @@ from sqlalchemy import delete as _sa_delete, func, select
 from sqlalchemy.orm import selectinload
 
 from aios.db.backend import db_session
-from aios.db.models import Agent, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
+from aios.db.models import Agent, AgentInstance, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
+from aios.core.audit import log_audit
 from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
 from aios.api.auth import _validate_password
@@ -66,6 +67,9 @@ TOOL_DESCRIPTIONS = {
     "crm_create_deal": "Criar deal no CRM (100% IA)",
     "crm_update_deal": "Atualizar stage do deal (HITL se >R$5k)",
     "lead_score": "Score BANT + qualificação",
+    "lead_save": "Salvar lead pesquisado (Prospector)",
+    "lead_list": "Listar leads por lote/status/score",
+    "lead_review": "Aprovar, rejeitar ou mandar lead ao SDR",
 }
 
 
@@ -82,6 +86,7 @@ def _compatible_agent_types(agent_type: str) -> list[str]:
         "orchestrator": ["manager", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor", "custom"],
         "manager": ["orchestrator", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "custom"],
         "sdr": ["closer", "support", "manager", "pricing_guardian", "custom"],
+        "lead_finder": ["sdr", "closer", "manager", "custom"],
         "closer": ["sdr", "support", "manager", "deal_auditor", "custom"],
         "support": ["sdr", "closer", "manager", "custom"],
         "data_analyst": ["data_scientist", "performance_watcher", "manager", "custom"],
@@ -179,6 +184,7 @@ def _agent_type_label(value: str) -> str:
         "orchestrator": "Orquestrador",
         "manager": "Gerente",
         "sdr": "SDR",
+        "lead_finder": "Prospector de Leads",
         "closer": "Closer",
         "support": "Suporte",
         "data_analyst": "Analista de Dados",
@@ -449,9 +455,19 @@ async def dashboard_home(request: Request):
         total_cost = sum(_cost_estimate(a.llm_config.get("model", ""), a.llm_config.get("max_tokens", 4096)) for a in agents if a.llm_config)
         from aios.core.limits import get_monthly_usage
         usage_monthly = await get_monthly_usage(org_id, db)
+        from aios.core.deployment import latest_instances
+
+        deployments = await latest_instances(db, org_id, [a.id for a in agents])
     return await _render("dashboard.html", request, title="Dashboard",
                    stats={"agents": ac, "teams": tc, "conversations": cc, "messages": mc,
-                          "total_cost": total_cost, "deployed": sum(1 for a in agents if a.status == "active")},
+                          "total_cost": total_cost,
+                          "deployed": sum(1 for a in agents if a.status == "active"),
+                          "verified": sum(
+                              1 for a in agents
+                              if a.status == "active"
+                              and deployments.get(a.id)
+                              and (deployments[a.id].extra_data or {}).get("verified")
+                          )},
                    teams=teams, agents=agents, usage_monthly=usage_monthly)
 
 
@@ -557,7 +573,7 @@ async def agent_canvas(request: Request):
 
 # ─── Agent CRUD ───
 
-AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"]
+AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "lead_finder", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"]
 ROUTING_STRATEGIES = ["supervisor", "round_robin", "broadcast", "semantic"]
 
 
@@ -573,7 +589,34 @@ async def agent_list(request: Request):
         for t in result.scalars():
             for a in (t.agents or []):
                 teams_map.setdefault(a.id, []).append(t.name)
-    return await _render("agents.html", request, title="Agentes", agents=agents, teams_map=teams_map)
+        from aios.core.deployment import latest_instances, system_status
+
+        deployments = await latest_instances(db, org_id, [a.id for a in agents])
+        readiness = await system_status(await db.health())
+        active_agents = [a for a in agents if a.status == "active"]
+        verified_count = sum(
+            1 for a in active_agents
+            if deployments.get(a.id) and (deployments[a.id].extra_data or {}).get("verified")
+        )
+        unverified_count = len(active_agents) - verified_count
+        from aios.core.fleet_verify import get_fleet_state
+
+        fleet_state = await get_fleet_state(org_id)
+    return await _render(
+        "agents.html",
+        request,
+        title="Agentes",
+        agents=agents,
+        teams_map=teams_map,
+        deployments=deployments,
+        readiness=readiness,
+        active_count=len(active_agents),
+        verified_count=verified_count,
+        unverified_count=unverified_count,
+        fleet_state=fleet_state,
+        deploy_result=request.query_params.get("deploy"),
+        deploy_reason=request.query_params.get("reason", ""),
+    )
 
 
 @router.get("/agents/new", response_class=HTMLResponse)
@@ -592,6 +635,7 @@ async def agent_new_form(request: Request, type: str | None = None, template: st
                 "evidence_compiler": "Evidence Compiler",
                 "performance_watcher": "Performance Watcher",
                 "human_auditor": "Human Auditor Assistant",
+                "lead_finder": "Prospector de Leads",
             }
             preset_name = name_map.get(tname, tname.replace("_", " ").title())
             preset_agent = SimpleNamespace(
@@ -621,8 +665,20 @@ async def agent_edit_form(request: Request, aid: str):
         # this another org's agent definition would be editable and readable.
         if not agent or agent.org_id != org_id:
             return RedirectResponse("/dashboard/agents", status_code=303)
+        from aios.core.deployment import deployment_view
+
+        history = (
+            await db.execute(
+                select(AgentInstance)
+                .where(AgentInstance.agent_id == aid, AgentInstance.org_id == org_id)
+                .order_by(AgentInstance.created_at.desc())
+                .limit(5)
+            )
+        ).scalars().all()
+        deployment = deployment_view(agent, latest=history[0] if history else None, history=history)
     return await _render("agent_form.html", request, title="Editar Agente",
-                   agent=agent, agent_types=AGENT_TYPES, agents=agents)
+                   agent=agent, agent_types=AGENT_TYPES, agents=agents,
+                   deployment=deployment)
 
 
 @router.get("/agents/{aid}/versions", response_class=HTMLResponse)
@@ -764,22 +820,87 @@ async def agent_save(
 @router.get("/agents/{aid}/deploy")
 async def agent_deploy(request: Request, aid: str):
     org_id = await _org_filter(request)
+    user_id = getattr(request.state, "user_id", None)
     async with db_session() as db:
         agent = await db.get(Agent, aid)
-        if agent and agent.org_id == org_id:
-            if agent.status != "active":
-                from aios.config import PLANS
-                from aios.db.models import Organization as _Org
-                _org = await db.get(_Org, org_id)
-                _plan = ((_org.extra_data or {}).get("plan", "free") if _org else "free")
-                if _plan not in ("unlimited",):
-                    _limits = PLANS.get(_plan, PLANS["free"])
-                    _cnt = (await db.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active"))).scalars().all()
-                    if len(_cnt) >= cast(int, _limits.get("max_agents", 2)):
-                        return HTMLResponse(f"<h2>quota max_agents {_limits['max_agents']} para {_plan}</h2>", status_code=403)
-            agent.status = "active" if agent.status != "active" else "draft"
+        if not agent or agent.org_id != org_id:
+            return RedirectResponse("/dashboard/agents", status_code=303)
+        if agent.status == "active":
+            # Desativar is a stop, not a deploy: no provider call needed.
+            agent.status = "draft"
+            rows = (
+                await db.execute(
+                    select(AgentInstance).where(
+                        AgentInstance.agent_id == aid,
+                        AgentInstance.org_id == org_id,
+                        AgentInstance.status == "running",
+                    )
+                )
+            ).scalars().all()
+            for inst in rows:
+                inst.status = "stopped"
+            await log_audit(db, org_id, "agent.stop", "agent", user_id=user_id,
+                            resource_id=aid, details={"name": agent.name})
             await db.commit()
-    return RedirectResponse("/dashboard/agents", status_code=303)
+            return RedirectResponse("/dashboard/agents?deploy=stopped", status_code=303)
+        from aios.core.deployment import DeploymentError, deploy_and_verify
+
+        try:
+            await deploy_and_verify(db, agent, org_id, user_id=user_id)
+        except DeploymentError as exc:
+            return RedirectResponse(
+                f"/dashboard/agents?deploy=failed&reason={quote(str(exc))}",
+                status_code=303,
+            )
+    return RedirectResponse("/dashboard/agents?deploy=ok", status_code=303)
+
+
+@router.post("/agents/{aid}/verify")
+async def agent_verify(request: Request, aid: str):
+    org_id = await _org_filter(request)
+    user_id = getattr(request.state, "user_id", None)
+    async with db_session() as db:
+        agent = await db.get(Agent, aid)
+        if not agent or agent.org_id != org_id:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        from aios.core.deployment import DeploymentError, verify_agent
+
+        try:
+            result = await verify_agent(db, agent, org_id, user_id=user_id)
+        except DeploymentError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=exc.status_code)
+    return JSONResponse({"ok": True, "evidence": result["evidence"]})
+
+
+@router.post("/agents/verify-fleet")
+async def agent_verify_fleet(request: Request):
+    """Queue background verification for every active agent in the org."""
+    org_id = await _org_filter(request)
+    user_id = getattr(request.state, "user_id", None)
+    async with db_session() as db:
+        from aios.core.fleet_verify import FleetVerifyError, start_fleet_verification
+
+        try:
+            state = await start_fleet_verification(db, org_id, user_id=user_id)
+        except FleetVerifyError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return JSONResponse({"ok": True, "state": state})
+
+
+@router.get("/agents/verify-fleet")
+async def agent_verify_fleet_status(request: Request):
+    org_id = await _org_filter(request)
+    from aios.core.fleet_verify import get_fleet_state
+
+    return JSONResponse({"ok": True, "state": await get_fleet_state(org_id)})
+
+
+@router.post("/agents/verify-fleet/cancel")
+async def agent_verify_fleet_cancel(request: Request):
+    org_id = await _org_filter(request)
+    from aios.core.fleet_verify import cancel_fleet_verification
+
+    return JSONResponse({"ok": True, "state": await cancel_fleet_verification(org_id)})
 
 
 @router.post("/agents/{aid}/test")
@@ -3232,6 +3353,138 @@ async def funnel_insight_resolve(request: Request, insight_id: str):
         await db.commit()
         funnel_id = ins.funnel_id
     return RedirectResponse(f"/dashboard/funnels/{funnel_id}", status_code=303)
+
+
+# ─── Leads (Prospector → Gerente → SDR) ───
+#
+# Leads are CrmDeals with source="lead_finder" and the review state in
+# extra_data["lead_status"]. One store keeps the kanban, export and SDR handoff
+# working; the review fields never leak into the deal columns.
+
+def _lead_rows_sync(org_id: str, limit: int = 1000):
+    from aios.db.models import CrmDeal
+    from aios.tools.leads import LEAD_SOURCE
+    from sqlalchemy import select as _sel
+    return _sel(CrmDeal).where(
+        CrmDeal.org_id == org_id, CrmDeal.source == LEAD_SOURCE
+    ).order_by(CrmDeal.created_at.desc()).limit(limit)
+
+
+def _lead_filter(rows, q="", status="", batch="", industry="", min_score=0):
+    from aios.tools.leads import _matches
+    return [d for d in rows if _matches(d, q=q, status=status, batch=batch,
+                                        industry=industry, min_score=min_score)]
+
+
+@router.get("/leads", response_class=HTMLResponse)
+async def leads_page(request: Request, q: str = "", status: str = "",
+                     batch: str = "", industry: str = "", min_score: int = 0):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        rows = (await db.execute(_lead_rows_sync(org_id))).scalars().all()
+        agents = (await db.execute(
+            select(Agent).where(Agent.org_id == org_id, Agent.agent_type == "sdr").order_by(Agent.name)
+        )).scalars().all()
+    leads = _lead_filter(rows, q, status, batch, industry, min_score)
+    counts: dict[str, int] = {}
+    for d in rows:
+        s = (d.extra_data or {}).get("lead_status", "new")
+        counts[s] = counts.get(s, 0) + 1
+    batches = sorted({(d.extra_data or {}).get("batch", "") for d in rows} - {""})
+    industries = sorted({(d.extra_data or {}).get("industry", "") for d in rows} - {""})
+    return await _render(
+        "leads.html", request, title="Leads — Prospecção",
+        leads=leads, counts=counts, batches=batches, industries=industries,
+        agents=agents, q=q, status=status, batch=batch, industry=industry,
+        min_score=min_score, total=len(rows),
+    )
+
+
+def _selected_ids(raw: str) -> list[str]:
+    return [i.strip() for i in (raw or "").split(",") if i.strip()]
+
+
+@router.post("/leads/send")
+async def leads_send(request: Request, ids: str = Form(""), sdr_agent_id: str = Form("")):
+    org_id = await _org_filter(request)
+    wanted = set(_selected_ids(ids))
+    if not wanted:
+        return RedirectResponse("/dashboard/leads", status_code=303)
+    from aios.db.models import Agent as _Ag, CrmDeal
+    from aios.tools.leads import LEAD_SOURCE
+    async with db_session() as db:
+        if sdr_agent_id:
+            sdr = await db.get(_Ag, sdr_agent_id)
+            if not sdr or sdr.org_id != org_id or sdr.agent_type != "sdr":
+                sdr_agent_id = ""
+        rows = (await db.execute(
+            select(CrmDeal).where(CrmDeal.org_id == org_id,
+                                  CrmDeal.source == LEAD_SOURCE,
+                                  CrmDeal.id.in_(wanted))
+        )).scalars().all()
+        for d in rows:
+            ex = dict(d.extra_data or {})
+            ex["lead_status"] = "sent_to_sdr"
+            ex["assigned_at"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            d.extra_data = ex
+            d.stage = "mql"
+            if sdr_agent_id:
+                d.agent_id = sdr_agent_id
+        await db.commit()
+    return RedirectResponse("/dashboard/leads", status_code=303)
+
+
+@router.post("/leads/review")
+async def leads_review(request: Request, ids: str = Form(""), status: str = Form("approved")):
+    if status not in ("approved", "rejected"):
+        return RedirectResponse("/dashboard/leads", status_code=303)
+    org_id = await _org_filter(request)
+    wanted = set(_selected_ids(ids))
+    if wanted:
+        from aios.db.models import CrmDeal
+        from aios.tools.leads import LEAD_SOURCE
+        async with db_session() as db:
+            rows = (await db.execute(
+                select(CrmDeal).where(CrmDeal.org_id == org_id,
+                                      CrmDeal.source == LEAD_SOURCE,
+                                      CrmDeal.id.in_(wanted))
+            )).scalars().all()
+            for d in rows:
+                ex = dict(d.extra_data or {})
+                ex["lead_status"] = status
+                d.extra_data = ex
+            await db.commit()
+    return RedirectResponse("/dashboard/leads", status_code=303)
+
+
+@router.get("/leads/export")
+async def leads_export(request: Request, q: str = "", status: str = "",
+                       batch: str = "", industry: str = "", min_score: int = 0):
+    import csv
+    import io
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        rows = (await db.execute(_lead_rows_sync(org_id, 5000))).scalars().all()
+    leads = _lead_filter(rows, q, status, batch, industry, min_score)
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["id", "name", "company", "email", "phone", "website", "industry",
+                "location", "company_size", "fit_score", "status", "batch", "icp",
+                "source_url", "notes", "created_at"])
+    for d in leads:
+        ex = d.extra_data or {}
+        w.writerow([d.id, d.lead_name, ex.get("company", ""), d.lead_email,
+                    d.lead_phone, ex.get("website", ""), ex.get("industry", ""),
+                    ex.get("location", ""), ex.get("company_size", ""), d.score,
+                    ex.get("lead_status", "new"), ex.get("batch", ""), ex.get("icp", ""),
+                    ex.get("source_url", ""), ex.get("notes", ""),
+                    d.created_at.isoformat() if d.created_at else ""])
+    out.seek(0)
+    filename = f"leads_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    return StreamingResponse(
+        io.BytesIO(out.getvalue().encode()), media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/crm", response_class=HTMLResponse)

@@ -94,7 +94,11 @@ def test_mailgun_signature_scheme(monkeypatch):
 
     secret = "mg-secret"
     monkeypatch.setattr(settings, "mailgun_webhook_secret", secret, raising=False)
-    body, ts = "recipient=ana%40x.com&text=oi", "1700000000"
+    body = "recipient=ana%40x.com&text=oi"
+    # Mailgun signs ts+body and the verifier enforces a 300s replay window, so
+    # the timestamp must be current or a legitimately signed request is refused.
+    import time as _time
+    ts = str(int(_time.time()))
     sig = _mailgun_sig(body, ts, secret)
 
     class Req:
@@ -104,7 +108,7 @@ def test_mailgun_signature_scheme(monkeypatch):
 
     assert E._verify_email_signature(Req(), body.encode(), "mailgun") is True
     # wrong timestamp prefix must not validate
-    Req.headers = {"x-mailgun-signature": f"1700000001,{sig}"}
+    Req.headers = {"x-mailgun-signature": f"{int(ts) + 1},{sig}"}
     assert E._verify_email_signature(Req(), body.encode(), "mailgun") is False
 
 

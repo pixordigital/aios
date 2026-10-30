@@ -313,6 +313,10 @@
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4h18l-7 8v7l-4 2v-9L3 4z"/></svg>
                 <span class="nav-text">Funis</span>
             </a>
+            <a href="/dashboard/leads" class="{% if request.url.path.startswith('/dashboard/leads') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
+                <span class="nav-text">Leads</span>
+            </a>
             <a href="/dashboard/crm" class="{% if request.url.path.startswith('/dashboard/crm') %}active{% endif %}">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
                 <span class="nav-text">CRM IA</span>

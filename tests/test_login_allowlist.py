@@ -150,8 +150,19 @@ async def test_refresh_rejected_for_nonlisted(monkeypatch):
 @pytest.mark.asyncio
 async def test_refresh_allowed_for_listed(monkeypatch):
     _allow(monkeypatch)
-    token = auth_mod._create_refresh_token("u1")
-    out = await auth_mod.refresh_token(_req(), {"refresh_token": token}, _DB(_user(LISTED)))
+    from aios.db.models import RefreshToken
+
+    db = _DB(_user(LISTED))
+    # Refresh tokens are only honoured when their jti was persisted, so issue
+    # one the way every real login does and let the fake serve that row back.
+    token = await auth_mod._issue_refresh(db, "u1")
+    saved = next(obj for obj in db.added if isinstance(obj, RefreshToken))
+
+    async def _get(model, ident):
+        return saved if model is RefreshToken else db._user
+
+    db.get = _get
+    out = await auth_mod.refresh_token(_req(), {"refresh_token": token}, db)
     assert out.user_id == "u1"
 
 

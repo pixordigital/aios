@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div>
+    <h1>Leads — Prospecção</h1>
+    <p class="text-sm text-secondary">O Prospector pesquisa, o Gerente de Vendas revisa, o SDR contata. Nada sai daqui sem revisão.</p>
+  </div>
+  <div style="display:flex;gap:0.5rem">
+    <a class="btn btn-ghost btn-sm" href="/dashboard/leads/export?{{ request.url.query }}">⬇ Exportar CSV</a>
+    <a class="btn btn-ghost btn-sm" href="/dashboard/agents/new?type=lead_finder">+ Prospector</a>
+  </div>
+</div>
+
+<div class="grid-4 mb-4">
+  <div class="stat-card"><p class="stat-label">Total</p><p class="stat-value">{{ total }}</p><span class="text-xs text-tertiary">no CRM como prospecção</span></div>
+  <div class="stat-card"><p class="stat-label">Aguardando revisão</p><p class="stat-value">{{ counts.get('new', 0) }}</p><span class="text-xs text-tertiary">status new</span></div>
+  <div class="stat-card"><p class="stat-label">Aprovados</p><p class="stat-value">{{ counts.get('approved', 0) }}</p><span class="text-xs text-tertiary">revisados pelo gerente</span></div>
+  <div class="stat-card"><p class="stat-label">No SDR</p><p class="stat-value">{{ counts.get('sent_to_sdr', 0) }}</p><span class="text-xs text-tertiary">MQL, primeiro toque</span></div>
+</div>
+
+<div class="card mb-4">
+  <form method="GET" action="/dashboard/leads" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:end">
+    <div style="flex:2;min-width:180px"><label>Buscar</label><input class="input" name="q" value="{{ q }}" placeholder="nome, empresa, email, site"></div>
+    <div><label>Status</label>
+      <select class="input" name="status">
+        <option value="">Todos</option>
+        {% for s in ['new','approved','rejected','sent_to_sdr'] %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div><label>Lote</label>
+      <select class="input" name="batch">
+        <option value="">Todos</option>
+        {% for b in batches %}<option value="{{ b }}" {% if batch == b %}selected{% endif %}>{{ b }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label>Setor</label>
+      <select class="input" name="industry">
+        <option value="">Todos</option>
+        {% for i in industries %}<option value="{{ i }}" {% if industry == i %}selected{% endif %}>{{ i }}</option>{% endfor %}
+      </select>
+    </div>
+    <div style="width:110px"><label>Score ≥</label><input class="input" type="number" name="min_score" min="0" max="100" value="{{ min_score }}"></div>
+    <button class="btn btn-primary btn-sm" type="submit">Filtrar</button>
+    <a class="btn btn-ghost btn-sm" href="/dashboard/leads">Limpar</a>
+  </form>
+</div>
+
+<div class="card">
+  <form id="bulk" method="POST" action="/dashboard/leads/send">
+    <input type="hidden" name="ids" id="bulk-ids">
+    <input type="hidden" name="status" id="bulk-status" value="">
+    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem">
+      <label style="margin:0;display:flex;gap:0.375rem;align-items:center;font-size:0.75rem">
+        <input type="checkbox" onclick="document.querySelectorAll('.lead-check').forEach(c=>c.checked=this.checked)"> selecionar todos
+      </label>
+      <select class="input" name="sdr_agent_id" style="width:200px">
+        <option value="">SDR da equipe (opcional)</option>
+        {% for a in agents %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-primary btn-sm" type="button" onclick="bulkAction('send')">→ Enviar ao SDR</button>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="bulkAction('approved')">✓ Aprovar</button>
+      <button class="btn btn-ghost btn-sm" type="button" onclick="bulkAction('rejected')">✕ Rejeitar</button>
+      <span class="text-xs text-tertiary">{{ leads|length }} lead(s) na visão</span>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.75rem">
+        <thead>
+          <tr style="background:var(--bg-elevated);text-align:left;border-bottom:1px solid var(--border)">
+            <th style="padding:0.5rem"></th>
+            <th style="padding:0.5rem">Lead</th>
+            <th style="padding:0.5rem">Setor / porte</th>
+            <th style="padding:0.5rem">Local</th>
+            <th style="padding:0.5rem">Contato</th>
+            <th style="padding:0.5rem">Score</th>
+            <th style="padding:0.5rem">Status</th>
+            <th style="padding:0.5rem">Lote</th>
+            <th style="padding:0.5rem">Origem</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for d in leads %}
+          {% set ex = d.extra_data or {} %}
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:0.5rem"><input type="checkbox" class="lead-check" value="{{ d.id }}"></td>
+            <td style="padding:0.5rem">
+              <b>{{ d.lead_name }}</b>
+              {% if ex.get('company') %}<div class="text-xs text-tertiary">{{ ex.get('company') }}{% if ex.get('role') %} · {{ ex.get('role') }}{% endif %}</div>{% endif %}
+              {% if ex.get('website') %}<a href="{{ ex.get('website') }}" target="_blank" rel="noopener" class="text-xs">{{ ex.get('website') }}</a>{% endif %}
+            </td>
+            <td style="padding:0.5rem">{{ ex.get('industry', '—') }}<div class="text-xs text-tertiary">{{ ex.get('company_size', '') }}</div></td>
+            <td style="padding:0.5rem">{{ ex.get('location', '—') }}</td>
+            <td style="padding:0.5rem">
+              {% if d.lead_email %}<div class="font-mono text-xs">{{ d.lead_email }}</div>{% endif %}
+              {% if d.lead_phone %}<div class="font-mono text-xs">{{ d.lead_phone }}</div>{% endif %}
+              {% if not d.lead_email and not d.lead_phone %}<span class="text-xs text-tertiary">a descobrir</span>{% endif %}
+            </td>
+            <td style="padding:0.5rem"><span class="badge" style="min-width:36px">{{ d.score }}</span></td>
+            <td style="padding:0.5rem">
+              {% set st = ex.get('lead_status', 'new') %}
+              <span class="badge" style="font-size:0.65rem;{% if st == 'approved' %}color:var(--green){% elif st == 'rejected' %}color:var(--red){% elif st == 'sent_to_sdr' %}color:var(--cyan){% endif %}">{{ st }}</span>
+            </td>
+            <td style="padding:0.5rem" class="text-xs">{{ ex.get('batch', '—') }}</td>
+            <td style="padding:0.5rem">{% if ex.get('source_url') %}<a href="{{ ex.get('source_url') }}" target="_blank" rel="noopener" class="text-xs">fonte ↗</a>{% else %}<span class="text-xs text-tertiary">—</span>{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" style="padding:1rem" class="text-sm text-tertiary">Nenhum lead. Peça ao Prospector um ICP para começar.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+</div>
+
+<script>
+function bulkAction(kind) {
+  const ids = [...document.querySelectorAll('.lead-check:checked')].map(c => c.value);
+  if (!ids.length) { alert('Selecione pelo menos um lead.'); return; }
+  const f = document.getElementById('bulk');
+  document.getElementById('bulk-ids').value = ids.join(',');
+  if (kind === 'send') { f.action = '/dashboard/leads/send'; }
+  else { f.action = '/dashboard/leads/review'; document.getElementById('bulk-status').value = kind; }
+  f.submit();
+}
+</script>
+{% endblock %}

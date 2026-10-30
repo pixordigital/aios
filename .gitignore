@@ -10,7 +10,7 @@ venv/
 
 # Data
 data/
-tests/test.db
+tests/test.db*
 
 # Scratch / local tooling
 tmp/

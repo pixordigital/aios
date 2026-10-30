@@ -75,16 +75,17 @@ async def enqueue_job(func_name: str, *args, priority: str = "normal", **kwargs)
     logger.debug("Enqueued job %s prio=%s", func_name, priority)
 
 
-async def enqueue_task(task_name: str, payload: dict):
-    """Lightweight task enqueue — falls back to no-op if Redis unavailable."""
+async def enqueue_task(task_name: str, payload: dict, **job_kwargs):
+    """Lightweight task enqueue — returns the ARQ job, or None if Redis is unavailable."""
     try:
         pool = await get_redis_pool()
-        await pool.enqueue_job(task_name, payload)
+        return await pool.enqueue_job(task_name, payload, **job_kwargs)
     except Exception:
         # Dropped task. debug hid this completely; a down Redis means lost
         # work and the only signal was silence. Warning, not error: the
         # fallback to no-op is deliberate when Redis is unavailable.
         logger.warning("enqueue_task fallback (no redis): %s", task_name)
+        return None
 
 
 async def close_pool():

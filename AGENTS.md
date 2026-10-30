@@ -1,3 +1,12 @@
+## pending work handoff
+
+`pendingwork.md` is the session handoff file. Before ending a turn where work is
+unfinished (including when the free quota runs out), write every open task there:
+what is done, what is left, the exact file/command to resume from, and any
+decision the next session must not re-litigate. On session start, read it first
+and finish those tasks before starting new ones. Delete nothing from it until the
+item is verified done, then remove that item.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

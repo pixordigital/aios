@@ -107,18 +107,19 @@ async function refreshData() {
         if (agentsData.agents.length === 0) {
             tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:1rem;color:var(--text-tertiary)">Ainda sem dados de agentes. Implante e execute um agente para ver as métricas.</td></tr>';
         } else {
+            const dot = (s) => s === 'healthy' ? 'var(--green)' : (s === 'degraded' || s === 'failed') ? 'var(--red)' : s === 'draft' ? 'var(--text-tertiary)' : 'var(--amber)';
             tbody.innerHTML = agentsData.agents.map(a => `
                 <tr style="border-bottom:1px solid var(--border)">
                     <td style="padding:0.625rem 1rem;font-weight:500">${a.name || a.agent_id.slice(0,8)}</td>
                     <td style="text-align:right;padding:0.625rem 1rem">${a.messages}</td>
-                    <td style="text-align:right;padding:0.625rem 1rem">${a.tokens.toLocaleString()}</td>
-                    <td style="text-align:right;padding:0.625rem 1rem">${a.avg_response_ms}ms</td>
+                    <td style="text-align:right;padding:0.625rem 1rem">${(a.tokens||0).toLocaleString()}</td>
+                    <td style="text-align:right;padding:0.625rem 1rem">${a.avg_response_ms||0}ms</td>
                     <td style="text-align:right;padding:0.625rem 1rem;${a.errors > 0 ? 'color:var(--red)' : ''}">${a.errors}</td>
                     <td style="text-align:right;padding:0.625rem 1rem;${a.error_rate_pct > 5 ? 'color:var(--red)' : 'color:var(--green)'}">${a.error_rate_pct}%</td>
                     <td style="text-align:right;padding:0.625rem 1rem">${a.tool_calls}</td>
                     <td style="text-align:center;padding:0.625rem 1rem">
-                        <span style="display:inline-block;width:8px;height:8px;border-radius:99px;${a.health?.status === 'healthy' ? 'background:var(--green)' : a.health?.status === 'degraded' ? 'background:var(--amber)' : 'background:var(--red)'}"></span>
-                        ${a.health?.status || 'desconhecido'}
+                        <span style="display:inline-block;width:8px;height:8px;border-radius:99px;background:${dot(a.status)}"></span>
+                        ${a.status || 'desconhecido'}
                     </td>
                 </tr>
             `).join('');
@@ -131,14 +132,17 @@ async function refreshData() {
         if (healthData.agents.length === 0) {
             healthDiv.innerHTML = '<p style="color:var(--text-tertiary)">Ainda sem dados de saúde.</p>';
         } else {
+            const dot = (s) => s === 'healthy' ? 'var(--green)' : (s === 'degraded' || s === 'failed') ? 'var(--red)' : s === 'draft' ? 'var(--text-tertiary)' : 'var(--amber)';
             healthDiv.innerHTML = healthData.agents.map(h => `
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem;background:var(--bg-hover);border-radius:var(--radius-sm)">
                     <div style="display:flex;align-items:center;gap:0.5rem">
-                        <span style="display:inline-block;width:12px;height:12px;border-radius:99px;${h.status === 'healthy' ? 'background:var(--green)' : h.status === 'degraded' ? 'background:var(--amber)' : 'background:var(--red)'}"></span>
-                        <span style="font-weight:500">${h.agent_id.slice(0,8)}</span>
+                        <span style="display:inline-block;width:12px;height:12px;border-radius:99px;background:${dot(h.status)}"></span>
+                        <span style="font-weight:500">${h.name || h.agent_id.slice(0,8)}</span>
+                        <span class="text-xs" style="color:var(--text-tertiary)">${h.status}${h.deploy_status !== 'verified' ? ' · ' + h.deploy_status : ''}</span>
                     </div>
-                    <div style="font-size:0.8125rem;color:var(--text-secondary)">
-                        ${h.failures} falhas / ${h.successes} sucessos
+                    <div style="font-size:0.8125rem;color:var(--text-secondary);text-align:right">
+                        ${h.messages || 0} msgs · ${h.error_rate_pct || 0}% erro${h.latency_ms ? ' · verificou em ' + h.latency_ms + 'ms' : ''}
+                        ${h.last_deploy_error ? '<div class="text-xs" style="color:var(--red)">' + h.last_deploy_error + '</div>' : ''}
                     </div>
                 </div>
             `).join('');

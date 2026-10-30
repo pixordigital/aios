@@ -26,11 +26,20 @@
 </div>
 {% endif %}
 
+{% if stats.deployed > stats.verified %}
+<div class="card mb-4" style="border-left:4px solid var(--amber)">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem">
+        <p class="text-sm" style="margin:0"><strong style="color:var(--amber)">{{ stats.deployed - stats.verified }} agente(s) ativo(s) sem verificação.</strong> O status "ativo" não prova que o modelo responde — reimplante para gerar a evidência.</p>
+        <a href="/dashboard/agents" class="btn btn-ghost btn-sm">Ver agentes →</a>
+    </div>
+</div>
+{% endif %}
+
 <div class="grid-4 mb-4">
     <div class="stat-card">
         <p class="stat-label">Agentes</p>
         <p class="stat-value">{{ stats.agents }}</p>
-        <span class="text-xs text-tertiary">{{ stats.deployed }} implantados</span>
+        <span class="text-xs text-tertiary">{{ stats.verified }} verificados{% if stats.deployed > stats.verified %} · <span style="color:var(--amber)">{{ stats.deployed - stats.verified }} sem verificação</span>{% endif %}</span>
         <a href="/dashboard/agents" class="stat-link">Gerenciar agentes</a>
     </div>
     <div class="stat-card">

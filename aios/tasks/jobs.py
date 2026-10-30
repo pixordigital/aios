@@ -1237,6 +1237,17 @@ async def monthly_report_job(ctx):
 
 
 # ARQ worker function registry
+async def verify_fleet_job(ctx, payload: dict):
+    """Verify every active agent of an org in the background.
+
+    Registered in the worker so the run outlives the dashboard request; progress
+    is persisted by run_fleet_verification after each agent.
+    """
+    from aios.core.fleet_verify import run_fleet_verification
+
+    return await run_fleet_verification(payload)
+
+
 FUNCTIONS = [
     process_inbound,
     deliver_message,
@@ -1253,6 +1264,7 @@ FUNCTIONS = [
     event_consume_job,
     proactive_event_job,
     workday_job,
+    verify_fleet_job,
 ]
 
 

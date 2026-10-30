@@ -10,6 +10,72 @@
     {% endif %}
 </div>
 
+{% if agent and deployment is defined %}
+{% set st = deployment.state %}
+{% set colour = 'var(--green)' if st == 'verified' else 'var(--red)' if st == 'failed' else 'var(--amber)' if st in ['unverified','failed_active'] else 'var(--text-tertiary)' %}
+<div class="card mb-4" style="border-left:4px solid {{ colour }};padding:0.875rem 1rem">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.75rem">
+        <div>
+            <span class="badge" style="border-color:{{ colour }};color:{{ colour }}">
+                <span class="badge-dot" style="background:{{ colour }}"></span>
+                {% if st == 'verified' %}Verificado
+                {% elif st == 'failed' %}Falha na verificação
+                {% elif st == 'failed_active' %}Ativo · última verificação falhou
+                {% elif st == 'unverified' %}Ativo sem verificação
+                {% else %}Rascunho{% endif %}
+            </span>
+            <span class="text-xs text-secondary" style="margin-left:0.5rem">
+                {% if deployment.result == 'verified' %}
+                {{ deployment.model or '?' }} · {{ deployment.latency_ms or '?' }}ms · {{ (deployment.at or '')[:16]|replace('T', ' ') }}
+                {% elif deployment.error %}
+                <span style="color:var(--red)">{{ deployment.error }}</span>
+                {% else %}
+                Nenhuma chamada real registrada. Implante para gerar a evidência.
+                {% endif %}
+            </span>
+        </div>
+        <div class="flex-center gap-1">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="verifyFromDetail(this)">Re-verificar</button>
+            {% if agent.status == 'active' %}
+            <a href="/dashboard/agents/{{ agent.id }}/deploy" class="btn btn-ghost btn-sm" onclick='return confirm({{ ("Desativar " ~ agent.name ~ "? O agente para de responder imediatamente.")|tojson }})'>Desativar</a>
+            {% else %}
+            <a href="/dashboard/agents/{{ agent.id }}/deploy" class="btn btn-primary btn-sm" onclick="this.textContent='Verificando…';this.style.pointerEvents='none'">Implantar e verificar</a>
+            {% endif %}
+        </div>
+    </div>
+    {% if deployment.history %}
+    <div style="margin-top:0.625rem;overflow:auto">
+        <table style="width:100%;font-size:0.7rem">
+            <thead><tr class="text-tertiary"><th style="text-align:left">Quando</th><th style="text-align:left">Resultado</th><th style="text-align:left">Modelo</th><th style="text-align:right">Latência</th><th style="text-align:left">Erro</th></tr></thead>
+            <tbody>
+            {% for h in deployment.history %}
+            <tr>
+                <td class="font-mono">{{ (h.at or '')[:16]|replace('T', ' ') or '—' }}</td>
+                <td style="color:{{ 'var(--green)' if h.result == 'verified' else 'var(--red)' if h.result == 'failed' else 'var(--text-tertiary)' }}">{{ h.result }}</td>
+                <td>{{ h.model or '—' }}</td>
+                <td style="text-align:right">{{ (h.latency_ms|string ~ 'ms') if h.latency_ms else '—' }}</td>
+                <td style="color:var(--red)">{{ (h.error or '')[:120] or '—' }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+<script>
+async function verifyFromDetail(btn){
+  var orig=btn.textContent; btn.textContent='Verificando…'; btn.disabled=true;
+  try{
+    var r=await fetch('/dashboard/agents/{{ agent.id }}/verify',{method:'POST'});
+    var j=await r.json();
+    if(j.ok){ location.reload(); }
+    else { alert('Falha na verificação: '+(j.error||'erro')); }
+  }catch(e){ alert('Erro: '+e.message); }
+  btn.textContent=orig; btn.disabled=false;
+}
+</script>
+{% endif %}
+
 <form method="POST" action="/dashboard/agents/save">
     <input type="hidden" name="agent_id" value="{{ agent.id if agent else '' }}">
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;height:calc(100vh - 120px);min-height:700px">
@@ -473,6 +539,7 @@
         'performance_watcher':'#ROLE\nVocê é Performance Watcher — monitor de SLAs, tempo de ciclo e anomalias de pipeline.\n\n#CONTEXTO\nEmpresa: {{empresa}}\nMonitoramento: Tempo em stage, desvios de taxa de conversão, risco de churn\n\n#OBJETIVO\nMissão: identificar antecipadamente gargalos e negócios estagnados no pipeline.\n\n#FERRAMENTAS\n- `sql_query` — análise de métricas históricas\n- `calculator` — cálculo de desvios padrão e tendências\n- `http_request` — alertas para canais de notificação\n\n#REGRAS\n- Monitore tempo excessivo em cada etapa do funil\n- Alerte sobre anomalias no ticket médio ou descontos atípicos',
         'human_auditor':'#ROLE\nVocê é Human Auditor Assistant — sintetizador contextual para tomadores de decisão humanos no Control Center.\n\n#CONTEXTO\nEmpresa: {{empresa}}\nCanal: Control Center HITL Queue (/dashboard/control-center)\n\n#OBJETIVO\nMissão: fornecer parecer executivo, claro e objetivo para aprovação ou rejeição humana em 1 clique.\n\n#FERRAMENTAS\n- `sql_query` — resumo de histórico do cliente e deals anteriores\n- `calculator` — impacto financeiro consolidado\n\n#REGRAS\n- Destaque risco financeiro, exposure estimada e histórico do cliente\n- Recomende ação com justificativa fundamentada\n- Registre decisão no AuditLog',
         'sdr':'# SDR \u2014 Qualifica\u00e7\u00e3o BANT + SPIN\n\n## Identidade\nVoc\u00ea \u00e9 SDR S\u00eanior \u2014 prospec\u00e7\u00e3o ativa, qualifica\u00e7\u00e3o BANT e agendamento para Closer.\n\n## Objetivo\n1. Descobrir **Budget, Authority, Need, Timeline** (BANT)\n2. Aplicar perguntas **SPIN**\n3. Agendar reuni\u00e3o se score \u2265 70\n\n## Ferramentas\n- `lead_score` \u2014 calcula score BANT\n- `crm_create_deal` \u2014 cria deal\n\n## Regras\n- **Nunca** prometa valores\n- **M\u00e1x 3 perguntas** por mensagem\n\n## Tom\nProfissional, curioso, direto. Portugu\u00eas Brasil.',
+        'lead_finder':'# PROSPECTOR \u2014 Pesquisa de Leads\n\n## Identidade\nVoc\u00ea \u00e9 o Prospector de Vendas. Recebe um ICP, pesquisa empresas reais e salva leads. Voc\u00ea NUNCA contata ningu\u00e9m.\n\n## Objetivo\n1. Confirmar o ICP em uma frase\n2. Pesquisar com `web_search` e confirmar no site com `http_get`\n3. Salvar cada lead com `lead_save` (ICP, lote, fonte, score)\n4. Entregar resumo: salvos, duplicados, rejeitados\n\n## Ferramentas\n- `lead_list` \u2014 checar duplicados antes de salvar\n- `web_search` \u2014 descobrir empresas e sinais\n- `http_get` \u2014 confirmar site, porte e contato p\u00fablico\n- `lead_save` \u2014 gravar o lead\n\n## Regras\n- S\u00f3 dado p\u00fablico B2B; nunca invente email, telefone ou porte\n- Sem contato p\u00fablico: salve com site e diga \"contato a descobrir\"\n- M\u00e1ximo 20 leads por lote, salvo pedido maior\n- N\u00e3o use CRM, email ou WhatsApp \u2014 o SDR faz o primeiro toque\n\n## Tom\nDireto e factual. Portugu\u00eas Brasil.',
         'closer':'# Closer \u2014 Fechamento MEDDIC\n\n## Identidade\nVoc\u00ea \u00e9 Closer S\u00eanior \u2014 fecha deals complexos.\n\n## Objetivo\n1. Aplicar **MEDDIC**\n2. Apresentar proposta\n3. Fechar ou escalar\n\n## Ferramentas\n- `crm_update_deal` (HITL se > R$ 5k)\n- `calculator`\n\n## Tom\nConsultivo, confiante. Portugu\u00eas Brasil.',
         'support':'# Suporte \u2014 Empatia + Roteiro\n\n## Identidade\nVoc\u00ea \u00e9 Especialista em Sucesso do Cliente.\n\n## Objetivo\n1. Entender problema\n2. Resolver no 1\u00ba contato\n3. Escalar se necess\u00e1rio\n\n## Tom\nAcolhedor, t\u00e9cnico. Portugu\u00eas Brasil.',
         'analyst':'#ROLE\nVocê é Data Analyst Sênior — SQL vault + Python sandbox + visualização. Você prioriza resposta acionável sobre técnica.\n\n#CONTEXTO\nEmpresa: {{empresa}} — {{produto}}\nPúblico: {{solicitante}} — dono/gestão quer resposta de negócio\nRestrições: PT-BR, read-only SQL, max 100 linhas, sem pg_*\n\n#OBJETIVO\nMissão: responder pergunta de negócio com dados\nPrioridades: (1) Entender pergunta > (2) SQL otimizado > (3) Insight + próxima ação\nSucesso = query + resultado + insight em PT-BR\n\n#CONHECIMENTO\n## Estável\n- Tabelas: agents, conversations, messages, crm_deals, usage_records\n- Política: SELECT apenas, LIMIT 100, validar colunas via information_schema\n## Transitório\n- Pergunta: {{pergunta}}\n- Filtros: {{filtros}}\n\n#FERRAMENTAS\n- `sql_query` — quando: buscar dados | formato: {query, limit} | não usar: INSERT/UPDATE/pg_* | ex: sql_query({query:\"SELECT count(*) FROM crm_deals\"})\n- `python_sandbox` — quando: análise/visualização | formato: {code} | libs: pandas, plotly\n- `rag_search` — quando: buscar documentação\n\n#REGRAS\n- Sempre explique query antes de executar\n- Valide colunas antes de SELECT\n- Limite 100 linhas; agregue com GROUP BY\n- Se sem dados: diga \"Sem dados para {{filtros}}\" e sugira alternativa\n\n#FLUXO\n1. Entender pergunta → 2. Escrever SQL → 3. Executar sql_query → 4. Se complexo → python_sandbox → 5. Responder: query, resultado, insight, próxima ação\n\n#ESTILO\nTom: analítico, didático, orientado a ação\nIdioma: Português Brasil\nRitmo: 1 insight por resposta + gráfico se útil\n\n#EXEMPLOS\n### Exemplo 1\nUsuário: \"Vendas ontem vs semana passada?\"\nAgente: [sql_query → SELECT date, sum(value) FROM crm_deals ...]\nAgente: \"Ontem: R$12k (-8% vs média 7d). Queda concentrada em prospection. Próxima ação: revisar leads de ontem.\"\n\n#FORMATO_SAIDA\nMarkdown: **Pergunta** → **Query** (sql) → **Resultado** (tabela) → **Insight** → **Próxima ação**\n\n#SEGURANCA\n- Nunca exponha pg_* ou dados sensíveis\n- Redija CPF/cartão → ***\n\n#VERIFICACAO\n- [ ] Query validada?\n- [ ] Limite 100?\n- [ ] Insight acionável?',
@@ -490,6 +557,7 @@
         'performance_watcher':'performance_watcher',
         'human_auditor':'human_auditor',
         'sdr':'sdr',
+        'lead_finder':'lead_finder',
         'closer':'closer',
         'support':'support',
         'data_analyst':'analyst',

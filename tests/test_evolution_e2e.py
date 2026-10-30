@@ -7,8 +7,8 @@ def test_evolution_full_loop(monkeypatch):
     key = "testkey"
     raw = json.dumps(body, separators=(",", ":"), sort_keys=True)
     sig = hmac.new(key.encode(), raw.encode(), hashlib.sha256).hexdigest()
-    assert _verify_evolution_sig(sig, body, key) is True
-    assert _verify_evolution_sig("bad", body, key) is False
+    assert _verify_evolution_sig(sig, raw.encode(), key) is True
+    assert _verify_evolution_sig("bad", raw.encode(), key) is False
 
 def test_automation_templates():
     from aios.api.automations import AUTOMATION_TEMPLATES

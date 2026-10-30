@@ -1,6 +1,7 @@
 """Agent type templates — default prompts, tools, and config per agent type."""
 
 from aios.templates.sdr import SDR_TEMPLATE
+from aios.templates.lead_finder import LEAD_FINDER_TEMPLATE
 from aios.templates.closer import CLOSER_TEMPLATE
 from aios.templates.support import SUPPORT_TEMPLATE
 from aios.templates.data_analyst import DATA_ANALYST_TEMPLATE
@@ -52,6 +53,7 @@ TEMPLATES = {
     "manager_revops": REVOPS_MANAGER_TEMPLATE,
     "revops": REVOPS_TEMPLATE,
     "sdr": SDR_TEMPLATE,
+    "lead_finder": LEAD_FINDER_TEMPLATE,
     "closer": CLOSER_TEMPLATE,
     "support": SUPPORT_TEMPLATE,
     "data_analyst": DATA_ANALYST_TEMPLATE,

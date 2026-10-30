@@ -84,7 +84,7 @@ class TestSignatureVerification:
 
     def test_signature_rejects_wrong_key(self):
         from aios.api.evolution_webhook import _verify_evolution_sig
-        body = {"instance": "x"}
+        body = b'{"instance": "x"}'
         assert _verify_evolution_sig("", body, "right-key") is not True
 
     def test_stored_ciphertext_is_not_used_as_the_webhook_secret(self):

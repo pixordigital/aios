@@ -94,8 +94,9 @@ class TestEvolutionWebhookAuth:
         raw = json.dumps(body, separators=(",", ":"), sort_keys=True)
         sig = hmac.new(b"k", raw.encode(), hashlib.sha256).hexdigest()
         req = _Req({"x-evolution-signature": sig}, body)
+        req.state.aios_raw = raw.encode()
         assert _verify_request(req, "k") is True
-        assert _verify_evolution_sig(sig, body, "k") is True
+        assert _verify_evolution_sig(sig, raw.encode(), "k") is True
 
     def test_hmac_wrong_key_rejected(self):
         import hashlib

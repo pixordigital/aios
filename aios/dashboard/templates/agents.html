@@ -1,12 +1,53 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex-between mb-4">
-    <div><h1>Agentes & Times</h1><p class="text-sm text-secondary mt-1">{{ agents|length }} agente{{ 's' if agents|length != 1 }} · {{ agents | selectattr("status","equalto","active") | list | length }} ativos</p></div>
+    <div><h1>Agentes & Times</h1><p class="text-sm text-secondary mt-1">{{ agents|length }} agente{{ 's' if agents|length != 1 }} · {{ active_count }} ativos · {{ verified_count }} verificados{% if unverified_count %} · <span style="color:var(--amber)">{{ unverified_count }} sem verificação</span>{% endif %}</p></div>
     <div class="flex-center gap-2">
         <a href="/dashboard/control-center" class="btn btn-ghost">📊 Control Center</a>
         <a href="/dashboard/agents/new" class="btn btn-primary">+ Novo Agente</a>
     </div>
 </div>
+
+<div class="card mb-4" style="border:1px solid var(--border);padding:0.875rem 1rem">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.75rem">
+        <div style="display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap;font-size:0.8125rem">
+            <strong style="font-size:0.875rem">Prontidão para produção</strong>
+            {% set db_ok = readiness.db == 'ok' %}
+            {% set mig_ok = readiness.migrations == 'ok' %}
+            <span title="Banco de dados"><span class="badge-dot" style="background:{{ 'var(--green)' if db_ok else 'var(--red)' }}"></span> Banco: {{ readiness.db }}</span>
+            <span title="Migrações Alembic"><span class="badge-dot" style="background:{{ 'var(--green)' if mig_ok else 'var(--amber)' if readiness.migrations == 'unversioned' else 'var(--red)' }}"></span> Migrações: {% if readiness.migrations == 'ok' %}em dia{% elif readiness.migrations == 'unversioned' %}sem versão (schema create_all){% else %}{{ readiness.migrations }}{% endif %}</span>
+            <span title="Fila de tarefas (Redis)"><span class="badge-dot" style="background:{{ 'var(--green)' if readiness.redis == 'ok' else 'var(--amber)' }}"></span> Fila: {% if readiness.redis == 'ok' %}ok{% else %}fallback em memória{% endif %}</span>
+            <span><span class="badge-dot" style="background:{{ 'var(--green)' if unverified_count == 0 and verified_count else 'var(--amber)' }}"></span> {{ verified_count }} verificados · {{ unverified_count }} sem verificação</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+            <span class="text-xs text-tertiary" id="fleet-label">
+                {% if fleet_state and fleet_state.status in ['queued','running','cancelling'] %}
+                {{ fleet_state.done or 0 }}/{{ fleet_state.total or 0 }} · {{ fleet_state.ok or 0 }} ok · {{ fleet_state.failed or 0 }} falhas
+                {% elif fleet_state and fleet_state.status == 'done' %}
+                {{ fleet_state.ok or 0 }}/{{ fleet_state.total or 0 }} verificados · {{ fleet_state.failed or 0 }} falhas
+                {% elif fleet_state and fleet_state.status == 'cancelled' %}
+                Cancelado: {{ fleet_state.ok or 0 }}/{{ fleet_state.total or 0 }} verificados
+                {% else %}
+                Só fica verde depois de uma chamada real ao modelo
+                {% endif %}
+            </span>
+            <button type="button" class="btn btn-ghost btn-sm" id="fleet-cancel" onclick="cancelFleet()" style="display:none">Cancelar</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="fleet-btn" onclick="verifyAll(this)" {% if not active_count %}disabled title="Nenhum agente ativo"{% endif %}>Verificar ativos</button>
+        </div>
+    </div>
+</div>
+
+{% if deploy_result %}
+<div class="card mb-4" style="border-left:4px solid {{ 'var(--green)' if deploy_result == 'ok' else 'var(--red)' if deploy_result == 'failed' else 'var(--text-tertiary)' }};padding:0.875rem 1rem">
+    {% if deploy_result == 'ok' %}
+    <p class="text-sm" style="margin:0"><strong style="color:var(--green)">Agente verificado e ativo.</strong> O modelo respondeu à chamada de verificação e a evidência ficou registrada.</p>
+    {% elif deploy_result == 'failed' %}
+    <p class="text-sm" style="margin:0"><strong style="color:var(--red)">Verificação falhou — agente NÃO foi ativado.</strong> {{ deploy_reason }}</p>
+    {% else %}
+    <p class="text-sm" style="margin:0"><strong>Agente desativado.</strong></p>
+    {% endif %}
+</div>
+{% endif %}
 
 <!-- Blueprints de Governança (Deal Desk) -->
 <div class="card mb-4" style="border:1px solid rgba(0, 229, 160, 0.25);background:var(--bg-surface, var(--surface, #111));padding:1.25rem">
@@ -137,7 +178,7 @@
         <tbody>
             {% for a in agents %}
             {% set cost = cost_estimate(a.llm_config.get('model', '') if a.llm_config else '', a.llm_config.get('max_tokens', 4096) if a.llm_config else 4096) %}
-            <tr>
+            <tr{% if a.status == 'active' %} data-active-agent="{{ a.id }}"{% endif %}>
                 <td><a href="/dashboard/agents/{{ a.id }}/edit" style="color:var(--text);text-decoration:none;font-weight:500">{{ a.name }}</a></td>
                 <td><div class="flex-center gap-1" style="flex-wrap:wrap"><span class="text-sm text-secondary">{{ agent_type_label(a.agent_type) }}</span>{% if a.system_prompt and 'BANT' in a.system_prompt %}<span class="badge" style="font-size:0.55rem;background:var(--cyan-dim);color:var(--cyan);border-color:var(--cyan)">BANT</span>{% endif %}{% if a.system_prompt and 'GPCT' in a.system_prompt %}<span class="badge" style="font-size:0.55rem;background:var(--purple-dim);color:var(--purple);border-color:var(--purple)">GPCT</span>{% endif %}{% if a.system_prompt and 'SPIN' in a.system_prompt %}<span class="badge" style="font-size:0.55rem;background:var(--green-dim);color:var(--green);border-color:var(--green)">SPIN</span>{% endif %}{% if a.system_prompt and 'DEF' in a.system_prompt %}<span class="badge" style="font-size:0.55rem;background:var(--amber-dim);color:var(--amber);border-color:var(--amber)">DEF</span>{% endif %}{% if a.system_prompt and 'H2H' in a.system_prompt %}<span class="badge" style="font-size:0.55rem;background:var(--bg-hover);color:var(--text)">H2H</span>{% endif %}</div></td>
                 <td><span class="text-xs font-mono" style="color:var(--text-tertiary)">{{ (a.llm_config.get('model', '?') if a.llm_config else '?').split('/')[-1][:20] }}</span></td>
@@ -153,8 +194,19 @@
                     {% else %}<span class="text-xs text-tertiary">—{% endif %}
                 </td>
                 <td>
-                    {% if a.status == 'active' %}
-                    <span class="badge" style="border-color:var(--green);color:var(--green)"><span class="badge-dot" style="background:var(--green)"></span> Ativo</span>
+                    {% set inst = deployments.get(a.id) %}
+                    {% set ev = (inst.extra_data or {}) if inst else {} %}
+                    {% if a.status == 'active' and ev.get('verified') %}
+                    <span class="badge" style="border-color:var(--green);color:var(--green)" title="Verificado em {{ ev.get('verified_at', '') }} · {{ ev.get('latency_ms', '?') }}ms"><span class="badge-dot" style="background:var(--green)"></span> Verificado</span>
+                    <div class="text-xs text-tertiary" style="margin-top:0.125rem">{{ ev.get('latency_ms', '?') }}ms · {{ (ev.get('verified_at', '') or '')[:16]|replace('T', ' ') }}</div>
+                    {% elif a.status == 'active' and inst and ev.get('verified') is sameas false %}
+                    <span class="badge" style="border-color:var(--amber);color:var(--amber)" title="{{ ev.get('error', '') }}"><span class="badge-dot" style="background:var(--amber)"></span> Ativo · última verificação falhou</span>
+                    <div class="text-xs" style="margin-top:0.125rem;color:var(--red)">{{ (ev.get('error', '') or '')[:90] }}</div>
+                    {% elif a.status == 'active' %}
+                    <span class="badge" style="border-color:var(--amber);color:var(--amber)"><span class="badge-dot" style="background:var(--amber)"></span> Ativo sem verificação</span>
+                    {% elif inst and ev.get('verified') is sameas false %}
+                    <span class="badge" style="border-color:var(--red);color:var(--red)" title="{{ ev.get('error', '') }}"><span class="badge-dot" style="background:var(--red)"></span> Falha na verificação</span>
+                    <div class="text-xs" style="margin-top:0.125rem;color:var(--red)">{{ (ev.get('error', '') or '')[:90] }}</div>
                     {% elif a.status == 'draft' %}
                     <span class="badge" style="border-color:var(--border);color:var(--text-tertiary)"><span class="badge-dot" style="background:var(--text-tertiary)"></span> Rascunho</span>
                     {% else %}
@@ -164,7 +216,12 @@
                 <td style="text-align:right"><div class="flex-center" style="justify-content:flex-end;gap:0.25rem">
                     <a href="/dashboard/agents/{{ a.id }}/edit" class="btn btn-ghost btn-sm">Editar</a>
                     <button onclick="testAgent('{{ a.id }}', this)" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" title="Dry-run">Testar</button>
-                    <a href="/dashboard/agents/{{ a.id }}/deploy" class="btn btn-sm {% if a.status == 'active' %}btn-ghost{% else %}btn-primary{% endif %}" style="padding:0.25rem 0.5rem;font-size:0.7rem">{{ 'Desativar' if a.status == 'active' else 'Implantar' }}</a>
+                    {% if a.status == 'active' %}
+                    <button onclick="verifyAgent('{{ a.id }}', this)" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" title="Chamar o modelo agora e registrar a evidência">Re-verificar</button>
+                    <a href="/dashboard/agents/{{ a.id }}/deploy" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" onclick='return confirm({{ ("Desativar " ~ a.name ~ "? O agente para de responder imediatamente.")|tojson }})'>Desativar</a>
+                    {% else %}
+                    <a href="/dashboard/agents/{{ a.id }}/deploy" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" onclick="this.textContent='Verificando…';this.style.pointerEvents='none'">Implantar e verificar</a>
+                    {% endif %}
                     <a href="/dashboard/agents/{{ a.id }}/clone" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:0.7rem" title="Duplicar">Duplicar</a>
                     <a href="/dashboard/agents/{{ a.id }}/delete" class="btn btn-danger btn-sm">Excluir</a>
                 </div></td>
@@ -197,5 +254,72 @@ async function testAgent(id, btn){
   }catch(e){ alert('Erro: '+e.message)}
   btn.textContent=orig; btn.disabled=false;
 }
+async function verifyAgent(id, btn){
+  var orig=btn.textContent; btn.textContent='Verificando…'; btn.disabled=true;
+  try{
+    var r=await fetch('/dashboard/agents/'+id+'/verify',{method:'POST'});
+    var j=await r.json();
+    if(j.ok){ alert('Verificado: '+(j.evidence.model||'')+' respondeu em '+(j.evidence.latency_ms||'?')+'ms'); location.reload(); }
+    else { alert('Falha na verificação: '+(j.error||'erro')); }
+  }catch(e){ alert('Erro: '+e.message)}
+  btn.textContent=orig; btn.disabled=false;
+}
+async function verifyAll(btn){
+  btn.disabled=true; btn.textContent='Iniciando…';
+  try{
+    var r=await fetch('/dashboard/agents/verify-fleet',{method:'POST'});
+    var j=await r.json();
+    if(!j.ok){
+      alert('Não foi possível iniciar: '+(j.error||'erro'));
+      btn.disabled=false; btn.textContent='Verificar ativos';
+      return;
+    }
+    renderFleet(j.state);
+    pollFleet();
+  }catch(e){
+    alert('Erro: '+e.message);
+    btn.disabled=false; btn.textContent='Verificar ativos';
+  }
+}
+var FLEET = {{ (fleet_state or {})|tojson }};
+var FLEET_POLL = null;
+function fleetActive(s){ return !!s && ['queued','running','cancelling'].indexOf(s.status)>=0; }
+function renderFleet(s){
+  var btn=document.getElementById('fleet-btn');
+  var cancel=document.getElementById('fleet-cancel');
+  var label=document.getElementById('fleet-label');
+  if(!btn) return;
+  if(fleetActive(s)){
+    btn.disabled=true;
+    btn.textContent = s.status==='queued' ? 'Na fila…' : 'Verificando '+(s.done||0)+'/'+(s.total||0)+'…';
+    if(cancel) cancel.style.display = s.status==='cancelling' ? 'none' : 'inline-flex';
+    if(label) label.textContent = (s.status==='queued' ? 'Aguardando o worker… ' : '')
+      + (s.done||0)+'/'+(s.total||0)+' · '+(s.ok||0)+' ok · '+(s.failed||0)+' falhas';
+  } else {
+    btn.disabled = {{ 'true' if not active_count else 'false' }};
+    btn.textContent='Verificar ativos';
+    if(cancel) cancel.style.display='none';
+    if(s && s.status==='done' && label)
+      label.textContent=(s.ok||0)+'/'+(s.total||0)+' verificados · '+(s.failed||0)+' falhas';
+    else if(s && s.status==='cancelled' && label)
+      label.textContent='Cancelado: '+(s.ok||0)+'/'+(s.total||0)+' verificados';
+  }
+}
+async function pollFleet(){
+  clearTimeout(FLEET_POLL);
+  try{
+    var r=await fetch('/dashboard/agents/verify-fleet');
+    var j=await r.json();
+    renderFleet(j.state);
+    if(fleetActive(j.state)){ FLEET_POLL=setTimeout(pollFleet, 2000); return; }
+    if(j.state && j.state.done){ location.reload(); }
+  }catch(e){ FLEET_POLL=setTimeout(pollFleet, 5000); }
+}
+async function cancelFleet(){
+  try{ await fetch('/dashboard/agents/verify-fleet/cancel',{method:'POST'}); }catch(e){}
+  pollFleet();
+}
+renderFleet(FLEET);
+if(fleetActive(FLEET)) pollFleet();
 </script>
 {% endblock %}

@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
     password_bcrypt_rounds: int = 12
     dashboard_enabled: bool = True
+    # Deploy spends one real provider call before flipping an agent to active.
+    # A model slower than this is treated as not ready rather than silently
+    # deployed; a deploy that cannot be measured is not a deploy.
+    deploy_probe_timeout_seconds: float = 25.0
+    # Fleet verification probes N agents at once. 2 matches the deploy semaphore
+    # so a fleet run cannot starve a manual deploy of provider capacity.
+    fleet_verify_concurrency: int = 2
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_starter: str = ""

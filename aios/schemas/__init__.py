@@ -90,7 +90,7 @@ _GOVERNANCE_DEFAULT = {
 }
 
 
-AgentType = Literal["custom", "orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist", "frontend", "backend", "red", "blue"]
+AgentType = Literal["custom", "orchestrator", "manager", "sdr", "lead_finder", "closer", "support", "data_analyst", "data_scientist", "frontend", "backend", "red", "blue"]
 
 
 class AgentCreate(BaseModel):

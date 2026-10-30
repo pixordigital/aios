@@ -92,22 +92,119 @@ async def telemetry_agents(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    """Per-agent performance metrics."""
-    from aios.core.telemetry import telemetry
-    agents = telemetry.get_all_agents_summary(org_id)
+    """Per-agent metrics from persisted rows (identical in every worker)."""
+    rows = await _agent_health_rows(db, org_id)
+    return {"agents": rows}
 
-    # enrich with agent names and health status
-    agent_ids = [a["agent_id"] for a in agents]
-    if agent_ids:
-        agent_objs = (await db.execute(
-            select(Agent).where(Agent.id.in_(agent_ids))
-        )).scalars().all()
-        name_map = {a.id: a.name for a in agent_objs}
-        for a in agents:
-            a["name"] = name_map.get(a["agent_id"], "Unknown")
-            a["health"] = health_tracker.get_status(a["agent_id"])
 
-    return {"agents": agents}
+async def _agent_health_rows(db: DatabaseBackend, org_id: str) -> list[dict]:
+    """DB-backed deploy + runtime status, scoped to org.
+
+    The old version read `telemetry`/`health_tracker`, both process-local: with
+    2 gunicorn workers (and an ARQ worker running the actual agents) the
+    dashboard usually saw an empty tracker, and the endpoint returned every
+    tenant's agents because the tracker does not store org_id.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d-%H")
+
+    from aios.db.models import AgentInstance, AgentMetric
+
+    agents = (
+        await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))
+    ).scalars().all()
+    if not agents:
+        return []
+
+    metric_rows = (
+        await db.execute(
+            select(
+                AgentMetric.agent_id,
+                func.sum(AgentMetric.messages),
+                func.sum(AgentMetric.tokens),
+                func.sum(AgentMetric.errors),
+                func.sum(AgentMetric.tool_calls),
+                func.avg(AgentMetric.avg_response_ms),
+            )
+            .where(AgentMetric.org_id == org_id, AgentMetric.hour >= since)
+            .group_by(AgentMetric.agent_id)
+        )
+    ).all()
+    metrics = {
+        r[0]: {
+            "messages": int(r[1] or 0),
+            "tokens": int(r[2] or 0),
+            "errors": int(r[3] or 0),
+            "tool_calls": int(r[4] or 0),
+            "avg_response_ms": int(r[5] or 0),
+        }
+        for r in metric_rows
+    }
+
+    instances = (
+        await db.execute(
+            select(AgentInstance)
+            .where(AgentInstance.org_id == org_id, AgentInstance.agent_id.in_([a.id for a in agents]))
+            .order_by(AgentInstance.created_at.desc())
+        )
+    ).scalars().all()
+    latest: dict[str, AgentInstance] = {}
+    for inst in instances:
+        latest.setdefault(inst.agent_id, inst)
+
+    return [
+        _health_entry(a, metrics.get(a.id, {}), latest.get(a.id))
+        for a in agents
+    ]
+
+
+def _health_entry(agent: Agent, metric: dict, inst) -> dict:
+    messages = metric.get("messages", 0)
+    errors = metric.get("errors", 0)
+    avg_ms = metric.get("avg_response_ms", 0)
+    error_rate = round(errors / messages * 100, 1) if messages else 0.0
+
+    evidence = (inst.extra_data or {}) if inst else {}
+    if not inst or "verified" not in evidence:
+        deploy_status = "none" if agent.status != "active" else "unverified"
+    elif evidence.get("verified"):
+        deploy_status = "verified"
+    else:
+        deploy_status = "failed"
+
+    if agent.status != "active":
+        status = "failed" if deploy_status == "failed" else "draft"
+    elif deploy_status == "failed":
+        status = "degraded"
+    elif deploy_status == "unverified":
+        status = "unverified"
+    elif messages == 0:
+        status = "no_traffic"
+    elif error_rate > 5.0 or avg_ms > 5000:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    return {
+        "agent_id": agent.id,
+        "name": agent.name,
+        "agent_status": agent.status,
+        "status": status,
+        "deploy_status": deploy_status,
+        "messages": messages,
+        "tokens": metric.get("tokens", 0),
+        "errors": errors,
+        "error_rate_pct": error_rate,
+        "avg_response_ms": avg_ms,
+        "tool_calls": metric.get("tool_calls", 0),
+        "failures": errors,
+        "successes": max(messages - errors, 0),
+        "verified_at": evidence.get("verified_at"),
+        "latency_ms": evidence.get("latency_ms"),
+        "model": evidence.get("model"),
+        "last_deploy_error": evidence.get("error"),
+    }
 
 
 @router.get("/telemetry/agent/{agent_id}")
@@ -138,12 +235,11 @@ async def telemetry_agent(
 
 @router.get("/telemetry/health")
 async def telemetry_health(
+    db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    """Agent health status for all agents in org."""
-    all_health = health_tracker.all_status()
-    # filter to org (health tracker doesn't store org_id, return all)
-    return {"agents": list(all_health.values())}
+    """Agent health for this org only, derived from persisted rows."""
+    return {"agents": await _agent_health_rows(db, org_id)}
 
 
 @router.get("/usage/monthly")
