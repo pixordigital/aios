@@ -26,7 +26,7 @@ loopback-only: `scripts/kokoro-host-forward.sh`.
 
 - Deploy padrão: 5 serviços, sem voice. Ativar voice: Coolify → Service → General → Custom Docker Compose → add `--profile voice` ao `docker compose up`.
 - O perfil `voice` sobe apenas `voice-tts-kokoro`. O antigo `voice-agent` (worker LiveKit) foi removido.
-- `voice-stt` continua separado e opcional (Whisper STT).
+- Whisper STT self-hosted removido: a imagem não existe mais. Aponte `AIOS_VOICE_STT_URL` para um STT externo (OpenAI/Deepgram/Groq).
 
 ## CI
 

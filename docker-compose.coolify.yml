@@ -245,10 +245,6 @@ services:
       AIOS_CALCOM_API_VERSION: ${AIOS_CALCOM_API_VERSION:-2024-08-13}
       AIOS_CALCOM_EVENT_TYPE_ID: ${AIOS_CALCOM_EVENT_TYPE_ID:-0}
       AIOS_CALCOM_TIMEZONE: ${AIOS_CALCOM_TIMEZONE:-America/Sao_Paulo}
-      # Whisper STT config (profile voice-stt)
-      WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
-      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318"
       AIOS_LOG_FORMAT: "json"
       AIOS_HTTPS_ONLY: "true"
@@ -314,35 +310,15 @@ services:
       resources:
         limits: { cpus: "1", memory: 1G }
 
-  # ─── Voz (leve: Kokoro TTS; Whisper STT opcional) ───
+  # ─── Voz (leve: Kokoro TTS) ───
   # Perfil "voice": sobe voice-tts-kokoro (CPU, ~1GB RAM)
-  # Perfil "voice-stt": adiciona voice-stt-whisper (CPU large-v3 ~4GB RAM / GPU ~2GB VRAM)
   # TTS Kokoro: $0/min, 72 vozes, PT-BR nativo (pm_alex/pf_dora)
-  # STT Whisper: $0/min self-hosted, 99+ idiomas, timestamps palavra
   # Kokoro TTS auto-hospedado, sem GPU.
-
-  # Whisper STT self-hosted (CPU optimized) — ative com: docker compose --profile voice-stt up -d
-  # Modelos: tiny (39M) → base (74M) → small (244M) → medium (769M) → large-v3 (1.5B)
-  # CPU: large-v3 ~4GB RAM, ~10x realtime. GPU: large-v3 ~2GB VRAM, ~50x realtime.
-  # Para VPS 8GB RAM: use model=small (244M, ~1.5GB RAM, ~5x realtime)
-  voice-stt-whisper:
-    profiles: ["voice-stt"]
-    image: ghcr.io/onyx-dot-app/whisper-api:latest
-    environment:
-      MODEL: ${WHISPER_MODEL:-small}
-      DEVICE: ${WHISPER_DEVICE:-cpu}
-      COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
-      BATCH_SIZE: ${WHISPER_BATCH_SIZE:-16}
-      NUM_WORKERS: ${WHISPER_NUM_WORKERS:-2}
-    ports:
-      - "9000:9000"
-    volumes:
-      - voice-stt-data:/root/.cache/whisper
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "2", memory: 4G }
-        reservations: { cpus: "1", memory: 2G }
+  #
+  # O Whisper STT self-hosted saiu: a imagem ghcr.io/onyx-dot-app/whisper-api
+  # não existe mais e o Coolify faz pull de todo serviço do arquivo, mesmo com
+  # profile — o deploy inteiro falhava. Use AIOS_VOICE_STT_URL apontando para um
+  # STT externo (OpenAI/Deepgram/Groq ou um faster-whisper do seu lado).
 
   # Ollama local LLM (opcional) — ative com: docker compose --profile ollama up -d
   # ollama:
@@ -384,6 +360,5 @@ volumes:
   evolution-data:
   evolution-store:
   voice-tts-data:
-  voice-stt-data:
   voice-kokoro-data:
   ollama-data:

@@ -1,6 +1,6 @@
 # AIOS — Coolify 1-Click (with Evolution + Kokoro TTS)
 # Deploy: Coolify → New Resource → Docker Compose (Raw) → paste this file
-# Recommended VPS: 4 vCPU / 8GB RAM minimum (16GB for voice-stt)
+# Recommended VPS: 4 vCPU / 8GB RAM minimum
 # Docs: COOLIFY_SETUP.md
 
 services:
@@ -134,7 +134,7 @@ services:
       AIOS_RETELL_API_KEY: ${AIOS_RETELL_API_KEY:-}
       AIOS_RETELL_AGENT_ID: ${AIOS_RETELL_AGENT_ID:-}
       AIOS_VOICE_TTS_URL: ${AIOS_VOICE_TTS_URL:-http://voice-tts-kokoro:8880/v1}
-      AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-http://voice-stt:9000/v1}
+      AIOS_VOICE_STT_URL: ${AIOS_VOICE_STT_URL:-}
       AIOS_VOICE_BRIDGE_URL: ${AIOS_VOICE_BRIDGE_URL:-}
       AIOS_VOICE_FROM_NUMBER: ${AIOS_VOICE_FROM_NUMBER:-}
       AIOS_VOICE_WEBHOOK_SECRET: ${AIOS_VOICE_WEBHOOK_SECRET:-}
@@ -226,26 +226,9 @@ services:
         reservations: { cpus: "0.5", memory: 1G }
 
 
-  # ─── Optional: Whisper STT (CPU) — enable with --profile voice-stt ───
-  # Requires ~4GB RAM. Use model=small for 8GB VPS.
-  voice-stt:
-    profiles: ["voice-stt"]
-    image: ghcr.io/onyx-dot-app/whisper-api:latest
-    environment:
-      MODEL: ${WHISPER_MODEL:-small}
-      DEVICE: ${WHISPER_DEVICE:-cpu}
-      COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
-      BATCH_SIZE: ${WHISPER_BATCH_SIZE:-16}
-      NUM_WORKERS: ${WHISPER_NUM_WORKERS:-2}
-    ports:
-      - "9000:9000"
-    volumes:
-      - voice-stt-data:/root/.cache/whisper
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits: { cpus: "2", memory: 4G }
-        reservations: { cpus: "1", memory: 2G }
+  # Whisper STT self-hosted removido: a imagem ghcr.io/onyx-dot-app/whisper-api
+  # não existe mais e o pull derrubava o deploy. Aponte AIOS_VOICE_STT_URL para
+  # um STT externo (OpenAI/Deepgram/Groq) ou suba seu próprio faster-whisper.
 
 volumes:
   postgres-data:
@@ -255,4 +238,3 @@ volumes:
   evolution-store:
   voice-kokoro-data:
   voice-kokoro-voices:
-  voice-stt-data:
