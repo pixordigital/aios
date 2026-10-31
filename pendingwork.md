@@ -8,6 +8,11 @@ Last updated: 2026-10-31
 
 ## Done this session
 
+- Model selector (`aios/core/model_select.py`): scores are now absolute anchors
+  (frontier index scale, $1/1M blended = 0.5 cost score, 1M ctx = 1.0) instead
+  of cohort-relative normalisation. Ranks no longer flip when an unrelated model
+  enters the catalog; a live refresh moved `glm-5.3-flash` to $0.016/$0.148 and
+  the picks were recomputed from that. `tests/test_model_select.py` still green.
 - Full suite confirmed green: `1361 passed, 19 skipped` in 43:16, exit 0
   (`/tmp/opencode/full_pytest4.log`). `_fresh_db` hardening verified.
 - `graphify update .` run after the fix (no topology changes).

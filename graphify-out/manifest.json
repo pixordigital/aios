@@ -3150,15 +3150,15 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1793453715.7966902,
-    "seen": 1793455727.5554175,
-    "ast_hash": "9b8e664c6f149f63501e4dad813f8a85",
+    "mtime": 1793455812.080895,
+    "seen": 1793455832.6526613,
+    "ast_hash": "4cf1b54ca1040c67576e7e861208aa5a",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
-    "mtime": 1793357400.0794811,
-    "seen": 1793358179.3538122,
-    "ast_hash": "2a800bfe3de502a056fa3f62dd7a58c6",
+    "mtime": 1793455788.3436797,
+    "seen": 1793455832.6318674,
+    "ast_hash": "c4185aa5d1cd3bac407631dfa825fecc",
     "semantic_hash": ""
   },
   "tests/test_model_select.py": {

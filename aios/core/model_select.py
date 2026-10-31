@@ -36,6 +36,13 @@ _INDICES = ("intelligence_index", "coding_index", "agentic_index")
 # capacity, so they are not candidates.
 _EXCLUDED_SUFFIXES = (":batch", ":free")
 
+# Absolute score anchors (see rank()): frontier score per benchmark family, the
+# blended price where the cost score is 0.5, and the context window treated as
+# full marks. Fixed on purpose so ranks do not move with the catalog.
+_INDEX_SCALE = {"intelligence": 60.0, "coding": 80.0, "agentic": 60.0}
+_COST_HALF = 1.0
+_MAX_CTX = 1_000_000
+
 # One profile per kind of work. Weights sum to 1. `tools` means the agent's
 # template actually calls tools, so a chat-only model cannot do the job.
 # `min_context` is what the template's prompt + memory budget needs, rounded up.
@@ -165,13 +172,6 @@ def _eligible(model: dict, profile: dict) -> bool:
     return True
 
 
-def _norm(values: list[float]) -> list[float]:
-    lo, hi = min(values), max(values)
-    if hi <= lo:
-        return [1.0] * len(values)
-    return [(v - lo) / (hi - lo) for v in values]
-
-
 def rank(agent_type: str, models: list[dict]) -> list[Pick]:
     """Score every eligible model for one agent type, best first.
 
@@ -196,42 +196,28 @@ def rank(agent_type: str, models: list[dict]) -> list[Pick]:
     if not scored:
         return []
 
-    # Normalise each axis within the cohort, so a 0-100 index and a price in
-    # dollars are compared by position, not by unit.
-    axis_values: dict[str, list[float]] = {}
-    for axis in quality_axes:
-        vals = [_aa(m).get(index_key[axis]) for m in scored]
-        present = [float(v) for v in vals if v is not None]
-        lo, hi = (min(present), max(present)) if present else (0.0, 0.0)
-        axis_values[axis] = [
-            ((float(v) - lo) / (hi - lo)) if v is not None and hi > lo
-            else (1.0 if v is not None else 0.0)
-            for v in vals
-        ]
-
-    blended = [(lambda pi, po: pi + po * 0.5)(*_price(m)) for m in scored]
-    # Cheapest = best. Log scale: moving $0.10 -> $0.20 should not count the
-    # same as $10 -> $20 when agents run thousands of calls.
-    cost_scores = [1.0 - v for v in _norm([math.log1p(b) for b in blended])]
-    ctx_scores = _norm([math.log1p(m.get("context_length") or 0) for m in scored])
+    # Absolute scales, deliberately not relative to the current cohort: a
+    # model's rank must not change because an unrelated model entered the
+    # catalog. Index scale is the frontier score of that benchmark family (so
+    # 1.0 is best-in-class); cost scale makes $1/1M blended ≈ 0.5.
+    total_weight = sum(profile[k] for k in (*quality_axes, "cost", "context") if profile.get(k))
 
     picks: list[Pick] = []
-    for i, model in enumerate(scored):
+    for model in scored:
         total = 0.0
-        used = 0.0
         for axis in quality_axes:
-            total += profile[axis] * axis_values[axis][i]
-            used += profile[axis]
-        total += profile["cost"] * cost_scores[i]
-        used += profile["cost"]
-        if profile.get("context"):
-            total += profile["context"] * ctx_scores[i]
-            used += profile["context"]
-        score = total / used if used else 0.0
-
+            value = _aa(model).get(index_key[axis])
+            total += profile[axis] * (min(1.0, value / _INDEX_SCALE[axis]) if value else 0.0)
         pin, pout = _price(model)
+        blended = pin + pout * 0.5
+        total += profile["cost"] * (1.0 / (1.0 + blended / _COST_HALF))
+        if profile.get("context"):
+            ctx = model.get("context_length") or 0
+            total += profile["context"] * (math.log1p(ctx) / math.log1p(_MAX_CTX))
+        score = total / total_weight if total_weight else 0.0
+
         idx = {k: _aa(model).get(index_key[k]) for k in quality_axes}
-        picks.append(Pick(model["id"], round(score, 4), pin, pout,
+        picks.append(Pick(model["id"], round(min(1.0, score), 4), pin, pout,
                           model.get("context_length") or 0,
                           {k: v for k, v in idx.items() if v is not None}))
 
