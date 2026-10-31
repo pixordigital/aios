@@ -245,7 +245,9 @@ services:
 
   voice-tts-kokoro:
     profiles: ["voice"]
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    # Pinned by digest, not `latest`: Coolify pulls every service on each deploy,
+    # and `latest` moved, so every deploy re-downloaded ~5GB and filled the disk.
+    image: ghcr.io/remsky/kokoro-fastapi-cpu@sha256:cbcc28802fb5d1eaaba8b91e38b0e872a669e85831c513cf6a29c709cbe25405
     environment:
       USE_GPU: "false"
     volumes:
