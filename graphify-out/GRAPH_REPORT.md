@@ -1,7 +1,7 @@
-# Graph Report - pixor_aios  (2026-10-30)
+# Graph Report - pixor_aios  (2026-10-31)
 
 ## Corpus Check
-- 457 files · ~385,899 words
+- 457 files · ~385,893 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 16 file(s) not represented in the graph (top: (none) 8, .example 2, .service 2)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a9550ff7`
+- Built from commit: `8542f5c7`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1459,6 +1459,6 @@ _Questions this graph is uniquely positioned to answer:_
 - **What is the exact relationship between `Agent Sandbox / Playground (streaming chat + tool execution)` and `YouTube Canais Autônomos`?**
   _Edge tagged AMBIGUOUS (relation: related_to) - confidence is low._
 - **Why does `db_session()` connect `db_session` to `whatsapp_template_studio.py`, `deployment.py`, `logging`, `score_from_events`, `Evaluator`, `DatabaseBackend`, `heartbeat`, `test_crm_tools.py`, `_register_syscall_handlers`, `billing.py`, `whatsapp.py`, `lifespan`, `SwarmCoordinator`, `limits.py`, `slack_webhook`, `main.py`, `whatsapp_guard.py`, `core/voice.py`, `app.py`, `Team`, `test_teams_map.py`, `SparcWorkflow`, `MemoryManager`, `storage.py`, `core/agent.py`, `publisher.py`, `ws.py`, `check_url`, `jobs.py`, `admin_api.py`, `voice_webhook`, `models.py`, `curated.py`, `AgentTelemetry`, `post`, `test_curated_memory.py`, `.select`?**
-  _High betweenness centrality (0.048) - this node is a cross-community bridge._
-- **Why does `DatabaseBackend` connect `DatabaseBackend` to `deployment.py`, `api/auth.py`, `db_session`, `schemas/__init__.py`, `crm2.py`, `heartbeat`, `_register_syscall_handlers`, `billing.py`, `TeamOrchestrator`, `BackendRegistry`, `analytics.py`, `test_audit_blockers.py`, `SQLAlchemyBackend`, `WorkflowRun`, `app.py`, `Team`, `update_deal`, `AgentRuntime`, `MemoryManager`, `tracing.py`, `storage.py`, `core/agent.py`, `upload_file`, `User`, `workflows.py`, `ChannelConnection`, `automations.py`, `models.py`, `.select`?**
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
+- **Why does `EvolutionChannel` connect `EvolutionChannel` to `test_whatsapp_webhook.py`, `TestEvolutionChannel`, `test_evolution_channel.py`, `ChannelConnection`, `app.py`, `models.py`, `_ch`, `OutboundMessage`, `_register_syscall_handlers`, `Channel`, `test_whatsapp_batching.py`, `2. BAA / DPA — LGPD (Encarregado + Medidas)`, `TeamOrchestrator`, `test_tool_execution_and_guards.py`, `.select`?**
   _High betweenness centrality (0.044) - this node is a cross-community bridge._

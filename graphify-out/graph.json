@@ -252218,7 +252218,7 @@
       "confidence_score": 0.95,
       "context": "_stub_deploy_probe",
       "source_file": "pendingwork.md",
-      "source_location": "L43",
+      "source_location": "L56",
       "weight": 1.0
     },
     {
@@ -272047,5 +272047,5 @@
       "source_file": "aios/dashboard/templates/evolution.html"
     }
   ],
-  "built_at_commit": "a9550ff723e9eaee0781fc89646c420040d5d72f"
+  "built_at_commit": "8542f5c7b35aac1bf94efff0816a86d82dd0f747"
 }

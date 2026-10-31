@@ -2142,15 +2142,15 @@
     "semantic_hash": "3bc7041d967dc72fe9dbca2fb0fbc477"
   },
   "docker-compose.coolify.one-click.yml": {
-    "mtime": 1791026931.6339078,
-    "seen": 1791029136.8851824,
-    "ast_hash": "987d3b40d0bc7ca5707597c30ecdd861",
+    "mtime": 1793358646.4689114,
+    "seen": 1793455727.5548036,
+    "ast_hash": "e2c6d0db942376c189e63e2b6c6402b1",
     "semantic_hash": ""
   },
   "docker-compose.coolify.yml": {
-    "mtime": 1791159174.0528445,
-    "seen": 1793058748.478265,
-    "ast_hash": "06a309c73a6cd7afbf3404a28383c473",
+    "mtime": 1793452838.7811184,
+    "seen": 1793455727.5548072,
+    "ast_hash": "e69e47f073a086b588b2d4b4ef515af3",
     "semantic_hash": ""
   },
   "docker-compose.suite.yml": {
@@ -2226,9 +2226,9 @@
     "semantic_hash": ""
   },
   "docs/VOICE_SMOKE.md": {
-    "mtime": 1790858339.4074323,
-    "seen": 1790904342.7390728,
-    "ast_hash": "4be6272f8455d1f81fbd5fa4ac0b08f4",
+    "mtime": 1793358659.256402,
+    "seen": 1793455727.555269,
+    "ast_hash": "2301dac1c67cc488612c57120e4a3fd2",
     "semantic_hash": ""
   },
   "docs/WHATSAPP_GATEWAY_RUNBOOK.md": {
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1793355090.1048458,
-    "seen": 1793358179.3714874,
-    "ast_hash": "e667e694c1e14318621a036f48115f36",
+    "mtime": 1793453715.7966902,
+    "seen": 1793455727.5554175,
+    "ast_hash": "9b8e664c6f149f63501e4dad813f8a85",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -3189,6 +3189,12 @@
     "mtime": 1793357428.3581083,
     "seen": 1793358179.3695836,
     "ast_hash": "b52d66937b7d82453a226179e71e070e",
+    "semantic_hash": ""
+  },
+  "docker-compose.calcom.yml": {
+    "mtime": 1793451977.5530179,
+    "seen": 1793455727.5547976,
+    "ast_hash": "09efc4a229e4170bef30ef1a4ff1e57d",
     "semantic_hash": ""
   }
 }
