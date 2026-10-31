@@ -4,7 +4,8 @@ Last updated: 2026-10-31
 
 ## Open
 
-- None. `main` = `f4cadce` deployed to Coolify (`pixor-aios`), app/worker healthy.
+- None. `main` = `4a59887` deployed to Coolify (`pixor-aios`), app/worker healthy
+  (`/health` 200, db ok, migrations ok).
 
 ## Done this session
 
