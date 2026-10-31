@@ -1,10 +1,10 @@
 # Pending work
 
-Last updated: 2026-10-30
+Last updated: 2026-10-31
 
 ## Open
 
-- None.
+- None. `main` = `f4cadce` deployed to Coolify (`pixor-aios`), app/worker healthy.
 
 ## Done this session
 
@@ -40,6 +40,19 @@ Earlier in the session (all verified):
 ## Notes for next session
 
 - Tests need pytest in the venv: `.venv/bin/python -m pip install pytest pytest-asyncio`.
+- Deploy is disk-bound: the VPS root is 75GB and Docker images alone are ~30GB.
+  Coolify **pulls every service** in `docker-compose.coolify.yml` on each deploy,
+  profiles ignored. That is why Cal.com moved to `docker-compose.calcom.yml`
+  (~4.5GB image) and Kokoro TTS is pinned by digest instead of `latest`
+  (it re-downloaded ~5GB per deploy). Keep both rules: no heavy services in the
+  Coolify file, no floating tags.
+- If a deploy fails on "no space", free space before retrying: remove old
+  `<app>_app:<sha>` / `_worker:<sha>` images, `docker builder prune -af`, then
+  check `df -h /`. Do not retry at <3GB free.
+- Disk-full also corrupted the Redis AOF (`Bad file format reading the append
+  only file`). Fix used: `docker run --rm -v <app>_redis-data:/data redis:7-alpine
+  sh -c 'printf "y\n" | redis-check-aof --fix /data/appendonlydir/appendonly.aof.manifest'`.
+  A backup was kept at `/data/appendonlydir.bak` inside the volume.
 - Do not remove the `_stub_deploy_probe` autouse fixture; it keeps tests off paid
   provider APIs.
 - Always start a full run from a clean DB (`rm -f tests/test.db*`); the fixture now
