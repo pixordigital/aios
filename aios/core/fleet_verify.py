@@ -10,6 +10,7 @@ state instead of pretending the job is durable.
 import asyncio
 import json
 import logging
+from typing import Any
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -133,7 +134,7 @@ async def start_fleet_verification(db, org_id: str, user_id: str | None = None) 
         raise FleetVerifyError("no active agents to verify")
 
     payload = {"org_id": org_id, "agent_ids": [a.id for a in agents], "user_id": user_id}
-    state = {
+    state: dict[str, Any] = {
         "org_id": org_id,
         "job_id": None,
         "status": "queued",

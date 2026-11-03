@@ -208,7 +208,10 @@ def rank(agent_type: str, models: list[dict]) -> list[Pick]:
         for axis in quality_axes:
             value = _aa(model).get(index_key[axis])
             total += profile[axis] * (min(1.0, value / _INDEX_SCALE[axis]) if value else 0.0)
-        pin, pout = _price(model)
+        prices = _price(model)
+        if prices is None:
+            continue
+        pin, pout = prices
         blended = pin + pout * 0.5
         total += profile["cost"] * (1.0 / (1.0 + blended / _COST_HALF))
         if profile.get("context"):
@@ -271,7 +274,7 @@ async def _main() -> None:
 
     types = args.types or list(TYPE_PROFILE)
     models = await fetch_catalog(force=args.refresh)
-    out = {}
+    out: dict[str, list[dict[str, object]]] = {}
     for t in types:
         picks = rank(t, models)[: args.limit]
         out[t] = [
@@ -288,10 +291,10 @@ async def _main() -> None:
             print(f"{t:<{width}}  (no model meets the role's requirements)")
             continue
         best = picks[0]
-        print(f"{t:<{width}}  {best['model']:<38} ${best['price_in']:g}/${best['price_out']:g}"
-              f"  {best['context'] // 1000}k  {best['indices']}")
+        print(f"{t:<{width}}  {str(best['model']):<38} ${float(best['price_in']):g}/${float(best['price_out']):g}"
+              f"  {int(best['context']) // 1000}k  {best['indices']}")
         for alt in picks[1:]:
-            print(f"{'':<{width}}  ↳ {alt['model']:<36} ${alt['price_in']:g}/{alt['price_out']:g}")
+            print(f"{'':<{width}}  ↳ {str(alt['model']):<36} ${float(alt['price_in']):g}/{float(alt['price_out']):g}")
 
 
 if __name__ == "__main__":

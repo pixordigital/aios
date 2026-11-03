@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -12,12 +12,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 MAX_MANIFEST_BYTES = 64 * 1024
 
 
+ContextLayer = Literal["identity", "routing", "stage", "static_references", "dynamic_references", "run_artifacts"]
+
+
 class ContextPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    layers: list[Literal[
-        "identity", "routing", "stage", "static_references",
-        "dynamic_references", "run_artifacts",
-    ]] = Field(default_factory=lambda: ["identity", "stage", "static_references"])
+    layers: list[ContextLayer] = Field(default_factory=lambda: cast(list[ContextLayer], ["identity", "stage", "static_references"]))
     max_context_tokens: int = Field(default=6000, ge=256, le=100_000)
 
 
