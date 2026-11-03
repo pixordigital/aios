@@ -26,6 +26,7 @@ import json
 import math
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 CATALOG_TTL_SECONDS = 6 * 60 * 60
 _AA = "artificial_analysis"
@@ -208,7 +209,10 @@ def rank(agent_type: str, models: list[dict]) -> list[Pick]:
         for axis in quality_axes:
             value = _aa(model).get(index_key[axis])
             total += profile[axis] * (min(1.0, value / _INDEX_SCALE[axis]) if value else 0.0)
-        pin, pout = _price(model)
+        prices = _price(model)
+        if prices is None:
+            continue
+        pin, pout = prices
         blended = pin + pout * 0.5
         total += profile["cost"] * (1.0 / (1.0 + blended / _COST_HALF))
         if profile.get("context"):
@@ -271,27 +275,27 @@ async def _main() -> None:
 
     types = args.types or list(TYPE_PROFILE)
     models = await fetch_catalog(force=args.refresh)
-    out = {}
+    out: dict[str, list[dict[str, Any]]] = {}
     for t in types:
-        picks = rank(t, models)[: args.limit]
+        ranked_picks = rank(t, models)[: args.limit]
         out[t] = [
             {"model": p.model, "score": p.score, "price_in": p.price_in,
              "price_out": p.price_out, "context": p.context, "indices": p.indices}
-            for p in picks
+            for p in ranked_picks
         ]
     if args.json:
         print(json.dumps(out, indent=2))
         return
     width = max(len(t) for t in out)
-    for t, picks in out.items():
-        if not picks:
+    for t, rows_for_type in out.items():
+        if not rows_for_type:
             print(f"{t:<{width}}  (no model meets the role's requirements)")
             continue
-        best = picks[0]
-        print(f"{t:<{width}}  {best['model']:<38} ${best['price_in']:g}/${best['price_out']:g}"
-              f"  {best['context'] // 1000}k  {best['indices']}")
-        for alt in picks[1:]:
-            print(f"{'':<{width}}  ↳ {alt['model']:<36} ${alt['price_in']:g}/{alt['price_out']:g}")
+        best = rows_for_type[0]
+        print(f"{t:<{width}}  {str(best['model']):<38} ${float(best['price_in']):g}/${float(best['price_out']):g}"
+              f"  {int(best['context']) // 1000}k  {best['indices']}")
+        for alt in rows_for_type[1:]:
+            print(f"{'':<{width}}  ↳ {str(alt['model']):<36} ${float(alt['price_in']):g}/{float(alt['price_out']):g}")
 
 
 if __name__ == "__main__":

@@ -1404,9 +1404,9 @@
     "semantic_hash": "0ed29bd0c2e548b6131dbec837c95074"
   },
   "pyproject.toml": {
-    "mtime": 1791117850.1793685,
-    "seen": 1793058748.4696991,
-    "ast_hash": "769a8edde4400f1e60197edeee5f85e1",
+    "mtime": 1793736667.797503,
+    "seen": 1793736956.0988433,
+    "ast_hash": "2dd4a3f846b257c2f91b099669bfe945",
     "semantic_hash": ""
   },
   "rebuild-coolify.sh": {
@@ -3138,9 +3138,9 @@
     "semantic_hash": ""
   },
   "aios/core/fleet_verify.py": {
-    "mtime": 1793064713.726561,
-    "seen": 1793189973.634951,
-    "ast_hash": "c8e1334e158a3288b9a1a03dc13a8f97",
+    "mtime": 1793736667.7955027,
+    "seen": 1793736956.0889716,
+    "ast_hash": "d8136733beaf2ac549a984e53baea488",
     "semantic_hash": ""
   },
   "tests/test_fleet_verify.py": {
@@ -3150,15 +3150,15 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1793455812.080895,
-    "seen": 1793455832.6526613,
-    "ast_hash": "4cf1b54ca1040c67576e7e861208aa5a",
+    "mtime": 1793456181.2623444,
+    "seen": 1793736956.1094685,
+    "ast_hash": "fd89d25797ec0fec71899008cdcda803",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
-    "mtime": 1793455788.3436797,
-    "seen": 1793455832.6318674,
-    "ast_hash": "c4185aa5d1cd3bac407631dfa825fecc",
+    "mtime": 1793736667.7955027,
+    "seen": 1793736956.0894446,
+    "ast_hash": "b67530498820495a73ea415f8689ea97",
     "semantic_hash": ""
   },
   "tests/test_model_select.py": {
@@ -3195,6 +3195,36 @@
     "mtime": 1793451977.5530179,
     "seen": 1793455727.5547976,
     "ast_hash": "09efc4a229e4170bef30ef1a4ff1e57d",
+    "semantic_hash": ""
+  },
+  "aios/icm/__init__.py": {
+    "mtime": 1793736667.7965028,
+    "seen": 1793736956.0927649,
+    "ast_hash": "a0d537ec0e4e3bf678020dd677f9d39a",
+    "semantic_hash": ""
+  },
+  "aios/icm/contracts.py": {
+    "mtime": 1793736667.796802,
+    "seen": 1793736956.0927675,
+    "ast_hash": "2fabc04f680c449db7d85e3a042c0c7e",
+    "semantic_hash": ""
+  },
+  "aios/icm/workspace.py": {
+    "mtime": 1793736667.796802,
+    "seen": 1793736956.0927706,
+    "ast_hash": "fa22d3b5441ff002fedd085a14bef230",
+    "semantic_hash": ""
+  },
+  "tests/test_icm_x.py": {
+    "mtime": 1793736725.055818,
+    "seen": 1793736956.1009398,
+    "ast_hash": "c6371b843352814ee107213c364aff55",
+    "semantic_hash": ""
+  },
+  "docs/ICM_X_ARCHITECTURE.md": {
+    "mtime": 1793736667.796802,
+    "seen": 1793736956.108987,
+    "ast_hash": "ac4cb7401542efb3c471f747abfdfd03",
     "semantic_hash": ""
   }
 }
