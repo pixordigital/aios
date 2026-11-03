@@ -116,3 +116,8 @@ This commit adds no service, database table, migration, environment variable, or
 7. Benchmark against current AIOS before making ICM-X the default.
 
 Operational acceptance criteria: existing workflow/channel tests remain green; cross-tenant and symlink traversal is rejected; invalid contracts fail closed; retries cannot duplicate WhatsApp/CRM side effects; worker restarts resume committed stage state; reference changes invalidate only dependent stages; cost, latency, tokens and verified business outcomes are measured per run.
+
+
+## CI fixture note
+
+The repository's `.env.example` keeps numeric optional settings parseable (`AIOS_CALCOM_EVENT_TYPE_ID=0`) so container smoke tests can boot without a configured Cal.com account. Replace the value with the real event-type ID only when Cal.com scheduling is enabled.
