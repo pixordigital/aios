@@ -1,13 +1,23 @@
 # Pending work
 
-Last updated: 2026-10-31
+Last updated: 2026-11-03
 
 ## Open
 
-- None. `main` = `4a59887` deployed to Coolify (`pixor-aios`), app/worker healthy
-  (`/health` 200, db ok, migrations ok).
+- PR #1 (`feat/icm-x-foundation`): Monitor GitHub Actions CI run for commit `7b29521`.
+  - Fixed `test_yaml_manifest_loads` in `tests/test_icm_x.py` where `max_cost_usd` was missing on an LLM stage manifest, causing a Pydantic validation error during CI test suite.
+  - Pushed commit `7b29521` to `origin/feat/icm-x-foundation`.
+  - Once CI completes green (lint, typecheck, test, build, docker-compose), merge `feat/icm-x-foundation` into `main` and deploy if desired.
 
 ## Done this session
+
+- Diagnosed remote GitHub branch `origin/feat/icm-x-foundation` and associated PR #1 (`feat(icm): add opt-in ICM-X workspace and stage contract foundation`).
+- Located failing CI job `test (3.14)` on GitHub Actions caused by `test_yaml_manifest_loads` in `tests/test_icm_x.py` omitting `max_cost_usd: 0.05` for `mode: llm`.
+- Fixed `tests/test_icm_x.py` to supply `max_cost_usd: 0.05`.
+- Verified all 14 tests in `tests/test_icm_x.py` pass cleanly locally.
+- Verified `ruff check` passes cleanly.
+- Updated knowledge graph with `graphify update .`.
+- Pushed commit `7b29521` to `origin/feat/icm-x-foundation`. CI is triggered.
 
 - Model selector (`aios/core/model_select.py`): scores are now absolute anchors
   (frontier index scale, $1/1M blended = 0.5 cost score, 1M ctx = 1.0) instead
