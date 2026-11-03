@@ -44,14 +44,26 @@ class WorkspacePaths:
     def ensure_run_directories(self, org_id: str, workspace_id: str, run_id: str) -> Path:
         """Create an isolated run directory and reject symlink escapes."""
         root = self._root()
-        target = self.run(org_id, workspace_id, run_id)
-        target.mkdir(parents=True, exist_ok=True)
-        resolved = target.resolve()
-        if not resolved.is_relative_to(root):
-            raise ValueError("workspace path escapes configured storage root")
-        (resolved / "artifacts").mkdir(exist_ok=True)
-        (resolved / "provenance").mkdir(exist_ok=True)
-        return resolved
+        root.mkdir(parents=True, exist_ok=True)
+        components = ("tenants", org_id, "workspaces", workspace_id, "runs", run_id)
+        current = root
+        for component in components:
+            current = current / component
+            resolved = current.resolve()
+            if not resolved.is_relative_to(root):
+                raise ValueError("workspace path escapes configured storage root")
+            current.mkdir(exist_ok=True)
+            current = current.resolve()
+            if not current.is_relative_to(root):
+                raise ValueError("workspace path escapes configured storage root")
+
+        for directory in ("artifacts", "provenance"):
+            child = current / directory
+            resolved = child.resolve()
+            if not resolved.is_relative_to(root):
+                raise ValueError("workspace path escapes configured storage root")
+            child.mkdir(exist_ok=True)
+        return current
 
 
 def load_context_files(
@@ -68,7 +80,7 @@ def load_context_files(
     business data should normally be fetched through authorized tools.
     """
     root = Path(workspace_root).expanduser().resolve()
-    selected_layers = set(allowed_layers or files_by_layer.keys())
+    selected_layers = set(files_by_layer if allowed_layers is None else allowed_layers)
     sections: list[str] = []
     fingerprints: dict[str, str] = {}
     total_chars = 0
