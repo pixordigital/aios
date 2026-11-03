@@ -59,6 +59,7 @@ def test_yaml_manifest_loads(tmp_path: Path):
 version: 1.0.0
 mode: llm
 max_llm_calls: 1
+max_cost_usd: 0.05
 """,
         encoding="utf-8",
     )
