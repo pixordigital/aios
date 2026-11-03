@@ -4,13 +4,20 @@ Last updated: 2026-11-03
 
 ## Open
 
-- PR #1 (`feat/icm-x-foundation`): Monitor GitHub Actions CI run for commit `7b29521`.
-  - Fixed `test_yaml_manifest_loads` in `tests/test_icm_x.py` where `max_cost_usd` was missing on an LLM stage manifest, causing a Pydantic validation error during CI test suite.
-  - Pushed commit `7b29521` to `origin/feat/icm-x-foundation`.
-  - Once CI completes green (lint, typecheck, test, build, docker-compose), merge `feat/icm-x-foundation` into `main` and deploy if desired.
+- None.
 
-## Done this session
+## Done
 
+- Implemented ICM-X Stage Adapter & Workflow Integration (`feat(icm): connect workflow engine to stage adapter and governance`):
+  - Created `aios/icm/adapter.py` (`ICMStageAdapter`): resolves stage contracts, enforces allowed/denied tool governance, loads bounded layered context (`L0` identity, `L1` routes, `L2` stage context, `L3` static guidelines), sets execution timeout limits, records execution provenance, and saves output artifacts.
+  - Extended `WorkflowNode` and `WorkflowEngine` in `aios/core/workflow.py` to optionally bind `stage_id`, `workspace_id`, and `stage_manifest`, triggering pre/post execution hooks and provenance recording.
+  - Added `seed_b2b_lead_research_workspace` scaffolding helper in `aios/icm/workspace.py`.
+  - Added unit tests in `tests/test_icm_x.py` for workspace seeding, allowed tool execution, provenance emission, and tool governance denial.
+  - Verified tests pass (`15 passed` in `tests/test_icm_x.py`, `3 passed` in `tests/test_workflows_async.py`).
+  - Verified `ruff check aios/` passes cleanly.
+  - Updated knowledge graph with `graphify update .`.
+
+- PR #1 (`feat/icm-x-foundation`): Verified CI completed green (lint, typecheck, gitleaks, test (3.14), build, docker-compose) and merged into `main` (commit `d3cc299`).
 - Diagnosed remote GitHub branch `origin/feat/icm-x-foundation` and associated PR #1 (`feat(icm): add opt-in ICM-X workspace and stage contract foundation`).
 - Located failing CI job `test (3.14)` on GitHub Actions caused by `test_yaml_manifest_loads` in `tests/test_icm_x.py` omitting `max_cost_usd: 0.05` for `mode: llm`.
 - Fixed `tests/test_icm_x.py` to supply `max_cost_usd: 0.05`.

@@ -17,7 +17,7 @@ from sqlalchemy import text
 
 from aios.core.agent import AgentRuntime
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from aios.core.autonomous_agent import AutonomousAgent
 
@@ -36,6 +36,9 @@ class WorkflowNode:
     timeout: float = 60.0
     on_failure: str = "fail"
     retry_count: int = 0
+    stage_id: str | None = None
+    workspace_id: str | None = None
+    stage_manifest: Any = None
 
 
 @dataclass
@@ -375,6 +378,25 @@ class WorkflowEngine:
         except Exception:
             ctx = shared
 
+        # ICM-X stage contract adaptation if opted-in on the node
+        stage_adapter = None
+        if getattr(node, "stage_manifest", None) is not None or getattr(node, "stage_id", None) is not None:
+            try:
+                from aios.icm.adapter import ICMStageAdapter
+
+                stage_adapter = ICMStageAdapter(
+                    node=node,
+                    storage_root=shared.get("workspace_root") or "data",
+                    org_id=shared.get("org_id") or "default",
+                    run_id=shared.get("run_id") or conv_id,
+                )
+                stage_adapter.pre_execute(ctx, shared)
+            except Exception as e:
+                logger.warning("ICM-X stage contract error for %s: %s", node.id, e)
+                result.errors[node.id] = str(e)
+                result.node_status[node.id] = "failed"
+                raise
+
         if node.agent_id:
             from aios.db.engine import async_session
             from aios.db.models import Agent as AgentModel
@@ -484,6 +506,12 @@ class WorkflowEngine:
                     shared[f"{node.id}_items"] = items
                 except Exception:
                     pass
+                if stage_adapter:
+                    try:
+                        provenance = stage_adapter.post_execute(output=json.dumps(items), shared=shared)
+                        result.outputs[f"{node.id}_icm_provenance"] = json.dumps(provenance)
+                    except Exception as e:
+                        logger.warning("ICM-X stage post_execute warning for %s: %s", node.id, e)
                 return result
             # `org` first: it is a local, and the ToolEngine line below read it
             # one statement early — UnboundLocalError on every tool node in
@@ -527,5 +555,13 @@ class WorkflowEngine:
                 result.errors[node.id] = str(e)
                 result.node_status[node.id] = "failed"
                 raise
+
+        if stage_adapter:
+            try:
+                out_val = result.outputs.get(node.id, "")
+                provenance = stage_adapter.post_execute(output=out_val, shared=shared)
+                result.outputs[f"{node.id}_icm_provenance"] = json.dumps(provenance)
+            except Exception as e:
+                logger.warning("ICM-X stage post_execute warning for %s: %s", node.id, e)
 
         return result

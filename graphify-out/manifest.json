@@ -786,9 +786,9 @@
     "semantic_hash": ""
   },
   "aios/core/workflow.py": {
-    "mtime": 1791119631.1258225,
-    "seen": 1793058748.4643874,
-    "ast_hash": "b8c1a3375f75190b7593658bd40eb68c",
+    "mtime": 1793745021.3579655,
+    "seen": 1793745327.146955,
+    "ast_hash": "8437c740e702227632d89ed7903d1f81",
     "semantic_hash": ""
   },
   "aios/core/ws_manager.py": {
@@ -1404,8 +1404,8 @@
     "semantic_hash": "0ed29bd0c2e548b6131dbec837c95074"
   },
   "pyproject.toml": {
-    "mtime": 1793736667.797503,
-    "seen": 1793736956.0988433,
+    "mtime": 1793739475.988172,
+    "seen": 1793745327.1548424,
     "ast_hash": "2dd4a3f846b257c2f91b099669bfe945",
     "semantic_hash": ""
   },
@@ -3138,8 +3138,8 @@
     "semantic_hash": ""
   },
   "aios/core/fleet_verify.py": {
-    "mtime": 1793736667.7955027,
-    "seen": 1793736956.0889716,
+    "mtime": 1793739475.9421678,
+    "seen": 1793745327.142333,
     "ast_hash": "d8136733beaf2ac549a984e53baea488",
     "semantic_hash": ""
   },
@@ -3150,14 +3150,14 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1793456181.2623444,
-    "seen": 1793736956.1094685,
-    "ast_hash": "fd89d25797ec0fec71899008cdcda803",
+    "mtime": 1793743748.163774,
+    "seen": 1793745327.1697555,
+    "ast_hash": "f4eeac349ea35f46d43db962bcfd6726",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
-    "mtime": 1793736667.7955027,
-    "seen": 1793736956.0894446,
+    "mtime": 1793739475.943168,
+    "seen": 1793745327.1429155,
     "ast_hash": "b67530498820495a73ea415f8689ea97",
     "semantic_hash": ""
   },
@@ -3198,33 +3198,39 @@
     "semantic_hash": ""
   },
   "aios/icm/__init__.py": {
-    "mtime": 1793736667.7965028,
-    "seen": 1793736956.0927649,
-    "ast_hash": "a0d537ec0e4e3bf678020dd677f9d39a",
+    "mtime": 1793740577.606443,
+    "seen": 1793745327.1475167,
+    "ast_hash": "511bc7663381b975b205346bcea0ce18",
     "semantic_hash": ""
   },
   "aios/icm/contracts.py": {
-    "mtime": 1793736667.796802,
-    "seen": 1793736956.0927675,
+    "mtime": 1793739475.944168,
+    "seen": 1793745327.1475253,
     "ast_hash": "2fabc04f680c449db7d85e3a042c0c7e",
     "semantic_hash": ""
   },
   "aios/icm/workspace.py": {
-    "mtime": 1793736667.796802,
-    "seen": 1793736956.0927706,
-    "ast_hash": "fa22d3b5441ff002fedd085a14bef230",
+    "mtime": 1793740094.2665699,
+    "seen": 1793745327.1475303,
+    "ast_hash": "afb9c3e2c3b5e74db2e3db6f62207fdc",
     "semantic_hash": ""
   },
   "tests/test_icm_x.py": {
-    "mtime": 1793736725.055818,
-    "seen": 1793736956.1009398,
-    "ast_hash": "c6371b843352814ee107213c364aff55",
+    "mtime": 1793745047.8834279,
+    "seen": 1793745327.1576746,
+    "ast_hash": "1c0e9eaf58b5e5a59ac57a3e69ab3dc8",
     "semantic_hash": ""
   },
   "docs/ICM_X_ARCHITECTURE.md": {
-    "mtime": 1793736667.796802,
-    "seen": 1793736956.108987,
+    "mtime": 1793739475.945168,
+    "seen": 1793745327.1691666,
     "ast_hash": "ac4cb7401542efb3c471f747abfdfd03",
+    "semantic_hash": ""
+  },
+  "aios/icm/adapter.py": {
+    "mtime": 1793740499.192163,
+    "seen": 1793745327.1475208,
+    "ast_hash": "7194f238fdae67b559cb2cd7c7f57798",
     "semantic_hash": ""
   }
 }

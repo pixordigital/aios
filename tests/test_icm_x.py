@@ -137,3 +137,55 @@ def test_workspace_paths_reject_intra_root_tenant_traversal(tmp_path: Path):
     paths = WorkspacePaths(tmp_path / "storage")
     with pytest.raises(ValueError):
         paths.ensure_run_directories("org_1/../org_2", "sales", "run_1")
+
+
+def test_seed_b2b_lead_research_workspace_and_adapter(tmp_path: Path):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+    from aios.icm.workspace import seed_b2b_lead_research_workspace
+
+    ws_dir = seed_b2b_lead_research_workspace(tmp_path, org_id="tenant_a", workspace_id="b2b_lead_research")
+    assert (ws_dir / "L0" / "WORKSPACE.md").exists()
+    assert (ws_dir / "L1" / "ROUTES.md").exists()
+    assert (ws_dir / "L2" / "stages" / "company_research" / "stage.yaml").exists()
+
+    # Test allowed tool execution
+    node_ok = WorkflowNode(
+        id="node_1",
+        tool_name="company_lookup",
+        stage_id="company_research",
+        workspace_id="b2b_lead_research",
+    )
+    adapter = ICMStageAdapter(
+        node=node_ok,
+        storage_root=tmp_path,
+        org_id="tenant_a",
+        run_id="run_100",
+    )
+    ctx: dict = {}
+    shared: dict = {}
+    adapter.pre_execute(ctx, shared)
+    assert "icm_context" in ctx
+    assert "company_lookup" in adapter.manifest.allowed_tools
+
+    # Test post_execute provenance tracking
+    prov = adapter.post_execute(output='{"found": true}', shared=shared)
+    assert prov["stage_id"] == "company_research"
+    assert "_icm_provenance" in shared
+    assert (tmp_path / "tenants" / "tenant_a" / "workspaces" / "b2b_lead_research" / "runs" / "run_100" / "provenance" / "company_research.json").exists()
+
+    # Test tool governance denial
+    node_denied = WorkflowNode(
+        id="node_2",
+        tool_name="crm_update",
+        stage_id="company_research",
+        workspace_id="b2b_lead_research",
+    )
+    adapter_denied = ICMStageAdapter(
+        node=node_denied,
+        storage_root=tmp_path,
+        org_id="tenant_a",
+        run_id="run_100",
+    )
+    with pytest.raises(PermissionError, match="explicitly denied"):
+        adapter_denied.pre_execute({}, {})
