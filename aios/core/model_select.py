@@ -286,14 +286,14 @@ async def _main() -> None:
         print(json.dumps(out, indent=2))
         return
     width = max(len(t) for t in out)
-    for t, picks in out.items():
-        if not picks:
+    for t, rows_for_type in out.items():
+        if not rows_for_type:
             print(f"{t:<{width}}  (no model meets the role's requirements)")
             continue
-        best = picks[0]
+        best = rows_for_type[0]
         print(f"{t:<{width}}  {str(best['model']):<38} ${float(best['price_in']):g}/${float(best['price_out']):g}"
               f"  {int(best['context']) // 1000}k  {best['indices']}")
-        for alt in picks[1:]:
+        for alt in rows_for_type[1:]:
             print(f"{'':<{width}}  ↳ {str(alt['model']):<36} ${float(alt['price_in']):g}/{float(alt['price_out']):g}")
 
 
