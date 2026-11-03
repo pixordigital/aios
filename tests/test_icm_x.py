@@ -91,3 +91,24 @@ def test_context_loader_enforces_size_limit(tmp_path: Path):
     (tmp_path / "large.md").write_text("x" * 20, encoding="utf-8")
     with pytest.raises(ValueError):
         load_context_files(tmp_path, {"stage": ["large.md"]}, max_file_bytes=10)
+
+
+def test_context_loader_empty_allowlist_loads_nothing(tmp_path: Path):
+    (tmp_path / "identity.md").write_text("Must not load", encoding="utf-8")
+    text, hashes = load_context_files(
+        tmp_path, {"identity": ["identity.md"]}, allowed_layers=[]
+    )
+    assert text == ""
+    assert hashes == {}
+
+
+def test_workspace_rejects_symlink_escape_before_writing(tmp_path: Path):
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root.mkdir()
+    (root / "tenants").symlink_to(outside, target_is_directory=True)
+    paths = WorkspacePaths(root)
+    with pytest.raises(ValueError):
+        paths.ensure_run_directories("org_1", "sales", "run_1")
+    assert list(outside.iterdir()) == []
