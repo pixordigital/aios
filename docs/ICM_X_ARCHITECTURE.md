@@ -121,3 +121,6 @@ Operational acceptance criteria: existing workflow/channel tests remain green; c
 ## CI fixture note
 
 The repository's `.env.example` keeps numeric optional settings parseable (`AIOS_CALCOM_EVENT_TYPE_ID=0`) so container smoke tests can boot without a configured Cal.com account. Replace the value with the real event-type ID only when Cal.com scheduling is enabled.
+
+
+Workspace path construction validates each tenant/workspace/run identifier before filesystem access and checks symlink resolution before creating descendant directories. LLM-enabled stages must declare a positive per-stage USD cost ceiling.
