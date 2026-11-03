@@ -26,6 +26,7 @@ import json
 import math
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 CATALOG_TTL_SECONDS = 6 * 60 * 60
 _AA = "artificial_analysis"
@@ -274,7 +275,7 @@ async def _main() -> None:
 
     types = args.types or list(TYPE_PROFILE)
     models = await fetch_catalog(force=args.refresh)
-    out: dict[str, list[dict[str, object]]] = {}
+    out: dict[str, list[dict[str, Any]]] = {}
     for t in types:
         ranked_picks = rank(t, models)[: args.limit]
         out[t] = [
