@@ -276,11 +276,11 @@ async def _main() -> None:
     models = await fetch_catalog(force=args.refresh)
     out: dict[str, list[dict[str, object]]] = {}
     for t in types:
-        picks = rank(t, models)[: args.limit]
+        ranked_picks = rank(t, models)[: args.limit]
         out[t] = [
             {"model": p.model, "score": p.score, "price_in": p.price_in,
              "price_out": p.price_out, "context": p.context, "indices": p.indices}
-            for p in picks
+            for p in ranked_picks
         ]
     if args.json:
         print(json.dumps(out, indent=2))
