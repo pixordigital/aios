@@ -50,14 +50,11 @@ def test_tool_allow_deny_overlap_is_rejected():
 def test_yaml_manifest_loads(tmp_path: Path):
     manifest = tmp_path / "stage.yaml"
     manifest.write_text(
-        "id: company_research
-"
-        "version: 1.0.0
-"
-        "mode: llm
-"
-        "max_llm_calls: 1
-",
+        """id: company_research
+version: 1.0.0
+mode: llm
+max_llm_calls: 1
+""",
         encoding="utf-8",
     )
     assert load_stage_manifest(manifest).id == "company_research"
