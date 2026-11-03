@@ -42,6 +42,11 @@ def test_deterministic_stage_cannot_spend_llm_budget():
         })
 
 
+def test_llm_stage_requires_a_positive_cost_budget():
+    with pytest.raises(ValidationError):
+        StageManifest.model_validate(_manifest(max_cost_usd=0))
+
+
 def test_tool_allow_deny_overlap_is_rejected():
     with pytest.raises(ValidationError):
         StageManifest.model_validate(_manifest(denied_tools=["company_lookup"]))
@@ -112,3 +117,22 @@ def test_workspace_rejects_symlink_escape_before_writing(tmp_path: Path):
     with pytest.raises(ValueError):
         paths.ensure_run_directories("org_1", "sales", "run_1")
     assert list(outside.iterdir()) == []
+
+
+def test_workspace_paths_reject_symlink_escape_before_creating_run(tmp_path: Path):
+    paths = WorkspacePaths(tmp_path / "storage")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    tenants = tmp_path / "storage" / "tenants"
+    tenants.mkdir(parents=True)
+    (tenants / "org_1").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError):
+        paths.ensure_run_directories("org_1", "sales", "run_1")
+    assert not (outside / "workspaces").exists()
+
+
+def test_workspace_paths_reject_intra_root_tenant_traversal(tmp_path: Path):
+    paths = WorkspacePaths(tmp_path / "storage")
+    with pytest.raises(ValueError):
+        paths.ensure_run_directories("org_1/../org_2", "sales", "run_1")

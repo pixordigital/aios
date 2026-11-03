@@ -58,6 +58,8 @@ class StageManifest(BaseModel):
             raise ValueError("llm stages must declare max_llm_calls > 0")
         if self.max_llm_calls == 0 and self.max_cost_usd > 0:
             raise ValueError("max_cost_usd must be 0 when no LLM calls are allowed")
+        if self.max_llm_calls > 0 and self.max_cost_usd <= 0:
+            raise ValueError("LLM stages must declare a positive max_cost_usd")
         return self
 
 

@@ -45,7 +45,10 @@ class WorkspacePaths:
         """Create an isolated run directory and reject symlink escapes."""
         root = self._root()
         root.mkdir(parents=True, exist_ok=True)
-        components = ("tenants", org_id, "workspaces", workspace_id, "runs", run_id)
+        org = _validate_segment(org_id, "organization id")
+        workspace = _validate_segment(workspace_id, "workspace id")
+        run = _validate_segment(run_id, "run id")
+        components = ("tenants", org, "workspaces", workspace, "runs", run)
         current = root
         for component in components:
             current = current / component
