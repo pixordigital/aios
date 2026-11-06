@@ -35,7 +35,27 @@ from dataclasses import dataclass, field
 from threading import Lock
 
 # Ordered cheapest → most capable. Index is the escalation ladder.
+
 TIERS = ("openai/gpt-4.1-nano", "openai/gpt-4o-mini", "openai/gpt-4o")
+
+ROLE_MIN_TIER = {
+    "orchestrator": "openai/gpt-4o",
+    "manager": "openai/gpt-4o",
+    "review": "openai/gpt-4o",
+    "sdr": "openai/gpt-4o-mini",
+    "support": "openai/gpt-4o-mini",
+    "prospector": "openai/gpt-4o-mini",
+    "closer": "openai/gpt-4o-mini",
+    "data_scientist": "openai/gpt-4o",
+    "data_analyst": "openai/gpt-4o-mini",
+    "frontend": "openai/gpt-4o",
+    "backend": "openai/gpt-4o",
+    "auditor": "openai/gpt-4o",
+    "watcher": "openai/gpt-4o-mini",
+    "business": "openai/gpt-4o-mini",
+    "custom": None,
+}
+
 
 # Tools whose effects are irreversible or externally visible. Routing one of
 # these to a cheap model is how you get a confidently wrong answer emailed to a
@@ -107,12 +127,18 @@ def is_routable(model: str | None) -> bool:
 def route(
     model: str | None,
     *,
+    role: str | None = None,
     context_tokens: int = 0,
     tools: list | None = None,
     autonomy: str = "autonomous",
     max_tokens: int = 4096,
     min_tier: str | None = None,
 ) -> RouteDecision:
+    """Choose the model for one call, now considering the caller's role.
+
+    `role` can be used to enforce a minimum tier based on the agent's responsibilities.
+    The function respects all existing signals and still only downgrades when safe.
+    """
     """Choose the model for one call.
 
     `model` is what the operator configured. It is returned unchanged unless
@@ -144,7 +170,14 @@ def route(
         return _hold("context size unknown — not routing on a sentinel")
 
     idx = _tier_index(model)
-    floor = _tier_index(min_tier) if min_tier and is_routable(min_tier) else 0
+    # Determine the minimum tier based on explicit min_tier or role mapping
+    effective_min = min_tier if min_tier and is_routable(min_tier) else None
+    if not effective_min and role:
+        # Look up required tier for the role; may be None meaning no minimum
++        role_min = ROLE_MIN_TIER.get(role)
++        if role_min and is_routable(role_min):
++            effective_min = role_min
++    floor = _tier_index(effective_min) if effective_min else 0
 
     # Consequential tools pin the tier: a wrong answer here reaches a human.
     hit = tool_names & _CONSEQUENTIAL_TOOLS
