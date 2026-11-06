@@ -20,6 +20,7 @@ from .meta import router as meta_router
 from .meta_webhook import router as meta_webhook_router
 from aios.integrations.arvo.routes import router as arvo_router
 from .workflows import router as workflows_router
+from ..metrics import router as metrics_router
 from .versions import router as versions_router
 from .mcp import router as mcp_router
 from .promptlab import router as promptlab_router
@@ -76,3 +77,4 @@ api_router.include_router(threads_router)
 api_router.include_router(meta_router)
 api_router.include_router(meta_webhook_router)
 api_router.include_router(arvo_router)
+api_router.include_router(metrics_router)  # Expose /metrics endpoint
