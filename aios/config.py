@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     whatsapp_batch_window_sec: float = 2.0
     whatsapp_batch_max_messages: int = 5
     whatsapp_batch_max_chars: int = 3800  # merged cap, under Meta's 4096 limit
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
     codex_model: str = "gpt-5.4"
     voice_provider: str = "selfhosted"  # "elevenlabs" | "vapi" | "retell" | "selfhosted"
     elevenlabs_api_key: str = ""

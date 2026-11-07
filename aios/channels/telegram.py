@@ -10,7 +10,8 @@ required for the tenant — consistent with how every other channel here works.
 """
 
 import asyncio
-import logging
+from aios.config import settings
+
 import uuid
 
 import httpx
@@ -47,7 +48,7 @@ class TelegramChannel(Channel):
         """
         if self._app is not None:
             return self._app
-        token = self._config.get("bot_token") or self._config.get("token") or ""
+        token = self._config.get("bot_token") or self._config.get("token") or settings.telegram_bot_token or ""
         if not token:
             logger.warning("Telegram send skipped: bot_token not configured")
             return ""

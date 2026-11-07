@@ -4,7 +4,7 @@ Last updated: 2026-11-03
 
 ## Open
 
-- None.
+- Add verification of Telegram configuration integrated with ICM‑X workflow (run example script, ensure inbound → dispatch → agent → outbound works).
 
 ## Done
 
