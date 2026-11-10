@@ -8,10 +8,10 @@ O repositório **pixordigital/aios** está **PUBLIC** (`gh repo view --json isPr
 
 | Secret | Valor antigo (vazado) | Valor novo (rotacionado) |
 |--------|----------------------|-------------------------|
-| `POSTGRES_PASSWORD` | `460a074...` | `76408bc423087feedc9d96e59d6782e4` |
-| `REDIS_PASSWORD` | `a74de8...` | `eefc34b85ae3916e10c9cda4a2ea3172` |
-| `JWT_SECRET` | `d9f36b4...` | `a473fa14d64aa2ef764424f4c36482a2e22ba716cface98d7f2e3b47511f7556` |
-| `ADMIN_MASTER_KEY` | (vazado) | `2596637c399db3461d35875e7b207e0b3eb61f2f040cc1544d8ca74d02b6d902` |
+| `POSTGRES_PASSWORD` | [REDACTED — rotate] | [REDACTED — rotate] |
+| `REDIS_PASSWORD` | [REDACTED — rotate] | [REDACTED — rotate] |
+| `JWT_SECRET` | [REDACTED — rotate] | [REDACTED — rotate] |
+| `ADMIN_MASTER_KEY` | [REDACTED — rotate] | [REDACTED — rotate] |
 
 **Commit seguro base:** `f328da5` (primeiro commit sem secrets no código atual)
 
@@ -32,11 +32,11 @@ alias bfg="java -jar ~/bfg-1.14.0.jar"
 ### 2. Criar arquivo de padrões (`patterns.txt`)
 ```text
 # Senhas reais (substitua pelos valores reais vazados do seu .env antigo)
-460a074
-a74de8
-d9f36b4
-2596637c399db3461d35875e7b207e0b3eb61f2f040cc1544d8ca74d02b6d902
-eefc34b85ae3916e10c9cda4a2ea3172
+[REDACTED]
+[REDACTED]
+[REDACTED]
+[REDACTED]
+[REDACTED]
 ```
 
 ### 3. Clonar repo **mirror** (bare, sem working tree)
@@ -69,7 +69,7 @@ git push --force --tags
 ### 7. Verificar
 ```bash
 # Confirmar que secrets não aparecem mais
-git log --all --oneline --grep="460a074\|a74de8\|d9f36b4\|2596637c" | head -5
+git log --all --oneline --grep="[REDACTED]\|[REDACTED]\|[REDACTED]\|2596637c" | head -5
 # Deve retornar vazio
 ```
 
@@ -116,7 +116,7 @@ git checkout f328da5 -b clean-main
 ### 2. Verificar que não há secrets no código atual
 ```bash
 # grep por padrões de secret no working tree
-grep -r "460a074\|a74de8\|d9f36b4\|2596637c\|eefc34b" . --exclude-dir=.git
+grep -r "[REDACTED]\|[REDACTED]\|[REDACTED]\|2596637c\|eefc34b" . --exclude-dir=.git
 # Deve retornar vazio
 ```
 
