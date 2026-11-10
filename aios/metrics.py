@@ -10,7 +10,6 @@ Uses `aioprometheus` which is lightweight and compatible with async frameworks.
 
 from fastapi import APIRouter, Request, Response
 from aioprometheus import Counter, Histogram, Service
-import asyncio
 
 router = APIRouter()
 

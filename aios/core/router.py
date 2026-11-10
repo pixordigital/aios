@@ -174,10 +174,10 @@ def route(
     effective_min = min_tier if min_tier and is_routable(min_tier) else None
     if not effective_min and role:
         # Look up required tier for the role; may be None meaning no minimum
-+        role_min = ROLE_MIN_TIER.get(role)
-+        if role_min and is_routable(role_min):
-+            effective_min = role_min
-+    floor = _tier_index(effective_min) if effective_min else 0
+        role_min = ROLE_MIN_TIER.get(role)
+        if role_min and is_routable(role_min):
+            effective_min = role_min
+    floor = _tier_index(effective_min) if effective_min else 0
 
     # Consequential tools pin the tier: a wrong answer here reaches a human.
     hit = tool_names & _CONSEQUENTIAL_TOOLS

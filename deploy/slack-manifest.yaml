@@ -37,7 +37,7 @@ oauth_config:
 
 settings:
   event_subscriptions:
-    request_url: http://178.105.181.38:8777/api/slack/webhook
+    request_url: https://YOUR_AIOS_DOMAIN/api/slack/webhook
     bot_events:
       - app_mention
       - message.channels

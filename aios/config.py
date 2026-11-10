@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     db_replica_backend: str = ""  # failover backend type, empty = no failover
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    litellm_api_key: str = "sk-litellm"
+    litellm_api_key: str = ""
     litellm_base_url: str = "http://litellm:4000"
     llm_provider: str = "openrouter"  # openrouter | litellm
     openai_api_key: str = ""

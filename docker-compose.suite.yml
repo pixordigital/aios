@@ -9,8 +9,8 @@ services:
     environment:
       AIOS_ARVO_INTEGRATION_ENABLED: "true"
       AIOS_ARVO_BASE_URL: http://arvo:9777
-      AIOS_ARVO_SERVICE_KEY_ID: suite-kid
-      AIOS_ARVO_SERVICE_KEY: suite-secret
+      AIOS_ARVO_SERVICE_KEY_ID: ${AIOS_ARVO_SERVICE_KEY_ID:?Set AIOS_ARVO_SERVICE_KEY_ID}
+      AIOS_ARVO_SERVICE_KEY: ${AIOS_ARVO_SERVICE_KEY:?Set AIOS_ARVO_SERVICE_KEY}
     depends_on:
       - arvo
   arvo:

@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: aios
       POSTGRES_USER: aios
-      POSTGRES_PASSWORD: ${AIOS_COMPOSE_PG_PASSWORD:-aios}
+      POSTGRES_PASSWORD: ${AIOS_COMPOSE_PG_PASSWORD:?Set a strong AIOS_COMPOSE_PG_PASSWORD in the environment}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -25,7 +25,7 @@ services:
     # security: NOT exposed to host/network — app + worker reach it via the
     # internal docker network (redis://redis:6379). Requires password via
     # AIOS_REDIS_URL=redis://:password@redis:6379 in .env.
-    command: ["redis-server", "--requirepass", "${AIOS_REDIS_PASSWORD}"]
+    command: ["redis-server", "--requirepass", "${AIOS_REDIS_PASSWORD:?Set a strong AIOS_REDIS_PASSWORD in the environment}"]
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -66,6 +66,7 @@ services:
     restart: unless-stopped
 
   seaweedfs:
+    profiles: ["s3"]
     image: chrislusf/seaweedfs:latest
     command: "server -master.port=9333 -volume.port=9334 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json -dir=/data"
     ports: ["8333:8333","9333:9333"]
