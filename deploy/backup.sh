@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 DATE=$(date +%Y%m%d_%H%M%S)
-PGURL=${AIOS_DATABASE_URL:-postgresql://aios:aios@postgres:5432/aios}
+PGURL=${AIOS_DATABASE_URL:?AIOS_DATABASE_URL must be configured; refusing insecure default}
 BACKUP_DIR=${BACKUP_DIR:-/data/backups}
 mkdir -p "$BACKUP_DIR"
 FILE="$BACKUP_DIR/aios_$DATE.sql.gz"
