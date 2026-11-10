@@ -39,3 +39,6 @@ graphify-out/20*/
 graphify-out/.graphify_*
 graphify-out/.needs_update
 graphify-out/.chunk*.json
+
+# Runtime SeaweedFS credentials — create locally from s3.example.json
+deploy/seaweedfs/s3.json
