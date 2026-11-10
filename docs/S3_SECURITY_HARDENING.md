@@ -132,3 +132,17 @@ If you have an existing bucket without versioning:
   ]
 }
 ```
+
+## Local SeaweedFS credentials (required before enabling the S3 profile)
+
+The runtime file `deploy/seaweedfs/s3.json` is intentionally excluded from Git. Create it locally from the template and replace both placeholders with unique random values before starting the optional service:
+
+```bash
+cp deploy/seaweedfs/s3.example.json deploy/seaweedfs/s3.json
+openssl rand -hex 16  # use as accessKey
+openssl rand -hex 32  # use as secretKey
+# Edit deploy/seaweedfs/s3.json with those generated values.
+docker compose --profile s3 up -d seaweedfs
+```
+
+Do not commit the generated runtime file. The S3 service is opt-in; the default AIOS storage backend remains local.
