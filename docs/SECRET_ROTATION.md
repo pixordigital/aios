@@ -2,7 +2,7 @@
 
 Sempre que `AIOS_JWT_SECRET`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD` estiverem como `changeme` ou vazios, rotacione **imediatamente** no Coolify.
 
-## Coolify (produção 178.105.181.38)
+## Coolify (produção — host não documentado publicamente)
 
 1. Coolify → `pixor-aios` → Environment (JWT sem downtime)
    ```
