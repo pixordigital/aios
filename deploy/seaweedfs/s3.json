@@ -1,1 +1,1 @@
-{"identities":[{"name":"aios","credentials":[{"accessKey":"aios","secretKey":"aios123456"}]}]
+{"identities":[{"name":"aios","credentials":[{"accessKey":"REPLACE_WITH_RANDOM_ACCESS_KEY","secretKey":"REPLACE_WITH_RANDOM_SECRET_KEY"}]}]}
