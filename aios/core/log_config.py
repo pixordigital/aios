@@ -19,6 +19,7 @@ _STANDARD_FIELDS = {
     "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
     "created", "msecs", "relativeCreated", "thread", "threadName",
     "processName", "process", "message", "asctime", "trace_id", "request_id",
+    "taskName",
 }
 
 
