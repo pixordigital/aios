@@ -316,7 +316,7 @@ class ChannelConnection(Base, TimestampMixin, OrgScopedMixin):
     __tablename__ = "channel_connections"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     channel_type: Mapped[str] = mapped_column(String(50))
-    label: Mapped[str] = mapped_column(String(255))
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True, default="")
     config: Mapped[dict] = mapped_column(JSON, default=dict)
     is_active: Mapped[bool] = mapped_column(default=True)
     agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), nullable=True)

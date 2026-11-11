@@ -6,7 +6,7 @@ set -e
 
 echo "🔄 Rebuilding AIOS app container..."
 
-cd /root/ai_projects/claude_projects/pixor_aios  # Ajuste se path diferente
+cd /home/pixor/ai_projects/claude_projects/pixor_aios  # Adjusted for actual location
 
 # 1. Parar container app
 docker compose -f docker-compose.coolify.yml stop app

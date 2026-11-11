@@ -834,6 +834,11 @@ async def health():
     }
 
 
+
 def run():
     import uvicorn
-    uvicorn.run("aios.main:app", host="0.0.0.0", port=8777, reload=True)
+    uvicorn.run("aios.main:app", host="0.0.0.0", port=8777, reload=False)
+
+if __name__ == "__main__":
+    run()
+

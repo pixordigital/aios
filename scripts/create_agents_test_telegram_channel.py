@@ -13,6 +13,10 @@ The script is safe to run multiple times – it will *upsert* the record.
 """
 import asyncio
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from aios.db.backend import db_session
 from aios.db.models import ChannelConnection
 
@@ -33,7 +37,7 @@ async def main():
             upd = (
                 update(ChannelConnection)
                 .where(ChannelConnection.id == row[0])
-                .values(config=placeholder_cfg, is_active=True)
+                .values(config=placeholder_cfg, label="agents-test-telegram-s9", is_active=True)
             )
             await db.execute(upd)
         else:
@@ -41,6 +45,7 @@ async def main():
             ins = insert(ChannelConnection).values(
                 org_id=org_id,
                 channel_type="telegram",
+                label="agents-test-telegram-s9",
                 is_active=True,
                 config=placeholder_cfg,
             )

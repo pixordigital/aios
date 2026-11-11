@@ -168,9 +168,9 @@
     "semantic_hash": "464dcf0697b061bf6647be896278528a"
   },
   "aios/api/router.py": {
-    "mtime": 1790944056.006211,
-    "seen": 1790966056.417791,
-    "ast_hash": "e0fc0cd74074f2b1c6e8ff3b5fd06a16",
+    "mtime": 1793964685.7245946,
+    "seen": 1794136478.3433766,
+    "ast_hash": "0f772ce6614ab67353d4ffeb69e40d32",
     "semantic_hash": ""
   },
   "aios/api/rubrics.py": {
@@ -300,9 +300,9 @@
     "semantic_hash": "2de1eacf24021a3378768fd62230dc03"
   },
   "aios/channels/telegram.py": {
-    "mtime": 1791026931.624907,
-    "seen": 1791029136.8687696,
-    "ast_hash": "cc49b169822df8590d52e980dc3beb61",
+    "mtime": 1794099128.3059776,
+    "seen": 1794136478.344195,
+    "ast_hash": "4337dbc617348c9c12c766b9ffa6192b",
     "semantic_hash": ""
   },
   "aios/channels/voice.py": {
@@ -318,9 +318,9 @@
     "semantic_hash": ""
   },
   "aios/config.py": {
-    "mtime": 1793064650.796713,
-    "seen": 1793189973.632568,
-    "ast_hash": "92983dc6103bc915a51629d4305b301d",
+    "mtime": 1794099128.3059776,
+    "seen": 1794136478.344272,
+    "ast_hash": "6f6659a856e72a3354691aa95ce6604b",
     "semantic_hash": ""
   },
   "aios/core/agent.py": {
@@ -870,9 +870,9 @@
     "semantic_hash": ""
   },
   "aios/main.py": {
-    "mtime": 1793060902.1223636,
-    "seen": 1793062225.764566,
-    "ast_hash": "30a059ffd9f1cee8a6b90f880294348c",
+    "mtime": 1794083910.4829788,
+    "seen": 1794136478.3525395,
+    "ast_hash": "4a9322d1a67ab8593c7530b94806d434",
     "semantic_hash": ""
   },
   "aios/qa/__init__.py": {
@@ -1404,16 +1404,16 @@
     "semantic_hash": "0ed29bd0c2e548b6131dbec837c95074"
   },
   "pyproject.toml": {
-    "mtime": 1793739475.988172,
-    "seen": 1793745327.1548424,
-    "ast_hash": "2dd4a3f846b257c2f91b099669bfe945",
+    "mtime": 1794099146.310649,
+    "seen": 1794136478.3590214,
+    "ast_hash": "15bed5deea01b40cb3105325e27a2596",
     "semantic_hash": ""
   },
   "rebuild-coolify.sh": {
-    "mtime": 1789084018.8823488,
-    "seen": 1790797355.3141932,
-    "ast_hash": "804476ddf19ec0646b524c4d99e0f5b8",
-    "semantic_hash": "804476ddf19ec0646b524c4d99e0f5b8"
+    "mtime": 1794056796.2594588,
+    "seen": 1794136478.359026,
+    "ast_hash": "48f7a9e01675e00f11c41214c9ef8926",
+    "semantic_hash": ""
   },
   "scripts/backup-cron.sh": {
     "mtime": 1789165743.4833488,
@@ -2946,9 +2946,9 @@
     "semantic_hash": ""
   },
   "aios/core/router.py": {
-    "mtime": 1791118918.5699842,
-    "seen": 1793058748.4621959,
-    "ast_hash": "c52561cbb27616fc80a3773358719dcd",
+    "mtime": 1794071987.3050318,
+    "seen": 1794136478.349231,
+    "ast_hash": "d94afae335447ce9f92f782f47cb4232",
     "semantic_hash": ""
   },
   "tests/test_router.py": {
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1793743748.163774,
-    "seen": 1793745327.1697555,
-    "ast_hash": "f4eeac349ea35f46d43db962bcfd6726",
+    "mtime": 1794099139.5640225,
+    "seen": 1794136478.3685534,
+    "ast_hash": "9d715f369bd5e525587c43969474a588",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -3231,6 +3231,24 @@
     "mtime": 1793740499.192163,
     "seen": 1793745327.1475208,
     "ast_hash": "7194f238fdae67b559cb2cd7c7f57798",
+    "semantic_hash": ""
+  },
+  "aios/metrics.py": {
+    "mtime": 1794078071.3787332,
+    "seen": 1794136478.3525438,
+    "ast_hash": "2c65371cbf883c3f106745d2f869118f",
+    "semantic_hash": ""
+  },
+  "alembic/versions/ea73e62a55fd_add_folder_index_table.py": {
+    "mtime": 1794099128.3069775,
+    "seen": 1794136478.3577373,
+    "ast_hash": "303248dcad48914f60ebee30166d1220",
+    "semantic_hash": ""
+  },
+  "scripts/create_agents_test_telegram_channel.py": {
+    "mtime": 1794099128.3079777,
+    "seen": 1794136478.3591075,
+    "ast_hash": "fc37fded79a145dd0473f70cddde8f10",
     "semantic_hash": ""
   }
 }

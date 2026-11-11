@@ -10,8 +10,8 @@ required for the tenant — consistent with how every other channel here works.
 """
 
 import asyncio
+import logging
 from aios.config import settings
-
 import uuid
 
 import httpx

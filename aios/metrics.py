@@ -5,17 +5,16 @@ Provides a minimal /metrics endpoint exposing counters for:
 - request latency histogram
 - token usage (input/output) if available via request context
 
-Uses `aioprometheus` which is lightweight and compatible with async frameworks.
+Uses `aioprometheus` Registry directly; no background Service is started.
 """
 
 from fastapi import APIRouter, Request, Response
-from aioprometheus import Counter, Histogram, Service
-import asyncio
+from aioprometheus import Counter, Histogram, Registry
 
 router = APIRouter()
 
-# Global Prometheus service (started on first request)
-_service: Service | None = None
+# Global Prometheus registry
+_registry: Registry | None = None
 
 # Define metrics
 REQUEST_COUNT = Counter("aios_http_requests_total", "Total HTTP requests processed")
@@ -27,45 +26,18 @@ REQUEST_LATENCY = Histogram(
 TOKEN_INPUT = Counter("aios_tokens_input_total", "Total input tokens processed")
 TOKEN_OUTPUT = Counter("aios_tokens_output_total", "Total output tokens generated")
 
-async def _ensure_service():
-    global _service
-    if _service is None:
-        _service = Service()
-        await _service.start(addr="0.0.0.0", port=8000)  # bound to localhost; metrics endpoint will proxy
-        # Register metrics
-        _service.register(REQUEST_COUNT)
-        _service.register(REQUEST_LATENCY)
-        _service.register(TOKEN_INPUT)
-        _service.register(TOKEN_OUTPUT)
+async def _ensure_registry():
+    global _registry
+    if _registry is None:
+        _registry = Registry()
+        _registry.register(REQUEST_COUNT)
+        _registry.register(REQUEST_LATENCY)
+        _registry.register(TOKEN_INPUT)
+        _registry.register(TOKEN_OUTPUT)
 
-@router.middleware("http")
-async def metrics_middleware(request: Request, call_next):
-    await _ensure_service()
-    REQUEST_COUNT.inc({"path": request.url.path, "method": request.method})
-    with REQUEST_LATENCY.time({"path": request.url.path, "method": request.method}):
-        response: Response = await call_next(request)
-        # If response includes token usage headers, increment counters (optional)
-        if "x-token-input" in response.headers:
-            try:
-                TOKEN_INPUT.inc(float(response.headers["x-token-input"]))
-            except ValueError:
-                pass
-        if "x-token-output" in response.headers:
-            try:
-                TOKEN_OUTPUT.inc(float(response.headers["x-token-output"]))
-            except ValueError:
-                pass
-        return response
 
 @router.get("/metrics")
-async def get_metrics():
-    """Expose Prometheus metrics.
-
-    The aioprometheus service already serves its own /metrics endpoint on the port it
-    was started on. To keep things simple we proxy that content.
-    """
-    global _service
-    if _service is None:
-        await _ensure_service()
-    # Pull metrics from the service directly
-    return Response(content=await _service.metrics(), media_type="text/plain; version=0.0.4")
+async def get_metrics() -> Response:
+    """Expose Prometheus metrics in the text exposition format."""
+    await _ensure_registry()
+    return Response(content=await _registry.render(), media_type="text/plain; version=0.0.4")

@@ -4,10 +4,12 @@ Last updated: 2026-11-03
 
 ## Open
 
-- Add verification of Telegram configuration integrated with ICM‑X workflow (run example script, ensure inbound → dispatch → agent → outbound works).
+- Rebuild app container with latest code if changes needed on main branch. (Attempted local rebuild; port 8777 already allocated by Coolify-managed app container; rebuild must run via Coolify deploy or after stopping that container.)
+
 
 ## Done
 
+- Verified Telegram test channel script runs: `scripts/create_agents_test_telegram_channel.py` upserts `agents-test-telegram-s9` row for org `test-org` successfully.
 - Implemented ICM-X Stage Adapter & Workflow Integration (`feat(icm): connect workflow engine to stage adapter and governance`):
   - Created `aios/icm/adapter.py` (`ICMStageAdapter`): resolves stage contracts, enforces allowed/denied tool governance, loads bounded layered context (`L0` identity, `L1` routes, `L2` stage context, `L3` static guidelines), sets execution timeout limits, records execution provenance, and saves output artifacts.
   - Extended `WorkflowNode` and `WorkflowEngine` in `aios/core/workflow.py` to optionally bind `stage_id`, `workspace_id`, and `stage_manifest`, triggering pre/post execution hooks and provenance recording.
