@@ -501,17 +501,6 @@ async def limit_body_size(request: Request, call_next):
 
 
 @app.middleware("http")
-async def add_request_id(request: Request, call_next):
-    global REQUEST_COUNT
-    with _request_lock:
-        REQUEST_COUNT += 1
-        req_id = REQUEST_COUNT
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = str(req_id)
-    return response
-
-
-@app.middleware("http")
 async def trace_middleware(request: Request, call_next):
     from aios.core.tracing import new_trace_id
     tid = new_trace_id()
@@ -540,14 +529,34 @@ async def rls_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def request_logging(request: Request, call_next):
-    """Log every request with method, path, status, duration."""
+    """Log every request with request id, method, path, status and duration."""
     import time
+    from aios.core.log_config import request_id_var
+
+    global REQUEST_COUNT
+    with _request_lock:
+        REQUEST_COUNT += 1
+        req_id = request.headers.get("X-Request-ID") or str(REQUEST_COUNT)
+    token = request_id_var.set(req_id)
     start = time.time()
-    response = await call_next(request)
-    duration_ms = round((time.time() - start) * 1000, 1)
+    try:
+        response = await call_next(request)
+    finally:
+        duration_ms = round((time.time() - start) * 1000, 1)
+        request_id_var.reset(token)
     path = request.url.path
+    response.headers["X-Request-ID"] = req_id
     if not path.startswith("/health") and not path.endswith((".css", ".js", ".ico")):
-        logger.info("%s %s %d %dms", request.method, path, response.status_code, duration_ms)
+        logger.info(
+            "%s %s %d %dms",
+            request.method, path, response.status_code, duration_ms,
+            extra={
+                "http_method": request.method,
+                "http_path": path,
+                "http_status": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
     return response
 
 

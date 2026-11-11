@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     encryption_key: str = ""  # at-rest secret encryption; when empty, derived from jwt_secret (legacy)
     jwt_key_rotation_days: int = 90    # days before JWT key rotation
     log_format: str = "json"  # "text" | "json"
+    log_level: str = "INFO"  # DEBUG | INFO | WARNING | ERROR
     https_only: bool = True
 
     cors_origins: str = ""  # comma-separated, defaults to app_url in non-debug
