@@ -4,10 +4,38 @@ Last updated: 2026-11-03
 
 ## Open
 
+- Activate the fleet: `AIOS_OPENROUTER_API_KEY` is still empty in production, so
+  all 13 agents remain `draft` and no event dispatch reaches them. Set the key
+  in Coolify, redeploy, then run the deploy/probe for each agent.
+- Telegram channel `agents-test-telegram-s9` still has an empty bot token and no
+  agent/team assignment.
 - Rebuild app container with latest code if changes needed on main branch. (Attempted local rebuild; port 8777 already allocated by Coolify-managed app container; rebuild must run via Coolify deploy or after stopping that container.)
 
 
 ## Done
+
+- ICM-X applied to standalone/proactive agent runs (task 4):
+  - `aios/icm/agent_binding.py` binds `AgentRuntime` to a stage manifest from
+    `extra_data.icm` (`workspace_id`, `stage_id`).
+  - Stage allowlist is intersected with the agent's own `allowed_tools`;
+    `denied_tools` are added; `timeout_seconds` caps each run and emits a
+    `STREAM_ERROR` on timeout.
+  - Layered context (L0-L3) is injected once per autonomous run.
+  - Provenance + artifact written per run; `proactive_event_job` now includes
+    `icm_provenance` in `agent.proactive_completed`.
+- Team workspaces and stage manifests (task 5): `aios/icm/team_workspaces.py`
+  defines `sales_ops`, `dev_ops`, `red_ops`, `blue_ops`, `data_ops` (12 stages).
+  `scripts/provision_icm_fleet.py` seeds under `/data` and binds agents.
+  Production already provisioned for Pixor org.
+- Event subscriptions (task 3): applied to sales-sdr, sales-closer,
+  sales-manager, dev-manager, red-agent, red-manager, blue-agent, blue-manager.
+  Data agents remain request-driven on purpose (no matching producer).
+- Autonomy policy (task 2): explicit `autonomy=autonomous`, `autonomous=true`,
+  `hitl_enabled=true`, `max_trials=3` on all 13 agents.
+- Verified in the live container: `sales-sdr` binds `sdr_prospecting` v1.0.0,
+  timeout 180s, allowlist 10 tools, denied `crm_merge_deals`/`crm_stale_deals`,
+  context 1027 chars loaded.
+- Commit `d76cbc1` deployed; deployment finished 2026-11-12T22:04:03Z.
 
 - Verified Telegram test channel script runs: `scripts/create_agents_test_telegram_channel.py` upserts `agents-test-telegram-s9` row for org `test-org` successfully.
 - Implemented ICM-X Stage Adapter & Workflow Integration (`feat(icm): connect workflow engine to stage adapter and governance`):
