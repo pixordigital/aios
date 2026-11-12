@@ -159,6 +159,25 @@ class AgentRuntime:
         self._max_tokens = gov.get("max_tokens_per_run", 500_000)
         self.MAX_ITERATIONS = gov.get("max_iterations", 10) or 10
 
+        # ICM-X stage binding: opt-in via extra_data["icm"]. The manifest's
+        # allowlist narrows the agent's tools and its timeout caps the run.
+        from aios.icm.agent_binding import bind_agent_stage
+
+        self.stage = bind_agent_stage(agent)
+        self.stage_provenance = None
+        self._stage_timeout = None
+        if self.stage is not None:
+            manifest = self.stage.manifest
+            self._denied_tools |= set(manifest.denied_tools)
+            if manifest.allowed_tools:
+                stage_allowed = set(manifest.allowed_tools)
+                self._allowed_tools = (
+                    stage_allowed
+                    if self._allowed_tools == "__all__"
+                    else set(self._allowed_tools) & stage_allowed
+                )
+            self._stage_timeout = self.stage.timeout_seconds
+
     # ─── Syscall wrappers ───
 
     async def _syscall(self, stype: SyscallType, params: dict,
@@ -321,8 +340,40 @@ class AgentRuntime:
         run_id = uuid.uuid4().hex[:12]
         from aios.core.agent_events import emit_stream_event
 
-        async for ev in self._run_stream_inner(conversation_id, user_message, db):
-            yield emit_stream_event(self.agent, ev, run_id)
+        collected: list[str] = []
+        try:
+            if self._stage_timeout:
+                # Raising the deadline aborts a runaway stage instead of
+                # letting it spend the org's token budget.
+                async with asyncio.timeout(self._stage_timeout):
+                    async for ev in self._run_stream_inner(conversation_id, user_message, db):
+                        if ev.get("type") == STREAM_TOKEN:
+                            collected.append(ev.get("content", ""))
+                        yield emit_stream_event(self.agent, ev, run_id)
+            else:
+                async for ev in self._run_stream_inner(conversation_id, user_message, db):
+                    if ev.get("type") == STREAM_TOKEN:
+                        collected.append(ev.get("content", ""))
+                    yield emit_stream_event(self.agent, ev, run_id)
+        except TimeoutError:
+            logger.warning(
+                "ICM stage timeout (%ss) for agent %s", self._stage_timeout, self.agent.id
+            )
+            yield emit_stream_event(
+                self.agent,
+                {"type": STREAM_ERROR, "error": f"ICM stage timed out after {self._stage_timeout}s"},
+                run_id,
+            )
+        finally:
+            if self.stage is not None:
+                try:
+                    self.stage_provenance = self.stage.post_execute(
+                        output="".join(collected), shared={}
+                    )
+                except Exception:
+                    logger.warning(
+                        "ICM provenance write failed for agent %s", self.agent.id, exc_info=True
+                    )
 
     async def _run_stream_inner(
         self,

@@ -161,6 +161,11 @@ class AutonomousAgent:
         last_response = ""
         last_tool_calls = None
 
+        # ICM-X bounded context is loaded once per run, not per trial.
+        stage = getattr(self.runtime, "stage", None)
+        if stage is not None and stage.loaded_context:
+            user_message = f"[ICM Context]\n{stage.loaded_context}\n\n{user_message}"
+
         for trial in range(1, self.max_trials + 1):
             # Injeta reflexões anteriores no contexto
             augmented_message = user_message

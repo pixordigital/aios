@@ -611,13 +611,17 @@ async def proactive_event_job(ctx, payload: dict):
             if is_autonomous:
                 from aios.core.autonomous_agent import AutonomousAgent
 
-                out = await AutonomousAgent(agent).run("", instruction, sess)
+                runner = AutonomousAgent(agent)
+                out = await runner.run("", instruction, sess)
+                provenance = getattr(runner.runtime, "stage_provenance", None)
             else:
                 from aios.core.agent import AgentRuntime
 
                 # No db arg: AgentRuntime takes a DatabaseBackend, not the
                 # AsyncSession this job holds. Same call shape as agent_run.
-                out = await AgentRuntime(agent).run("", instruction)
+                runtime = AgentRuntime(agent)
+                out = await runtime.run("", instruction)
+                provenance = getattr(runtime, "stage_provenance", None)
 
             # Emit what the agent did so downstream automations can react too.
             await publish(
@@ -629,6 +633,7 @@ async def proactive_event_job(ctx, payload: dict):
                     "source_event": ev.event_type,
                     "source_event_id": ev.event_id,
                     "output": str(out)[:4000],
+                    "icm_provenance": provenance,
                 },
                 actor_id=agent_id,
                 idempotency_key=f"{ev.idempotency_key}:{agent_id}:done",
