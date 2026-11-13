@@ -1,0 +1,84 @@
+<script>
+/* Shared live model picker. Both agent forms include this and only own their
+   selection handler, so the catalog is fetched and grouped in one place. */
+(function () {
+  var PROVIDER = {
+    openai: "OpenAI", anthropic: "Anthropic", google: "Google", deepseek: "DeepSeek",
+    "x-ai": "xAI", qwen: "Qwen", "meta-llama": "Meta", meta: "Meta", mistralai: "Mistral",
+    moonshot: "Moonshot", minimax: "MiniMax", cohere: "Cohere", amazon: "Amazon",
+    microsoft: "Microsoft", nvidia: "NVIDIA", perplexity: "Perplexity", ai21: "AI21",
+    databricks: "Databricks", upstage: "Upstage", ibm: "IBM", baidu: "Baidu",
+    tencent: "Tencent", liquid: "Liquid", kt: "KT", "nex-agi": "Nex AGI",
+    "thinkingmachines": "Thinking Machines", "motif-technologies": "Motif",
+    ricursiveai: "Ricursive"
+  };
+  var LOCAL = [
+    "openai-direct/gpt-4o", "openai-direct/gpt-4o-mini",
+    "anthropic-direct/claude-sonnet-4-20250514", "anthropic-direct/claude-3.5-haiku",
+    "ollama/llama3", "ollama/mistral", "ollama/qwen2.5",
+    "opencode/deepseek-v4", "opencode/deepseek-v4-flash"
+  ];
+  var cached = null;
+
+  function styleLabel(el) {
+    el.style.cssText = "font-size:0.6rem;font-weight:600;color:var(--text-tertiary);" +
+      "text-transform:uppercase;letter-spacing:0.04em;padding:0.5rem 0.625rem 0.25rem;" +
+      "border-bottom:1px solid var(--border)";
+  }
+
+  function draw(host, list, onSelect, onDone) {
+    var recent = list.slice(0, 18);
+    var recentIds = {};
+    recent.forEach(function (m) { recentIds[m.model] = 1; });
+    var groups = [["Recém-lançados", recent.map(function (m) { return m.model; })]];
+    var byProvider = {};
+    list.forEach(function (m) {
+      if (recentIds[m.model]) return;
+      var prefix = m.model.split("/")[0];
+      var label = PROVIDER[prefix] || prefix;
+      (byProvider[label] = byProvider[label] || []).push(m.model);
+    });
+    Object.keys(byProvider).sort().forEach(function (label) {
+      groups.push([label, byProvider[label]]);
+    });
+    groups.push(["Local / API direta", LOCAL]);
+
+    host.innerHTML = "";
+    groups.forEach(function (group) {
+      if (!group[1].length) return;
+      var header = document.createElement("div");
+      header.textContent = group[0];
+      styleLabel(header);
+      host.appendChild(header);
+      group[1].forEach(function (modelId) {
+        var option = document.createElement("div");
+        option.className = "model-option";
+        option.setAttribute("data-model", modelId);
+        option.setAttribute("data-group", group[0]);
+        option.textContent = modelId;
+        option.style.cssText = "padding:0.375rem 0.625rem;font-size:0.75rem;" +
+          "font-family:'JetBrains Mono',monospace;cursor:pointer;color:var(--text-secondary);" +
+          "border-bottom:1px solid var(--border);transition:background 0.06s";
+        option.onmouseover = function () { option.style.background = "var(--bg-hover)"; };
+        option.onmouseout = function () { option.style.background = "transparent"; };
+        option.onclick = function () { onSelect(modelId); };
+        host.appendChild(option);
+      });
+    });
+    if (onDone) onDone();
+  }
+
+  window.loadModelGroups = function (hostId, onSelect, onDone) {
+    var host = document.getElementById(hostId);
+    if (!host) return;
+    if (cached) { draw(host, cached, onSelect, onDone); return; }
+    host.innerHTML = '<div style="padding:0.5rem 0.625rem;font-size:0.7rem;color:var(--text-tertiary)">Carregando modelos…</div>';
+    fetch("/dashboard/api/models", { credentials: "include" })
+      .then(function (response) { return response.json(); })
+      .then(function (list) { cached = list || []; draw(host, cached, onSelect, onDone); })
+      .catch(function () {
+        host.innerHTML = '<div style="padding:0.5rem 0.625rem;font-size:0.7rem;color:var(--red)">Falha ao carregar modelos</div>';
+      });
+  };
+})();
+</script>

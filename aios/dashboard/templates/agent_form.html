@@ -167,71 +167,7 @@ async function verifyFromDetail(btn){
                                onblur="setTimeout(function(){document.getElementById('model-dropdown').classList.remove('open')}, 200)"
                                class="input input-mono" placeholder="Buscar modelos…">
                         <div id="model-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;margin-top:2px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:280px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
-                             {% set groups = {
-                                "OpenRouter — Últimos": [
-                                    "openai/gpt-5.6-sol", "openai/gpt-5.6-terra", "openai/gpt-5.6-luna",
-                                    "openai/gpt-5.4", "openai/gpt-5.3", "openai/gpt-5.1", "openai/gpt-5",
-                                    "anthropic/claude-fable-5-1", "anthropic/claude-mythos-5-1",
-                                    "anthropic/claude-opus-4.5", "anthropic/claude-sonnet-4.5",
-                                    "google/gemini-3.8-flash", "google/gemini-3.8-flash-cyber", "google/gemini-3-pro",
-                                ],
-                                "Meta — Muse Spark": [
-                                    "muse/muse-spark-1.2", "muse/muse-spark-1.2-contributor-free",
-                                    "opencode/muse-spark-1.2", "opencode/muse-spark-1.2-contributor-free",
-                                    "meta-llama/llama-4-maverick", "meta-llama/llama-4-scout",
-                                ],
-                                "OpenRouter": [
-                                    "openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/gpt-4.1-nano",
-                                    "openai/o3", "openai/o3-mini", "openai/o4-mini", "openai/o4",
-                                    "openai/gpt-5", "openai/gpt-5-mini", "openai/o5", "openai/o5-mini",
-                                    "openai/gpt-5.1-flash", "openai/gpt-5.1-pro",
-                                    "anthropic/claude-sonnet-4-20250514", "anthropic/claude-5-opus-20250714",
-                                    "anthropic/claude-4.5-sonnet", "anthropic/claude-3.5-sonnet", "anthropic/claude-3-haiku",
-                                    "anthropic/claude-opus-4-20250514", "anthropic/claude-sonnet-4.6-20250715",
-                                    "anthropic/claude-fable-5",
-                                    "google/gemini-2.5-pro", "google/gemini-2.5-flash", "google/gemini-2.5-flash-lite",
-                                    "google/gemini-3-pro-2026-05", "google/gemini-3-flash-2026-05",
-                                    "google/gemma-4-27b-it", "google/gemma-4-9b-it",
-                                    "meta-llama/llama-4-maverick", "meta-llama/llama-4-scout",
-                                    "meta-llama/llama-5-70b", "meta-llama/llama-5-405b",
-                                    "mistralai/mistral-large-3", "mistralai/mistral-3-small", "mistralai/codestral-2501",
-                                    "deepseek/deepseek-v4", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro",
-                                    "deepseek/deepseek-v5", "deepseek/deepseek-r2",
-                                    "cohere/command-x1-05-2026", "cohere/command-a-03-2025", "cohere/command-r7-12-2024",
-                                    "x-ai/grok-4", "x-ai/grok-4-mini", "x-ai/grok-3",
-                                    "qwen/qwen-3-235b-a22b", "qwen/qwen-3-30b-a3b", "qwen/qwen-max",
-                                    "minimax/minimax-m4-2026", "minimax/minimax-m3-0724",
-                                    "moonshot/kimi-3", "moonshot/kimi-k3",
-                                    "perplexity/sonar-deep-research", "perplexity/sonar-pro",
-                                    "nvidia/nemotron-5-120b", "nvidia/nemotron-4-340b",
-                                    "ai21/jamba-1.6-large", "ai21/jamba-1.6-mini",
-                                    "databricks/dbrx-2", "databricks/dbrx-instruct",
-                                    "microsoft/phi-4", "microsoft/phi-4-mini",
-                                    "amazon/nova-pro-v1", "amazon/nova-lite-v1",
-                                    "upstage/solar-pro-2", "ibm/granite-3.2-20b",
-                                ],
-                                "OpenCode (grátis)": [
-                                    "opencode/deepseek-v4", "opencode/deepseek-v4-flash",
-                                    "opencode/qwen-3-235b-a22b", "opencode/qwen-3-30b-a3b",
-                                    "opencode/llama-4-maverick", "opencode/llama-4-scout",
-                                    "opencode/mistral-large-3",
-                                ],
-                                "API direta": [
-                                    "openai-direct/gpt-4o", "openai-direct/gpt-4o-mini",
-                                    "anthropic-direct/claude-sonnet-4-20250514", "anthropic-direct/claude-3.5-haiku",
-                                    "anthropic-direct/claude-fable-5-1",
-                                ],
-                                "Ollama (local)": [
-                                    "ollama/llama3", "ollama/mistral", "ollama/qwen2.5", "ollama/gpt-5.6-sol",
-                                ],
-                            } %}
-                            {% for group, models_list in groups.items() %}
-                            <div style="font-size:0.6rem;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.04em;padding:0.5rem 0.625rem 0.25rem;border-bottom:1px solid var(--border)">{{ group }}</div>
-                            {% for m in models_list %}
-                            <div class="model-option" data-model="{{ m }}" data-group="{{ group }}" onclick="selectModel('{{ m }}');updateCost('{{ m }}')" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'"
-                                 style="padding:0.375rem 0.625rem;font-size:0.75rem;font-family:'JetBrains Mono',monospace;cursor:pointer;color:var(--text-secondary);border-bottom:1px solid var(--border);transition:background 0.06s">{{ m }}</div>
-                            {% endfor %}
-                            {% endfor %}
+                        <div id="model-groups"></div>
                         </div>
                         <p id="model-provider" style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.25rem"></p>
                     </div>
@@ -365,7 +301,7 @@ async function verifyFromDetail(btn){
 
     </div>
 </form>
-
+{% include "_model_picker.html" %}
 <style>
 #prompt-editor-wrap{display:flex;flex-direction:column;flex:1;min-height:380px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-elevated)}
 #prompt-toolbar{display:flex;gap:0.25rem;padding:0.5rem;background:var(--bg-hover);border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
@@ -907,7 +843,7 @@ async function verifyFromDetail(btn){
         if(dd) dd.addEventListener('mousedown',function(e){e.preventDefault()});
         updateModelProvider(document.getElementById('model-search').value);
         updateCost(document.getElementById('model-search').value);
-        annotateModels();
+        loadModelGroups('model-groups', function(m){ selectModel(m); updateCost(m); }, annotateModels);
     });
 
 function toggleTool(el, name) {

@@ -73,6 +73,53 @@ TOOL_DESCRIPTIONS = {
 }
 
 
+LOCAL_MODELS = [
+    ("openai-direct/gpt-4o", 2.50, 10.00),
+    ("openai-direct/gpt-4o-mini", 0.15, 0.60),
+    ("anthropic-direct/claude-sonnet-4-20250514", 3.00, 15.00),
+    ("anthropic-direct/claude-3.5-haiku", 0.25, 1.25),
+    ("ollama/llama3", 0.0, 0.0),
+    ("ollama/mistral", 0.0, 0.0),
+    ("ollama/qwen2.5", 0.0, 0.0),
+    ("opencode/deepseek-v4", 0.0, 0.0),
+    ("opencode/deepseek-v4-flash", 0.0, 0.0),
+]
+
+
+def _catalog_models(catalog: list[dict]) -> list[dict]:
+    """Chat models from the OpenRouter catalog, newest first.
+
+    Batch and rate-limited free variants are excluded: selecting either for a
+    production agent misstates latency or capacity. A model without a text
+    output modality or a price cannot be costed, so it is skipped.
+    """
+    models = []
+    for item in catalog:
+        model_id = item.get("id") or ""
+        if not model_id or model_id.endswith((":batch", ":free")):
+            continue
+        arch = item.get("architecture") or {}
+        outputs = arch.get("output_modalities") or []
+        if outputs and "text" not in outputs:
+            continue
+        pricing = item.get("pricing") or {}
+        try:
+            inp = float(pricing["prompt"]) * 1e6
+            out = float(pricing["completion"]) * 1e6
+        except (KeyError, TypeError, ValueError):
+            continue
+        models.append({
+            "model": model_id,
+            "name": item.get("name") or model_id,
+            "input": round(inp, 4),
+            "output": round(out, 4),
+            "context": item.get("context_length") or 0,
+            "created": item.get("created") or 0,
+        })
+    models.sort(key=lambda m: (-m["created"], m["model"]))
+    return models
+
+
 def _cost_estimate(model: str, tokens: int = 4096) -> float:
     if model in MODEL_PRICING:
         inp, out = MODEL_PRICING[model]
@@ -924,16 +971,42 @@ async def agent_test(request: Request, aid: str, message: str = Form("Olá, test
 
 
 @router.get("/api/models")
-async def api_models():
-    """Fonte única de modelos — reusa MODEL_PRICING."""
+async def api_models(refresh: bool = False):
+    """Live model list from OpenRouter plus the direct/local extras.
+
+    The picker must not drift: a hardcoded list goes stale the week a provider
+    ships a model. OpenRouter's catalog is the source of truth and is cached by
+    ``model_select.fetch_catalog`` for 6h; ``?refresh=1`` bypasses the cache.
+    Falls back to the static pricing map when the catalog is unreachable.
+    """
     from fastapi.responses import JSONResponse
-    models = []
-    for m, (inp, out) in MODEL_PRICING.items():
-        models.append({"model": m, "input": inp, "output": out, "cost_estimate": _cost_estimate(m)})
-    # add ollama/opencode extras not in pricing
-    for m in ["ollama/llama3","ollama/mistral","opencode/deepseek-v4"]:
-        if m not in MODEL_PRICING:
-            models.append({"model": m, "input": 0, "output": 0, "cost_estimate": 0})
+
+    from aios.core.model_select import fetch_catalog
+
+    try:
+        models = _catalog_models(await fetch_catalog(force=refresh))
+    except Exception:
+        logger.warning("OpenRouter catalog unavailable, using static model list", exc_info=True)
+        models = []
+
+    if not models:
+        models = [
+            {"model": m, "name": m, "input": inp, "output": out,
+             "context": 0, "created": 0}
+            for m, (inp, out) in MODEL_PRICING.items()
+        ]
+
+    known = {m["model"] for m in models}
+    for model_id, inp, out in LOCAL_MODELS:
+        if model_id not in known:
+            models.append({
+                "model": model_id, "name": model_id, "input": inp, "output": out,
+                "context": 0, "created": 0,
+            })
+    for m in models:
+        m["cost_estimate"] = round(
+            (m["input"] * 4096 / 1000 + m["output"] * 4096 / 1000 * 0.5) / 100, 4
+        )
     return JSONResponse(models)
 
 
