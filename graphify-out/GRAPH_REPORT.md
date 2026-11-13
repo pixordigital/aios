@@ -1,7 +1,7 @@
 # Graph Report - pixor_aios  (2026-11-13)
 
 ## Corpus Check
-- 474 files · ~394,699 words
+- 474 files · ~394,787 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 16 file(s) not represented in the graph (top: (none) 8, .example 2, .service 2)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7e73174c`
+- Built from commit: `d2deeeea`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -938,7 +938,7 @@ Nodes (10): CRMPipelineStatsTool, _deal(), _org(), TestCrmControl, TestCrmDelete
 
 ### Community 145 - "test_model_catalog.py"
 Cohesion: 0.36
-Nodes (7): _catalog_models(), _model(), test_api_models_adds_direct_and_local_extras(), fake_catalog(), test_catalog_excludes_batch_free_non_text_and_unpriced(), test_catalog_keeps_chat_models_and_converts_price_per_million(), test_catalog_sorts_newest_first()
+Nodes (7): _catalog_models(), _model(), test_api_models_adds_direct_and_local_extras(), fake_catalog(), test_catalog_keeps_chat_models_and_converts_price_per_million(), test_catalog_keeps_free_variants_but_drops_batch(), test_catalog_sorts_newest_first()
 
 ### Community 147 - "test_meta_contract.py"
 Cohesion: 0.14
@@ -1503,6 +1503,6 @@ _Questions this graph is uniquely positioned to answer:_
 - **What is the exact relationship between `Agent Sandbox / Playground (streaming chat + tool execution)` and `YouTube Canais Autônomos`?**
   _Edge tagged AMBIGUOUS (relation: related_to) - confidence is low._
 - **Why does `db_session()` connect `db_session` to `test_template_org_scope.py`, `logging`, `team_collaboration.py`, `test_webhook_signatures.py`, `worker.py`, `app.py`, `_post_team_reports`, `get_provider`, `test_crm_tools.py`, `fleet_verify.py`, `billing.py`, `recommend_orchestrator`, `email_webhook.py`, `sqlalchemy`, `main.py`, `DatabaseBackend`, `whatsapp_guard.py`, `.select`, `test_teams_map.py`, `funnel_detail`, `test_worker_registry.py`, `Organization`, `MemoryManager`, `models.py`, `meetings.py`, `TestVoice`, `write_dlq`, `score_from_events`, `storage.py`, `_require_superadmin`, `agent_health.py`, `test_learning_loop.py`, `jobs.py`, `time`, `admin_api.py`, `PendingAction`, `heartbeat`, `db/backend.py`, `curated.py`, `whatsapp.py`, `AgentMetric`, `test_curated_memory.py`, `WhatsappTemplate`?**
-  _High betweenness centrality (0.063) - this node is a cross-community bridge._
-- **Why does `Organization` connect `Organization` to `test_workday_board.py`, `AgentInstance`, `api/auth.py`, `Credential`, `fixture`, `worker.py`, `CrmDeal`, `app.py`, `envelope.py`, `_post_team_reports`, `EvolutionChannel`, `get_provider`, `test_crm_tools.py`, `fleet_verify.py`, `billing.py`, `sqlalchemy`, `main.py`, `should_work_day`, `DatabaseBackend`, `TestEvolutionInstanceLimit`, `test_team_collaboration.py`, `test_build_request.py`, `Workflow`, `.select`, `Message`, `evolution.py`, `test_crm_board.py`, `test_teams_map.py`, `leads.py`, `test_worker_registry.py`, `analytics.py`, `models.py`, `db_session`, `_require_superadmin`, `routes.py`, `test_events_bus.py`, `jobs.py`, `User`, `admin_api.py`, `ensure_business_setup`, `get_redis_pool`, `PendingAction`, `heartbeat`, `test_evolution_channel.py`, `db/backend.py`, `curated.py`, `deployment.py`, `test_wizard_smoke.py`, `test_curated_memory.py`?**
+  _High betweenness centrality (0.062) - this node is a cross-community bridge._
+- **Why does `Agent` connect `.select` to `MetaAgent`, `test_workday_board.py`, `logging`, `AgentInstance`, `team_collaboration.py`, `capture_deal_insight`, `app.py`, `ChannelConnection`, `_post_team_reports`, `get_provider`, `test_crm_tools.py`, `fleet_verify.py`, `sqlalchemy`, `main.py`, `should_work_day`, `DatabaseBackend`, `test_team_collaboration.py`, `test_build_request.py`, `test_suite_integration.py`, `Workflow`, `Message`, `AutonomousAgent`, `test_icm_agent_binding.py`, `test_teams_map.py`, `Pesquisa: Agentes Autônomos de IA — Como Funcionam e Como Aplicar no AIOS`, `leads.py`, `test_lojista_signals.py`, `analytics.py`, `AgentRuntime`, `MemoryManager`, `Organization`, `models.py`, `Evaluator`, `TestVoice`, `eval.py`, `AgentUpdate`, `routes.py`, `agent_health.py`, `test_events_bus.py`, `jobs.py`, `time`, `User`, `test_features.py`, `Memory`, `admin_api.py`, `ensure_business_setup`, `get_redis_pool`, `PendingAction`, `api/voice.py`, `db/backend.py`, `curated.py`, `deployment.py`, `pytest`, `test_wizard_smoke.py`, `test_curated_memory.py`, `subagent.py`?**
   _High betweenness centrality (0.043) - this node is a cross-community bridge._

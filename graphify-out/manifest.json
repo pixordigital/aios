@@ -798,9 +798,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/app.py": {
-    "mtime": 1794530511.6658812,
-    "seen": 1794530672.8389227,
-    "ast_hash": "057bb1ebc35ea9aba21cc04cc03c27bf",
+    "mtime": 1794558934.687295,
+    "seen": 1794558994.021544,
+    "ast_hash": "cb56dd381a2fa7cd494c33a59c956354",
     "semantic_hash": ""
   },
   "aios/db/__init__.py": {
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1794529840.3713675,
-    "seen": 1794530672.8610032,
-    "ast_hash": "1cff8c9e61fc01e2da412ee7f377fead",
+    "mtime": 1794530855.195875,
+    "seen": 1794558994.063239,
+    "ast_hash": "69eb6899fbc976cdcbe0ba76d8d1efdc",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -3294,9 +3294,9 @@
     "semantic_hash": ""
   },
   "tests/test_model_catalog.py": {
-    "mtime": 1794530622.8172328,
-    "seen": 1794530672.8539178,
-    "ast_hash": "1b9a24ef6abc5644928ae2c01e362320",
+    "mtime": 1794558938.857682,
+    "seen": 1794558994.0424373,
+    "ast_hash": "5324e204a4f55e6fe8bcb945b1fe76e6",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/_model_picker.html": {
