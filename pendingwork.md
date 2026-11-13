@@ -15,6 +15,34 @@ Last updated: 2026-11-13
 
 ## Done
 
+- Right-sized for the 4 vCPU / 8 GB host (commit `dde0d83`, deployed
+  2026-11-13T10:34:08Z):
+  - gunicorn `--workers 1` (was 2): one scheduler, one DB pool, one telemetry
+    flush per release instead of two.
+  - DB pool `5 + 5 overflow` per process (was `10 + 20`); ARQ `max_jobs` is now
+    `AIOS_WORKER_MAX_JOBS`, default 5 (was hardcoded 20).
+  - Cron advisory-lock holder now `COMMIT`s right after acquiring the session
+    lock, and the loser closes its session. The two long-lived
+    `idle in transaction` backends are gone; one advisory lock remains.
+  - Daily backup runs once (ARQ `backup_job` removed; `deploy/backup.sh` via
+    the cron scheduler is the single path), strips `+asyncpg` from the URL,
+    rejects empty archives, keeps 7 days. Verified in the container: a real
+    dump is 31 KB and `gzip -t` passes.
+  - Compose: postgres 512M with `shared_buffers=256MB`,
+    `effective_cache_size=1GB`, `max_connections=60`; app 1G; worker 512M;
+    otel 128M; json-file logs capped at 10m x 3. Kokoro untouched (2G cap).
+  - Tests: `tests/test_backup_script.py` added; catalog + config suites pass.
+    `tests/test_config.py::test_health_endpoints` still 503 locally because the
+    local sqlite DB is unversioned (`alembic_version` missing) — pre-existing,
+    unrelated to this change; production `/health/ready` returns 200.
+  - Host cleanup: unused Docker images and build cache pruned. Disk
+    91% -> 87% (9.7 GB free, was 6.6 GB). The earlier "26 GB reclaimable"
+    figure from `docker system df` was shared-layer accounting and did not
+    materialise; used memory fell 6.2 GB -> 4.7 GB and available memory
+    1.5 GB -> 3.0 GB after the container restarts.
+  - Note: pruning removed older app/worker image tags, so Coolify's
+    image-level rollback for previous releases is gone; redeploy the git commit
+    instead.
 - Model picker now uses the live OpenRouter catalog instead of a hardcoded
   list (`aios/dashboard/templates/_model_picker.html`,
   `aios/dashboard/app.py:_catalog_models`). Agent form and wizard fetch
