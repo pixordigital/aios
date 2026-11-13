@@ -150,12 +150,18 @@ async def main() -> int:
         for team in teams:
             team.manager_agent_id = manager.id
             await _ensure_member(db, team.id, manager.id)
+        team_names = [t.name for t in teams]
+        manager_id, manager_name = manager.id, manager.name
 
         for name in ("red-manager", "blue-manager"):
             stale = by_name.get(name)
             if stale is None or stale.id == manager.id:
                 continue
             stale.status = "archived"
+            stale_extra = dict(stale.extra_data or {})
+            stale_extra.pop("icm", None)
+            stale_extra.pop("event_subscriptions", None)
+            stale.extra_data = stale_extra
             await db.execute(
                 delete(team_agents).where(team_agents.c.agent_id == stale.id)
             )
@@ -166,8 +172,8 @@ async def main() -> int:
         else:
             await db.commit()
         print(
-            f"security-manager={manager.name} id={manager.id} "
-            f"teams={[t.name for t in teams]}"
+            f"security-manager={manager_name} id={manager_id} "
+            f"teams={team_names}"
         )
     return 0
 
