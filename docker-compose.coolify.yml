@@ -5,6 +5,19 @@
 services:
   postgres:
     image: pgvector/pgvector:pg15
+    # Sized for a 4 vCPU / 8GB host shared with Coolify and other apps.
+    # effective_cache_size is deliberately 1GB, not 4GB: the container does not
+    # own the host's page cache.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - max_connections=60
+      - -c
+      - work_mem=4MB
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-aios}
       POSTGRES_USER: ${POSTGRES_USER:-aios}
@@ -18,6 +31,12 @@ services:
       retries: 5
       start_period: 20s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 512M }
+    logging: &default-logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 
   redis:
     image: redis:7-alpine
@@ -31,6 +50,7 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    logging: *default-logging
 
   otel:
     image: otel/opentelemetry-collector-contrib:0.128.0
@@ -41,6 +61,10 @@ services:
       - "4317:4317"
       - "4318:4318"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128M }
+    logging: *default-logging
 
   # litellm removed: active provider is openrouter (direct, see
   # aios/core/providers.py) and the proxy never started — no master key,
@@ -91,6 +115,7 @@ services:
       resources:
         limits: { cpus: "1", memory: 1024M }
         reservations: { cpus: "0.2", memory: 256M }
+    logging: *default-logging
 
   # Cal.com self-hosted scheduling lives in docker-compose.calcom.yml.
   # It is not in this file on purpose: Coolify pulls every service here,
@@ -175,8 +200,9 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1", memory: 1536M }
+        limits: { cpus: "1", memory: 1024M }
         reservations: { cpus: "0.5", memory: 512M }
+    logging: *default-logging
 
   worker:
     build: .
@@ -219,7 +245,8 @@ services:
     restart: unless-stopped
     deploy:
       resources:
-        limits: { cpus: "1", memory: 1G }
+        limits: { cpus: "1", memory: 512M }
+    logging: *default-logging
 
   # ─── Voz (leve: Kokoro TTS) ───
   # Perfil "voice": sobe voice-tts-kokoro (CPU, ~1GB RAM)

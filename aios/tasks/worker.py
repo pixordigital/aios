@@ -42,21 +42,6 @@ def _parse_redis(redis_url: str) -> RedisSettings:
     return _shared(redis_url)
 
 
-async def backup_job(ctx):
-    import datetime
-    import shlex
-    import subprocess
-
-    pg = os.getenv("AIOS_DATABASE_URL") or settings.database_url
-    d = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = f"/data/backups/aios_{d}.sql.gz"
-    os.makedirs("/data/backups", exist_ok=True)
-    try:
-        subprocess.run(f"pg_dump {shlex.quote(pg)} | gzip > {shlex.quote(out)}", shell=True, check=True, timeout=600)
-    except Exception:
-        logging.getLogger(__name__).exception('cron job failed')
-
-
 async def approval_expire_job(ctx):
     try:
         from aios.core.approval import approval_manager
@@ -237,13 +222,12 @@ def _registry(functions, namespace: str | None = None):
 
 class WorkerSettings:
     functions = _registry(FUNCTIONS, namespace="aios.tasks.jobs") + _registry([
-        backup_job, approval_expire_job, autoscale_job, canary_rollback_job,
+        approval_expire_job, autoscale_job, canary_rollback_job,
         _learning_job_wrapper,
         integration_outbox_flush_job,
         template_status_reconcile_job,
     ])
     cron_jobs = [
-        cron(backup_job, hour=3, minute=0),
         cron(approval_expire_job, minute=5),
         cron(autoscale_job, minute=0),
         cron(canary_rollback_job, minute=10),
@@ -266,7 +250,7 @@ class WorkerSettings:
         cron(monthly_report_job, hour=9, minute=30),  # last month's report, 1st of the month
     ]
     redis_settings = _parse_redis(settings.redis_url or os.getenv("REDIS_URL", ""))
-    max_jobs = 20
+    max_jobs = settings.worker_max_jobs
     job_timeout = 300
     poll_delay = 0.2
     health_check_interval = 60

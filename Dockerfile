@@ -50,7 +50,7 @@ STOPSIGNAL SIGTERM
 CMD ["gunicorn", "aios.main:app", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8777", \
-     "--workers", "2", \
+     "--workers", "1", \
      "--timeout", "120", \
      "--keep-alive", "5", \
      "--access-logfile", "-", \

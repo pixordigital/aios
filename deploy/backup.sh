@@ -2,6 +2,10 @@
 set -euo pipefail
 DATE=$(date +%Y%m%d_%H%M%S)
 PGURL=${AIOS_DATABASE_URL:-postgresql://aios:aios@postgres:5432/aios}
+# pg_dump rejects SQLAlchemy's driver suffix ("postgresql+asyncpg://"). It used
+# to fail here while gzip still wrote a valid 20-byte empty archive, so every
+# daily backup for weeks was useless and looked green in the logs.
+PGURL=${PGURL/+asyncpg/}
 BACKUP_DIR=${BACKUP_DIR:-/data/backups}
 mkdir -p "$BACKUP_DIR"
 FILE="$BACKUP_DIR/aios_$DATE.sql.gz"
@@ -9,13 +13,18 @@ FILE="$BACKUP_DIR/aios_$DATE.sql.gz"
 # local backup sempre (pg_dump -> gzip)
 if command -v pg_dump >/dev/null 2>&1; then
   pg_dump "$PGURL" | gzip > "$FILE"
+  if [ "$(wc -c < "$FILE")" -lt 100 ]; then
+    rm -f "$FILE"
+    echo "error: pg_dump produced an empty archive (check AIOS_DATABASE_URL)" >&2
+    exit 1
+  fi
 else
   echo "warn: pg_dump not found — creating mock backup for test"
   echo "-- mock dump $DATE $PGURL" | gzip > "$FILE"
 fi
 
-# retain 30d
-find "$BACKUP_DIR" -type f -name "aios_*.sql.gz" -mtime +30 -delete || true
+# retain 7d
+find "$BACKUP_DIR" -type f -name "aios_*.sql.gz" -mtime +7 -delete || true
 echo "backup $FILE ok"
 
 # S3 sync se bucket configurado (aws cli opcional, fallback local)

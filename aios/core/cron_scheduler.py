@@ -278,27 +278,40 @@ async def _try_singleton_lock():
     """Hold a Postgres advisory lock for this process' scheduler lifetime.
 
     start_cron_scheduler() is called from the app lifespan, and lifespan runs
-    once per gunicorn worker. With --workers 2 that meant two schedulers, and
-    the module-level _last_backup_day / _last_proactive_alert_day guards were
-    per-process, so the daily backup, the sales-drop alerts and the
-    "deal parado ha 7+ dias" WhatsApp all fired twice. The advisory lock makes
-    exactly one process the scheduler regardless of worker count.
+    once per gunicorn worker. With multiple workers that meant multiple
+    schedulers, and the module-level _last_backup_day /
+    _last_proactive_alert_day guards were per-process, so the daily backup, the
+    sales-drop alerts and the "deal parado ha 7+ dias" WhatsApp all fired
+    twice. The advisory lock makes exactly one process the scheduler regardless
+    of worker count.
     """
     from aios.db.engine import async_session
     from sqlalchemy import text as _t
     global _lock_sess
+    sess = None
     try:
-        _lock_sess = async_session()
-        got = (await _lock_sess.execute(
+        sess = async_session()
+        got = (await sess.execute(
             _t("SELECT pg_try_advisory_lock(:k)"), {"k": 0x41494F53}
         )).scalar()
-        return bool(got)
+        if not got:
+            # The loser used to keep this session open forever: two idle-in-
+            # transaction backends holding a transaction snapshot and a pooled
+            # connection for the life of the process.
+            await sess.close()
+            return False
+        # Session-level advisory locks survive COMMIT, and committing keeps the
+        # winner out of "idle in transaction" (which pins an old snapshot and
+        # blocks vacuum).
+        await sess.commit()
+        _lock_sess = sess
+        return True
     except Exception:
         # SQLite (tests/local) has no advisory locks. Fall back to allowing it;
         # SQLite is single-process anyway.
         try:
-            if _lock_sess is not None:
-                await _lock_sess.close()
+            if sess is not None:
+                await sess.close()
         except Exception:
             pass
         _lock_sess = None

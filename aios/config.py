@@ -17,8 +17,12 @@ class Settings(BaseSettings):
     usd_brl_rate: float = 5.5
     crm_webhook_url: str = ""
     database_url: str = "sqlite+aiosqlite:///./aios.db"
-    db_pool_size: int = 10
-    db_max_overflow: int = 20
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    # ARQ jobs run concurrently in one worker process. Each agent turn holds a
+    # DB session and an LLM call, so 20 (the old hardcoded value) oversubscribed
+    # a 4 vCPU box. Raise via AIOS_WORKER_MAX_JOBS on bigger hosts.
+    worker_max_jobs: int = 5
     storage_backend: str = "local"  # "local" | "s3"
     s3_bucket: str = ""
     s3_region: str = ""
