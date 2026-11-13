@@ -15,6 +15,16 @@ Last updated: 2026-11-13
 
 ## Done
 
+- Model picker now uses the live OpenRouter catalog instead of a hardcoded
+  list (`aios/dashboard/templates/_model_picker.html`,
+  `aios/dashboard/app.py:_catalog_models`). Agent form and wizard fetch
+  `/dashboard/api/models` on load, group by provider with a "Recém-lançados"
+  section (newest by `created`), and keep direct/local extras. Batch and
+  free-tier variants are excluded; catalog cached 6h, `?refresh=1` bypasses.
+  Production catalog has 373 chat models; newest includes
+  `google/gemini-4-hydrogen`, `google/gemini-4-carbon`,
+  `anthropic/claude-fable-5.2`. Tests: `tests/test_model_catalog.py` (4 passed).
+  Commit `7e73174` deployed 2026-11-13T00:45:13Z.
 - Manager consolidation: red-manager + blue-manager merged into one
   `security-manager` (`scripts/merge_security_managers.py`). Both `red` and
   `blue` teams point at it; red-manager is archived (row kept for conversation

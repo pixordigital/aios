@@ -798,9 +798,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/app.py": {
-    "mtime": 1793358149.7311323,
-    "seen": 1793358179.356946,
-    "ast_hash": "6fab6b87cc2c48a925a0e012f44d30ec",
+    "mtime": 1794530511.6658812,
+    "seen": 1794530672.8389227,
+    "ast_hash": "057bb1ebc35ea9aba21cc04cc03c27bf",
     "semantic_hash": ""
   },
   "aios/db/__init__.py": {
@@ -1860,9 +1860,9 @@
     "semantic_hash": "9410ed79f409c68c742243990f214c7b"
   },
   "aios/dashboard/templates/agent_form.html": {
-    "mtime": 1793357496.095401,
-    "seen": 1793358179.3682997,
-    "ast_hash": "8d0caf21eb27b179d41a3b72a60eeeda",
+    "mtime": 1794530570.3393455,
+    "seen": 1794530672.8579268,
+    "ast_hash": "93c93389f93fdc415484efdb14489f64",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/agents.html": {
@@ -2100,10 +2100,10 @@
     "semantic_hash": ""
   },
   "aios/dashboard/templates/wizard.html": {
-    "mtime": 1788907271.4087234,
-    "seen": 1790797355.3147335,
-    "ast_hash": "b9e700d6580512bad1e01f8759b626d2",
-    "semantic_hash": "b9e700d6580512bad1e01f8759b626d2"
+    "mtime": 1794530542.5187545,
+    "seen": 1794530672.8599753,
+    "ast_hash": "b8771c447baf2b4853a15da5a52b7bde",
+    "semantic_hash": ""
   },
   "aios/templates/emails/verification.html": {
     "mtime": 1785706220.930738,
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1794529811.1156445,
-    "seen": 1794529833.340893,
-    "ast_hash": "103901c2cfe513b337cf48089fd61526",
+    "mtime": 1794529840.3713675,
+    "seen": 1794530672.8610032,
+    "ast_hash": "1cff8c9e61fc01e2da412ee7f377fead",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -3291,6 +3291,18 @@
     "mtime": 1794529776.1413894,
     "seen": 1794529833.328653,
     "ast_hash": "6daa0f2b2a5f674133eecc6a75c8338c",
+    "semantic_hash": ""
+  },
+  "tests/test_model_catalog.py": {
+    "mtime": 1794530622.8172328,
+    "seen": 1794530672.8539178,
+    "ast_hash": "1b9a24ef6abc5644928ae2c01e362320",
+    "semantic_hash": ""
+  },
+  "aios/dashboard/templates/_model_picker.html": {
+    "mtime": 1794530521.6038067,
+    "seen": 1794530672.8575058,
+    "ast_hash": "a092c1433027a16a4852d0a7941705d9",
     "semantic_hash": ""
   }
 }
