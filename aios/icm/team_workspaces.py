@@ -25,9 +25,8 @@ AGENT_STAGES: dict[str, tuple[str, str]] = {
     "dev-backend": ("dev_ops", "backend_delivery"),
     "dev-manager": ("dev_ops", "dev_review"),
     "red-agent": ("red_ops", "offensive_test"),
-    "red-manager": ("red_ops", "red_review"),
     "blue-agent": ("blue_ops", "detection_analysis"),
-    "blue-manager": ("blue_ops", "blue_review"),
+    "security-manager": ("security_ops", "security_review"),
     "Data Analyst": ("data_ops", "data_analysis"),
     "Data Scientist": ("data_ops", "data_science"),
     "data-manager": ("data_ops", "data_review"),
@@ -47,9 +46,8 @@ AGENT_EVENTS: dict[str, list[str]] = {
     ],
     "dev-manager": ["agent.verify_failed", "agent.deploy_failed"],
     "red-agent": ["agent.verify_failed"],
-    "red-manager": ["agent.verify_failed", "agent.deploy_failed"],
     "blue-agent": ["agent.deploy_failed"],
-    "blue-manager": ["agent.verify_failed", "agent.deploy_failed"],
+    "security-manager": ["agent.verify_failed", "agent.deploy_failed"],
 }
 
 
@@ -212,16 +210,6 @@ TEAM_WORKSPACES: dict[str, dict] = {
                 max_cost_usd=0.8,
                 side_effects=True,
             ),
-            "red_review": _stage(
-                "Rank findings and write remediation guidance",
-                "# Stage Instructions: Red Review\n\n"
-                "1. Rank findings by exploitability and business impact.\n"
-                "2. Give one concrete remediation per finding with the affected surface.\n"
-                "3. Do not run new attacks in a review stage.\n",
-                ["read_file", "web_search", "rag_search", "current_datetime",
-                 "ask_team_manager", "notify_human"],
-                ["http_request", "python_sandbox", "sql_query"],
-            ),
         },
     },
     "blue_ops": {
@@ -249,16 +237,44 @@ TEAM_WORKSPACES: dict[str, dict] = {
                 [],
                 max_cost_usd=0.8,
             ),
-            "blue_review": _stage(
-                "Write the incident timeline, root cause, and prevention plan",
-                "# Stage Instructions: Incident Review\n\n"
-                "1. Build a timestamped timeline from observed evidence only.\n"
-                "2. State root cause, blast radius, and detection gap.\n"
-                "3. One preventive action with an owner and a due date.\n"
-                "4. Do not run containment actions in a review stage.\n",
-                ["read_file", "web_search", "rag_search", "current_datetime",
+        },
+    },
+    "security_ops": {
+        "identity": (
+            "# Security Workspace\n\n"
+            "- ID: `security_ops`\n- Version: `1.0.0`\n"
+            "- Purpose: one lead for offensive findings and defensive remediation, "
+            "from reproduction to a regression check.\n"
+            "- Authority: red tests owned systems; blue fixes root causes; neither "
+            "weakens a check to close a finding.\n"
+        ),
+        "routes": (
+            "# Routing Policies\n\n"
+            "- New surface or hypothesis -> `red_ops/offensive_test`.\n"
+            "- Alert or anomaly -> `blue_ops/detection_analysis`.\n"
+            "- Confirmed finding -> `security_review`: rank, assign, demand reproduction.\n"
+            "- Prohibited: attacking third parties, exfiltrating data, disabling a check.\n"
+        ),
+        "stages": {
+            "security_review": _stage(
+                "Triage findings and incidents, assign owners, and verify the fix",
+                "# Stage Instructions: Security Review\n\n"
+                "1. A finding needs location, traced untrusted input, impact, and "
+                "reproduction steps. Missing any of them -> back to red.\n"
+                "2. Rank by real production impact, not a generic severity table.\n"
+                "3. A fix needs root cause, smallest patch, and a regression test that "
+                "failed before the patch. If the root cause exists elsewhere, name every place.\n"
+                "4. Never weaken a check, remove a test, or disable verification.\n"
+                "5. Escalate when real data, exposed credentials, a public contract, "
+                "or all tenants are affected.\n"
+                "6. Close with: cause, file:line, proof, and what remains open.\n",
+                ["read_file", "code", "sql_query", "python_sandbox", "http_request",
+                 "web_search", "rag_search", "current_datetime",
                  "ask_team_manager", "notify_human"],
-                ["python_sandbox", "sql_query"],
+                ["crm_create_deal", "crm_update_deal", "send_email"],
+                timeout_seconds=240,
+                max_llm_calls=10,
+                max_cost_usd=0.8,
             ),
         },
     },
