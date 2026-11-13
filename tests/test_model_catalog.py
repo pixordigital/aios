@@ -26,15 +26,15 @@ def test_catalog_keeps_chat_models_and_converts_price_per_million():
     }]
 
 
-def test_catalog_excludes_batch_free_non_text_and_unpriced():
+def test_catalog_keeps_free_variants_but_drops_batch():
     rows = _catalog_models([
-        _model("openai/gpt-5:batch"),
-        _model("openai/gpt-5:free"),
+        _model("openai/gpt-5:batch", created=1),
+        _model("openai/gpt-5:free", prompt="0", completion="0", created=2),
         _model("black-forest/image-only", outputs=["image"]),
         _model("broken/no-price", prompt=None),
         _model("openai/gpt-5", created=5),
     ])
-    assert [row["model"] for row in rows] == ["openai/gpt-5"]
+    assert [row["model"] for row in rows] == ["openai/gpt-5", "openai/gpt-5:free"]
 
 
 def test_catalog_sorts_newest_first():

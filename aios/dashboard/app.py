@@ -89,14 +89,16 @@ LOCAL_MODELS = [
 def _catalog_models(catalog: list[dict]) -> list[dict]:
     """Chat models from the OpenRouter catalog, newest first.
 
-    Batch and rate-limited free variants are excluded: selecting either for a
-    production agent misstates latency or capacity. A model without a text
-    output modality or a price cannot be costed, so it is skipped.
+    ``:free`` variants are kept (operators use them for testing); they stay
+    distinguishable by their id suffix and are rate-limited. ``:batch`` is
+    excluded because it is a different execution mode, not a cheaper model.
+    A model without a text output modality or a price cannot be costed, so it
+    is skipped.
     """
     models = []
     for item in catalog:
         model_id = item.get("id") or ""
-        if not model_id or model_id.endswith((":batch", ":free")):
+        if not model_id or model_id.endswith(":batch"):
             continue
         arch = item.get("architecture") or {}
         outputs = arch.get("output_modalities") or []
