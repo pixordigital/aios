@@ -20,6 +20,7 @@ from sqlalchemy import select
 from aios.db.backend import DatabaseBackend
 
 from aios.config import settings
+from aios.core import vector_store
 from aios.db.models import Message
 
 logger = logging.getLogger(__name__)
@@ -216,6 +217,20 @@ class MemoryManager:
         self.injector = Injector()
         self.formatter = Formatter()
         self.write_barrier = WriteBarrier(min_interval=2.0)
+        self._org_id: str | None = None
+
+    async def _org(self) -> str:
+        """Resolve the agent's org once. The pgvector table is org-scoped."""
+        if self._org_id is None:
+            from aios.db.backend import db_session
+            from aios.db.models import Agent
+
+            async with db_session() as db:
+                row = await db.execute(select(Agent.org_id).where(Agent.id == self.agent_id))
+                self._org_id = row.scalar_one_or_none() or ""
+            if not self._org_id:
+                logger.warning("memory: no org for agent %s", self.agent_id)
+        return self._org_id
 
     async def note_user_turn(self, conversation_id: str, content: str) -> None:
         """Extract long-term memory from a user turn without touching the buffer.
@@ -302,8 +317,11 @@ class MemoryManager:
 
     async def search_sa_cts(self, query: str, top_k: int = 5) -> list[dict]:
         """U-Mem SA-CTS: similarity * recency * importance, top-3."""
-        import time as _time
         vec = _embed(query)
+        if vector_store.use_postgres():
+            org = await self._org()
+            return await vector_store.sa_cts(self.agent_id, org, vec, top_k) if org else []
+        import time as _time
         conn = _vec_db(self.agent_id)
         rows = conn.execute("SELECT id, content, embedding, created_at FROM memories ORDER BY rowid DESC LIMIT 100").fetchall()
         scored = []
@@ -338,6 +356,9 @@ class MemoryManager:
 
     async def update_memory(self, memory_id: str, success: bool):
         """RL GRPO: success increments usage/success, failure decays (Agentic Memory)."""
+        if vector_store.use_postgres():
+            await vector_store.update_used(memory_id, success)
+            return
         try:
             conn = _vec_db(self.agent_id)
             # Ensure stats row exists
@@ -356,6 +377,9 @@ class MemoryManager:
 
     async def discard_memory(self, memory_id: str):
         """RL discard: delete if success_rate <0.3 after 10 uses."""
+        if vector_store.use_postgres():
+            await vector_store.discard(memory_id)
+            return
         try:
             conn = _vec_db(self.agent_id)
             row = conn.execute("SELECT usage_count, success_count FROM memory_stats WHERE id=?", (memory_id,)).fetchone()
@@ -382,6 +406,9 @@ class MemoryManager:
     async def search_similar(self, query: str, top_k: int = 5) -> list[dict]:
         """Tier 3: vector similarity search across stored memories."""
         vec = _embed(query)
+        if vector_store.use_postgres():
+            org = await self._org()
+            return await vector_store.similar(self.agent_id, org, vec, top_k) if org else []
         conn = _vec_db(self.agent_id)
         rows = conn.execute("SELECT id, content, embedding FROM memories ORDER BY rowid").fetchall()
         scored = []
@@ -397,6 +424,9 @@ class MemoryManager:
 
     async def search_fts(self, query: str, top_k: int = 5) -> list[dict]:
         """FTS5 full-text search for exact keyword matches."""
+        if vector_store.use_postgres():
+            org = await self._org()
+            return await vector_store.fts(self.agent_id, org, query, top_k) if org else []
         conn = _vec_db(self.agent_id)
         try:
             rows = conn.execute(
@@ -423,6 +453,9 @@ class MemoryManager:
 
     async def get_agent_memories(self, top_k: int = 10) -> list[dict]:
         """Load memories across all conversations for this agent (cross-conversation)."""
+        if vector_store.use_postgres():
+            org = await self._org()
+            return await vector_store.recent(self.agent_id, org, top_k) if org else []
         conn = _vec_db(self.agent_id)
         rows = conn.execute(
             "SELECT id, content, created_at FROM memories ORDER BY rowid DESC LIMIT ?",
@@ -448,6 +481,12 @@ class MemoryManager:
             )
             return
         content = scanned
+        if vector_store.use_postgres():
+            org = await self._org()
+            if not org:
+                return
+            await vector_store.store(self.agent_id, org, content, _embed(content))
+            return
         conn = _vec_db(self.agent_id)
         vec = _embed(content)
         rid = str(uuid.uuid4())

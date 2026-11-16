@@ -136,6 +136,8 @@ async def slack_webhook(request: Request):
 
     if event_type == "message" and not event.get("bot_id"):
         # User message — covers both message.channels and message.im (DMs)
+        from aios.core.owner_notify import ack_notification
+        await ack_notification(conn.org_id, "slack", channel_id)
         await dispatch_inbound(
             channel_type="slack",
             channel_connection_id=conn.id,
@@ -169,6 +171,8 @@ async def slack_webhook(request: Request):
     elif event_type == "reaction_added":
         # Reaction added to message
         item = event.get("item", {})
+        from aios.core.owner_notify import ack_notification
+        await ack_notification(conn.org_id, "slack", channel_id)
         await dispatch_inbound(
             channel_type="slack",
             channel_connection_id=conn.id,

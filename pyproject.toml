@@ -43,7 +43,7 @@ dependencies = [
 
 [project.scripts]
 aios = "aios.main:run"
-aios-worker = "aios.tasks.worker:run"
+aios-worker = "aios.tasks.worker:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

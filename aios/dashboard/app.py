@@ -1722,6 +1722,19 @@ async def channel_toggle(request: Request, cid: str):
 async def _sync_channel_adapter(ch, is_active: bool, db) -> bool:
     """Start/stop the live adapter behind a channel row. Never raises."""
     try:
+        from aios.config import channels_are_remote
+
+        if channels_are_remote():
+            from aios.tasks.queue import enqueue_job
+
+            await enqueue_job(
+                "aios.tasks.jobs.channel_sync_job",
+                ch.id,
+                is_active,
+                priority="high",
+            )
+            return True
+
         from aios.channels.manager import manager as channel_mgr
         from sqlalchemy.orm import selectinload
 
@@ -1746,6 +1759,7 @@ async def channel_delete(request: Request, cid: str):
     async with db_session() as db:
         ch = await db.get(ChannelConnection, cid)
         if ch and ch.org_id == org_id:
+            await _sync_channel_adapter(ch, False, db)
             await db.delete(ch)
             await db.commit()
     return RedirectResponse("/dashboard/channels", status_code=303)

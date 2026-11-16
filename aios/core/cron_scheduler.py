@@ -8,8 +8,6 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-_running = False
-_task: asyncio.Task | None = None
 _last_backup_day: str | None = None
 _last_proactive_alert_day: str | None = None
 _last_crm_mql_alert_day: str | None = None
@@ -275,15 +273,13 @@ async def _expire_pending_tick():
 
 
 async def _try_singleton_lock():
-    """Hold a Postgres advisory lock for this process' scheduler lifetime.
+    """Take the Postgres advisory lock that elects the cron writer.
 
-    start_cron_scheduler() is called from the app lifespan, and lifespan runs
-    once per gunicorn worker. With multiple workers that meant multiple
-    schedulers, and the module-level _last_backup_day /
-    _last_proactive_alert_day guards were per-process, so the daily backup, the
-    sales-drop alerts and the "deal parado ha 7+ dias" WhatsApp all fired
-    twice. The advisory lock makes exactly one process the scheduler regardless
-    of worker count.
+    run_once() is called by the ARQ cron in every worker process. Without the
+    lock each worker would tick the same AutomationTrigger rows (the conditional
+    UPDATE claim saves the workflow, but the per-process daily guards would
+    still duplicate backup/proactive sweeps). The lock makes exactly one
+    process the writer regardless of worker count.
     """
     from aios.db.engine import async_session
     from sqlalchemy import text as _t
@@ -318,47 +314,32 @@ async def _try_singleton_lock():
         return True
 
 
-async def _loop():
-    if not await _try_singleton_lock():
-        logger.warning(
-            "cron scheduler: another process holds the scheduler lock; this "
-            "worker will not run cron ticks"
-        )
-        return
-    while _running:
-        try:
-            await _tick()
-        except Exception:
-            logger.exception("cron tick failed")
-        try:
-            await _backup_tick()
-        except Exception:
-            logger.exception("backup tick failed")
-        try:
-            await _proactive_alerts_tick()
-        except Exception:
-            logger.exception("proactive alerts tick failed")
-        try:
-            await _crm_mql_stale_tick()
-        except Exception:
-            logger.exception("crm mql stale tick failed")
-        try:
-            await _expire_pending_tick()
-        except Exception:
-            logger.exception("expire_pending tick failed")
-        await asyncio.sleep(60)
+async def run_once() -> None:
+    """Run one scheduler iteration.
 
-def start_cron_scheduler():
-    global _running, _task
-    if _running:
-        return
-    _running = True
-    _task = asyncio.create_task(_loop())
-    logger.info("cron scheduler started")
+    Called by the ARQ cron in every worker. On Postgres the advisory lock elects
+    one writer per tick; the loser returns without touching anything. SQLite has
+    no advisory locks (and is single-process), so it just runs.
+    """
+    from aios.db.engine import engine
 
-def stop_cron_scheduler():
-    global _running, _task
-    _running = False
-    # advisory lock is released when the session/connection closes
-    if _task:
-        _task.cancel()
+    global _lock_sess
+    if engine.dialect.name.startswith("postgres"):
+        if not await _try_singleton_lock():
+            logger.debug("cron scheduler: another process holds the lock")
+            return
+    try:
+        for step in (_tick, _backup_tick, _proactive_alerts_tick, _crm_mql_stale_tick, _expire_pending_tick):
+            try:
+                await step()
+            except Exception:
+                logger.exception("%s failed", step.__name__)
+    finally:
+        # Session-level lock dies with the connection; holding it between ticks
+        # would pin a pooled connection for the life of the worker.
+        if _lock_sess is not None:
+            try:
+                await _lock_sess.close()
+            except Exception:
+                pass
+            _lock_sess = None

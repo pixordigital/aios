@@ -1154,3 +1154,17 @@ class RefreshToken(Base):
     # jti (an attacker replaying a consumed token) be told apart from theft.
     replaced_by: Mapped[str | None] = mapped_column(String(36), default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
+
+
+class OwnerNotification(Base, TimestampMixin, OrgScopedMixin):
+    """Slack→Telegram escalation state for one owner-facing message."""
+    __tablename__ = "owner_notifications"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    channel_type: Mapped[str] = mapped_column(String(20))
+    target: Mapped[str] = mapped_column(String(255))
+    body: Mapped[str] = mapped_column(Text, default="")
+    urgency: Mapped[str] = mapped_column(String(20), default="info")
+    requires_ack: Mapped[bool] = mapped_column(default=False)
+    deadline_at: Mapped[datetime | None] = mapped_column(default=None)
+    acked_at: Mapped[datetime | None] = mapped_column(default=None)
+    escalated_at: Mapped[datetime | None] = mapped_column(default=None)

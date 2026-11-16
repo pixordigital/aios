@@ -1,9 +1,7 @@
 import pytest
-from aios.config import settings
-from fastapi.testclient import TestClient
-from aios.main import app
 
-client = TestClient(app)
+from aios.config import settings
+
 
 def test_settings_loaded():
     # Verify that critical settings have expected default values
@@ -13,17 +11,18 @@ def test_settings_loaded():
     assert settings.rate_limit_per_minute == 60
     assert settings.jwt_algorithm == "HS256"
 
-def test_health_endpoints():
+@pytest.mark.asyncio
+async def test_health_endpoints(async_client):
     # Liveness
-    resp_live = client.get("/health/live")
+    resp_live = await async_client.get("/health/live")
     assert resp_live.status_code == 200
     assert resp_live.json().get("status") == "live"
     # Readiness
-    resp_ready = client.get("/health/ready")
+    resp_ready = await async_client.get("/health/ready")
     assert resp_ready.status_code == 200
     assert resp_ready.json().get("status") == "ready"
     # Overall health (should combine both)
-    resp = client.get("/health")
+    resp = await async_client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data.get("live") is True

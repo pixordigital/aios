@@ -120,6 +120,8 @@ curl -X POST https://your-domain.com/api/conversations \
   -d '{"agent_id":"AGENT_ID","channel":"web"}'
 
 # Send message (non-streaming)
+# Returns immediately with reply=null. The turn runs in the worker and the
+# reply appears in GET /messages (and on the live agent websocket).
 curl -X POST https://your-domain.com/api/conversations/CONV_ID/messages \
   -H "Authorization: Bearer TOKEN" \
   -H "Content-Type: application/json" \

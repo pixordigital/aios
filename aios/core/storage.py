@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from aios.config import settings
+from aios.config import runtime_role, settings
 from aios.db.backend import DatabaseBackend
 
 logger = logging.getLogger(__name__)
@@ -183,7 +183,28 @@ def backend() -> StorageBackend:
 async def ensure_storage():
     if settings.storage_backend == "local":
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-        if not settings.debug:
+        if (
+            runtime_role() != "all"
+            and not settings.debug
+            and "storage_backend" not in settings.model_fields_set
+        ):
+            # Split roles mean several processes. Defaulting them to local disk
+            # silently loses media written by one role on another, so require an
+            # explicit choice: S3, or local with a shared volume declared.
+            raise RuntimeError(
+                f"runtime_role={runtime_role()} with storage_backend=local is not "
+                "safe across replicas; set AIOS_STORAGE_BACKEND=s3 (bucket/key/"
+                "secret) or set AIOS_STORAGE_BACKEND=local explicitly if the data "
+                "directory is a shared volume"
+            )
+        if runtime_role() != "all":
+            logger.warning(
+                "Storage backend local com runtime_role=%s: exige volume "
+                "compartilhado entre réplicas (AIOS_STORAGE_BACKEND definido "
+                "explicitamente)",
+                runtime_role(),
+            )
+        elif not settings.debug:
             logger.warning("S3 backend recomendado em produção — local perde mídia em restart sem volume compartilhado")
     elif settings.storage_backend == "s3":
         if not settings.s3_bucket or not settings.s3_access_key or not settings.s3_secret_key:

@@ -348,41 +348,25 @@ def reset_metrics():
 
 _METRIC_FLUSH_INTERVAL = 60  # seconds
 _LAST_FLUSH = 0
-_METRICS_DIR = None
 
-
-def _metrics_path() -> str:
-    global _METRICS_DIR
-    if _METRICS_DIR is None:
-        from aios.config import settings
-
-        _METRICS_DIR = os.path.join(settings.app_data_dir, "metrics")
-        os.makedirs(_METRICS_DIR, exist_ok=True)
-    return _METRICS_DIR
+metrics_logger = logging.getLogger("aios.metrics")
 
 
 def _maybe_flush_metrics():
-    """Append current metrics to daily log file every interval."""
+    """Emit current metrics as one JSON object on the aios.metrics logger."""
     global _LAST_FLUSH
     now = time.time()
     if now - _LAST_FLUSH < _METRIC_FLUSH_INTERVAL:
         return
     _LAST_FLUSH = now
 
-    try:
-        day = time.strftime("%Y-%m-%d", time.localtime())
-        path = os.path.join(_metrics_path(), f"{day}.jsonl")
-        snapshot = dict(METRICS)
-        snapshot["_ts"] = int(now)
-        # ponytail: sync I/O, acceptable for metrics flush
-        with open(path, "a") as f:
-            f.write(json.dumps(snapshot) + "\n")
-    except Exception:
-        pass  # ponytail: fail open — metrics are non-critical
+    snapshot = dict(METRICS)
+    snapshot["_ts"] = int(now)
+    metrics_logger.info(json.dumps(snapshot))
 
 
 def flush_metrics():
-    """Force flush to disk."""
+    """Force a metrics snapshot emission."""
     _LAST_FLUSH = 0
     _maybe_flush_metrics()
 

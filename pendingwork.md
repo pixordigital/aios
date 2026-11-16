@@ -1,6 +1,6 @@
 # Pending work
 
-Last updated: 2026-11-13
+Last updated: 2026-11-16
 
 ## Open
 
@@ -12,6 +12,260 @@ Last updated: 2026-11-13
   agent/team assignment.
 - Rebuild app container with latest code if changes needed on main branch. (Attempted local rebuild; port 8777 already allocated by Coolify-managed app container; rebuild must run via Coolify deploy or after stopping that container.)
 
+
+## Open — stateless migration
+
+Goal: API tier stateless, deployable without Docker, multi-node capable.
+Non-negotiables: no behavior change until `AIOS_RUNTIME_ROLE` is set explicitly;
+every phase reversible; `pendingwork.md` updated at each gate.
+Do not re-litigate: role split before scheduler move; vectors last; Redis stays
+(load-bearing for queue, streams, leases, pub/sub).
+Baseline: full suite green 2026-11-15 with Phases 1/2/3/5 merged:
+1425 passed, 11 skipped in 13:37 (`pytest -n 4 --dist loadfile`).
+Historical failures fixed 2026-11-15: `test_config.py::test_health_endpoints`
+(module-level TestClient never ran lifespan, so `registry.active` was None) and
+`test_agent_canvas_events.py::test_autonomous_run_stream_emits_trial_and_tokens`
+`_StubAgent` lacked `extra_data` for ICM binding).
+
+Deploy blocker: the production Postgres is at `ea73e62a55fd`, head is
+`c2d3e4f5a6b7`. Any deploy runs every pending migration (owner_notify merge
+included). Take a `pg_dump` first and treat it as its own change window, not a
+side effect of a code deploy.
+
+### Phase 0 — bare-metal deploy scaffolding  [x] done 2026-11-15
+- `deploy/aios-migrate.service`: oneshot `alembic upgrade head`, `RemainAfterExit`.
+- `deploy/aios-server.service`: rewritten. `EnvironmentFile=/etc/aios/aios.env`,
+  `After=`/`Requires=aios-migrate`, bind `127.0.0.1:8777`, journal logs,
+  `StateDirectory=aios`, `AIOS_RUNTIME_ROLE=api` (ignored until Phase 1).
+- `deploy/aios-worker.service`: `aios-worker` console script, role=worker.
+- `deploy/aios-gateway.service`: role=gateway on `127.0.0.1:8778`. Until Phase 1
+  it behaves like a second API process; do not enable it yet.
+- `deploy/aios-backup.service` + `.timer`: 03:30 daily, backup dir
+  `/var/lib/aios/backups`, `Persistent=true`.
+- `pyproject.toml`: `aios-worker` script pointed at `main`. `worker.run` is now
+  a sync alias, so console scripts installed before the fix also work; the old
+  `async def run` was called without `await` and exited immediately.
+- `DEPLOY.md`: "Bare metal (systemd)" section with install steps.
+Gate: `systemd-analyze verify` reports no syntax errors. Current warnings are
+only missing `/opt/aios` binaries on this dev host; unit syntax is clean.
+Not yet exercised on a real VM.
+
+### Phase 1 — runtime role split  [x] done 2026-11-15
+- `aios/config.py`: `runtime_role: str = "all"` plus `runtime_role()`,
+  `runs_channels()`, `runs_cron()`, `runs_telemetry_flush()`,
+  `channels_are_remote()`. Roles: `all|api|worker|gateway`.
+- `aios/main.py`: invalid role refuses to boot; startup log reports role and
+  enabled subsystems. Channels, cron, telemetry flush and WhatsApp restore are
+  guarded by role. `/health/ready` reports `role`.
+- `aios/core/whatsapp_guard.py`: `restore_all_orgs()` extracted; called from
+  `main.py` and from `WorkerSettings.on_startup`, so the worker process also
+  knows opt-outs and cooldowns (delivery runs there).
+- `aios/tasks/jobs.py`: `channel_sync_job` + registration. API replicas enqueue
+  it instead of calling `channel_mgr` directly.
+- `aios/api/channels.py`, `aios/dashboard/app.py`: in `api` role the toggle,
+  start, save and delete paths enqueue the job. Delete now stops the adapter.
+- `aios/channels/manager.py`: `stop_by_id()` so a deleted row can still stop a
+  live poller.
+- `tests/test_runtime_role.py`: 7 passed (role matrix, api enqueues, all local).
+- Gate: subset 49 passed. Both historical test failures are fixed:
+  `test_health_endpoints` (backend now initialized by `test_db_session`) and the
+  canvas stub (`extra_data = {}`).
+- Compose left unchanged (role unset = `all`). Enable the split only with the
+  gateway unit running; never set `AIOS_RUNTIME_ROLE=api` without a gateway.
+
+### Phase 2 — scheduler out of API  [x] done 2026-11-15
+
+- `aios/core/cron_scheduler.py`: `run_once()` replaces the `_loop()` task.
+  Postgres takes the advisory lock per tick (skipped on SQLite, which is
+  single-process); the loser returns without touching anything. `_backup_tick`
+  stays in the pass — compose deployments have no systemd backup timer.
+- `aios/tasks/worker.py`: `cron_tick_job` runs `run_once()` every minute;
+  `telemetry_flush_job` flushes the worker's own in-memory metrics every 5 min
+  (the API loop never saw worker-process agent runs, in any role).
+- `aios/main.py`: lifespan no longer starts/stops the cron scheduler; startup
+  log now reports `cron=worker`.
+- `tests/test_cron_worker.py`: registration, scheduling, SQLite `run_once()`.
+
+Known limit: the lock is per tick, not per process, so the in-memory
+`_last_*_day` guards reset when the winning worker changes and a daily sweep can
+repeat in another process. DB idempotency keys (`sales-drop:<org>:<date>`,
+`crm-stalled:<deal>:<date>`) cap the effect. Fix only if duplicates show up in
+practice: move the daily guard into a table.
+
+### Phase 3 — connection pool math  [x] done 2026-11-15
+
+`PRODUCTION_CONFIG.md` "Connection budget": per-process
+`AIOS_DB_POOL_SIZE + AIOS_DB_MAX_OVERFLOW` (default 5 + 5) × (API + worker +
+gateway replicas) must stay under Postgres `max_connections`. Compose sets
+`max_connections=60`, i.e. at most six database-facing processes at defaults.
+
+### Phase 4 — vectors to Postgres  [x] done 2026-11-16
+
+- `aios/core/vector_store.py`: pgvector store (`memory_vectors`, 384 dims,
+  org+agent scoped) with the same five operations the SQLite store exposes
+  (store, similarity, FTS, SA-CTS, RL update/discard). Selected by
+  `AIOS_VECTOR_BACKEND=auto|postgres|sqlite`; `auto` follows the engine dialect,
+  so SQLite dev keeps `data/vectors/*.db` unchanged.
+- `alembic/versions/c2d3e4f5a6b7_add_memory_vectors.py`: table, generated
+  `content_tsv`, GIN index, HNSW cosine index. Skipped on non-Postgres binds.
+- `aios/core/memory.py`: `MemoryManager` delegates to the store and resolves the
+  agent's org once (the table is org-scoped).
+- `aios/core/rag.py`: agent-scoped `hybrid_search` reads through
+  `MemoryManager.search_similar`, so it sees the same store. `/health` now
+  reports `hnsw` from the real index instead of hardcoded False.
+- `scripts/migrate_vectors_to_pg.py`: idempotent copy of the old per-agent
+  files, original ids preserved; `--dry-run` supported.
+- `tests/test_vector_store.py`: backend switch, dialect auto-detect, SQLite
+  isolation, embedding literal validation.
+- Verified against a scratch Postgres 15 + pgvector database, with the full
+  Alembic chain: write, similarity, FTS, SA-CTS, recency, RL success/decay,
+  discard, generated tsvector, and `downgrade -1` + re-upgrade.
+- Data reality check: all 813 local `data/vectors/*.db` files contain zero rows
+  (the extractor historically never fired), so the live copy moved nothing.
+  Backup taken first: `/tmp/opencode/phase4-backup/vectors-20261116T000024.tgz`.
+- Known limit: Postgres FTS uses `simple` (no stemming), while SQLite FTS5
+  tokenizes differently; retrieval parity is behavioural, not byte-identical.
+- Keep `data/vectors/` for one week after switching production to Postgres.
+- Not done: production `alembic upgrade head`. The live DB is at `ea73e62a55fd`
+  and head is `c2d3e4f5a6b7`, so deploying Phase 4 runs every pending migration,
+  not just this one. Needs a `pg_dump` and a deploy window.
+
+### Phase 5 — artifacts + metrics  [x] done 2026-11-15
+
+- `aios/core/tracing.py`: metrics snapshots go to logger `aios.metrics` as one
+  JSON object per snapshot instead of appending `data/metrics/<day>.jsonl`.
+  Payload keys unchanged (`llm_calls`, `llm_tokens`, `tool_calls`, `errors`,
+  `_ts`). Any consumer of the old JSONL path must switch to that logger.
+- `aios/core/storage.py`: one WARNING on startup when the backend is `local`
+  and the role is not `all` — local artifacts need a shared volume across
+  replicas, S3 required otherwise. No raise, no new config.
+- `aios/core/telemetry.py` unchanged (memory -> DB, no local files).
+- `tests/test_metrics_logging.py`: log record emitted, no metrics dir created.
+- Gate: artifact written by replica A readable by replica B — still requires
+  S3 or a shared volume in a real multi-node deployment; not yet exercised.
+
+### Phase 6 — channel ingress  [x] done 2026-11-16
+
+Telegram webhook mode when public base URL configured; IMAP only in gateway
+role. Gate: webhook message received and deduped; lease loss stops the loop.
+
+- `aios/config.py`: `public_base_url` (empty → polling unchanged) and
+  `telegram_webhook_secret`. Webhook mode needs both; missing either keeps the
+  existing poll loop, so a half-configured deploy cannot go silent.
+- `aios/channels/telegram.py`: `start()` calls `setWebhook` when configured and
+  skips polling; otherwise polls. Both inbound paths now pass a stable
+  `msg_id` (`telegram:{chat}:{message}`) so `process_inbound` dedups by
+  `channel_message_id` — the in-memory `_seen` set was lost on restart.
+- Fixed the poll lease: it was taken `NX` and **deleted at the end of every
+  cycle**, so two replicas raced each cycle. It is now renewed with `SET XX EX
+  60` each cycle; if renewal fails the loop stops. Compare-and-delete on exit.
+- `aios/api/telegram_webhook.py`: `POST /api/telegram/webhook/{connection_id}`
+  verifies `X-Telegram-Bot-Api-Secret-Token` (per-connection `webhook_secret`
+  else the global setting) with `hmac.compare_digest`, fails closed with 503
+  when unconfigured and 401 on mismatch.
+- `aios/channels/email_.py`: `start()` refuses to open the IMAP poller outside
+  the gateway/all role, even if called directly.
+- Gate: 4 passed (`tests/test_telegram_webhook.py`) covering fail-closed auth,
+  wrong secret, dispatch with stable `msg_id`, and lease-loss loop stop.
+  77 passed in channel/delivery/runtime-role subset. Full suite: 1436 passed,
+  11 skipped in 13:31 (`pytest -n 4 --dist loadfile`, EXIT=0) — Phase 7's 1432
+  plus the 4 new tests, no regressions.
+- Known limit: webhook registration is best-effort at `start()`; a failed
+  `setWebhook` falls back to polling rather than retrying, so a transient
+  Telegram error at boot means polling until the next restart.
+
+### Phase 7 — REST turns become events  [x] done 2026-11-16
+
+- `POST /api/conversations/{id}/messages` no longer runs the agent. It writes
+  the user row, keeps the limit check and the human-handover short circuit,
+  then enqueues `aios.tasks.jobs.conversation_turn_job` and returns
+  `reply=null`. The response model already allowed null (handover path), so
+  this is contract-compatible; clients must read the reply from
+  `GET /messages` or the agent websocket.
+- `aios/tasks/jobs.py`: `conversation_turn_job` does the agent/team routing
+  that used to live in the endpoint, and is idempotent on the user message id
+  (`extra_data.turn_done`), so an ARQ retry cannot answer twice.
+- Fixed a duplicate-reply bug found while moving it: `AgentRuntime.run_stream`
+  already persists the assistant row when given a session, and every caller
+  wrote a second one. `_ensure_reply_row` now inserts only when the runtime did
+  not. Applied to `process_inbound` as well — the same root cause affected every
+  answered channel turn, not just REST.
+- `aios/tasks/queue.py`: a failed Redis pool creation now sets a 5s cooldown.
+  Before, every webhook/turn paid arq's full retry delay (~5s) whenever Redis
+  was down.
+- Gate: 55 passed in the REST/conversation/turn subset; 45 in
+  delivery/channels/worker-registry/dead-letter/runtime-role. Full suite below.
+- Deliberately not changed: `POST /messages/stream`, dashboard test/chat, and
+  promptlab/eval still run inline. A human is watching those; they are bounded
+  and their output is streamed, so queueing them needs a token channel first.
+- Known limit: if Redis is down, the turn is written to the outbound DLQ and the
+  user row exists with no reply. Same failure mode channel inbound already has.
+
+Deferred / rejected: removing Redis (separate project); serverless/edge targets
+(`sandbox.py` + cron subprocesses need a real OS process).
+
+### Phase 8 — shared agent state  [x] done 2026-11-16
+
+Original gap list: health tracker, telemetry reads, context cache, scheduler
+bookkeeping, tool cache. Doing the correctness half first.
+
+- `aios/core/agent_health.py`: status is now mirrored to Redis
+  (`aios:health:{agent_id}`, 7d TTL) on every failure/success/reset, and
+  `refresh()` merges the shared status into the local counters. `main.py` runs
+  a 5s sync task. Before this, a worker that marked an agent `stopped` did not
+  stop it on any other worker, and the API replica always reported `healthy`
+  because it never ran the agent. Counters stay local by design.
+- `aios/api/analytics.py` `/telemetry/summary`: reads `agent_metrics` from the
+  DB (sample-weighted average) instead of the calling process's unflushed dict,
+  which on the API role was usually empty. `/telemetry/agents` was already
+  DB-backed.
+- `aios/core/agent.py` / `aios/core/context_manager.py`: the in-process context
+  cache could shadow newer turns. The old guard compared `cached.message_count`
+  (includes tool rows) with `len(recent)` (DB replay, tool rows filtered and
+  capped at 20), so once the cache held ~20 entries it always won — a replica
+  that had answered an older turn kept serving that block while another replica
+  advanced the conversation. `SavedContext.saved_at` plus
+  `_cached_context_is_fresh()` now allows at most one DB row newer than the save
+  (the current user message) before the cache is discarded.
+- `tests/test_router.py`: clearing the process-global response/context caches
+  between tests. The new freshness rule made the context identical across
+  tests, which exposed a latent leak: the response cache served the previous
+  test's answer and the provider was never called (`calls == []`). Production
+  behaviour is unchanged; tests were passing by accident.
+- Remaining Phase 8: tool_cache is a 5-minute per-process cache (miss
+  re-executes; sharing it would make staleness global, not smaller). Scheduler
+  `_processes` bookkeeping is per-process; the dashboard only sees the local
+  worker's queue, and actual concurrency is bounded by ARQ `max_jobs`. Neither
+  is a correctness bug.
+- Gate: 6 passed in `tests/test_shared_state.py` (adds the cache-freshness
+  watermark), 37 passed in `tests/test_router.py` with per-test cache clearing.
+  Full suite: 1442 passed, 11 skipped in 13:38 (`pytest -n 4 --dist loadfile`,
+  EXIT=0) — the P1/P2 gate's 1441 plus the watermark test, no regressions.
+
+### P1/P2 statelessness fixes  [x] 2026-11-16
+
+- IMAP lease was never exclusive: the key embedded a fresh uuid each cycle and
+  was written with `SET NX`, so `NX` always found an unused key. Now the key is
+  stable and the owner is the value; `SET NX` to take, owner-checked Lua to
+  renew/release. Same bug existed in the Phase 6 Telegram lease and is fixed
+  with the same helpers (`acquire_lease` / `renew_lease` / `release_lease` in
+  `aios/tasks/queue.py`).
+- `aios/core/storage.py`: split roles (`api`/`worker`/`gateway`) with
+  `storage_backend=local` **and no explicit setting** now refuse to boot.
+  S3, or an explicit `AIOS_STORAGE_BACKEND=local` for a shared volume, is
+  required. `all` (single process) keeps the old warning.
+- `aios/tasks/worker.py`: WhatsApp opt-out/cooldown state is rehydrated every
+  5 minutes, closing the window where a runtime opt-out recorded by another
+  replica was not seen by the delivering worker. DB was already the truth.
+- Still documented, not changed: per-process circuit breakers, ARQ nonce dedup,
+  in-memory rate-limit fallback (all deliberate); `evolution` outbound batching
+  splits across gateway replicas if more than one is running; scheduler and
+  cache bookkeeping above.
+- Gate: 5 new tests in `tests/test_shared_state.py` (lease exclusivity, IMAP
+  lease wait/lost, health publish, health refresh, DB-backed telemetry), plus
+  the 4 Telegram webhook tests updated for the owner-scoped lease.
+  Full suite: 1441 passed, 11 skipped in 13:25 (`pytest -n 4 --dist
+  loadfile`, EXIT=0) — Phase 6's 1436 plus the 5 new tests, no regressions.
 
 ## Done
 

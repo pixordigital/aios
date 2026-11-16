@@ -320,15 +320,7 @@ async def _process_inbound_once(
                 reply_text = await runtime.run(conv.id, text, db)
 
         if reply_text:
-            # save reply
-            db.add(Message(
-                conversation_id=conv.id,
-                org_id=conn.org_id,
-                role="assistant",
-                content=reply_text,
-                **_reply_meta(agent_or_team),
-            ))
-            await db.commit()
+            await _ensure_reply_row(db, conv.id, conn.org_id, reply_text, agent_or_team, msg)
             await track_usage(conn.org_id, db, messages=1, tokens=len(reply_text))
 
             # SDR -> CRM handoff. An answered conversation used to leave no
@@ -455,6 +447,45 @@ async def _process_inbound_once(
             logger.warning("process_inbound: could not mark %s completed", getattr(msg, "id", "?"))
 
 
+async def _ensure_reply_row(
+    db, conversation_id: str, org_id: str, reply_text: str, agent_or_team, user_msg=None
+) -> bool:
+    """Insert this turn's assistant row unless the runtime already wrote it.
+
+    AgentRuntime.run_stream persists the final assistant message whenever it is
+    given a session, and every caller wrote another one here, so each answered
+    turn stored the reply twice. The guard checks only rows created at or after
+    the user message, so an earlier identical reply cannot suppress this one.
+    """
+    from aios.db.models import Message
+    from sqlalchemy import select
+
+    if user_msg is not None and getattr(user_msg, "created_at", None) is not None:
+        existing = (
+            await db.execute(
+                select(Message.id).where(
+                    Message.conversation_id == conversation_id,
+                    Message.role == "assistant",
+                    Message.created_at >= user_msg.created_at,
+                    Message.content == reply_text,
+                )
+            )
+        ).first()
+        if existing:
+            return False
+    db.add(
+        Message(
+            conversation_id=conversation_id,
+            org_id=org_id,
+            role="assistant",
+            content=reply_text,
+            **_reply_meta(agent_or_team),
+        )
+    )
+    await db.commit()
+    return True
+
+
 async def agent_run(ctx, payload: dict):
     """Distributed agent run via ARQ — dequeues scheduler, runs AgentRuntime with retry/DLQ."""
     agent_id = payload.get("agent_id")
@@ -498,6 +529,84 @@ async def agent_run(ctx, payload: dict):
             from aios.core.dead_letter import write_dlq
             await write_dlq(direction="outbound", channel_type="agent_run", job_name="aios.tasks.jobs.agent_run", payload=payload, error=str(exc), org_id=org_id or None, conversation_id=conv_id or None)
         raise
+
+
+async def conversation_turn_job(ctx, payload: dict):
+    """Run one API-originated conversation turn in the worker.
+
+    The REST endpoint used to run the whole turn inside the request: the reply
+    was pinned to whichever API replica took the call, a restart lost it, and
+    there was no retry or DLQ. Idempotent on the user message id, so an ARQ
+    retry cannot write a second turn.
+    """
+    from aios.core.agent import AgentRuntime
+    from aios.core.limits import track_usage
+    from aios.core.orchestrator import TeamOrchestrator
+    from aios.db.backend import db_session
+    from aios.db.models import Agent, Conversation, Message, Team
+    from sqlalchemy.orm import selectinload
+
+    message_id = payload.get("message_id", "")
+    conversation_id = payload.get("conversation_id", "")
+    text = payload.get("text", "")
+    org_id = payload.get("org_id", "")
+
+    async with db_session() as db:
+        msg = await db.get(Message, message_id)
+        if not msg or (msg.extra_data or {}).get("turn_done"):
+            return {"skipped": "already done"}
+        conv = await db.get(Conversation, conversation_id)
+        if not conv or conv.org_id != org_id:
+            return {"skipped": "conversation gone"}
+
+        reply_text = ""
+        agent_or_team = None
+        try:
+            from aios.core.agent_health import health_tracker
+
+            if conv.team_id:
+                team = await db.get(Team, conv.team_id, options=[selectinload(Team.agents)])
+                if team and team.agents:
+                    available = [a for a in team.agents if health_tracker.is_available(a.id)]
+                    if available:
+                        orch = TeamOrchestrator(team, available)
+                        reply_text = await orch.handle_message(conversation_id, text, db)
+                        if reply_text:
+                            agent_or_team = team
+                        elif len(available) > 1:
+                            # Same failover the endpoint had: one bad agent in a
+                            # team must not cost the customer an answer.
+                            for agent in available:
+                                try:
+                                    reply_text = await AgentRuntime(agent).run(
+                                        conversation_id, text, db
+                                    )
+                                    if reply_text:
+                                        agent_or_team = agent
+                                        break
+                                except Exception:
+                                    logger.exception("Team failover: agent %s failed", agent.id)
+            elif conv.agent_id:
+                agent_model = await db.get(Agent, conv.agent_id)
+                if agent_model:
+                    reply_text = await AgentRuntime(agent_model).run(
+                        conversation_id, text, db
+                    )
+                    agent_or_team = agent_model
+        except Exception:
+            # Leave turn_done unset so the ARQ retry runs the turn again.
+            logger.exception("conversation turn failed for %s", conversation_id)
+            raise
+
+        if reply_text and agent_or_team is not None:
+            await _ensure_reply_row(db, conversation_id, org_id, reply_text, agent_or_team, msg)
+            await track_usage(org_id, db, messages=1, tokens=len(reply_text), llm_calls=1)
+
+        done = dict(msg.extra_data or {})
+        done["turn_done"] = True
+        msg.extra_data = done
+        await db.commit()
+        return {"ok": True}
 
 
 async def workflow_run_job(ctx, payload: dict):
@@ -1143,6 +1252,7 @@ async def _post_team_reports(kind: str, year_month: str | None = None,
         report_text,
         team_stats,
     )
+    from aios.core.owner_notify import send_telegram
     from aios.core.sales_goals import month_progress
     from aios.db.backend import db_session
     from aios.db.models import Agent, ChannelConnection, Organization, Team
@@ -1207,6 +1317,7 @@ async def _post_team_reports(kind: str, year_month: str | None = None,
                         posted += 1
                     else:
                         failed += 1
+                        await send_telegram(org.id, text)
     return {
         "kind": kind,
         "posted": posted,
@@ -1253,10 +1364,52 @@ async def verify_fleet_job(ctx, payload: dict):
     return await run_fleet_verification(payload)
 
 
+async def owner_escalation_job(ctx):
+    """Telegram copy for owner messages past their 15-min ack window."""
+    from aios.core.owner_notify import escalate_due
+
+    return {"escalated": await escalate_due()}
+
+
+async def channel_sync_job(ctx, channel_id: str, is_active: bool):
+    """Apply a channel start/stop requested by an API replica.
+
+    Split deployments run the pollers in the gateway, so the API cannot call
+    ``channel_mgr`` directly: that would start a second poller in the web
+    process. This job is the single writer.
+    """
+    from aios.channels.manager import manager as channel_mgr
+
+    if not is_active:
+        await channel_mgr.stop_by_id(channel_id)
+        return
+
+    from sqlalchemy.orm import selectinload
+
+    from aios.db.engine import async_session
+    from aios.db.models import Agent, ChannelConnection, Team
+
+    async with async_session() as db:
+        conn = await db.get(ChannelConnection, channel_id)
+        if conn is None or not conn.is_active:
+            await channel_mgr.stop_by_id(channel_id)
+            return
+        agent_or_team = None
+        if conn.agent_id:
+            agent_or_team = await db.get(Agent, conn.agent_id)
+        elif conn.team_id:
+            agent_or_team = await db.get(
+                Team, conn.team_id, options=[selectinload(Team.agents)]
+            )
+        await channel_mgr.sync(conn, True, agent_or_team, db)
+
+
 FUNCTIONS = [
+    channel_sync_job,
     process_inbound,
     deliver_message,
     agent_run,
+    conversation_turn_job,
     workflow_run_job,
     quota_alert_job,
     budget_alert_job,
@@ -1269,6 +1422,7 @@ FUNCTIONS = [
     event_consume_job,
     proactive_event_job,
     workday_job,
+    owner_escalation_job,
     verify_fleet_job,
 ]
 

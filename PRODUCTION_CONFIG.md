@@ -97,6 +97,19 @@ AIOS_GITHUB_CLIENT_SECRET="xxx"
 AIOS_SENTRY_DSN="https://xxx@sentry.io/xxx"
 ```
 
+## Connection budget
+
+Each process opens up to `AIOS_DB_POOL_SIZE + AIOS_DB_MAX_OVERFLOW` Postgres
+connections (SQLAlchemy `pool_size` + `max_overflow`; defaults 5 + 5 = 10).
+Multiply that by the number of database-facing processes — API replicas plus
+worker replicas plus the gateway — and keep the total below Postgres
+`max_connections`.
+
+The compose file sets `max_connections=60`, so with the 5 + 5 per-process
+default that is room for at most six such processes. Raising replicas, the pool
+size, or the overflow without raising `max_connections` leaves the extra
+processes failing to connect under load.
+
 ## Step 3: Post-Deploy Checklist
 
 ```bash

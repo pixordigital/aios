@@ -5,8 +5,9 @@ python-telegram-bot, which was never installed: `import telegram` raised, so
 `start()` could never open a poll loop and the channel received nothing while
 the dashboard and the Pro plan both listed it as available.
 
-Long-poll (getUpdates) rather than a webhook so no public TLS endpoint is
-required for the tenant — consistent with how every other channel here works.
+Long-poll (getUpdates) by default, so no public TLS endpoint is required for
+the tenant. Setting `public_base_url` + `telegram_webhook_secret` switches the
+channel to the webhook in `aios/api/telegram_webhook.py` instead.
 """
 
 import asyncio
@@ -121,9 +122,40 @@ class TelegramChannel(Channel):
         token = self._ensure_token()
         if not token:
             return
+        # Webhook mode is opt-in: it needs a public origin AND a secret Telegram
+        # will echo back. Missing either and we keep polling, so a half-configured
+        # deployment cannot silently stop receiving inbound messages.
+        base = settings.public_base_url.rstrip("/")
+        secret = settings.telegram_webhook_secret
+        if base and secret and getattr(self.connection, "id", None):
+            if await self._set_webhook(token, base, secret):
+                logger.info("Telegram webhook mode enabled for %s", self.connection.id)
+                return
+            logger.warning("Telegram setWebhook failed; falling back to polling")
         self._running = True
         self._poll_task = asyncio.create_task(self._poll_loop(token))
         logger.info("Telegram poll loop started")
+
+    async def _set_webhook(self, token: str, base: str, secret: str) -> bool:
+        url = f"{base}/api/telegram/webhook/{self.connection.id}"
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{_API}/bot{token}/setWebhook",
+                    json={
+                        "url": url,
+                        "secret_token": secret,
+                        "allowed_updates": ["message"],
+                    },
+                )
+            data = resp.json()
+        except Exception:
+            logger.exception("Telegram setWebhook transport error")
+            return False
+        if not data.get("ok"):
+            logger.warning("Telegram setWebhook rejected: %s", data.get("description"))
+            return False
+        return True
 
     async def stop(self) -> None:
         self._running = False
@@ -148,25 +180,34 @@ class TelegramChannel(Channel):
         # started two of these for the same connection, both long-polling the
         # same bot and both receiving the same pending updates.
         lock_key = f"aios:telegram-poll:{token[-8:]}"
-        lock_held = ""
+        owner = ""
 
         while self._running:
-            if not lock_held:
-                try:
-                    from aios.tasks.queue import get_redis_pool
+            pool = None
+            try:
+                from aios.tasks.queue import acquire_lease, get_redis_pool, renew_lease
 
-                    pool = await get_redis_pool()
-                    lock_held = f"{lock_key}:{uuid.uuid4().hex[:8]}"
+                pool = await get_redis_pool()
+            except Exception:
+                logger.warning(
+                    "Telegram poll lock unavailable; polling without it", exc_info=True
+                )
+            if pool is not None:
+                if not owner:
+                    owner = uuid.uuid4().hex[:8]
                     # 60s > the 25s long-poll, so a healthy holder never expires
                     # between cycles and a dead process loses the token in a minute.
-                    if not await pool.set(lock_held, 1, nx=True, ex=60):
-                        lock_held = ""
+                    if not await acquire_lease(pool, lock_key, owner, 60):
+                        owner = ""
                         await asyncio.sleep(30)
                         continue
-                except Exception:
-                    logger.warning(
-                        "Telegram poll lock unavailable; polling without it", exc_info=True
-                    )
+                elif not await renew_lease(pool, lock_key, owner, 60):
+                    # Our lease vanished: we stalled past the TTL and another
+                    # replica may own it now. Stop instead of double-polling.
+                    owner = ""
+                    logger.warning("Telegram poll lease lost; stopping loop")
+                    self._running = False
+                    return
             try:
                 async with httpx.AsyncClient(timeout=_POLL_TIMEOUT_S + 10) as client:
                     resp = await client.get(
@@ -195,6 +236,10 @@ class TelegramChannel(Channel):
                     if not text or not chat.get("id"):
                         continue
 
+                    from aios.core.owner_notify import ack_notification
+                    await ack_notification(
+                        getattr(self.connection, "org_id", ""), "telegram", "telegram"
+                    )
                     await dispatch_inbound(
                         channel_type="telegram",
                         channel_connection_id=getattr(self.connection, "id", "") or "",
@@ -204,6 +249,9 @@ class TelegramChannel(Channel):
                         extra_data={
                             "chat_id": chat["id"],
                             "message_id": msg.get("message_id"),
+                            # Provider-stable id so process_inbound dedups a
+                            # redelivered update by channel_message_id.
+                            "msg_id": f"telegram:{chat['id']}:{msg.get('message_id')}",
                             "chat_type": chat.get("type"),
                             "username": msg.get("from", {}).get("username"),
                         },
@@ -213,11 +261,12 @@ class TelegramChannel(Channel):
             except Exception:
                 logger.debug("Telegram poll error", exc_info=True)
                 await asyncio.sleep(5)
-            if lock_held:
-                try:
-                    from aios.tasks.queue import get_redis_pool
 
-                    await (await get_redis_pool()).delete(lock_held)
-                except Exception:
-                    pass
-                lock_held = ""
+        # Leave cleanly: only drop the lease if it is still ours.
+        if owner and pool is not None:
+            try:
+                from aios.tasks.queue import release_lease
+
+                await release_lease(pool, lock_key, owner)
+            except Exception:
+                pass

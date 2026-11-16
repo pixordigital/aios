@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     # WITH allow_credentials=True, and skipped the production DB check -- so any
     # deployment that forgot AIOS_DEBUG came up wide open. Opt in explicitly.
     debug: bool = False
+    # Deployment role. "all" keeps the single-process behavior. Split
+    # deployments use api (HTTP only), worker (ARQ) and gateway (channel
+    # pollers + cron). Unknown values refuse to boot.
+    runtime_role: str = "all"
     # USD -> BRL. This was hardcoded as the literal 5.5 in ~40 places across
     # limits.py, billing.py, whatsapp_pricing.py and the dashboard templates, so
     # every cost figure in the product moved with the real exchange rate and
@@ -23,7 +27,12 @@ class Settings(BaseSettings):
     # DB session and an LLM call, so 20 (the old hardcoded value) oversubscribed
     # a 4 vCPU box. Raise via AIOS_WORKER_MAX_JOBS on bigger hosts.
     worker_max_jobs: int = 5
+    owner_ack_timeout_minutes: int = 15
     storage_backend: str = "local"  # "local" | "s3"
+    # Where long-term vector memories live. "auto" = Postgres uses pgvector,
+    # SQLite keeps the per-agent files in data/vectors/. Set to "sqlite" in
+    # Postgres deployments to roll Phase 4 back without redeploying old code.
+    vector_backend: str = "auto"  # "auto" | "postgres" | "sqlite"
     s3_bucket: str = ""
     s3_region: str = ""
     s3_access_key: str = ""
@@ -116,6 +125,13 @@ class Settings(BaseSettings):
     whatsapp_batch_max_chars: int = 3800  # merged cap, under Meta's 4096 limit
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
+    # Set to the public https origin (e.g. https://aios.example.com) to switch
+    # Telegram from long-polling to webhooks. Empty keeps the poll loop, so
+    # nothing changes until this is configured explicitly.
+    public_base_url: str = ""
+    # Shared secret Telegram echoes in X-Telegram-Bot-Api-Secret-Token. Without
+    # it the webhook stays disabled (fail closed) and polling continues.
+    telegram_webhook_secret: str = ""
 
     codex_model: str = "gpt-5.4"
     voice_provider: str = "selfhosted"  # "elevenlabs" | "vapi" | "retell" | "selfhosted"
@@ -253,3 +269,27 @@ PLANS: dict[str, dict[str, Any]] = {
 }
 
 DEFAULT_PLAN = "free"
+
+RUNTIME_ROLES = ("all", "api", "worker", "gateway")
+
+
+def runtime_role() -> str:
+    return (settings.runtime_role or "all").strip().lower()
+
+
+def runs_channels() -> bool:
+    """Only the gateway and the single-process role own channel pollers."""
+    return runtime_role() in ("all", "gateway")
+
+
+def runs_cron() -> bool:
+    return runtime_role() in ("all", "gateway")
+
+
+def runs_telemetry_flush() -> bool:
+    return runtime_role() in ("all", "api")
+
+
+def channels_are_remote() -> bool:
+    """API replicas must ask the gateway to start/stop adapters."""
+    return runtime_role() == "api"

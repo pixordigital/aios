@@ -1,0 +1,18 @@
+[Unit]
+Description=AIOS database migrations
+Wants=network-online.target
+After=network-online.target postgresql.service
+Documentation=file:/opt/aios/DEPLOY.md
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios
+EnvironmentFile=/etc/aios/aios.env
+ExecStart=/opt/aios/.venv/bin/alembic upgrade head
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

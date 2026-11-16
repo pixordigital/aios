@@ -18,6 +18,53 @@ curl http://localhost:8777/health/ready
 open http://localhost:8777/dashboard
 ```
 
+## Bare metal (systemd)
+
+Docker is only packaging. These units run AIOS directly against Postgres and
+Redis. Assumes the repo at `/opt/aios`, a venv at `/opt/aios/.venv`, and env at
+`/etc/aios/aios.env` (same variables as `.env.example`).
+
+```bash
+# 1. Runtime prerequisites: Python 3.14, PostgreSQL 15+ with pgvector, Redis 7.
+sudo apt install postgresql-15 postgresql-15-pgvector redis-server
+
+# 2. User + directories
+sudo useradd --system --home /opt/aios --shell /usr/sbin/nologin aios
+sudo mkdir -p /etc/aios
+sudo chown aios:aios /opt/aios
+
+# 3. Install
+cd /opt/aios
+sudo -u aios python3.14 -m venv .venv
+sudo -u aios .venv/bin/pip install -e .
+sudo install -m 600 -o aios -g aios .env.example /etc/aios/aios.env
+sudo -u aios editor /etc/aios/aios.env   # set AIOS_DATABASE_URL, AIOS_JWT_SECRET, AIOS_REDIS_URL
+
+# 4. Units
+sudo cp deploy/aios-*.service deploy/aios-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now aios-migrate.service
+sudo systemctl enable --now aios-server.service aios-worker.service aios-gateway.service
+sudo systemctl enable --now aios-backup.timer
+
+# 5. Verify
+systemctl status aios-server aios-worker aios-gateway
+curl -s http://127.0.0.1:8777/health/ready
+journalctl -u aios-server -n 50
+```
+
+Notes:
+
+- `aios-migrate.service` runs `alembic upgrade head` once per boot; the API and
+  worker units `Require=` it, so replicas never race on migrations.
+- Bind is `127.0.0.1:8777`; put Caddy/nginx in front for TLS. `deploy/Caddyfile`
+  is a starting point.
+- Data lives in `/var/lib/aios` (`StateDirectory=aios`). Set
+  `AIOS_APP_DATA_DIR=/var/lib/aios` in the env file.
+- Backups land in `/var/lib/aios/backups`, retained 7 days.
+- Scale API replicas after Phase 3 of the stateless migration; keep the connection
+  budget under Postgres `max_connections`.
+
 ## Environment Variables
 
 See `.env.example` for all options. Required:
@@ -55,6 +102,24 @@ alembic upgrade head
 # Check if migrations are up to date
 alembic check
 ```
+
+### Vector memory (Phase 4)
+
+On Postgres, long-term memories live in `memory_vectors` (pgvector, 384 dims)
+and every replica sees them. SQLite deployments keep the per-agent files in
+`data/vectors/` and never create the table.
+
+```bash
+# One-time copy of old per-agent files, after `alembic upgrade head`
+python scripts/migrate_vectors_to_pg.py --dry-run
+python scripts/migrate_vectors_to_pg.py   # idempotent, keeps original ids
+
+# Rollback without redeploying: falls back to the local SQLite files
+AIOS_VECTOR_BACKEND=sqlite
+```
+
+Keep `data/vectors/` for one week after the switch; the copy preserves ids but
+the SQLite files are the only rollback that does not need a DB restore.
 
 ## Coolify Deploy
 

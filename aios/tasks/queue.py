@@ -5,6 +5,7 @@ Reads REDIS_URL from env or settings.redis_url.
 
 import logging
 import os
+import time
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -16,6 +17,11 @@ from aios.config import settings
 logger = logging.getLogger(__name__)
 
 _redis_pool: Optional[ArqRedis] = None
+# arq retries a dead redis for ~5s per call. Without this, every webhook or API
+# turn paid that during an outage; now the first caller pays and the rest fail
+# fast until the cooldown expires.
+_pool_retry_after = 0.0
+_POOL_RETRY_COOLDOWN_S = 5.0
 
 
 def _parse_redis(url: str) -> RedisSettings:
@@ -47,15 +53,46 @@ def _parse_redis(url: str) -> RedisSettings:
     )
 
 
+# Lease holders (channel pollers) share one key and store their owner id as the
+# value. A per-replica key made `SET NX` succeed on every replica, so the "lock"
+# never excluded anyone. Renew/release must only touch our own lease, hence Lua.
+_LEASE_RENEW_LUA = (
+    "if redis.call('get',KEYS[1])==ARGV[1] then "
+    "return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end"
+)
+_LEASE_RELEASE_LUA = (
+    "if redis.call('get',KEYS[1])==ARGV[1] then "
+    "return redis.call('del',KEYS[1]) else return 0 end"
+)
+
+
+async def acquire_lease(pool, key: str, owner: str, ttl: int) -> bool:
+    return bool(await pool.set(key, owner, nx=True, ex=ttl))
+
+
+async def renew_lease(pool, key: str, owner: str, ttl: int) -> bool:
+    return bool(await pool.eval(_LEASE_RENEW_LUA, 1, key, owner, ttl))
+
+
+async def release_lease(pool, key: str, owner: str) -> bool:
+    return bool(await pool.eval(_LEASE_RELEASE_LUA, 1, key, owner))
+
+
 async def get_redis_pool() -> ArqRedis:
     """Return shared ARQ Redis pool — created on first call."""
-    global _redis_pool
+    global _redis_pool, _pool_retry_after
     if _redis_pool is None:
+        if time.monotonic() < _pool_retry_after:
+            raise ConnectionError("redis pool unavailable (retry cooldown)")
         # "" when unset, so _parse_redis falls back to REDIS_HOST/PORT instead of
         # a hardcoded localhost that compose never publishes.
         url = settings.redis_url or os.getenv("REDIS_URL", "")
         redis_settings = _parse_redis(url)
-        _redis_pool = await create_pool(redis_settings)
+        try:
+            _redis_pool = await create_pool(redis_settings)
+        except Exception:
+            _pool_retry_after = time.monotonic() + _POOL_RETRY_COOLDOWN_S
+            raise
         logger.info("Redis pool connected to %s:%d", redis_settings.host, redis_settings.port)
     return _redis_pool
 

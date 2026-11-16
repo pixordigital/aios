@@ -82,9 +82,39 @@ async def telemetry_summary(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    """Org-wide telemetry summary."""
-    from aios.core.telemetry import telemetry
-    return telemetry.get_org_summary(org_id)
+    """Org-wide telemetry, from flushed rows (same numbers on every replica).
+
+    Reading `telemetry.get_org_summary()` here reported the calling process's
+    unflushed dict: the API replica runs no agents, so it usually showed zeros.
+    """
+    from aios.db.models import AgentMetric
+
+    row = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(AgentMetric.messages), 0),
+                func.coalesce(func.sum(AgentMetric.tokens), 0),
+                func.coalesce(func.sum(AgentMetric.errors), 0),
+                func.coalesce(
+                    func.sum(AgentMetric.avg_response_ms * AgentMetric.samples), 0
+                ),
+                func.count(func.distinct(AgentMetric.agent_id)),
+                func.coalesce(func.sum(AgentMetric.samples), 0),
+            ).where(AgentMetric.org_id == org_id)
+        )
+    ).one()
+
+    messages = int(row[0] or 0)
+    errors = int(row[2] or 0)
+    samples = int(row[5] or 0)
+    return {
+        "total_messages": messages,
+        "total_tokens": int(row[1] or 0),
+        "total_errors": errors,
+        "error_rate_pct": round(errors / max(messages, 1) * 100, 1),
+        "avg_response_ms": int(row[3] / samples) if samples else 0,
+        "active_agents": int(row[4] or 0),
+    }
 
 
 @router.get("/telemetry/agents")

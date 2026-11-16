@@ -67,6 +67,14 @@ class EmailChannel(Channel):
             return None
 
     async def start(self) -> None:
+        # IMAP is a long-lived poller with a per-mailbox lease; it belongs to
+        # the gateway role, never to an API replica. main.py already gates this,
+        # but a direct start() call (tests, admin action) must not open it either.
+        from aios.config import runs_channels, runtime_role
+
+        if not runs_channels():
+            logger.info("Email poller not started: role %r runs no channel pollers", runtime_role())
+            return
         self._running = True
         self._poll_task = asyncio.create_task(self._poll_loop())
         logger.info("Email poller started")
@@ -118,31 +126,39 @@ class EmailChannel(Channel):
         overall_ok = all(r.get("ok", False) for r in results.values())
         return {"ok": overall_ok, "message": "Email channel test", "details": results}
 
-    async def _claim_mailbox(self, lock_key: str) -> bool:
-        """Take a short-TTL Redis lock on this mailbox. True when we may poll.
+    async def _claim_mailbox(self, lock_key: str) -> str:
+        """Renew (or take) the mailbox lease. -> ok | wait | lost | unlocked.
 
-        ponytail: SET NX EX, refreshed every cycle. Fine while the loop is one
-        poller per process; a Redis-native lease (or moving the poller into the
-        ARQ worker) is the upgrade if the TTL ever has to span a restart.
+        The key used to include a fresh uuid on every call and was written with
+        `SET NX`, so the NX always found an unused key and every cycle "won" the
+        lock. Two replicas then polled the same mailbox and answered the same
+        email twice. The key is stable and the owner is the value now.
         """
         try:
-            from aios.tasks.queue import get_redis_pool
+            from aios.tasks.queue import acquire_lease, get_redis_pool, renew_lease
 
             pool = await get_redis_pool()
-            key = f"{lock_key}:{uuid.uuid4().hex[:8]}"
-            # 60s > the 30s poll interval, so a healthy holder never expires
-            # between cycles and a dead process loses the mailbox in a minute.
-            won = await pool.set(key, 1, nx=True, ex=60)
-            if won:
-                self._lock_key = key
-                return True
-            return False
+            if not self._lock_key:
+                self._lock_key = f"{lock_key}:{uuid.uuid4().hex[:8]}"
+                # 60s > the 30s poll interval, so a healthy holder never expires
+                # between cycles and a dead process loses the mailbox in a minute.
+                # Owner is the value; the key itself is shared by every replica.
+                if not await acquire_lease(pool, lock_key, self._lock_key, 60):
+                    self._lock_key = ""
+                    return "wait"
+                return "ok"
+            if await renew_lease(pool, lock_key, self._lock_key, 60):
+                return "ok"
+            # Our lease vanished: we stalled past the TTL and another replica may
+            # own the mailbox now. Stop rather than double-poll.
+            self._lock_key = ""
+            return "lost"
         except Exception:
             # Redis down: the platform cannot run agents anyway, and blocking
             # here would silently stop email. Let this process poll alone
             # rather than trading a rare duplicate for guaranteed silence.
             logger.warning("IMAP lock unavailable; polling without it", exc_info=True)
-            return True
+            return "unlocked"
 
     async def _poll_loop(self):
         """Poll IMAP inbox every 30s for new messages."""
@@ -163,11 +179,17 @@ class EmailChannel(Channel):
         lock_key = f"aios:imap-poll:{email_addr}"
         while self._running:
             try:
-                if not await self._claim_mailbox(lock_key):
-                    await asyncio.sleep(30)
-                    continue
+                state = await self._claim_mailbox(lock_key)
             except Exception:
                 logger.debug("IMAP lock check failed", exc_info=True)
+                state = "unlocked"
+            if state == "wait":
+                await asyncio.sleep(30)
+                continue
+            if state == "lost":
+                logger.warning("IMAP poll lease lost; stopping loop")
+                self._running = False
+                return
             try:
                 import imaplib
 
@@ -231,3 +253,13 @@ class EmailChannel(Channel):
                 logger.debug("Email poll error (normal if IMAP unavailable)", exc_info=True)
 
             await asyncio.sleep(30)
+
+        # Leave cleanly: only drop the lease if it is still ours.
+        if self._lock_key:
+            try:
+                from aios.tasks.queue import get_redis_pool, release_lease
+
+                await release_lease(await get_redis_pool(), lock_key, self._lock_key)
+            except Exception:
+                pass
+            self._lock_key = ""

@@ -20,7 +20,10 @@ from aios.config import settings
 # at docker-network services (supabase-db, redis) unreachable in CI/sandbox.
 # File (not :memory:) so the global engine used by dashboard db_session() paths
 # and the per-test session see the same data.
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), "test.db")
+# One sqlite file per xdist worker: _fresh_db deletes the file before each
+# test, so sharing one path makes workers delete each other's tables.
+TEST_WORKER = os.getenv("PYTEST_XDIST_WORKER", "main")
+TEST_DB_PATH = os.path.join(os.path.dirname(__file__), f"test.db.{TEST_WORKER}")
 TEST_DATABASE_URL = f"sqlite+aiosqlite:///{TEST_DB_PATH}"
 settings.jwt_secret = "test-secret"
 settings.debug = True

@@ -13,7 +13,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 from aios.api.errors import _problem, register_error_handlers
 from aios.api.router import api_router
-from aios.config import settings
+from aios.config import (
+    RUNTIME_ROLES,
+    runs_channels,
+    runs_telemetry_flush,
+    runtime_role,
+    settings,
+)
 from aios.core.storage import ensure_storage
 try:
     from prometheus_fastapi_instrumentator import Instrumentator
@@ -47,6 +53,17 @@ async def lifespan(app: FastAPI):
     _validate_db_config()
     _validate_security_config()
 
+    _role = runtime_role()
+    if _role not in RUNTIME_ROLES:
+        raise RuntimeError(
+            f"AIOS_RUNTIME_ROLE={settings.runtime_role!r} is invalid; "
+            f"expected one of {', '.join(RUNTIME_ROLES)}"
+        )
+    logger.info(
+        "AIOS role=%s channels=%s cron=worker telemetry_flush=%s",
+        _role, runs_channels(), runs_telemetry_flush(),
+    )
+
     await init_backends()
     await init_db()
     await ensure_storage()
@@ -63,27 +80,18 @@ async def lifespan(app: FastAPI):
     # Restore opt-outs and cooldowns before serving traffic. Without this a
     # restart silently clears every "STOP" a contact ever sent, and the next
     # deploy starts messaging them again.
-    try:
-        from sqlalchemy import select as sql_select
+    if runs_channels():
+        try:
+            from aios.core.whatsapp_guard import restore_all_orgs
 
-        from aios.db.backend import db_session
-        from aios.db.models import Organization
-        from aios.core.whatsapp_guard import load_durable_state
-
-        async with db_session() as db:
-            org_ids = [r[0] for r in (await db.execute(sql_select(Organization.id))).all()]
-        total = {"opted_out": 0, "cooldown": 0}
-        for oid in org_ids:
-            c = await load_durable_state(oid)
-            total["opted_out"] += c["opted_out"]
-            total["cooldown"] += c["cooldown"]
-        if total["opted_out"] or total["cooldown"]:
-            logger.info(
-                "WhatsApp guard restored %d opt-outs and %d cooldowns across %d org(s)",
-                total["opted_out"], total["cooldown"], len(org_ids),
-            )
-    except Exception as e:
-        logger.warning("WhatsApp guard state restore failed: %s", e)
+            total = await restore_all_orgs()
+            if total["opted_out"] or total["cooldown"]:
+                logger.info(
+                    "WhatsApp guard restored %d opt-outs and %d cooldowns",
+                    total["opted_out"], total["cooldown"],
+                )
+        except Exception as e:
+            logger.warning("WhatsApp guard state restore failed: %s", e)
 
     # Sentry — only if DSN configured
     if settings.sentry_dsn:
@@ -119,23 +127,32 @@ async def lifespan(app: FastAPI):
                         summary["queued"], summary["running"], summary["total_processes"])
     asyncio.create_task(_log_scheduler())
 
-    # Periodic telemetry flush (every 5 minutes)
-    async def _flush_telemetry():
+    # Agent health lives in Redis, counters stay local. Each process mirrors the
+    # shared status so a `stopped` agent on the worker is also stopped (and
+    # visible) on the API replica. 5s is well under the 5-minute failure window.
+    async def _health_sync():
         while True:
-            await asyncio.sleep(300)
+            await asyncio.sleep(5)
             try:
-                from aios.core.telemetry import telemetry
-                await telemetry.flush_to_db()
-            except Exception:
-                logger.exception("Telemetry flush failed")
-    asyncio.create_task(_flush_telemetry())
+                from aios.core.agent_health import health_tracker
 
-    try:
-        from aios.core.cron_scheduler import start_cron_scheduler
-        start_cron_scheduler()
-        logger.info("Cron scheduler started")
-    except Exception:
-        logger.exception("Cron scheduler failed to start")
+                await health_tracker.refresh()
+            except Exception:
+                logger.debug("agent health sync failed", exc_info=True)
+
+    asyncio.create_task(_health_sync())
+
+    # Periodic telemetry flush (every 5 minutes)
+    if runs_telemetry_flush():
+        async def _flush_telemetry():
+            while True:
+                await asyncio.sleep(300)
+                try:
+                    from aios.core.telemetry import telemetry
+                    await telemetry.flush_to_db()
+                except Exception:
+                    logger.exception("Telemetry flush failed")
+        asyncio.create_task(_flush_telemetry())
 
     # Periodic DB failover check
     async def _failover_watch():
@@ -197,28 +214,29 @@ async def lifespan(app: FastAPI):
     logger.info("Dashboard mounted at /dashboard")
 
     # start active channel background workers
-    from aios.channels.manager import manager as channel_mgr
-    async with async_session() as sess:
-        active = (await sess.execute(
-            select(ChannelConnection).where(ChannelConnection.is_active == True)
-        )).scalars().all()
-        for conn in active:
-            try:
-                agent_or_team: object = None
-                if conn.agent_id:
-                    from aios.db.models import Agent
-                    agent_or_team = await sess.get(Agent, conn.agent_id)
-                elif conn.team_id:
-                    from aios.db.models import Team
-                    from sqlalchemy.orm import selectinload
-                    agent_or_team = await sess.get(Team, conn.team_id, options=[selectinload(Team.agents)])
+    if runs_channels():
+        from aios.channels.manager import manager as channel_mgr
+        async with async_session() as sess:
+            active = (await sess.execute(
+                select(ChannelConnection).where(ChannelConnection.is_active == True)
+            )).scalars().all()
+            for conn in active:
+                try:
+                    agent_or_team: object = None
+                    if conn.agent_id:
+                        from aios.db.models import Agent
+                        agent_or_team = await sess.get(Agent, conn.agent_id)
+                    elif conn.team_id:
+                        from aios.db.models import Team
+                        from sqlalchemy.orm import selectinload
+                        agent_or_team = await sess.get(Team, conn.team_id, options=[selectinload(Team.agents)])
 
-                ch = channel_mgr.build(conn, agent_or_team, sess)
-                await channel_mgr.start(ch)
-                _channel_tasks.append(ch)
-                logger.info("Channel %s (%s) started", conn.label, conn.channel_type)
-            except Exception:
-                logger.exception("Failed to start channel %s", conn.label)
+                    ch = channel_mgr.build(conn, agent_or_team, sess)
+                    await channel_mgr.start(ch)
+                    _channel_tasks.append(ch)
+                    logger.info("Channel %s (%s) started", conn.label, conn.channel_type)
+                except Exception:
+                    logger.exception("Failed to start channel %s", conn.label)
 
     # Agent canvas event bridge: local pump + optional cross-process redis
     # subscriber. Never fatal — the canvas is a dashboard, and /health/ready
@@ -232,17 +250,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    for ch in _channel_tasks:
-        try:
-            await ch.stop()
-        except Exception:
-            logger.exception("Channel stop failed")
-
-    try:
-        from aios.core.cron_scheduler import stop_cron_scheduler
-        stop_cron_scheduler()
-    except Exception:
-        pass
+    if runs_channels():
+        for ch in _channel_tasks:
+            try:
+                await ch.stop()
+            except Exception:
+                logger.exception("Channel stop failed")
 
     # Order matters: the canvas subscriber holds its own dedicated redis
     # connection, so it must be closed before the shared pool below. Closing
@@ -294,6 +307,8 @@ from aios.api.voice_recordings import router as voice_rec_router  # noqa: E402
 app.include_router(voice_rec_router)
 from aios.api.inbox import router as inbox_router  # noqa: E402
 app.include_router(inbox_router)
+from aios.api.telegram_webhook import router as telegram_router  # noqa: E402
+app.include_router(telegram_router)
 
 # Prometheus metrics instrumentation
 Instrumentator().instrument(app).expose(app)
@@ -787,6 +802,7 @@ async def health_ready():
 
     checks = {}
     ok = True
+    checks["role"] = runtime_role()
     try:
         checks["db"] = "ok" if await registry.active.health() else "down"
     except Exception as e:

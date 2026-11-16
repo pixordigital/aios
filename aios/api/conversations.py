@@ -276,74 +276,30 @@ async def send_message(
     if (conv.extra_data or {}).get("handover", {}).get("status") == "human":
         return SendMessageResponse(user_message=MessageOut.model_validate(msg), reply=None)
 
-    # route to agent or team if assigned, with retry + failover
-    try:
-        from aios.core.agent_health import health_tracker
-        if conv.team_id:
-            team = await db.get(Team, conv.team_id)
-            if team and team.agents:
-                available = [a for a in team.agents if health_tracker.is_available(a.id)]
-                if available:
-                    orchestrator = TeamOrchestrator(team, available)
-                    reply = await orchestrator.handle_message(conversation_id, body.content, db)
-                    if reply:
-                        reply_msg = Message(
-                            conversation_id=conversation_id,
-                            role="assistant",
-                            content=reply,
-                            org_id=org_id,
-                        )
-                        db.add(reply_msg)
-                        await db.commit()
-                        await db.refresh(reply_msg)
-                        # The orchestrator owns its own runtime, so there is no
-                        # `runtime` in this scope to read tokens from -- the old
-                        # `if 'runtime' in locals()` guard was false on every
-                        # path that reaches here. Character count is the honest
-                        # fallback; wire real usage out of the orchestrator to
-                        # replace it.
-                        tokens = len(reply)
-                        await track_usage(org_id, db, messages=1, tokens=tokens, llm_calls=1)
-                    elif len(available) > 1:
-                        # team failed, try each agent individually
-                        for agent in available:
-                            try:
-                                runtime = AgentRuntime(agent)
-                                reply = await runtime.run(conversation_id, body.content, db)
-                                if reply:
-                                    reply_msg = Message(
-                                        conversation_id=conversation_id,
-                                        role="assistant",
-                                        content=reply,
-                                        org_id=org_id,
-                                    )
-                                    db.add(reply_msg)
-                                    await db.commit()
-                                    await db.refresh(reply_msg)
-                                    await track_usage(org_id, db, messages=1, tokens=getattr(runtime, "_last_tokens", len(reply)), llm_calls=1)
-                                    break
-                            except Exception:
-                                logger.exception("Failover: agent %s failed", agent.id)
-        elif conv.agent_id:
-            agent_model = await db.get(Agent, conv.agent_id)
-            if agent_model:
-                runtime = AgentRuntime(agent_model)
-                reply = await runtime.run(conversation_id, body.content, db)
-                if reply:
-                    reply_msg = Message(
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content=reply,
-                        org_id=org_id,
-                    )
-                    db.add(reply_msg)
-                    await db.commit()
-                    await db.refresh(reply_msg)
-                    await track_usage(org_id, db, messages=1, tokens=getattr(runtime, "_last_tokens", len(reply)), llm_calls=1)
-    except Exception:
-        logger.exception("Agent/team routing failed for conversation %s", conversation_id)
+    # The turn runs in the worker, the same way every channel message does.
+    # Running it here pinned the reply to this replica, with no retry and no DLQ.
+    from aios.core.dead_letter import write_dlq
+    from aios.tasks.queue import enqueue_task
 
-    return SendMessageResponse(user_message=MessageOut.model_validate(msg), reply=MessageOut.model_validate(reply_msg) if reply_msg else None)
+    turn = {
+        "message_id": msg.id,
+        "conversation_id": conversation_id,
+        "text": body.content,
+        "org_id": org_id,
+    }
+    job = await enqueue_task("aios.tasks.jobs.conversation_turn_job", turn)
+    if job is None:
+        await write_dlq(
+            direction="outbound",
+            channel_type="api",
+            job_name="aios.tasks.jobs.conversation_turn_job",
+            payload={"args": [turn], "kwargs": {}},
+            error="enqueue failed: redis unavailable",
+            org_id=org_id,
+            conversation_id=conversation_id,
+        )
+
+    return SendMessageResponse(user_message=MessageOut.model_validate(msg), reply=None)
 
 
 @router.post("/{conversation_id}/messages/stream")

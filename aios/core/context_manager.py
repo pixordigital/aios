@@ -10,6 +10,7 @@ ponytail: in-memory LRU cache. External cache (Redis) when multi-process.
 """
 
 import logging
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 
@@ -29,6 +30,10 @@ class SavedContext:
     message_block: list[dict]  # the non-system messages
     token_count: int = 0
     message_count: int = 0
+    # Wall-clock of the last save. The cache is only reusable while no other
+    # turn has landed in the DB after this instant; without it a replica that
+    # handled an older turn kept serving its stale block over newer DB rows.
+    saved_at: float = 0.0
     # scheduler preemption metadata
     preempted_at_step: int = 0
     partial_response: str = ""
@@ -58,6 +63,7 @@ class ContextManager:
             message_block=list(non_system),
             token_count=sum(count_tokens(m.get("content", "") or "") for m in non_system),
             message_count=len(non_system),
+            saved_at=time.time(),
         )
         key = self.cache_key(conv_id, agent_id)
         self._cache[key] = sc

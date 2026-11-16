@@ -17,21 +17,25 @@ async def ensure_vector_extension():
             await s.commit()
             RAG_STATUS["vector"] = True
             try:
-                # `memories` has no `embedding` column (embeddings live in the
-                # per-agent SQLite store, or in extra_data->'embedding'), so the
-                # HNSW index could never be created and `hnsw` stayed False
-                # forever while claiming readiness. Index what exists.
-                await s.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS idx_memories_org_id ON memories (org_id)"
+                from aios.core import vector_store
+
+                if vector_store.use_postgres():
+                    # The index is created by the migration; report it only if
+                    # it actually exists, so /health does not claim pgvector
+                    # readiness on a database that has not been upgraded.
+                    reg = await s.execute(
+                        text("SELECT to_regclass('ix_memory_vectors_embedding')")
                     )
+                    RAG_STATUS["hnsw"] = reg.scalar() is not None
+                else:
+                    RAG_STATUS["hnsw"] = False
+                RAG_STATUS["fallback"] = not RAG_STATUS["hnsw"]
+                logger.info(
+                    "vector extension ready; memory hnsw index %s",
+                    "present" if RAG_STATUS["hnsw"] else "absent",
                 )
-                await s.commit()
-                RAG_STATUS["hnsw"] = False
-                RAG_STATUS["fallback"] = False
-                logger.info("vector extension ready; embeddings stored per-agent in SQLite")
             except Exception as e:
-                logger.warning("pgvector HNSW index failed, fallback sqlite: %s", e)
+                logger.warning("pgvector HNSW index check failed, fallback sqlite: %s", e)
                 RAG_STATUS["fallback"] = True
     except Exception as e:
         logger.warning("vector extension not available, RAG fallback sqlite: %s", e)
@@ -49,8 +53,8 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
     base therefore reported "not found" for everything and hallucinated instead,
     with ok:true and no error anywhere.
 
-    - agent_id given -> the per-agent SQLite vector store, which is where
-      MemoryManager._store_vector actually writes the embeddings.
+    - agent_id given -> the MemoryManager store (pgvector in production, the
+      per-agent SQLite file in dev), which is where _store_vector writes.
     - no agent_id -> Postgres rows that carry `extra_data->'embedding'`, which
       is the format etl_url writes. Org-filtered.
     """
@@ -60,29 +64,11 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
         q = _embed(query)
 
         if agent_id:
-            from aios.core.memory import _vec_db
+            # Same store the MemoryManager writes to, so this works in
+            # multi-replica deployments instead of reading a local SQLite file.
+            from aios.core.memory import MemoryManager
 
-            conn = _vec_db(agent_id)
-            rows = conn.execute(
-                "SELECT id, content, embedding FROM memories ORDER BY rowid DESC LIMIT 500"
-            ).fetchall()
-            import json as _json
-
-            scored = []
-            for rid, content, emb in rows:
-                if not emb:
-                    continue
-                try:
-                    stored = _json.loads(emb)
-                except (TypeError, ValueError):
-                    continue
-                dot = sum(a * b for a, b in zip(q, stored))
-                scored.append((dot, rid, content))
-            scored.sort(key=lambda x: -x[0])
-            return [
-                {"id": r[1], "content": r[2], "score": round(float(r[0]), 4)}
-                for r in scored[:top_k]
-            ]
+            return await MemoryManager(agent_id).search_similar(query, top_k=top_k)
 
         if not org_id:
             return []

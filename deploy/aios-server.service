@@ -1,24 +1,34 @@
 [Unit]
-Description=AIOS - AI Agent Operating System
-After=network.target
+Description=AIOS API
+Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service aios-migrate.service
+Requires=aios-migrate.service
+Documentation=file:/opt/aios/DEPLOY.md
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root/ai_projects/claude_projects/pixor_aios
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios
+EnvironmentFile=/etc/aios/aios.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/local/bin/gunicorn aios.main:app \
+Environment=AIOS_RUNTIME_ROLE=api
+StateDirectory=aios
+RuntimeDirectory=aios
+ExecStart=/opt/aios/.venv/bin/gunicorn aios.main:app \
     --worker-class uvicorn.workers.UvicornWorker \
-    --bind 0.0.0.0:8777 \
-    --workers 2 \
+    --bind 127.0.0.1:8777 \
+    --workers 1 \
     --timeout 120 \
     --keep-alive 5 \
     --max-requests 10000 \
     --max-requests-jitter 1000 \
-    --access-logfile /var/log/aios/access.log \
-    --error-logfile /var/log/aios/error.log
+    --access-logfile - \
+    --error-logfile -
 Restart=always
 RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target

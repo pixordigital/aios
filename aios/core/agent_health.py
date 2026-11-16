@@ -17,6 +17,12 @@ _STOP_THRESHOLD = 15  # failures before stopped
 _FAILURE_WINDOW = 300  # 5 minutes
 _RECOVERY_THRESHOLD = 3  # successes to recover from degraded
 
+# Shared status. The counters stay local, but the derived status ("stopped")
+# must be visible to every replica: the worker that runs the agent is not the
+# API that renders its health nor the worker that picks the next turn.
+_STATUS_KEY = "aios:health:{agent_id}"
+_STATUS_TTL = 7 * 86400
+
 
 @dataclass
 class AgentHealth:
@@ -66,6 +72,7 @@ class AgentHealthTracker:
                 logger.warning("Agent %s DEGRADED after %d failures", agent_id, h.consecutive_failures)
                 _escalate(agent_id, "degraded", h.consecutive_failures, error)
 
+        self._publish(agent_id)
         return h.status
 
     def record_success(self, agent_id: str) -> str:
@@ -83,6 +90,7 @@ class AgentHealthTracker:
             # don't auto-recover from stopped — requires manual reset
             pass
 
+        self._publish(agent_id)
         return h.status
 
     def is_available(self, agent_id: str) -> bool:
@@ -103,10 +111,67 @@ class AgentHealthTracker:
     def reset(self, agent_id: str):
         """Manually reset agent health."""
         self._agents[agent_id] = AgentHealth(agent_id=agent_id, status="healthy")
+        self._publish(agent_id)
         logger.info("Agent %s health reset to healthy", agent_id)
 
     def all_status(self) -> dict:
         return {aid: self.get_status(aid) for aid in self._agents}
+
+    # ─── shared status (Redis) ───
+
+    def _publish(self, agent_id: str) -> None:
+        """Best-effort push of this agent's status; never blocks the caller."""
+        try:
+            import asyncio
+
+            asyncio.get_running_loop().create_task(self._push(agent_id))
+        except RuntimeError:
+            pass  # sync context (CLI/tests): local state only
+
+    async def _push(self, agent_id: str) -> None:
+        try:
+            from aios.tasks.queue import get_redis_pool
+
+            pool = await get_redis_pool()
+            await pool.set(
+                _STATUS_KEY.format(agent_id=agent_id),
+                self._get(agent_id).status,
+                ex=_STATUS_TTL,
+            )
+        except Exception:
+            logger.debug("health publish failed for %s", agent_id, exc_info=True)
+
+    async def refresh(self) -> int:
+        """Merge shared statuses into this process. Returns entries changed.
+
+        The API replica never runs an agent, so without this every agent looked
+        healthy there and a `stopped` agent on a worker was invisible.
+        """
+        try:
+            from aios.tasks.queue import get_redis_pool
+
+            pool = await get_redis_pool()
+            keys = await pool.keys(_STATUS_KEY.format(agent_id="*"))
+            if not keys:
+                return 0
+            values = await pool.mget(keys)
+        except Exception:
+            return 0
+
+        changed = 0
+        for key, status in zip(keys, values):
+            if not status:
+                continue
+            if isinstance(status, bytes):
+                status = status.decode()
+            if isinstance(key, bytes):
+                key = key.decode()
+            agent_id = key.rsplit(":", 1)[-1]
+            h = self._get(agent_id)
+            if h.status != status:
+                h.status = status
+                changed += 1
+        return changed
 
 
 def _escalate(agent_id: str, status: str, failure_count: int, error: str):

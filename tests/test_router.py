@@ -23,6 +23,28 @@ FRONTIER = "openai/gpt-4o"
 CHEAP = "openai/gpt-4o-mini"
 
 
+@pytest.fixture(autouse=True)
+def _isolated_run_caches():
+    """Caches are process-global, so one test's answer leaked into the next.
+
+    With identical context + model + org, `AgentRuntime` served the cached
+    response and never called the provider, so the escalation tests saw
+    `calls == []`. The context cache is also cleared: a stale block from the
+    previous test changed the cache key and hid this for a while.
+    """
+    from aios.core.cache import cache
+    from aios.core.context_manager import context_manager
+
+    def _clear():
+        cache.clear()
+        context_manager._cache.clear()
+        context_manager._active.clear()
+
+    _clear()
+    yield
+    _clear()
+
+
 def _tools(*names):
     return [{"type": "function", "function": {"name": n}} for n in names]
 

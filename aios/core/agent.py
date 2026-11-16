@@ -124,6 +124,32 @@ def _context_tokens(context: list[dict]) -> int:
     return chars // 4
 
 
+async def _cached_context_is_fresh(db, conversation_id: str, cached) -> bool:
+    """True when no turn except the one being answered landed after the save.
+
+    The old guard compared cache message counts with `get_recent(limit=20)`,
+    which is capped and excludes tool rows while the cache includes them. Once
+    the cache held ~20 entries it always "won", even if another replica had
+    answered newer turns in the meantime, and those turns disappeared from the
+    model's context. One row newer is the current user message; two or more
+    means somebody else advanced the conversation.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func, select
+
+    since = datetime.fromtimestamp(cached.saved_at or 0.0, tz=timezone.utc)
+    newer = (
+        await db.execute(
+            select(func.count(Message.id)).where(
+                Message.conversation_id == conversation_id,
+                Message.created_at > since,
+            )
+        )
+    ).scalar() or 0
+    return newer <= 1
+
+
 class AgentRuntime:
     """One agent loop per deployed agent.
 
@@ -809,17 +835,23 @@ class AgentRuntime:
         recent = await self.memory.get_recent(conversation_id, limit=20, db=db)
         ctx.extend(recent)
 
-        # Prefer the in-process context cache when it is at least as complete as
-        # what the DB gave us. The DB replay carries user/assistant text only —
-        # tool rows are filtered out (a bare `role="tool"` with no tool_call_id
-        # is rejected by every provider), so the assistant's tool_calls chain is
-        # lost across turns. The cache holds the assembled block with that chain
-        # intact, and `context_manager.save()` at the end of a run already writes
-        # it — but nothing ever read it back, so the save was dead weight.
-        # Guarded by length: if another process wrote newer turns, the DB copy
-        # wins and nothing is lost.
+        # Prefer the in-process context cache when nothing newer has landed in
+        # the DB since it was saved. The DB replay carries user/assistant text
+        # only — tool rows are filtered out (a bare `role="tool"` with no
+        # tool_call_id is rejected by every provider), so the assistant's
+        # tool_calls chain is lost across turns. The cache holds the assembled
+        # block with that chain intact, and `context_manager.save()` at the end
+        # of a run already writes it — but nothing ever read it back, so the
+        # save was dead weight. Freshness is checked against DB timestamps, not
+        # message counts: the counts are not comparable (cache includes tool
+        # rows, `recent` is capped at 20).
         cached = context_manager.load(conversation_id, self.agent.id)
-        if cached and cached.message_count >= len(recent):
+        if (
+            cached
+            and cached.message_count >= len(recent)
+            and db is not None
+            and await _cached_context_is_fresh(db, conversation_id, cached)
+        ):
             ctx = [ctx[0]] + list(cached.message_block)
 
         # Feed the long-term extractor. Nothing else passes a "user" turn to it.

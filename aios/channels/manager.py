@@ -66,6 +66,14 @@ class ChannelManager:
         self.unregister(cid or "")
         logger.info("Channel %s stopped", channel.channel_type)
 
+    async def stop_by_id(self, connection_id: str) -> bool:
+        """Stop a live adapter by connection id, even if its DB row is gone."""
+        channel = self._instances.get(connection_id)
+        if channel is None:
+            return False
+        await self.stop(channel)
+        return True
+
     async def sync(self, connection, is_active: bool, agent_or_team=None, db=None) -> bool:
         """Start or stop one connection's adapter. Returns True when running.
 

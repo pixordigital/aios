@@ -197,7 +197,7 @@ class TestToolEngineResilience:
         agent = types.SimpleNamespace(
             id="a", org_id="o", tools=["sql_query", "gone_tool"],
             llm_config={"model": "openai/gpt-4o"}, governance_config={},
-            name="t", system_prompt="", memory_config={},
+            name="t", system_prompt="", memory_config={}, extra_data={},
         )
         rt = AgentRuntime(agent)  # must not raise
         assert "sql_query" in rt.tool_engine.tools

@@ -429,6 +429,8 @@ async def test_proactive_event_job_runs_agent_and_republishes_result(monkeypatch
     )
 
     class FakeAuto:
+        runtime = None
+
         def __init__(self, a):
             self.a = a
 

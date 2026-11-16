@@ -1,0 +1,15 @@
+[Unit]
+Description=AIOS database backup
+After=network-online.target postgresql.service
+Wants=network-online.target
+Documentation=file:/opt/aios/DEPLOY.md
+
+[Service]
+Type=oneshot
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios
+EnvironmentFile=/etc/aios/aios.env
+Environment=BACKUP_DIR=/var/lib/aios/backups
+StateDirectory=aios
+ExecStart=/opt/aios/deploy/backup.sh

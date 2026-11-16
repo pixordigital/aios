@@ -103,6 +103,7 @@ async def delete_channel(
     if not channel or channel.org_id != org_id:
         raise HTTPException(404)
     await log_audit(db, org_id, "channel.delete", "channel", user_id=user.id, resource_id=channel_id, details={"label": channel.label})
+    await _sync_channel(channel, False, db)
     await db.delete(channel)
     await db.commit()
     return {"ok": True}
@@ -157,6 +158,19 @@ async def _sync_channel(channel: ChannelConnection, is_active: bool, db) -> bool
     not fail the API call that toggled the flag.
     """
     try:
+        from aios.config import channels_are_remote
+
+        if channels_are_remote():
+            from aios.tasks.queue import enqueue_job
+
+            await enqueue_job(
+                "aios.tasks.jobs.channel_sync_job",
+                channel.id,
+                is_active,
+                priority="high",
+            )
+            return True
+
         from sqlalchemy.orm import selectinload
 
         from aios.db.models import Agent, Team

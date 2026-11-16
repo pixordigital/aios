@@ -12,6 +12,7 @@ Usage:
 import logging
 
 logger = logging.getLogger(__name__)
+import asyncio
 import os
 from arq import cron
 from arq.connections import RedisSettings
@@ -20,6 +21,7 @@ from .jobs import (
     FUNCTIONS,
     event_consume_job,
     monthly_report_job,
+    owner_escalation_job,
     template_status_reconcile_job,
     weekly_report_job,
     weekly_standup_job,
@@ -40,6 +42,25 @@ def _parse_redis(redis_url: str) -> RedisSettings:
     from .queue import _parse_redis as _shared
 
     return _shared(redis_url)
+
+
+async def cron_tick_job(ctx):
+    try:
+        from aios.core.cron_scheduler import run_once
+
+        await run_once()
+    except Exception:
+        logging.getLogger(__name__).exception("cron tick job failed")
+
+
+async def telemetry_flush_job(ctx):
+    """Flush metrics accumulated in this process; the API loop cannot see them."""
+    try:
+        from aios.core.telemetry import telemetry
+
+        await telemetry.flush_to_db()
+    except Exception:
+        logging.getLogger(__name__).exception("telemetry flush job failed")
 
 
 async def approval_expire_job(ctx):
@@ -223,11 +244,15 @@ def _registry(functions, namespace: str | None = None):
 class WorkerSettings:
     functions = _registry(FUNCTIONS, namespace="aios.tasks.jobs") + _registry([
         approval_expire_job, autoscale_job, canary_rollback_job,
+        cron_tick_job,
+        telemetry_flush_job,
         _learning_job_wrapper,
         integration_outbox_flush_job,
         template_status_reconcile_job,
     ])
     cron_jobs = [
+        cron(cron_tick_job, second=0),
+        cron(telemetry_flush_job, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         cron(approval_expire_job, minute=5),
         cron(autoscale_job, minute=0),
         cron(canary_rollback_job, minute=10),
@@ -245,6 +270,7 @@ class WorkerSettings:
         # 07:00, before the 08:00 sales sweep, so a rep works today's board on
         # freshly-staged data rather than yesterday's.
         cron(workday_job, hour=7, minute=0),
+        cron(owner_escalation_job, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         cron(weekly_standup_job, hour=9, minute=0),  # daily trigger, self-skips unless Monday
         cron(weekly_report_job, hour=9, minute=15),  # owner report + 1:1 agenda, Mondays
         cron(monthly_report_job, hour=9, minute=30),  # last month's report, 1st of the month
@@ -283,6 +309,38 @@ class WorkerSettings:
                 "the instance key instead of the org's"
             )
 
+        # Delivery runs in this process, so the guard must be hydrated here,
+        # not only in the API lifespan: an empty guard re-sends to contacts who
+        # opted out.
+        try:
+            from aios.core.whatsapp_guard import restore_all_orgs
+
+            await restore_all_orgs()
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "worker: WhatsApp guard state not restored — opt-outs and "
+                "cooldowns are unknown in this process"
+            )
+
+        # Runtime opt-outs recorded by another replica are only in the DB. A
+        # full rehydrate every 5 minutes closes that window; it is cheap enough
+        # at current contact counts.
+        # shortcut: full rehydrate, switch to an updated_at delta if the
+        # whatsapp_contacts table grows past ~100k rows.
+        async def _guard_resync():
+            while True:
+                await asyncio.sleep(300)
+                try:
+                    from aios.core.whatsapp_guard import restore_all_orgs
+
+                    await restore_all_orgs()
+                except Exception:
+                    logging.getLogger(__name__).debug(
+                        "worker: WhatsApp guard resync failed", exc_info=True
+                    )
+
+        asyncio.create_task(_guard_resync())
+
     @staticmethod
     async def on_shutdown(ctx):
         from aios.tasks.queue import close_pool
@@ -292,25 +350,13 @@ class WorkerSettings:
             pass
 
 
-async def run():
-    """Entry point for ``aios-worker`` script — blocks on event loop.
+def run():
+    """Alias for console scripts generated before the entry point moved to main.
 
-    Uses the full WorkerSettings, not just functions: an earlier version built
-    a bare Worker here, which silently dropped every cron job and the on_startup
-    registration for anyone running the installed script instead of
-    `python -m aios.tasks.worker`.
+    The old metadata pointed here at an ``async def``; setuptools called it
+    without awaiting, so the worker exited immediately.
     """
-    from arq.worker import Worker
-    worker = Worker(
-        functions=WorkerSettings.functions,
-        redis_settings=WorkerSettings.redis_settings,
-        cron_jobs=WorkerSettings.cron_jobs,
-        on_startup=WorkerSettings.on_startup,
-        on_shutdown=WorkerSettings.on_shutdown,
-        max_jobs=WorkerSettings.max_jobs,
-        job_timeout=WorkerSettings.job_timeout,
-    )
-    await worker.run()
+    main()
 
 
 def main():

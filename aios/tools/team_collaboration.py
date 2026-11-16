@@ -300,9 +300,8 @@ class NotifyHumanTool(BaseTool):
     input_model = NotifyHumanInput
 
     async def run(self, message: str, urgency: str = "info", team: str = "") -> dict[str, Any]:
-        import asyncio
-
-        from aios.core.meetings import human_slack_targets, post_to_slack
+        from aios.core.meetings import human_slack_targets
+        from aios.core.owner_notify import deliver_owner
         from aios.db.engine import async_session
 
         org_id = _require_org(self._org_id)
@@ -344,17 +343,10 @@ class NotifyHumanTool(BaseTool):
             header += f" — {team_name}"
         body = f"{header}\n\n{text}"
 
-        # post_to_slack is sync urllib — keep it off the event loop.
-        sent = [
-            t for t in targets
-            if await asyncio.to_thread(post_to_slack, t["token"], t["channel"], body)
-        ]
-        return {
-            "ok": bool(sent),
-            "delivered": len(sent),
-            "attempted": len(targets),
-            "channels": [t["channel"] for t in sent],
-        }
+        return await deliver_owner(
+            org_id, body, urgency=urgency or "info", requires_ack=True,
+            team_id=resolved_team_id or "",
+        )
 
 
 async def _team_id(org_id: str, name: str) -> str | None:
@@ -674,7 +666,8 @@ class RequestBuildTool(BaseTool):
             await sess.commit()
 
         # The owner always hears about it, with both sides in one message.
-        from aios.core.meetings import human_slack_targets, post_to_slack
+        from aios.core.meetings import human_slack_targets
+        from aios.core.owner_notify import deliver_owner
 
         targets = await human_slack_targets(org_id, team_id="")
         if not targets:
@@ -699,29 +692,13 @@ class RequestBuildTool(BaseTool):
             f"{evidence_line}\n\n"
             f"_Aprovação no /dashboard/approvals. Thread: {conv_id}_"
         )
-        # post_to_slack is sync urllib — keep it off the event loop, same as
-        # notify_human. One failed target must not hide the others.
-        import asyncio
-
-        sent: list[str] = []
-        try:
-            for t in targets:
-                try:
-                    ok = await asyncio.to_thread(
-                        post_to_slack, t["token"], t["channel"], text
-                    )
-                except Exception:
-                    logger.exception("request_build: slack post failed conv=%s", conv_id)
-                    continue
-                if ok:
-                    sent.append(t["channel"])
-        except Exception:
-            logger.exception("request_build: slack loop failed conv=%s", conv_id)
-
-        if not sent:
+        res = await deliver_owner(
+            org_id, text, urgency=urgency or "info", requires_ack=True,
+        )
+        if not res["ok"]:
             return {
                 "ok": False,
-                "error": "Slack delivery to the owner failed; the request was NOT delivered",
+                "error": "Slack and Telegram delivery to the owner failed; the request was NOT delivered",
                 "conversation_id": conv_id,
                 "feasibility": feasibility[:2000],
             }

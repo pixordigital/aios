@@ -247,6 +247,7 @@ class _StubAgent:
     tools = []
     governance_config = {"autonomous": True, "max_trials": 2,
                          "hitl_enabled": False}
+    extra_data: dict = {}
 
 
 @pytest.mark.asyncio

@@ -263,6 +263,23 @@ def record_send(contact: str):
     _contact_queues[contact].append(time.time())
 
 
+async def restore_all_orgs() -> dict:
+    """Rehydrate every org. Called at API and worker boot."""
+    from sqlalchemy import select as sql_select
+
+    from aios.db.backend import db_session
+    from aios.db.models import Organization
+
+    total = {"opted_out": 0, "cooldown": 0}
+    async with db_session() as db:
+        org_ids = [r[0] for r in (await db.execute(sql_select(Organization.id))).all()]
+    for oid in org_ids:
+        c = await load_durable_state(oid)
+        total["opted_out"] += c["opted_out"]
+        total["cooldown"] += c["cooldown"]
+    return total
+
+
 async def guard_send(
     contact: str,
     text: str,

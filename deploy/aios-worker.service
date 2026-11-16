@@ -1,0 +1,25 @@
+[Unit]
+Description=AIOS worker (ARQ queue and cron)
+Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service aios-migrate.service
+Requires=aios-migrate.service
+Documentation=file:/opt/aios/DEPLOY.md
+
+[Service]
+Type=simple
+User=aios
+Group=aios
+WorkingDirectory=/opt/aios
+EnvironmentFile=/etc/aios/aios.env
+Environment=PYTHONUNBUFFERED=1
+Environment=AIOS_RUNTIME_ROLE=worker
+StateDirectory=aios
+RuntimeDirectory=aios
+ExecStart=/opt/aios/.venv/bin/aios-worker
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
