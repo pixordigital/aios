@@ -960,9 +960,9 @@
     "semantic_hash": ""
   },
   "aios/templates/data_analyst.py": {
-    "mtime": 1790810090.218086,
-    "seen": 1790904342.7259216,
-    "ast_hash": "49ae925d7533bd070e0cbd564a6690eb",
+    "mtime": 1794877768.6007192,
+    "seen": 1794878005.7215178,
+    "ast_hash": "312d95049730f3dfa8c1d5b71c35eaea",
     "semantic_hash": ""
   },
   "aios/templates/data_scientist.py": {
@@ -1014,9 +1014,9 @@
     "semantic_hash": "2d00fa745f1175d2b6f3487b705a1b8f"
   },
   "aios/templates/sdr.py": {
-    "mtime": 1791132980.8777997,
-    "seen": 1793058748.466301,
-    "ast_hash": "d8efa6658c03dffdd473ed484aa277db",
+    "mtime": 1794877781.315105,
+    "seen": 1794878005.7222056,
+    "ast_hash": "07e1455ca2bd3c0a476eecf8eeed22b9",
     "semantic_hash": ""
   },
   "aios/templates/solutions.py": {
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1794875349.6297817,
-    "seen": 1794875406.5297952,
-    "ast_hash": "006304c4f37474ccc07141dcf008342e",
+    "mtime": 1794877970.3326979,
+    "seen": 1794878005.7396808,
+    "ast_hash": "3e63871f2f5da23d1aebda70ec1cf4f0",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -3258,9 +3258,9 @@
     "semantic_hash": ""
   },
   "aios/icm/team_workspaces.py": {
-    "mtime": 1794529302.2692835,
-    "seen": 1794529833.315688,
-    "ast_hash": "d459c489e24a931638dd39d7bbd50905",
+    "mtime": 1794877658.1776438,
+    "seen": 1794878005.7200863,
+    "ast_hash": "5132b2eb1d2496b79b607135c1bb5f7f",
     "semantic_hash": ""
   },
   "scripts/logs.py": {
@@ -3399,6 +3399,12 @@
     "mtime": 1794787433.2601032,
     "seen": 1794866953.4996815,
     "ast_hash": "cc638466d145d1f2ed69c0adc0cfcb89",
+    "semantic_hash": ""
+  },
+  "scripts/remediate_agent_tools.py": {
+    "mtime": 1794877798.8937411,
+    "seen": 1794878005.7279344,
+    "ast_hash": "a92ba2b327ed6a99a148328a25aa56e3",
     "semantic_hash": ""
   }
 }
