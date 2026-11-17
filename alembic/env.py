@@ -1,7 +1,6 @@
 """Alembic env — async SQLAlchemy for Postgres/SQLite."""
 
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context

@@ -6,7 +6,6 @@ in favour of the Baileys/Meta bridge, and left this file importing the dead
 paths. The parsing assertions were kept against the module that replaced it.
 """
 
-import inspect
 
 
 class TestParseMessage:

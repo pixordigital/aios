@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     # Fleet verification probes N agents at once. 2 matches the deploy semaphore
     # so a fleet run cannot starve a manual deploy of provider capacity.
     fleet_verify_concurrency: int = 2
+    # Stripe is a commercial surface and is not wired up in the internal build:
+    # the billing router is not mounted. The fields stay declared so an old
+    # `.env` does not fail validation, but nothing reads them.
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_starter: str = ""
@@ -207,7 +210,54 @@ if settings.stripe_price_starter:
 if settings.stripe_price_pro:
     STRIPE_PRICE_MAP[settings.stripe_price_pro] = "pro"
 
-# ─── Plan limits ───
+# ─── Model registry ───
+# Names and prices live here, not in the runtime that consumes them. The ladder
+# is ordered cheapest -> most capable; escalation walks it upward and nothing is
+# rerouted unless the model is on it.
+MODEL_TIERS: tuple[str, ...] = (
+    "openai/gpt-4.1-nano",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+)
+
+MODEL_ROLE_MIN_TIER: dict[str, str | None] = {
+    "orchestrator": "openai/gpt-4o",
+    "manager": "openai/gpt-4o",
+    "review": "openai/gpt-4o",
+    "sdr": "openai/gpt-4o-mini",
+    "support": "openai/gpt-4o-mini",
+    "prospector": "openai/gpt-4o-mini",
+    "closer": "openai/gpt-4o-mini",
+    "data_scientist": "openai/gpt-4o",
+    "data_analyst": "openai/gpt-4o-mini",
+    "frontend": "openai/gpt-4o",
+    "backend": "openai/gpt-4o",
+    "auditor": "openai/gpt-4o",
+    "watcher": "openai/gpt-4o-mini",
+    "business": "openai/gpt-4o-mini",
+    "custom": None,
+}
+
+# USD per 1M tokens (input, output). Pricing is data, so it can be corrected
+# without touching the cost functions.
+MODEL_COST_IN_OUT: dict[str, tuple[float, float]] = {
+    "openai/gpt-4o": (2.50, 10.00),
+    "openai/gpt-4o-mini": (0.15, 0.60),
+    "openai/gpt-4.1": (2.50, 10.00),
+    "openai/gpt-4.1-mini": (0.40, 1.60),
+    "openai/gpt-4.1-nano": (0.10, 0.40),
+    "openai/o3": (5.00, 20.00),
+    "openai/o3-mini": (1.10, 4.40),
+    "anthropic/claude-sonnet-4-20250514": (3.00, 15.00),
+    "anthropic/claude-4.5-sonnet": (3.00, 15.00),
+    "anthropic/claude-opus-4-20250514": (15.00, 75.00),
+}
+
+# Fallback for models the registry does not price yet. Deliberately the
+# frontier rate: an unknown model must never look cheaper than it is.
+MODEL_COST_UNKNOWN_PER_1K = 0.002
+
+# ─── Plan limits (billing surface, internal builds do not expose it) ───
 # max_cost_brl: teto estimado em BRL (USD×5.5) para guardrail — P0-15. Ilimitado = sem teto.
 # sla_minutes: tempo máximo humano assumir sem estouro
 PLANS: dict[str, dict[str, Any]] = {

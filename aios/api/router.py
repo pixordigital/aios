@@ -7,7 +7,10 @@ from .channels import router as channels_router
 from .conversations import router as conversations_router
 from .teams import router as teams_router
 from .tools import router as tools_router
-from .billing import router as billing_router
+# Billing is a commercial surface. AIOS ships as an internal tool first, so the
+# router is deliberately not mounted: there is no subscriber and no Stripe
+# lifecycle to verify. Re-enable together with multi-tenant onboarding.
+# from .billing import router as billing_router
 from .files import router as files_router
 from .admin_api import router as admin_api_router
 from .ws import router as ws_router
@@ -65,7 +68,7 @@ api_router.include_router(conversations_router)
 api_router.include_router(channels_router)
 api_router.include_router(tools_router)
 api_router.include_router(analytics_router)
-api_router.include_router(billing_router)
+# api_router.include_router(billing_router)  # internal-only build: see import above
 api_router.include_router(files_router)
 api_router.include_router(admin_api_router)
 api_router.include_router(ws_router)

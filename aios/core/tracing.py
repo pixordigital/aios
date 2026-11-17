@@ -8,10 +8,11 @@ import hashlib
 import hmac
 import json
 import logging
-import os
 import time
 import uuid
 from dataclasses import dataclass, field
+
+from aios.config import MODEL_COST_IN_OUT, MODEL_COST_UNKNOWN_PER_1K
 
 logger = logging.getLogger(__name__)
 
@@ -199,45 +200,21 @@ async def _persist_span(span: TraceSpan):
 
 
 
-_COST_PER_1K = {
-    "openai/gpt-4o": 0.005,
-    "openai/gpt-4o-mini": 0.00015,
-    "openai/gpt-4.1": 0.005,
-    "openai/gpt-4.1-mini": 0.0004,
-    "openai/gpt-4.1-nano": 0.0001,
-    "openai/gpt-3.5-turbo": 0.0005,
-    "openai/o3": 0.01,
-    "openai/o3-mini": 0.0011,
-    "openai/o4": 0.02,
-    "openai/o4-mini": 0.003,
-    "anthropic/claude-3-5-sonnet": 0.003,
-    "anthropic/claude-3-haiku": 0.00025,
-    "anthropic/claude-sonnet-4-20250514": 0.003,
-    "anthropic/claude-4.5-sonnet": 0.003,
-    "anthropic/claude-opus-4-20250514": 0.015,
-    "anthropic/claude-3-opus": 0.015,
-}
+_COST_IN_OUT = MODEL_COST_IN_OUT
 
-# input vs output pricing (avg)
-_COST_IN_OUT = {
-    "openai/gpt-4o": (2.50, 10.00),
-    "openai/gpt-4o-mini": (0.15, 0.60),
-    "openai/gpt-4.1": (2.50, 10.00),
-    "openai/gpt-4.1-mini": (0.40, 1.60),
-    "openai/gpt-4.1-nano": (0.10, 0.40),
-    "openai/o3": (5.00, 20.00),
-    "openai/o3-mini": (1.10, 4.40),
-    "anthropic/claude-sonnet-4-20250514": (3.00, 15.00),
-    "anthropic/claude-4.5-sonnet": (3.00, 15.00),
-    "anthropic/claude-opus-4-20250514": (15.00, 75.00),
+# Blended (input+output)/2 rate for callers that only pass a token total.
+_COST_PER_1K = {
+    model: round((inp + out) / 2_000, 6)
+    for model, (inp, out) in MODEL_COST_IN_OUT.items()
 }
+_COST_DEFAULT_PER_1K = MODEL_COST_UNKNOWN_PER_1K
 
 
 def estimate_cost(model: str, tokens: int, input_tokens: int | None = None, output_tokens: int | None = None) -> float:
     if input_tokens is not None and output_tokens is not None and model in _COST_IN_OUT:
         inp_rate, out_rate = _COST_IN_OUT[model]
-        return round(input_tokens / 1000 * inp_rate / 1000 + output_tokens / 1000 * out_rate / 1000, 6) if False else round(input_tokens * inp_rate / 1_000_000 + output_tokens * out_rate / 1_000_000, 6)
-    rate = _COST_PER_1K.get(model, 0.002)
+        return round(input_tokens * inp_rate / 1_000_000 + output_tokens * out_rate / 1_000_000, 6)
+    rate = _COST_PER_1K.get(model, _COST_DEFAULT_PER_1K)
     return round(tokens / 1000 * rate, 6)
 
 
@@ -245,7 +222,7 @@ def estimate_cost_detailed(model: str, input_tokens: int, output_tokens: int) ->
     if model in _COST_IN_OUT:
         inp, out = _COST_IN_OUT[model]
         return round(input_tokens * inp / 1_000_000 + output_tokens * out / 1_000_000, 6)
-    rate = _COST_PER_1K.get(model, 0.002)
+    rate = _COST_PER_1K.get(model, _COST_DEFAULT_PER_1K)
     return round((input_tokens + output_tokens) / 1000 * rate, 6)
 
 

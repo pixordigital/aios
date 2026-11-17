@@ -19,6 +19,39 @@ from aios.icm.adapter import ICMStageAdapter
 logger = logging.getLogger(__name__)
 
 
+class ICMContractRequired(RuntimeError):
+    """A paid workflow class was declared without an enforceable ICM-X contract.
+
+    Opt-in ICM-X remains valid for experiments and internal utilities; the paid
+    workflow classes this platform sells must be governed. Failing at startup is
+    the point: an agent that would execute a revenue workflow without a stage
+    contract must not run.
+    """
+
+
+def assert_paid_workflow_contract(agent) -> None:
+    """Raise when ``extra_data["workflow_class"]`` has no bound stage contract."""
+    # Imported lazily: the vertical package imports ICM contracts, and the
+    # binding module must stay importable while the app is still booting.
+    from aios.verticals.pet_business.workflows import has_contract, paid_workflow_class
+
+    workflow_class = paid_workflow_class(getattr(agent, "extra_data", None))
+    if not workflow_class:
+        return
+    if not has_contract(workflow_class):
+        raise ICMContractRequired(
+            f"workflow_class={workflow_class!r} is not owned by any vertical contract"
+        )
+    cfg = (getattr(agent, "extra_data", None) or {}).get("icm") or {}
+    if not isinstance(cfg, dict) or not (
+        cfg.get("stage_id") or cfg.get("stage_manifest")
+    ):
+        raise ICMContractRequired(
+            f"workflow_class={workflow_class!r} requires extra_data['icm'] "
+            f"(workspace_id + stage_id)"
+        )
+
+
 def bind_agent_stage(agent, storage_root: str | None = None, run_id: str | None = None):
     """Return the agent's ICM-X adapter, or ``None`` when not opted in."""
     cfg = (agent.extra_data or {}).get("icm") or {}

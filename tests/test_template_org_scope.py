@@ -9,8 +9,6 @@ All tests use two seeded orgs so an unscoped query actually returns the victim's
 row and fails.
 """
 
-import pytest
-from sqlalchemy import select
 
 from aios.api.meta_webhook import apply_meta_state
 from aios.db.models import WhatsappConnection, WhatsappTemplate

@@ -7,7 +7,6 @@ pipeline (stage mql) instead of leaving it parked in prospection.
 
 import types
 
-import pytest
 from sqlalchemy import select
 
 from aios.db.models import Agent, CrmDeal, Organization
@@ -77,7 +76,7 @@ class TestOrgIsolation:
         await _lead_tool("save", b.id).run(name="Lead B", email="b@b.com", icp=ICP)
 
         out = await _lead_tool("list", a.id).run()
-        assert [l["name"] for l in out["leads"]] == ["Lead A"]
+        assert [lead["name"] for lead in out["leads"]] == ["Lead A"]
 
     async def test_review_refuses_foreign_lead(self, test_session):
         a = await _org(test_session, "Org A")

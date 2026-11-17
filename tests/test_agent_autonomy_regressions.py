@@ -5,7 +5,6 @@ are deliberately behavioural — a source-grep test would pass while the bug
 returned.
 """
 
-import asyncio
 
 import pytest
 
@@ -20,7 +19,7 @@ def test_overlapping_runs_do_not_leak_capacity():
     """Two runs of the SAME agent share one `_running` key; the second
     terminate() used to pop nothing and skip the decrement, so the ceiling was
     permanently reduced until every later run was refused."""
-    start, term = scheduler._running_count, len(scheduler._running)
+    start = scheduler._running_count
 
     class _P:
         started_at = 0

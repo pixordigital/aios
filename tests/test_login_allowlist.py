@@ -183,14 +183,11 @@ async def test_oauth_rejected_before_any_db_touch(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_api_register_gated_by_allowlist(monkeypatch):
-    from aios.schemas import RegisterRequest
-
+    """Self-service signup does not exist in the internal build; the allowlist
+    gate that used to live inside it is moot, and no org can be created."""
     _allow(monkeypatch)
     monkeypatch.setattr(settings, "registration_enabled", True)
-    body = RegisterRequest(email=OTHER, password="correct-horse-42", org_name="Evil")
-    with pytest.raises(HTTPException) as e:
-        await auth_mod.register(_req(), body, _DB())
-    assert e.value.status_code == 403
+    assert not hasattr(auth_mod, "register")
 
 
 # ─── password reset / verify ──────────────────────────────────────────────

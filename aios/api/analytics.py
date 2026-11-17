@@ -74,6 +74,115 @@ async def get_metrics(user=Depends(get_current_user)):
     }
 
 
+# ─── Business outcome analytics ───
+
+# First-response latency needs the first user and first assistant row of each
+# conversation, which is a per-conversation min() — expensive to express portably
+# across SQLite and Postgres. The window keeps it bounded; it is a sample of the
+# most recent conversations, and the response says so.
+_OUTCOME_WINDOW = 500
+
+
+@router.get("/outcomes")
+async def business_outcomes(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Business outcomes, not infrastructure metrics.
+
+    Every count is read from persisted rows. Attribution is reported as
+    "a CRM deal linked to an agent", with source and confidence — never as
+    proven revenue.
+    """
+    from aios.db.models import CrmDeal, PendingAction
+    from aios.verticals.pet_business.metrics import OutcomeCounts, summarize_outcomes
+
+    # Conversations in the window, newest first.
+    conv_rows = (
+        await db.execute(
+            select(Conversation.id)
+            .where(Conversation.org_id == org_id)
+            .order_by(Conversation.created_at.desc())
+            .limit(_OUTCOME_WINDOW)
+        )
+    ).scalars().all()
+    conv_ids = list(conv_rows)
+
+    enquiries = len(conv_ids)
+    answered = 0
+    first_response_seconds: list[float] = []
+    if conv_ids:
+        msg_rows = (
+            await db.execute(
+                select(Message.conversation_id, Message.role, Message.created_at)
+                .where(
+                    Message.org_id == org_id,
+                    Message.conversation_id.in_(conv_ids),
+                    Message.role.in_(("user", "assistant")),
+                )
+                .order_by(Message.conversation_id, Message.created_at)
+            )
+        ).all()
+        first: dict[str, dict[str, object]] = {}
+        for conv_id, role, created_at in msg_rows:
+            slot = first.setdefault(conv_id, {})
+            slot.setdefault(role, created_at)
+        for slot in first.values():
+            user_at = slot.get("user")
+            assistant_at = slot.get("assistant")
+            if assistant_at is not None:
+                answered += 1
+                if user_at is not None:
+                    delta = (assistant_at - user_at).total_seconds()
+                    if delta >= 0:
+                        first_response_seconds.append(delta)
+
+    qualified = (
+        await db.execute(
+            select(func.count(CrmDeal.id)).where(CrmDeal.org_id == org_id)
+        )
+    ).scalar() or 0
+
+    attributed_rows = (
+        await db.execute(
+            select(func.count(CrmDeal.id), func.coalesce(func.sum(CrmDeal.value), 0.0))
+            .where(CrmDeal.org_id == org_id, CrmDeal.agent_id.is_not(None))
+        )
+    ).one()
+    attributed = int(attributed_rows[0] or 0)
+    attributed_value = float(attributed_rows[1] or 0.0)
+
+    handoffs = await db.execute(
+        # "Handoff" is measured as a human decision being required: distinct
+        # conversations with an approval row. `notify_human` alone leaves no
+        # durable row, so counting it would be a guess.
+        select(func.count(func.distinct(PendingAction.conversation_id))).where(
+            PendingAction.org_id == org_id
+        )
+    )
+    handoff_count = int(handoffs.scalar() or 0)
+
+    summary = summarize_outcomes(
+        OutcomeCounts(
+            enquiries=enquiries,
+            answered=answered,
+            qualified_leads=qualified,
+            deals_attributed=attributed,
+            attributed_value_brl=attributed_value,
+            human_handoffs=handoff_count,
+        ),
+        attribution_source="crm_deal.agent_id",
+        attribution_confidence="medium",
+    )
+    summary["avg_first_response_seconds"] = (
+        int(sum(first_response_seconds) / len(first_response_seconds))
+        if first_response_seconds
+        else None
+    )
+    summary["window_conversations"] = _OUTCOME_WINDOW
+    return summary
+
+
 # ─── Telemetry Endpoints ───
 
 

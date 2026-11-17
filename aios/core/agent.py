@@ -187,8 +187,9 @@ class AgentRuntime:
 
         # ICM-X stage binding: opt-in via extra_data["icm"]. The manifest's
         # allowlist narrows the agent's tools and its timeout caps the run.
-        from aios.icm.agent_binding import bind_agent_stage
+        from aios.icm.agent_binding import assert_paid_workflow_contract, bind_agent_stage
 
+        assert_paid_workflow_contract(agent)
         self.stage = bind_agent_stage(agent)
         self.stage_provenance = None
         self._stage_timeout = None

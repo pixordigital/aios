@@ -7,9 +7,7 @@ product; these pin the removal so no dead surface creeps back in.
 """
 
 import pathlib
-import re
 
-import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -63,6 +61,7 @@ def test_plans_do_not_sell_it():
 
 def test_dashboard_does_not_offer_it():
     app = (ROOT / "aios/dashboard/app.py").read_text()
+    assert "discord" not in app.lower(), "app.py still offers Discord"
     for template in ("channels.html", "channel_form.html"):
         t = (ROOT / "aios/dashboard/templates" / template).read_text()
         assert "discord" not in t.lower(), f"{template} still offers Discord"

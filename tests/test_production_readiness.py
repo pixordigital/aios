@@ -8,11 +8,9 @@ import inspect
 import pathlib
 
 import pytest
-from sqlalchemy import inspect as sa_inspect
 
 from aios.api import approvals as approvals_mod
-from aios.api import auth as auth_mod
-from aios.core import delivery, limits
+from aios.core import delivery
 from aios.db.models import AgentMetric, PendingAction
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]

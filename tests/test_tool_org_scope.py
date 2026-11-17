@@ -69,7 +69,6 @@ class TestSqlOrgScoping:
 class TestSuperadminGate:
     @pytest.mark.asyncio
     async def test_owner_and_superadmin_pass(self):
-        from fastapi import HTTPException
 
         from aios.api.deps import get_superadmin
         from aios.db.models import User

@@ -6,7 +6,7 @@ to __name__. The mismatch made the worker drop every job with
 "function ... not found".
 """
 
-from aios.tasks.jobs import FUNCTIONS, process_inbound
+from aios.tasks.jobs import FUNCTIONS
 from aios.tasks.worker import WorkerSettings, _registry
 
 # Names used by the enqueue call sites across the codebase.

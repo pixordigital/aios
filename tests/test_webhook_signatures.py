@@ -12,7 +12,6 @@ import inspect
 import pathlib
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunsplit
 
-import pytest
 
 from aios.api.voice_webhook import _verify_twilio_signature
 
@@ -51,7 +50,6 @@ def test_twilio_accepts_a_genuinely_signed_request(monkeypatch):
     hex(HMAC-SHA256(secret, body)). Twilio sends X-Twilio-Signature =
     base64(HMAC-SHA1(auth_token, url + sorted params)) — a different header and
     a different construction, so every real call event 401'd."""
-    from aios.api import voice_webhook as V
     from aios.config import settings
 
     monkeypatch.setattr(settings, "voice_webhook_secret", TOKEN, raising=False)

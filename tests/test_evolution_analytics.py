@@ -2,7 +2,6 @@
 
 import pytest
 from datetime import datetime, timezone
-from sqlalchemy import select
 
 from aios.db.models import ChannelConnection, Conversation, Message, Organization, User
 
@@ -45,7 +44,7 @@ async def test_evolution_analytics_basic(test_db_session, test_org, test_user, a
     await test_db_session.commit()
 
     # Call analytics endpoint
-    response = await auth_client.get(f"/api/channels/evolution/test-instance/analytics?days=7")
+    response = await auth_client.get("/api/channels/evolution/test-instance/analytics?days=7")
     assert response.status_code == 200
     data = response.json()
     
@@ -125,7 +124,6 @@ async def test_evolution_analytics_daily_breakdown(test_db_session, test_org, te
 @pytest.mark.asyncio
 async def test_evolution_analytics_isolation_by_org(test_db_session, test_user, auth_client):
     """Test evolution analytics only returns data for the user's org."""
-    from aios.db.models import Organization
     
     # Create second org
     org2 = Organization(name="Org 2", slug="org-2", extra_data={"plan": "pro"})

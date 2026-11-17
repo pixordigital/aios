@@ -14,7 +14,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     from alembic import op
-    from sqlalchemy import inspect
 
     conn = op.get_bind()
     is_sqlite = conn.dialect.name == "sqlite"

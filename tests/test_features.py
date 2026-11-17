@@ -7,8 +7,6 @@ Pure-logic tests (no DB) where possible; API tests for CRUD.
 import asyncio
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import select
 
 
 # ─── Three-part memory extraction ───

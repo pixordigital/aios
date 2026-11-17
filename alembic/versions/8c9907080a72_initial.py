@@ -4,7 +4,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 revision: str = "8c9907080a72"
 down_revision: Union[str, None] = None

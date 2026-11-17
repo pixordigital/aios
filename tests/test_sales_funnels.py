@@ -5,9 +5,7 @@ deals, the Data team reads and posts findings it cannot later have edited by
 Sales. These pin the split, the cross-org boundary, and the conversion maths.
 """
 
-import json
 
-import pytest
 from httpx import AsyncClient
 
 REF = {"referer": "http://test/dashboard/funnels"}

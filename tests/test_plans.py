@@ -1,7 +1,6 @@
 """Pixor org is always Ilimitado — enforced at the ORM flush choke point."""
 
 import pytest
-from sqlalchemy import select
 
 from aios.db.models import Organization
 

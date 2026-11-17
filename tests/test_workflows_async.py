@@ -1,4 +1,3 @@
-import pytest
 from httpx import AsyncClient
 
 
@@ -22,7 +21,7 @@ class TestWorkflowsAsync:
         wf = await auth_client.post("/api/workflows", json={"name": "WF Cycle"})
         wf_id = wf.json()["id"]
         n1 = await auth_client.post(f"/api/workflows/{wf_id}/nodes", json={"label": "n1"})
-        nid = n1.json()["id"]
+        assert n1.status_code in (200, 201)
         bad = await auth_client.post(f"/api/workflows/{wf_id}/nodes", json={"label": "n2", "depends_on": ["not-exist"]})
         assert bad.status_code == 400
 

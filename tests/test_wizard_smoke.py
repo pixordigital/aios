@@ -5,7 +5,6 @@ from httpx import AsyncClient
 import jwt
 from datetime import datetime, timedelta, timezone
 from aios.config import settings
-from aios.db.models import Organization
 
 REF = {"referer": "http://test/dashboard/agents/new"}
 

@@ -23,7 +23,7 @@ from aios.config import settings
 from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Organization, User
-from aios.schemas import LoginRequest, RegisterRequest, TokenResponse
+from aios.schemas import LoginRequest, TokenResponse
 
 
 # ─── JWT Key Management (Ed25519 with HS256 fallback) ───
@@ -446,66 +446,70 @@ def _is_allowlisted(email: str) -> bool:
 # ─── Routes ───
 
 
-@router.post("/register", response_model=TokenResponse)
-async def register(request: Request, body: RegisterRequest, db: DatabaseBackend = Depends(get_db_backend)):
-    if not settings.registration_enabled:
-        raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
-    # Defense in depth: even if registration is ever flipped back on, only
-    # allowlisted addresses may create accounts.
-    if not _is_login_allowed(body.email):
-        logger.warning("registration rejected for non-allowlisted address")
-        raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
-    _validate_password(body.password)
-    # blacklist check (email/domain)
-    try:
-        email_l = body.email.lower().strip()
-        domain = email_l.split("@")[1] if "@" in email_l else ""
-        # check control plane blacklist table (if exists)
-        # Params are bound into the statement: DatabaseBackend.execute(stmt)
-        # takes one argument. Passing a dict positionally raised TypeError,
-        # which the surrounding `except Exception` swallowed — so the blacklist
-        # silently never blocked anyone.
-        from sqlalchemy import text
-        hit = await db.execute(
-            text("SELECT 1 FROM blacklist WHERE email=:e OR domain=:d LIMIT 1")
-            .bindparams(e=email_l, d=domain)
-        )
-        if hit.first():
-            raise HTTPException(403, "Cadastro bloqueado — entre em contato com suporte")
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+# Multi-tenant signup is a commercial surface: it creates an Organization.
+# AIOS ships as an internal tool first — accounts are provisioned by the
+# operator (seed/CLI), not self-service. Restore from version control when
+# there is a tenant lifecycle to verify.
+# @router.post("/register", response_model=TokenResponse)
+# async def register(request: Request, body: RegisterRequest, db: DatabaseBackend = Depends(get_db_backend)):
+#     if not settings.registration_enabled:
+#         raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
+#     # Defense in depth: even if registration is ever flipped back on, only
+#     # allowlisted addresses may create accounts.
+#     if not _is_login_allowed(body.email):
+#         logger.warning("registration rejected for non-allowlisted address")
+#         raise HTTPException(403, "Cadastros temporariamente fechados — entre em contato")
+#     _validate_password(body.password)
+#     # blacklist check (email/domain)
+#     try:
+#         email_l = body.email.lower().strip()
+#         domain = email_l.split("@")[1] if "@" in email_l else ""
+#         # check control plane blacklist table (if exists)
+#         # Params are bound into the statement: DatabaseBackend.execute(stmt)
+#         # takes one argument. Passing a dict positionally raised TypeError,
+#         # which the surrounding `except Exception` swallowed — so the blacklist
+#         # silently never blocked anyone.
+#         from sqlalchemy import text
+#         hit = await db.execute(
+#             text("SELECT 1 FROM blacklist WHERE email=:e OR domain=:d LIMIT 1")
+#             .bindparams(e=email_l, d=domain)
+#         )
+#         if hit.first():
+#             raise HTTPException(403, "Cadastro bloqueado — entre em contato com suporte")
+#     except HTTPException:
+#         raise
+#     except Exception:
+#         pass
 
-    existing = await db.execute(select(User).where(User.email == body.email))
-    if existing.scalar_one_or_none():
-        raise HTTPException(409, "E-mail já registrado")
+#     existing = await db.execute(select(User).where(User.email == body.email))
+#     if existing.scalar_one_or_none():
+#         raise HTTPException(409, "E-mail já registrado")
 
-    org = Organization(name=body.org_name, slug=body.org_name.lower().replace(" ", "-"))
-    db.add(org)
-    await db.flush()
+#     org = Organization(name=body.org_name, slug=body.org_name.lower().replace(" ", "-"))
+#     db.add(org)
+#     await db.flush()
 
-    user = User(
-        email=body.email.lower().strip(),
-        hashed_password=_hash_password(body.password),
-        org_id=org.id,
-        role="admin",
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
+#     user = User(
+#         email=body.email.lower().strip(),
+#         hashed_password=_hash_password(body.password),
+#         org_id=org.id,
+#         role="admin",
+#     )
+#     db.add(user)
+#     await db.commit()
+#     await db.refresh(user)
 
-    await log_audit(db, org.id, "user.register", "user", user_id=user.id, details={"email": user.email})
+#     await log_audit(db, org.id, "user.register", "user", user_id=user.id, details={"email": user.email})
 
-    # send verification email
-    vt = _create_email_token(user.id, "email_verify", expire_minutes=1440)
-    verify_url = f"{settings.app_url}/api/auth/verify-email?token={vt}"
-    html_body = _render_email_template("verification", name=body.org_name, verify_url=verify_url, app_url=settings.app_url)
-    await _send_email(user.email, "Verifique seu e-mail — AIOS", html_body or f"Bem-vindo! Verifique seu e-mail: {verify_url}\n\nO link expira em 24h.")
+#     # send verification email
+#     vt = _create_email_token(user.id, "email_verify", expire_minutes=1440)
+#     verify_url = f"{settings.app_url}/api/auth/verify-email?token={vt}"
+#     html_body = _render_email_template("verification", name=body.org_name, verify_url=verify_url, app_url=settings.app_url)
+#     await _send_email(user.email, "Verifique seu e-mail — AIOS", html_body or f"Bem-vindo! Verifique seu e-mail: {verify_url}\n\nO link expira em 24h.")
 
-    token = _create_access_token(user.id, org.id)
-    refresh = await _issue_refresh(db, user.id)
-    return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=org.id)
+#     token = _create_access_token(user.id, org.id)
+#     refresh = await _issue_refresh(db, user.id)
+#     return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=org.id)
 
 
 @router.post("/login", response_model=TokenResponse)

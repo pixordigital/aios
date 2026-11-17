@@ -1,10 +1,9 @@
-import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from aios.core import owner_notify
-from aios.db.models import OwnerNotification, Organization
+from aios.db.models import OwnerNotification
 from sqlalchemy import select
 
 

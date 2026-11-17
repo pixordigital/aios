@@ -1,4 +1,11 @@
-"""Stripe billing — checkout, webhook, portal."""
+"""Stripe billing — checkout, webhook, portal.
+
+NOT MOUNTED: AIOS ships as an internal tool first, so `aios/api/router.py` does
+not include this router and `/dashboard/billing` is commented out. There is no
+subscriber and no subscription lifecycle to verify, so exposing these endpoints
+would claim a capability the product does not operate. Re-enable as part of
+multi-tenant onboarding, together with end-to-end billing tests.
+"""
 
 import hashlib
 import hmac

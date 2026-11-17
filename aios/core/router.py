@@ -34,27 +34,12 @@ import time
 from dataclasses import dataclass, field
 from threading import Lock
 
+from aios.config import MODEL_ROLE_MIN_TIER, MODEL_TIERS
+
 # Ordered cheapest → most capable. Index is the escalation ladder.
+TIERS = MODEL_TIERS
 
-TIERS = ("openai/gpt-4.1-nano", "openai/gpt-4o-mini", "openai/gpt-4o")
-
-ROLE_MIN_TIER = {
-    "orchestrator": "openai/gpt-4o",
-    "manager": "openai/gpt-4o",
-    "review": "openai/gpt-4o",
-    "sdr": "openai/gpt-4o-mini",
-    "support": "openai/gpt-4o-mini",
-    "prospector": "openai/gpt-4o-mini",
-    "closer": "openai/gpt-4o-mini",
-    "data_scientist": "openai/gpt-4o",
-    "data_analyst": "openai/gpt-4o-mini",
-    "frontend": "openai/gpt-4o",
-    "backend": "openai/gpt-4o",
-    "auditor": "openai/gpt-4o",
-    "watcher": "openai/gpt-4o-mini",
-    "business": "openai/gpt-4o-mini",
-    "custom": None,
-}
+ROLE_MIN_TIER = MODEL_ROLE_MIN_TIER
 
 
 # Tools whose effects are irreversible or externally visible. Routing one of

@@ -343,7 +343,6 @@ def test_build_guard_classification(text, blocked):
 async def test_refresh_token_carries_a_persisted_jti():
     """Refresh tokens were stateless: 30 days, unrotated, and valid after both
     logout and a password reset."""
-    from sqlalchemy import select
 
     from aios.api import auth as A
     from aios.db.models import RefreshToken
@@ -390,7 +389,7 @@ def test_expired_at_normalises_naive_datetimes():
 # --- CRM kanban must not be hidden behind the paid flag --------------------
 
 def _template_ast():
-    from jinja2 import Environment, nodes
+    from jinja2 import Environment
 
     from pathlib import Path
 

@@ -4,13 +4,11 @@ Every defect here made an autonomous agent fail outright or reach data it must
 not reach. Each test fails if the defect returns.
 """
 
-import asyncio
 import json
 
 import pytest
 
 from aios.core.tools import ToolEngine
-from aios.tools.base import BaseTool
 
 
 # ─── tools that raised on 100% of calls ───────────────────────────────────

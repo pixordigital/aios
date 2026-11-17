@@ -186,7 +186,7 @@ async def run_manual_test():
         print("ERROR: Set AIOS_TEST_CHANNEL_ID")
         return
     
-    print(f"\n=== AIOS Evolution Test ===")
+    print("\n=== AIOS Evolution Test ===")
     print(f"URL: {AIOS_URL}")
     print(f"Instance: {instance_name}")
     print(f"Channel: {channel_id}")

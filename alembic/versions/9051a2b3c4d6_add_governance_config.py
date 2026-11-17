@@ -3,7 +3,6 @@
 from typing import Sequence, Union
 
 from alembic import op
-import sqlalchemy as sa
 
 
 revision: str = "9051a2b3c4d6"

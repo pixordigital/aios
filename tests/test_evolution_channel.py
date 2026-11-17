@@ -303,6 +303,6 @@ class TestBanSignalWiring:
 
         src = Path("aios/channels/evolution.py").read_text()
         # strip the comment that documents the old bug
-        body = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+        body = "\n".join(line for line in src.splitlines() if not line.strip().startswith("#"))
         for helper in ("humanize_delay", "vary_text", "record_ban_signal"):
             assert f"await {helper}(" not in body, f"{helper} is sync but awaited"

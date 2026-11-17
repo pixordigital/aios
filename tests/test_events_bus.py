@@ -760,7 +760,7 @@ async def test_duplicate_event_is_dispatched_only_once(monkeypatch):
 
 async def test_different_deals_are_not_suppressed(monkeypatch):
     o = await _org("ev-dedupe-2")
-    agent = await _mk_agent(o, ["crm.deal_stalled"])
+    await _mk_agent(o, ["crm.deal_stalled"])
 
     async def fake_pool():
         return _DedupePool()

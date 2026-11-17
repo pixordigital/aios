@@ -4,6 +4,9 @@ Last updated: 2026-11-17
 
 ## Open
 
+- Internal-tool pivot (2026-11-17): billing and multi-tenant signup are disabled
+  by commenting their entrypoints (see `## Done` for the exact list). Do not
+  re-enable either without a paying tenant and end-to-end lifecycle tests.
 - Activate the fleet: `AIOS_OPENROUTER_API_KEY` is still empty in production, so
   all 12 operational agents remain `draft` and no event dispatch reaches them.
   (`red-manager` is archived: 13 rows, 12 operational.) Set the key in Coolify,
@@ -265,6 +268,46 @@ bookkeeping, tool cache. Doing the correctness half first.
   loadfile`, EXIT=0) — Phase 6's 1436 plus the 5 new tests, no regressions.
 
 ## Done
+
+- Internal tool first + strategy items 2-5 (2026-11-17, from the startup/roadmap
+  PDF assessment; item 1 — `aios/verticals/` as a *product layer* — was
+  explicitly excluded by the operator, the package exists only to own paid
+  workflow contracts):
+  - Model registry: names, role floors and prices moved to `aios/config.py`
+    (`MODEL_TIERS`, `MODEL_ROLE_MIN_TIER`, `MODEL_COST_IN_OUT`,
+    `MODEL_COST_UNKNOWN_PER_1K`). `aios/core/router.py` and
+    `aios/core/tracing.py` import them; unknown models are priced at the
+    frontier fallback, never at zero. Gate:
+    `tests/test_router.py::test_ladder_and_prices_come_from_the_registry`.
+  - ICM-X contractual for paid workflows: `aios/icm/agent_binding.py` adds
+    `assert_paid_workflow_contract()`, called from `AgentRuntime.__init__`.
+    An agent declaring `extra_data["workflow_class"]` must have a contract
+    owned by a vertical and an `extra_data["icm"]` binding, or it refuses to
+    run. Opt-in ICM-X remains for internal utilities. Gate:
+    `tests/test_icm_paid_contract.py`.
+  - Business outcome analytics: `GET /api/analytics/outcomes` reports enquiries,
+    answered/unanswered, first-response seconds, qualified leads, follow-ups,
+    human approvals, attributed deals and value — with
+    `attribution_source` / `attribution_confidence` always present. Window is
+    the 500 most recent conversations and says so. Gate:
+    `tests/test_outcome_analytics.py`.
+  - Lint baseline cleared: `ruff check .` → `All checks passed!` (was 97
+    findings under the project's own E4/E7/E9/F selection).
+  - Billing disabled (commented): `aios/api/router.py` no longer mounts
+    `billing_router`; `/dashboard/billing` page commented out; billing nav/link
+    in `base.html`, `dashboard.html`, `proposal.html` commented; `billing.py`
+    header states it is not mounted.
+  - Multi-tenant signup disabled (commented): `/api/auth/register` and both
+    `/dashboard/register` handlers commented out; accounts are provisioned by
+    the operator. `tests/test_auth.py` provisions users directly,
+    `tests/test_billing.py` / `tests/test_registration_closed.py` assert the
+    surfaces are absent (404).
+  - Kept on purpose: `org_id` scoping and approval/tenant-safety checks are data
+    isolation, not a commercial surface. `PLANS` and `core/limits.py` remain
+    because the fleet uses them for SLA/cost guardrails; `AIOS_INTERNAL_MODE`
+    already bypasses quota gates.
+  - Gate: `1453 passed, 11 skipped in 13:54` (`pytest -n 4 --dist loadfile`,
+    `EXIT=0`); `ruff check .` → `All checks passed!`.
 
 - Fleet agent tools & capabilities remediated (2026-11-17):
   - Audited all 12 operational agents against prompts, tool registry, and ICM manifests.

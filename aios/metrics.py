@@ -8,7 +8,7 @@ Provides a minimal /metrics endpoint exposing counters for:
 Uses `aioprometheus` Registry directly; no background Service is started.
 """
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Response
 from aioprometheus import Counter, Histogram, Registry
 
 router = APIRouter()

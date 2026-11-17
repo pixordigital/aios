@@ -8,7 +8,6 @@ text only — `role="tool"` rows are filtered because a bare tool message with n
 had already computed.
 """
 
-import asyncio
 
 import pytest
 

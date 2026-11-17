@@ -1,6 +1,5 @@
 """Voice channel tests — providers, call validation, webhook auth, tool registry."""
 
-import pytest
 from httpx import AsyncClient
 
 

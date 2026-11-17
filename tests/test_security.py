@@ -87,10 +87,10 @@ class TestArtifactOrgIsolation:
         await test_session.refresh(art)
 
         # same org -> not None (content None because storage backend missing file)
-        from aios.db.backend import get_db_backend
         from aios.db.backends.sqlalchemy_backend import SQLAlchemyBackend
         backend = SQLAlchemyBackend(test_session)
         res = await get_artifact_content(art.id, backend, org_id=test_org.id)
+        assert res is None
         # storage path missing => returns None content, but the artifact lookup itself is org-filtered:
         # for a foreign org it must NOT even resolve
         other = await get_artifact_content(art.id, backend, org_id=other_org.id)

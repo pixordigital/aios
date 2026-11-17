@@ -10,7 +10,6 @@ Two things are pinned here:
    the agent could switch off its own SSRF guard and read cloud metadata.
 """
 
-import asyncio
 import inspect
 
 import pytest

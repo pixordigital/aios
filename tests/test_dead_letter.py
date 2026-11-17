@@ -88,7 +88,6 @@ async def test_dlq_retry_sets_status(async_client):
     from aios.core.dead_letter import write_dlq
     import aios.tasks.queue as queue_mod
     from aios.db.models import DeadLetter
-    from sqlalchemy import select
 
     eid = await write_dlq(
         direction="inbound",

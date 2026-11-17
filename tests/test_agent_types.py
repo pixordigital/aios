@@ -183,9 +183,6 @@ class TestAgentQuotas:
     async def test_pro_plan_max_agents(self, async_client: AsyncClient):
         """Pro plan should allow more agents."""
         # Create pro org user
-        from aios.db.models import Organization, User
-        from aios.api.auth import _hash_password
-        from sqlalchemy.ext.asyncio import AsyncSession
 
         # This test would need a pro org - skip for now
         pass

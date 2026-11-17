@@ -7,7 +7,6 @@ whose schema was created outside this migration.
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import JSON
 
 revision = "h4b5c6d7e8f9"

@@ -4,7 +4,6 @@ Each defect here either lost a customer message, routed it to the wrong
 tenant, or produced a green job for work that never happened.
 """
 
-import hashlib
 import inspect
 import pathlib
 
@@ -267,7 +266,7 @@ async def test_inbound_email_dispatches_to_the_explicit_channel(
 
     from aios.api.email_webhook import _process_inbound_email
 
-    out = await _process_inbound_email(
+    await _process_inbound_email(
         {"from": "buyer@example.com", "channel_id": str(conn.id)}, "sendgrid"
     )
 

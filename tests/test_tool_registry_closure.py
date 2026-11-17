@@ -8,8 +8,6 @@ allow-listed in `aios/core/tools.py`, but never imported by `aios/tools/__init__
 so the registry entry never existed at runtime.
 """
 
-import ast
-import importlib
 import pathlib
 
 import pytest
@@ -53,7 +51,6 @@ def test_every_registered_tools_module_is_allow_listed():
     """`execute()` re-checks the module against _ALLOWED_MODULES and refuses
     anything missing — so a registered tool the allow-list lacks can be listed
     to the LLM and then always fail at call time."""
-    import re
 
     for name, entry in TOOL_REGISTRY.items():
         mod = entry["code_reference"].rsplit(".", 1)[0]
@@ -89,7 +86,6 @@ def test_unresolvable_tool_is_reported_not_silently_dropped():
 def test_missing_is_not_write_only():
     """`missing` was populated and never read anywhere outside tests, which is
     how the whatsapp_template gap stayed invisible."""
-    import re
 
     src = (ROOT / "aios" / "core" / "tools.py").read_text()
     assert "self.missing" in src

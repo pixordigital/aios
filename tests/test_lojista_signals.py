@@ -18,7 +18,7 @@ def _cookie_for(user):
 
 class TestSolutions:
     def test_three_packs(self):
-        from aios.templates.solutions import SOLUTIONS, get_solution
+        from aios.templates.solutions import SOLUTIONS
         assert set(SOLUTIONS) == {"vender", "atender", "recuperar"}
         for key, s in SOLUTIONS.items():
             assert s["agent_type"] in ("sdr", "support")

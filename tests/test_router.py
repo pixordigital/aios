@@ -51,6 +51,20 @@ def _tools(*names):
 
 # ─── no-signal means no-change ────────────────────────────────────────────
 
+def test_ladder_and_prices_come_from_the_registry():
+    """One source of truth: editing config.py must move the runtime with it."""
+    from aios.config import MODEL_COST_IN_OUT, MODEL_ROLE_MIN_TIER, MODEL_TIERS
+
+    from aios.core import router as router_mod
+    from aios.core import tracing
+
+    assert router_mod.TIERS is MODEL_TIERS
+    assert router_mod.ROLE_MIN_TIER is MODEL_ROLE_MIN_TIER
+    assert tracing._COST_IN_OUT is MODEL_COST_IN_OUT
+    # A model the registry does not price must never look free.
+    assert tracing.estimate_cost_detailed("unknown/model", 1000, 1000) > 0
+
+
 def test_unknown_workload_is_left_alone():
     """Zero everything. The router has no idea what this is, so it must not
     guess — a router that guesses on missing input is a router that will

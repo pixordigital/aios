@@ -2,7 +2,7 @@
 
 import pytest
 
-from aios.tasks.worker import WorkerSettings, cron_tick_job, telemetry_flush_job
+from aios.tasks.worker import WorkerSettings, cron_tick_job
 
 
 def test_cron_tick_registered_and_scheduled():

@@ -218,9 +218,6 @@ async def test_05_send_media_message(evolution_client: EvolutionTestClient, test
 @pytest.mark.asyncio
 async def test_06_receive_webhook_simulation(evolution_client: EvolutionTestClient, test_instance_name: str):
     """Simulate receiving a webhook (test webhook endpoint)."""
-    import hmac
-    import hashlib
-    import json
     
     # This tests the AIOS webhook endpoint, not Evolution directly
     # We'd need the AIOS app running for this
@@ -245,7 +242,7 @@ async def run_full_test_suite():
     instance_name = f"aios-test-{uuid.uuid4().hex[:8]}"
     
     try:
-        print(f"\n=== Evolution Integration Test ===")
+        print("\n=== Evolution Integration Test ===")
         print(f"Instance: {instance_name}")
         print(f"Test Number: {TEST_WHATSAPP_NUMBER}")
         print(f"Server: {EVOLUTION_SERVER_URL}")

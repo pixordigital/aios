@@ -1,16 +1,13 @@
 """Test configuration and fixtures."""
 
-import asyncio
 import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from aios.config import settings
 
