@@ -266,6 +266,16 @@ bookkeeping, tool cache. Doing the correctness half first.
 
 ## Done
 
+- Fleet agent tools & capabilities remediated (2026-11-17):
+  - Audited all 12 operational agents against prompts, tool registry, and ICM manifests.
+  - Resolved fleet-wide escalation gap: added `ask_team_manager` and `notify_human` across worker agents (`sales-sdr`, `sales-closer`, `dev-frontend`, `dev-backend`, `red-agent`, `blue-agent`, `Data Analyst`, `Data Scientist`).
+  - Added `cal_booking`, `calculator`, `whatsapp_template` to `sales-sdr`; added `lead_score`, `cal_booking`, `web_search` to `sales-closer`; added `crm_pipeline_stats`, `cal_booking` to `sales-manager`.
+  - Added `request_build` to `dev-backend` and `dev-manager`; added `proactive_alerts` to `security-manager` and `data-manager`.
+  - Cleaned obsolete prompt references (`knowledge` -> `rag_search` in `sales-sdr`, removed `storage_save` reference in `Data Analyst`).
+  - Updated stage manifests in `aios/icm/team_workspaces.py` to allow the new tools under ICM governance.
+  - Created and executed `scripts/remediate_agent_tools.py` in production; re-seeded all 6 ICM workspaces under `/data` with `scripts/provision_icm_fleet.py`. All 12 operational agents verified loading 100% of their tools with `missing=[]`.
+  - Tests green: `pytest tests/test_icm_x.py` (15 passed), `pytest tests/test_fleet_verify.py` (7 passed).
+
 - Stateless migration deployment (Phases 0-8) verified in production (2026-11-17):
   - Coolify deployed commit `a2ee3de` (~2026-11-16T22:20:37Z).
   - App and worker containers running `38908ddf-a875-4105-a93f-a4570513911f_app:a2ee3dee9db3d9317a8c7efb72668b0442c956fe`.

@@ -7,7 +7,7 @@ DATA_ANALYST_TEMPLATE = {
 Fluxo:
 1. Entender pergunta negócio + métrica alvo
 2. Consultar: use sql_query (credencial vault) ou http_request (API DW) — valide WHERE limit 100
-3. Python_sandbox: pandas/matplotlib para limpar + gráfico (salve via storage_save)
+3. Python_sandbox: pandas/matplotlib para limpar + gráfico (salve no sandbox ou retorne em base64)
 4. Explicar em PT-BR simples com contexto e suposições
 5. Recomendar ação
 
