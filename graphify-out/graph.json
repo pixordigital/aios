@@ -47509,7 +47509,7 @@
       "node_kind": "heading",
       "norm_label": "phase 2 \u2014 scheduler out of api  [x] done 2026-11-15",
       "source_file": "pendingwork.md",
-      "source_location": "L76"
+      "source_location": "L73"
     },
     {
       "id": "aios_core_cron_scheduler_rationale_276",
@@ -49078,7 +49078,7 @@
       "node_kind": "heading",
       "norm_label": "phase 1 \u2014 runtime role split  [x] done 2026-11-15",
       "source_file": "pendingwork.md",
-      "source_location": "L53"
+      "source_location": "L50"
     },
     {
       "id": "aios_config_rationale_281",
@@ -54920,7 +54920,7 @@
       "node_kind": "heading",
       "norm_label": "p1/p2 statelessness fixes  [x] 2026-11-16",
       "source_file": "pendingwork.md",
-      "source_location": "L245"
+      "source_location": "L242"
     },
     {
       "id": "aios_channels_email_rationale_1",
@@ -55240,7 +55240,7 @@
       "node_kind": "heading",
       "norm_label": "phase 7 \u2014 rest turns become events  [x] done 2026-11-16",
       "source_file": "pendingwork.md",
-      "source_location": "L177"
+      "source_location": "L174"
     },
     {
       "id": "aios_api_channels_rationale_403",
@@ -65205,7 +65205,7 @@
       "node_kind": "heading",
       "norm_label": "phase 4 \u2014 vectors to postgres  [x] done 2026-11-16",
       "source_file": "pendingwork.md",
-      "source_location": "L102"
+      "source_location": "L99"
     },
     {
       "id": "reuniao_tecnica_100_autonomo_validacao_2026_09_13_data_analyst_sql_vault_python_ana",
@@ -71576,7 +71576,7 @@
       "node_kind": "heading",
       "norm_label": "done",
       "source_file": "pendingwork.md",
-      "source_location": "L270"
+      "source_location": "L267"
     },
     {
       "id": "pendingwork_notes_for_next_session",
@@ -71588,7 +71588,7 @@
       "node_kind": "heading",
       "norm_label": "notes for next session",
       "source_file": "pendingwork.md",
-      "source_location": "L394"
+      "source_location": "L399"
     },
     {
       "id": "pendingwork_open",
@@ -72680,7 +72680,7 @@
       "node_kind": "heading",
       "norm_label": "open \u2014 stateless migration",
       "source_file": "pendingwork.md",
-      "source_location": "L16"
+      "source_location": "L15"
     },
     {
       "id": "pendingwork_phase_0_bare_metal_deploy_scaffolding_x_done_2026_11_15",
@@ -72692,7 +72692,7 @@
       "node_kind": "heading",
       "norm_label": "phase 0 \u2014 bare-metal deploy scaffolding  [x] done 2026-11-15",
       "source_file": "pendingwork.md",
-      "source_location": "L35"
+      "source_location": "L32"
     },
     {
       "id": "pendingwork_phase_3_connection_pool_math_x_done_2026_11_15",
@@ -72704,7 +72704,7 @@
       "node_kind": "heading",
       "norm_label": "phase 3 \u2014 connection pool math  [x] done 2026-11-15",
       "source_file": "pendingwork.md",
-      "source_location": "L95"
+      "source_location": "L92"
     },
     {
       "id": "pendingwork_phase_5_artifacts_metrics_x_done_2026_11_15",
@@ -72716,7 +72716,7 @@
       "node_kind": "heading",
       "norm_label": "phase 5 \u2014 artifacts + metrics  [x] done 2026-11-15",
       "source_file": "pendingwork.md",
-      "source_location": "L133"
+      "source_location": "L130"
     },
     {
       "id": "pendingwork_phase_6_channel_ingress_x_done_2026_11_16",
@@ -72728,7 +72728,7 @@
       "node_kind": "heading",
       "norm_label": "phase 6 \u2014 channel ingress  [x] done 2026-11-16",
       "source_file": "pendingwork.md",
-      "source_location": "L147"
+      "source_location": "L144"
     },
     {
       "id": "pendingwork_phase_8_shared_agent_state_x_done_2026_11_16",
@@ -72740,7 +72740,7 @@
       "node_kind": "heading",
       "norm_label": "phase 8 \u2014 shared agent state  [x] done 2026-11-16",
       "source_file": "pendingwork.md",
-      "source_location": "L207"
+      "source_location": "L204"
     },
     {
       "id": "reuniao_tecnica_agentes_autonomos_2026_09_12_8_decis\u00e3o",
@@ -187662,7 +187662,7 @@
       "confidence_score": 1.0,
       "context": "test_agent_canvas_events.py::test_autonomous_run_stream_emits_trial_and_tokens",
       "source_file": "pendingwork.md",
-      "source_location": "L27",
+      "source_location": "L26",
       "weight": 1.0
     },
     {
@@ -187686,7 +187686,7 @@
       "confidence_score": 1.0,
       "context": "test_config.py::test_health_endpoints",
       "source_file": "pendingwork.md",
-      "source_location": "L25",
+      "source_location": "L24",
       "weight": 1.0
     },
     {
@@ -187698,7 +187698,7 @@
       "confidence_score": 1.0,
       "context": "tests/conftest.py::_fresh_db",
       "source_file": "pendingwork.md",
-      "source_location": "L378",
+      "source_location": "L383",
       "weight": 1.0
     },
     {
@@ -187710,7 +187710,7 @@
       "confidence_score": 1.0,
       "context": "tests/test_config.py::test_health_endpoints",
       "source_file": "pendingwork.md",
-      "source_location": "L289",
+      "source_location": "L294",
       "weight": 1.0
     },
     {
@@ -187722,7 +187722,7 @@
       "confidence_score": 1.0,
       "context": "tests/test_login_allowlist.py::test_refresh_allowed_for_listed",
       "source_file": "pendingwork.md",
-      "source_location": "L389",
+      "source_location": "L394",
       "weight": 1.0
     },
     {
@@ -209705,24 +209705,13 @@
     },
     {
       "source": "pendingwork_open_stateless_migration",
-      "target": "pendingwork_phase_4_vectors_to_postgres_x_done_2026_11_16",
-      "relation": "contains",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "pendingwork.md",
-      "source_location": "L102",
-      "weight": 1.0
-    },
-    {
-      "source": "pendingwork_open_stateless_migration",
       "target": "pendingwork_phase_5_artifacts_metrics_x_done_2026_11_15",
       "relation": "contains",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L133",
+      "source_location": "L130",
       "weight": 1.0
     },
     {
@@ -209733,7 +209722,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L147",
+      "source_location": "L144",
       "weight": 1.0
     },
     {
@@ -209744,7 +209733,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L177",
+      "source_location": "L174",
       "weight": 1.0
     },
     {
@@ -209755,7 +209744,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L207",
+      "source_location": "L204",
       "weight": 1.0
     },
     {
@@ -209766,7 +209755,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L245",
+      "source_location": "L242",
       "weight": 1.0
     },
     {
@@ -209777,7 +209766,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L35",
+      "source_location": "L32",
       "weight": 1.0
     },
     {
@@ -209788,7 +209777,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L53",
+      "source_location": "L50",
       "weight": 1.0
     },
     {
@@ -209799,7 +209788,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L76",
+      "source_location": "L73",
       "weight": 1.0
     },
     {
@@ -209810,7 +209799,18 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L95",
+      "source_location": "L92",
+      "weight": 1.0
+    },
+    {
+      "source": "pendingwork_open_stateless_migration",
+      "target": "pendingwork_phase_4_vectors_to_postgres_x_done_2026_11_16",
+      "relation": "contains",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "pendingwork.md",
+      "source_location": "L99",
       "weight": 1.0
     },
     {
@@ -209821,7 +209821,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L16",
+      "source_location": "L15",
       "weight": 1.0
     },
     {
@@ -209832,7 +209832,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L270",
+      "source_location": "L267",
       "weight": 1.0
     },
     {
@@ -209843,7 +209843,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "pendingwork.md",
-      "source_location": "L394",
+      "source_location": "L399",
       "weight": 1.0
     },
     {
@@ -263762,7 +263762,7 @@
       "confidence_score": 0.95,
       "context": "AgentRuntime",
       "source_file": "pendingwork.md",
-      "source_location": "L327",
+      "source_location": "L332",
       "weight": 1.0
     },
     {
@@ -263846,7 +263846,7 @@
       "confidence_score": 0.95,
       "context": "AgentRuntime.run_stream",
       "source_file": "pendingwork.md",
-      "source_location": "L188",
+      "source_location": "L185",
       "weight": 1.0
     },
     {
@@ -264686,7 +264686,7 @@
       "confidence_score": 0.95,
       "context": "ICMStageAdapter",
       "source_file": "pendingwork.md",
-      "source_location": "L343",
+      "source_location": "L348",
       "weight": 1.0
     },
     {
@@ -264878,7 +264878,7 @@
       "confidence_score": 0.95,
       "context": "MemoryManager",
       "source_file": "pendingwork.md",
-      "source_location": "L111",
+      "source_location": "L108",
       "weight": 1.0
     },
     {
@@ -264890,7 +264890,7 @@
       "confidence_score": 0.95,
       "context": "MemoryManager.search_similar",
       "source_file": "pendingwork.md",
-      "source_location": "L114",
+      "source_location": "L111",
       "weight": 1.0
     },
     {
@@ -265502,7 +265502,7 @@
       "confidence_score": 0.95,
       "context": "WorkerSettings.on_startup",
       "source_file": "pendingwork.md",
-      "source_location": "L61",
+      "source_location": "L58",
       "weight": 1.0
     },
     {
@@ -265706,7 +265706,7 @@
       "confidence_score": 0.95,
       "context": "WorkflowEngine",
       "source_file": "pendingwork.md",
-      "source_location": "L344",
+      "source_location": "L349",
       "weight": 1.0
     },
     {
@@ -265766,7 +265766,7 @@
       "confidence_score": 0.95,
       "context": "_StubAgent",
       "source_file": "pendingwork.md",
-      "source_location": "L28",
+      "source_location": "L27",
       "weight": 1.0
     },
     {
@@ -265778,7 +265778,7 @@
       "confidence_score": 0.95,
       "context": "_backup_tick",
       "source_file": "pendingwork.md",
-      "source_location": "L80",
+      "source_location": "L77",
       "weight": 1.0
     },
     {
@@ -265790,7 +265790,7 @@
       "confidence_score": 0.95,
       "context": "_cached_context_is_fresh()",
       "source_file": "pendingwork.md",
-      "source_location": "L228",
+      "source_location": "L225",
       "weight": 1.0
     },
     {
@@ -265814,7 +265814,7 @@
       "confidence_score": 0.95,
       "context": "_ensure_reply_row",
       "source_file": "pendingwork.md",
-      "source_location": "L190",
+      "source_location": "L187",
       "weight": 1.0
     },
     {
@@ -265850,7 +265850,7 @@
       "confidence_score": 0.95,
       "context": "_issue_refresh",
       "source_file": "pendingwork.md",
-      "source_location": "L389",
+      "source_location": "L394",
       "weight": 1.0
     },
     {
@@ -265874,7 +265874,7 @@
       "confidence_score": 0.95,
       "context": "_stub_deploy_probe",
       "source_file": "pendingwork.md",
-      "source_location": "L410",
+      "source_location": "L415",
       "weight": 1.0
     },
     {
@@ -265886,7 +265886,7 @@
       "confidence_score": 0.95,
       "context": "_verify_evolution_sig",
       "source_file": "pendingwork.md",
-      "source_location": "L385",
+      "source_location": "L390",
       "weight": 1.0
     },
     {
@@ -265898,7 +265898,7 @@
       "confidence_score": 0.95,
       "context": "acquire_lease",
       "source_file": "pendingwork.md",
-      "source_location": "L251",
+      "source_location": "L248",
       "weight": 1.0
     },
     {
@@ -265934,7 +265934,7 @@
       "confidence_score": 0.95,
       "context": "aios.tasks.jobs.conversation_turn_job",
       "source_file": "pendingwork.md",
-      "source_location": "L181",
+      "source_location": "L178",
       "weight": 1.0
     },
     {
@@ -266006,7 +266006,7 @@
       "confidence_score": 0.95,
       "context": "channel_sync_job",
       "source_file": "pendingwork.md",
-      "source_location": "L63",
+      "source_location": "L60",
       "weight": 1.0
     },
     {
@@ -266018,7 +266018,7 @@
       "confidence_score": 0.95,
       "context": "channels_are_remote()",
       "source_file": "pendingwork.md",
-      "source_location": "L56",
+      "source_location": "L53",
       "weight": 1.0
     },
     {
@@ -266078,7 +266078,7 @@
       "confidence_score": 0.95,
       "context": "cron_tick_job",
       "source_file": "pendingwork.md",
-      "source_location": "L82",
+      "source_location": "L79",
       "weight": 1.0
     },
     {
@@ -266174,7 +266174,7 @@
       "confidence_score": 0.95,
       "context": "errors",
       "source_file": "pendingwork.md",
-      "source_location": "L137",
+      "source_location": "L134",
       "weight": 1.0
     },
     {
@@ -266354,7 +266354,7 @@
       "confidence_score": 0.95,
       "context": "hybrid_search",
       "source_file": "pendingwork.md",
-      "source_location": "L113",
+      "source_location": "L110",
       "weight": 1.0
     },
     {
@@ -266451,6 +266451,18 @@
       "context": "monthly_report_job",
       "source_file": "SUITE.md",
       "source_location": "L24",
+      "weight": 1.0
+    },
+    {
+      "source": "pendingwork_done",
+      "target": "aios_core_workflow_workflowresult_ok",
+      "relation": "references",
+      "_origin": "ast",
+      "confidence": "INFERRED",
+      "confidence_score": 0.95,
+      "context": "ok",
+      "source_file": "pendingwork.md",
+      "source_location": "L274",
       "weight": 1.0
     },
     {
@@ -269522,7 +269534,7 @@
       "confidence_score": 0.95,
       "context": "proactive_event_job",
       "source_file": "pendingwork.md",
-      "source_location": "L333",
+      "source_location": "L338",
       "weight": 1.0
     },
     {
@@ -269582,7 +269594,7 @@
       "confidence_score": 0.95,
       "context": "process_inbound",
       "source_file": "pendingwork.md",
-      "source_location": "L157",
+      "source_location": "L154",
       "weight": 1.0
     },
     {
@@ -269594,7 +269606,7 @@
       "confidence_score": 0.95,
       "context": "process_inbound",
       "source_file": "pendingwork.md",
-      "source_location": "L191",
+      "source_location": "L188",
       "weight": 1.0
     },
     {
@@ -269726,7 +269738,7 @@
       "confidence_score": 0.95,
       "context": "release_lease",
       "source_file": "pendingwork.md",
-      "source_location": "L251",
+      "source_location": "L248",
       "weight": 1.0
     },
     {
@@ -269738,7 +269750,7 @@
       "confidence_score": 0.95,
       "context": "renew_lease",
       "source_file": "pendingwork.md",
-      "source_location": "L251",
+      "source_location": "L248",
       "weight": 1.0
     },
     {
@@ -269750,7 +269762,7 @@
       "confidence_score": 0.95,
       "context": "restore_all_orgs()",
       "source_file": "pendingwork.md",
-      "source_location": "L60",
+      "source_location": "L57",
       "weight": 1.0
     },
     {
@@ -269846,7 +269858,7 @@
       "confidence_score": 0.95,
       "context": "run_once()",
       "source_file": "pendingwork.md",
-      "source_location": "L78",
+      "source_location": "L75",
       "weight": 1.0
     },
     {
@@ -269858,7 +269870,7 @@
       "confidence_score": 0.95,
       "context": "runs_channels()",
       "source_file": "pendingwork.md",
-      "source_location": "L55",
+      "source_location": "L52",
       "weight": 1.0
     },
     {
@@ -269870,7 +269882,7 @@
       "confidence_score": 0.95,
       "context": "runs_cron()",
       "source_file": "pendingwork.md",
-      "source_location": "L55",
+      "source_location": "L52",
       "weight": 1.0
     },
     {
@@ -269882,7 +269894,7 @@
       "confidence_score": 0.95,
       "context": "runs_telemetry_flush()",
       "source_file": "pendingwork.md",
-      "source_location": "L55",
+      "source_location": "L52",
       "weight": 1.0
     },
     {
@@ -269894,7 +269906,7 @@
       "confidence_score": 0.95,
       "context": "runtime_role()",
       "source_file": "pendingwork.md",
-      "source_location": "L54",
+      "source_location": "L51",
       "weight": 1.0
     },
     {
@@ -269942,7 +269954,7 @@
       "confidence_score": 0.95,
       "context": "seed_b2b_lead_research_workspace",
       "source_file": "pendingwork.md",
-      "source_location": "L345",
+      "source_location": "L350",
       "weight": 1.0
     },
     {
@@ -269978,7 +269990,7 @@
       "confidence_score": 0.95,
       "context": "stop_by_id()",
       "source_file": "pendingwork.md",
-      "source_location": "L67",
+      "source_location": "L64",
       "weight": 1.0
     },
     {
@@ -269990,7 +270002,7 @@
       "confidence_score": 0.95,
       "context": "telemetry_flush_job",
       "source_file": "pendingwork.md",
-      "source_location": "L83",
+      "source_location": "L80",
       "weight": 1.0
     },
     {
@@ -270014,7 +270026,7 @@
       "confidence_score": 0.95,
       "context": "test_db_session",
       "source_file": "pendingwork.md",
-      "source_location": "L71",
+      "source_location": "L68",
       "weight": 1.0
     },
     {
@@ -270038,7 +270050,7 @@
       "confidence_score": 0.95,
       "context": "test_health_endpoints",
       "source_file": "pendingwork.md",
-      "source_location": "L71",
+      "source_location": "L68",
       "weight": 1.0
     },
     {
@@ -270050,7 +270062,7 @@
       "confidence_score": 0.95,
       "context": "test_yaml_manifest_loads",
       "source_file": "pendingwork.md",
-      "source_location": "L353",
+      "source_location": "L358",
       "weight": 1.0
     },
     {
@@ -270122,7 +270134,7 @@
       "confidence_score": 0.95,
       "context": "verify_fleet_job",
       "source_file": "pendingwork.md",
-      "source_location": "L391",
+      "source_location": "L396",
       "weight": 1.0
     },
     {
@@ -270170,7 +270182,7 @@
       "confidence_score": 0.95,
       "context": "worker.run",
       "source_file": "pendingwork.md",
-      "source_location": "L45",
+      "source_location": "L42",
       "weight": 1.0
     },
     {
@@ -286500,5 +286512,5 @@
       "source_file": "aios/dashboard/templates/evolution.html"
     }
   ],
-  "built_at_commit": "3176bdf5ffc9e7eee28df4173fc6e636f3634e3a"
+  "built_at_commit": "4ae345d0c4b75f1b9f0ddc484afb0108c0433b56"
 }
