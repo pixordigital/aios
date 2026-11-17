@@ -1,6 +1,6 @@
 # Pending work
 
-Last updated: 2026-11-16
+Last updated: 2026-11-17
 
 ## Open
 
@@ -10,7 +10,6 @@ Last updated: 2026-11-16
   redeploy, then run the deploy/probe for each agent.
 - Telegram channel `agents-test-telegram-s9` still has an empty bot token and no
   agent/team assignment.
-- Rebuild app container with latest code if changes needed on main branch. (Attempted local rebuild; port 8777 already allocated by Coolify-managed app container; rebuild must run via Coolify deploy or after stopping that container.)
 
 
 ## Open — stateless migration
@@ -27,10 +26,8 @@ Historical failures fixed 2026-11-15: `test_config.py::test_health_endpoints`
 `test_agent_canvas_events.py::test_autonomous_run_stream_emits_trial_and_tokens`
 `_StubAgent` lacked `extra_data` for ICM binding).
 
-Deploy blocker: the production Postgres is at `ea73e62a55fd`, head is
-`c2d3e4f5a6b7`. Any deploy runs every pending migration (owner_notify merge
-included). Take a `pg_dump` first and treat it as its own change window, not a
-side effect of a code deploy.
+Deploy executed: production deployment ran 2026-11-16T22:20:37Z on commit `a2ee3de` (Phases 0-8).
+Postgres is at alembic head `c2d3e4f5a6b7`. App and worker containers healthy, `/health/ready` returns 200.
 
 ### Phase 0 — bare-metal deploy scaffolding  [x] done 2026-11-15
 - `deploy/aios-migrate.service`: oneshot `alembic upgrade head`, `RemainAfterExit`.
@@ -126,9 +123,9 @@ gateway replicas) must stay under Postgres `max_connections`. Compose sets
 - Known limit: Postgres FTS uses `simple` (no stemming), while SQLite FTS5
   tokenizes differently; retrieval parity is behavioural, not byte-identical.
 - Keep `data/vectors/` for one week after switching production to Postgres.
-- Not done: production `alembic upgrade head`. The live DB is at `ea73e62a55fd`
-  and head is `c2d3e4f5a6b7`, so deploying Phase 4 runs every pending migration,
-  not just this one. Needs a `pg_dump` and a deploy window.
+- Production `alembic upgrade head` done 2026-11-16T22:20Z (Coolify deploy): head
+  `c2d3e4f5a6b7` verified live, `memory_vectors` table verified, `migrate_vectors_to_pg.py`
+  executed (0 memories pending, dry_run=False).
 
 ### Phase 5 — artifacts + metrics  [x] done 2026-11-15
 
@@ -268,6 +265,14 @@ bookkeeping, tool cache. Doing the correctness half first.
   loadfile`, EXIT=0) — Phase 6's 1436 plus the 5 new tests, no regressions.
 
 ## Done
+
+- Stateless migration deployment (Phases 0-8) verified in production (2026-11-17):
+  - Coolify deployed commit `a2ee3de` (~2026-11-16T22:20:37Z).
+  - App and worker containers running `38908ddf-a875-4105-a93f-a4570513911f_app:a2ee3dee9db3d9317a8c7efb72668b0442c956fe`.
+  - Alembic migrations ran successfully up to `c2d3e4f5a6b7` (head).
+  - `memory_vectors` table verified in Postgres; `scripts/migrate_vectors_to_pg.py` executed cleanly.
+  - `/health/ready` reports HTTP 200 with role=`all`, db=`ok`, migrations=`ok`, redis=`ok`, rag=`ok`.
+  - `/health` reports `hnsw: true`. Worker running cleanly with `j_failed=0`.
 
 - Right-sized for the 4 vCPU / 8 GB host (commit `dde0d83`, deployed
   2026-11-13T10:34:08Z):
