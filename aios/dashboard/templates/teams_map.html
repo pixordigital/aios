@@ -152,7 +152,7 @@
         <a id="mp-edit" class="btn btn-primary btn-sm" href="#">Editar</a>
     </aside>
 </div>
-<p class="map-instructions"><span>Arraste para navegar · Use os botões para aproximar e enquadrar</span><span>Selecione uma equipe para ver detalhes ou um assistente para editar</span></p>
+<p class="map-instructions"><span>Arraste para navegar · Junte ou afaste dois dedos para ampliar · Use os botões para enquadrar</span><span>Selecione uma equipe para ver detalhes ou um assistente para editar</span></p>
 </section>
 <script>
 (function () {
@@ -554,22 +554,92 @@
     jump.addEventListener("change", () => {
         if (jump.value) focusTeam(jump.value);
     });
+    const activePointers = new Map();
     let drag = null;
-    svg.addEventListener("pointerdown", ev => {
-        drag = { x: ev.clientX, y: ev.clientY, vx, vy };
-        svg.setPointerCapture(ev.pointerId);
+    let pinch = null;
+    let gestureMoved = false;
+    let suppressClickUntil = 0;
+    const pointerDistance = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+    const pointerMidpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    const startPinch = () => {
+        const points = [...activePointers.values()].slice(0, 2);
+        if (points.length < 2) return;
+        const mid = pointerMidpoint(points[0], points[1]);
+        const rect = svg.getBoundingClientRect();
+        pinch = {
+            distance: Math.max(pointerDistance(points[0], points[1]), 1),
+            mid,
+            worldX: vx + ((mid.x - rect.left) / rect.width) * vw,
+            worldY: vy + ((mid.y - rect.top) / rect.height) * vh,
+            vw, vh,
+        };
+        drag = null;
         svg.style.cursor = "grabbing";
+    };
+    const updatePinch = () => {
+        const points = [...activePointers.values()].slice(0, 2);
+        if (points.length < 2 || !pinch) return;
+        const mid = pointerMidpoint(points[0], points[1]);
+        const rect = svg.getBoundingClientRect();
+        const nextWidth = Math.min(Math.max(pinch.vw * pinch.distance / Math.max(pointerDistance(points[0], points[1]), 1), 200), fullW * 2);
+        const nextHeight = nextWidth * (pinch.vh / pinch.vw);
+        vx = pinch.worldX - ((mid.x - rect.left) / rect.width) * nextWidth;
+        vy = pinch.worldY - ((mid.y - rect.top) / rect.height) * nextHeight;
+        vw = nextWidth;
+        vh = nextHeight;
+        apply();
+        gestureMoved = true;
+    };
+    svg.addEventListener("pointerdown", ev => {
+        activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+        svg.setPointerCapture(ev.pointerId);
+        if (activePointers.size >= 2) {
+            startPinch();
+        } else {
+            drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, vx, vy };
+            pinch = null;
+            gestureMoved = false;
+            svg.style.cursor = "grabbing";
+        }
     });
     svg.addEventListener("pointermove", ev => {
-        if (!drag) return;
+        if (!activePointers.has(ev.pointerId)) return;
+        const point = activePointers.get(ev.pointerId);
+        point.x = ev.clientX;
+        point.y = ev.clientY;
+        if (activePointers.size >= 2) {
+            updatePinch();
+            return;
+        }
+        if (!drag || drag.id !== ev.pointerId) return;
+        if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) > 5) gestureMoved = true;
         const r = svg.getBoundingClientRect();
         vx = drag.vx - (ev.clientX - drag.x) * (vw / r.width);
         vy = drag.vy - (ev.clientY - drag.y) * (vh / r.height);
         apply();
     });
-    const endDrag = () => { drag = null; svg.style.cursor = "grab"; };
-    svg.addEventListener("pointerup", endDrag);
-    svg.addEventListener("pointercancel", endDrag);
+    const endPointer = ev => {
+        activePointers.delete(ev.pointerId);
+        if (gestureMoved) suppressClickUntil = Date.now() + 350;
+        if (activePointers.size >= 2) {
+            startPinch();
+        } else if (activePointers.size === 1) {
+            const [id, point] = [...activePointers.entries()][0];
+            drag = { id, x: point.x, y: point.y, vx, vy };
+            pinch = null;
+        } else {
+            drag = null;
+            pinch = null;
+            svg.style.cursor = "grab";
+        }
+    };
+    svg.addEventListener("pointerup", endPointer);
+    svg.addEventListener("pointercancel", endPointer);
+    svg.addEventListener("click", ev => {
+        if (Date.now() >= suppressClickUntil) return;
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+    }, true);
     const zoomAt = (factor, cx, cy) => {
         const r = svg.getBoundingClientRect();
         const px = (cx - r.left) / r.width, py = (cy - r.top) / r.height;
