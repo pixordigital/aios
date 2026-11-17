@@ -4,6 +4,22 @@ Last updated: 2026-11-17
 
 ## Open
 
+- Customer viability browser simulation (2026-11-17): two isolated Persona
+  Product Tester prospect sessions are complete. Results are in
+  `product-feedback/2026-11-17/panel-summary.md`, individual reports and
+  screenshots. Both new-business prospects were blocked from starting an
+  evaluation; the CTA scrolls to product information, the dashboard login says
+  signups are closed, and the public copy also says internal/self-hosted.
+  External market viability and authenticated product workflows remain
+  untested. A dedicated non-production account is still needed to test internal
+  owner/sales/operations workflows. The operations buyer persona is prepared in
+  `product-feedback/2026-11-17/persona-operations-buyer.yaml` but was not run.
+  Resume by reading the installed Persona Product Tester skill, then use an
+  isolated agent-browser session at `http://127.0.0.1:8777/dashboard` with the
+  provided test account. Keep actions within that non-production account; do
+  not reopen signup. Chromium is installed; this host requires
+  `agent-browser --args "--no-sandbox"` to start.
+
 - Internal-tool pivot (2026-11-17): billing and multi-tenant signup are disabled
   by commenting their entrypoints (see `## Done` for the exact list). Do not
   re-enable either without a paying tenant and end-to-end lifecycle tests.

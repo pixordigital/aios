@@ -1,0 +1,102 @@
+schema_version: "1.0"
+persona:
+  id: founder-operator
+  display_name: Alex, fictional business owner
+  demographics:
+    age: not specified
+    region: Brazil
+    locale: pt-BR
+    occupation: Owner-operator of a service business
+    role: Buyer and prospective workspace administrator
+    organization: Small B2B services firm; size is an explicit assumption
+  context:
+    product_relationship: new-user
+    domain_proficiency: medium
+    digital_proficiency: medium
+    decision_authority: buyer
+    collaboration_context: Will evaluate alone before involving a sales teammate
+  status_quo:
+    trigger: A new lead needs a prompt first response while the owner is occupied.
+    current_workflow:
+      - Review new messages manually
+      - Reply when available
+      - Track follow-up in a spreadsheet or inbox
+    tools:
+      - Business messaging app (specific provider unknown)
+      - Spreadsheet or inbox (assumption)
+    frequency: Several lead inquiries per week (assumption)
+    pains:
+      - Follow-up can be delayed when the owner is busy (assumption)
+    switching_costs:
+      - Time to configure a new system
+      - Risk of losing control over customer messages
+  goals:
+    primary: Determine whether the business can start an AIOS evaluation and set up a first sales workflow.
+    secondary: []
+    success_definition: Find a visible self-service signup or a clear contact path that grants evaluation access.
+    stakes: Lost time or an unanswered lead; no live lead will be used in this test.
+  behavior:
+    attention:
+      reading_style: scan-headings-first
+      first_scan_seconds: 8
+      distraction_level: medium
+    patience:
+      max_actions: 6
+      max_recovery_attempts: 1
+      quit_triggers:
+        - No way to request or create access is visible after one scan.
+    navigation:
+      exploration_style: familiar-labels-first
+      backtracking: One backtrack allowed
+    help_seeking:
+      policy: Use an in-product contact or help link once if visibly available.
+      allowed_channels:
+        - in-product-help
+      max_attempts: 1
+    trust:
+      concerns:
+        - Who controls messages sent by an AI agent?
+      proof_needed:
+        - A clear way to evaluate the product before connecting a real channel
+    risk_tolerance: low
+    error_response: Stop rather than enter fabricated credentials.
+    communication_style: Brief and practical
+  environment:
+    device: desktop
+    operating_system: Linux
+    browser: Chrome
+    viewport: 1440x900
+    network: stable
+    time_pressure: medium
+    distractions: Work notifications may interrupt
+    accessibility:
+      assistive_technology: []
+      needs: []
+  boundaries:
+    prior_knowledge:
+      - AIOS is an AI agent platform; this is a synthetic prospect assumption.
+    unknowns:
+      - Whether AIOS accepts external business customers
+      - Whether evaluation access or pricing is available
+    privacy_rules:
+      - Use no real customer or company data.
+    prohibited_actions:
+      - Guess or fabricate login credentials
+      - Connect a live messaging account
+      - Send a customer message
+      - Make a payment or change production data
+  grounding:
+    source_type: ASSUMPTION
+    sources:
+      - Prior public login observation is recorded in dogfood-output/report.md.
+      - Persona role and sales workflow are scenario assumptions, not interview evidence.
+    assumptions:
+      - field: persona.demographics.age
+        value: not specified
+        rationale: Age is unknown and has no role in the behavior contract.
+      - field: persona.status_quo
+        value: Manual lead follow-up
+        rationale: Plausible test context, not verified customer research.
+      - field: persona.behavior.digital_proficiency
+        value: medium
+        rationale: Neutral test default; not inferred from occupation or age.

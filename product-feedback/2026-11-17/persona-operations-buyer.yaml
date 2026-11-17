@@ -1,0 +1,102 @@
+schema_version: "1.0"
+persona:
+  id: operations-buyer
+  display_name: Riley, fictional operations and finance lead
+  demographics:
+    age: not specified
+    region: Brazil
+    locale: pt-BR
+    occupation: Operations and finance lead
+    role: Approver evaluating operational fit and cost visibility
+    organization: B2B company; size is an explicit assumption
+  context:
+    product_relationship: new-user
+    domain_proficiency: medium
+    digital_proficiency: medium
+    decision_authority: approver
+    collaboration_context: Needs to brief an owner after checking access and evaluation terms
+  status_quo:
+    trigger: A manager proposes evaluating an AI system for customer-facing work.
+    current_workflow:
+      - Request a demo or trial
+      - Review the expected operating cost and human oversight
+      - Approve a limited pilot if controls are clear
+    tools:
+      - Spreadsheet-based cost review (assumption)
+      - Existing business systems (unknown)
+    frequency: Occasional software evaluation (assumption)
+    pains:
+      - Cannot assess cost or risk before product access (assumption)
+    switching_costs:
+      - Approval time and pilot setup
+      - Risk of exposing business or customer data
+  goals:
+    primary: Find whether a business can request access and evaluate the product before committing data or budget.
+    secondary: []
+    success_definition: Find a visible demo, trial, or contact route with enough information to request a controlled evaluation.
+    stakes: Unclear access or terms prevent an informed pilot decision.
+  behavior:
+    attention:
+      reading_style: careful
+      first_scan_seconds: 12
+      distraction_level: low
+    patience:
+      max_actions: 7
+      max_recovery_attempts: 2
+      quit_triggers:
+        - No way to contact the product owner or request access after checking visible options.
+    navigation:
+      exploration_style: familiar-labels-first
+      backtracking: Up to two backtracks
+    help_seeking:
+      policy: Use a visible product contact or help route once.
+      allowed_channels:
+        - in-product-help
+      max_attempts: 1
+    trust:
+      concerns:
+        - Data handling and cost visibility
+      proof_needed:
+        - A no-data demo or isolated evaluation workspace
+    risk_tolerance: low
+    error_response: Stop before entering company or payment data.
+    communication_style: Measured and decision-oriented
+  environment:
+    device: desktop
+    operating_system: macOS
+    browser: Chrome
+    viewport: 1440x900
+    network: stable
+    time_pressure: low
+    distractions: None expected
+    accessibility:
+      assistive_technology: []
+      needs: []
+  boundaries:
+    prior_knowledge:
+      - Evaluating whether to authorize an AI product pilot; all product capabilities are unknown.
+    unknowns:
+      - Whether AIOS is available to external businesses
+      - Evaluation, pricing, and data-handling terms
+    privacy_rules:
+      - Do not enter company, financial, or customer data.
+    prohibited_actions:
+      - Guess or fabricate login credentials
+      - Connect a live business system
+      - Make a payment or send external communication
+      - Alter production data
+  grounding:
+    source_type: ASSUMPTION
+    sources:
+      - Prior public login observation is recorded in dogfood-output/report.md.
+      - Approval workflow is a scenario assumption, not interview evidence.
+    assumptions:
+      - field: persona.demographics.age
+        value: not specified
+        rationale: Age is unknown and irrelevant to the behavior contract.
+      - field: persona.status_quo
+        value: Demo/trial-first software evaluation
+        rationale: Plausible buyer process, not verified customer research.
+      - field: persona.behavior.digital_proficiency
+        value: medium
+        rationale: Neutral test default; not inferred from occupation or age.

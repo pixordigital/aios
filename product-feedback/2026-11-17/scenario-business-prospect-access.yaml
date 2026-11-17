@@ -1,0 +1,34 @@
+schema_version: "1.0"
+session:
+  id: business-prospect-access
+  depth: quick
+  product:
+    name: AIOS
+    target: http://127.0.0.1:8777
+    version: Not exposed by the public UI
+    surface: web
+    start_location: http://127.0.0.1:8777/
+  task:
+    trigger: The business is considering an AI assistant for customer-facing work and wants to evaluate it safely.
+    goal: Find a legitimate way for a new business to request or obtain an evaluation account.
+    start_state: New prospect, logged out, no account or credentials.
+    success_condition:
+      - A visible signup, demo request, or contact route lets the business begin evaluation.
+    failure_condition:
+      - No available route to obtain access is visible.
+      - The journey requires credentials the prospect does not have.
+    stop_conditions:
+      - Success condition is reached.
+      - A visible closed-signup notice appears and no visible support/contact route is available.
+      - The persona reaches its action or recovery budget.
+  environment_overrides: {}
+  safety:
+    test_account_reference: None; the task tests prospect access only
+    synthetic_data_only: true
+    allow_reversible_state_changes: false
+    allow_irreversible_actions: false
+    allow_external_search: false
+  evidence:
+    capture_screenshots: true
+    capture_each_step: true
+    output_directory: product-feedback/2026-11-17

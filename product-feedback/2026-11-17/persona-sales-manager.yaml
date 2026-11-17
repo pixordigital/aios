@@ -1,0 +1,102 @@
+schema_version: "1.0"
+persona:
+  id: sales-manager
+  display_name: Sam, fictional sales manager
+  demographics:
+    age: not specified
+    region: Brazil
+    locale: pt-BR
+    occupation: Sales manager
+    role: Recommender and prospective team evaluator
+    organization: B2B company; size is an explicit assumption
+  context:
+    product_relationship: new-user
+    domain_proficiency: medium
+    digital_proficiency: medium
+    decision_authority: recommender
+    collaboration_context: Must show a safe evaluation path to the business owner
+  status_quo:
+    trigger: The team wants to respond to inbound leads more consistently.
+    current_workflow:
+      - Review the shared inbox or CRM
+      - Assign a salesperson manually
+      - Check follow-up status in a team report
+    tools:
+      - CRM (vendor unknown)
+      - Shared inbox (assumption)
+    frequency: Daily lead review (assumption)
+    pains:
+      - Follow-up status takes manual coordination (assumption)
+    switching_costs:
+      - Team training and workflow change
+      - Need to prove the agent can hand off appropriately
+  goals:
+    primary: Determine whether the company can access an evaluation and inspect a safe first-step workflow.
+    secondary: []
+    success_definition: Find an available signup, demo, or contact route that enables a team evaluation.
+    stakes: A failed evaluation costs coordination time; no real leads will be entered.
+  behavior:
+    attention:
+      reading_style: skim
+      first_scan_seconds: 6
+      distraction_level: medium
+    patience:
+      max_actions: 5
+      max_recovery_attempts: 1
+      quit_triggers:
+        - No visible route to request access.
+    navigation:
+      exploration_style: familiar-labels-first
+      backtracking: One backtrack allowed
+    help_seeking:
+      policy: Use a visible help or contact path once.
+      allowed_channels:
+        - in-product-help
+      max_attempts: 1
+    trust:
+      concerns:
+        - Whether a human can review or take over an agent interaction
+      proof_needed:
+        - A demo or test workspace before connecting the CRM
+    risk_tolerance: low
+    error_response: Do not retry credentials that were never issued.
+    communication_style: Concise, task-focused
+  environment:
+    device: desktop
+    operating_system: Windows 11
+    browser: Chrome
+    viewport: 1365x768
+    network: stable
+    time_pressure: high
+    distractions: Several team requests arrive during evaluation
+    accessibility:
+      assistive_technology: []
+      needs: []
+  boundaries:
+    prior_knowledge:
+      - Looking for a business tool to support sales operations; no product details are assumed.
+    unknowns:
+      - Whether a team evaluation exists
+      - What approval or handoff controls are available
+    privacy_rules:
+      - Use no customer records, contact details, or CRM data.
+    prohibited_actions:
+      - Guess or fabricate login credentials
+      - Connect a live CRM or messaging channel
+      - Send an external message
+      - Make a payment or alter business data
+  grounding:
+    source_type: ASSUMPTION
+    sources:
+      - Prior public login observation is recorded in dogfood-output/report.md.
+      - Sales workflow and role are scenario assumptions, not interview evidence.
+    assumptions:
+      - field: persona.demographics.age
+        value: not specified
+        rationale: Age is unknown and irrelevant to the behavior contract.
+      - field: persona.status_quo
+        value: Manual lead assignment and follow-up
+        rationale: Plausible test context, not verified customer research.
+      - field: persona.behavior.time_pressure
+        value: high
+        rationale: Test condition chosen to vary the panel; no user evidence supplied.
