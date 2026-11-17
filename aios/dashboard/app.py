@@ -570,6 +570,148 @@ async def control_center(request: Request):
     return await _render("control_center.html", request, title="Control Center — Deal Desk Governado", pending=pending_data, metrics=hist, versions=versions, deals=deals_data, logs=logs)
 
 
+# ─── Approvals (human-in-the-loop queue) ───
+
+@router.get("/approvals", response_class=HTMLResponse)
+async def approvals_page(request: Request, status: str = "pending"):
+    """The queue the API already exposed, until now only reachable by curl."""
+    org_id = await _org_filter(request)
+    from sqlalchemy import desc
+    from aios.db.models import Agent as _Agent, Conversation as _Conversation, PendingAction
+
+    async with db_session() as db:
+        rows = (
+            await db.execute(
+                select(PendingAction)
+                .where(PendingAction.org_id == org_id, PendingAction.status == status)
+                .order_by(desc(PendingAction.created_at))
+                .limit(100)
+            )
+        ).scalars().all()
+        agent_ids = {r.agent_id for r in rows}
+        conv_ids = {r.conversation_id for r in rows}
+        agent_names = {
+            a.id: a.name
+            for a in (
+                await db.execute(select(_Agent).where(_Agent.id.in_(agent_ids)))
+            ).scalars().all()
+        } if agent_ids else {}
+        conversations = {
+            c.id: c.external_id
+            for c in (
+                await db.execute(select(_Conversation).where(_Conversation.id.in_(conv_ids)))
+            ).scalars().all()
+        } if conv_ids else {}
+
+    actions = [
+        {
+            "id": r.id,
+            "agent": agent_names.get(r.agent_id, r.agent_id[:8]),
+            "contact": conversations.get(r.conversation_id) or "—",
+            "tool_name": r.tool_name,
+            "tool_args": r.tool_args,
+            "context_summary": r.context_summary,
+            "status": r.status,
+            "created_at": r.created_at,
+            "decided_by": r.decided_by,
+            "decided_at": r.decided_at,
+        }
+        for r in rows
+    ]
+    return await _render(
+        "approvals.html", request, title="Aprovações", actions=actions, status=status
+    )
+
+
+@router.post("/approvals/{action_id}/approve", response_class=HTMLResponse)
+async def approvals_approve(request: Request, action_id: str):
+    from aios.core.approval import approval_manager
+
+    user_id = getattr(request.state, "user_id", "") or ""
+    org_id = await _org_filter(request)
+    await approval_manager.approve(action_id, decided_by=user_id, org_id=org_id)
+    return RedirectResponse("/dashboard/approvals", status_code=303)
+
+
+@router.post("/approvals/{action_id}/reject", response_class=HTMLResponse)
+async def approvals_reject(request: Request, action_id: str):
+    from aios.core.approval import approval_manager
+
+    user_id = getattr(request.state, "user_id", "") or ""
+    org_id = await _org_filter(request)
+    await approval_manager.reject(action_id, decided_by=user_id, org_id=org_id)
+    return RedirectResponse("/dashboard/approvals", status_code=303)
+
+
+# ─── Workflow contracts (ICM-X) ───
+
+@router.get("/contracts", response_class=HTMLResponse)
+async def contracts_page(request: Request):
+    """Read-only view of the contracts the runtime enforces on paid workflows.
+
+    The manifest is already validated and frozen at import time; this page is
+    the buyer-facing proof: which tools an agent may and may not call, the cost
+    ceiling per run, and whether a human approval is required.
+    """
+    org_id = await _org_filter(request)
+    from aios.verticals.pet_business.workflows import (
+        WORKFLOW_CONTRACTS,
+        has_contract,
+        paid_workflow_class,
+    )
+
+    async with db_session() as db:
+        agents = (
+            await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))
+        ).scalars().all()
+
+    contracts = []
+    for name, manifest in WORKFLOW_CONTRACTS.items():
+        contracts.append(
+            {
+                "id": manifest.id,
+                "workflow_class": name,
+                "version": manifest.version,
+                "description": manifest.description,
+                "timeout_seconds": manifest.timeout_seconds,
+                "max_llm_calls": manifest.max_llm_calls,
+                "max_cost_usd": manifest.max_cost_usd,
+                "allowed_tools": manifest.allowed_tools,
+                "denied_tools": manifest.denied_tools,
+                "approval_required": manifest.approval_required,
+                "side_effects": manifest.side_effects,
+                "inputs_schema": manifest.inputs_schema,
+                "outputs_schema": manifest.outputs_schema,
+                "max_context_tokens": manifest.context.max_context_tokens,
+                "max_attempts": manifest.retry.max_attempts,
+            }
+        )
+
+    governed = []
+    for a in agents:
+        declared = paid_workflow_class(a.extra_data)
+        if not declared:
+            continue
+        icm = (a.extra_data or {}).get("icm") or {}
+        governed.append(
+            {
+                "agent": a.name,
+                "workflow_class": declared,
+                "has_contract": has_contract(declared),
+                "bound": bool(icm.get("stage_id") or icm.get("stage_manifest")),
+                "workspace": icm.get("workspace_id", ""),
+            }
+        )
+
+    return await _render(
+        "contracts.html",
+        request,
+        title="Contratos de Workflow",
+        contracts=contracts,
+        governed=governed,
+    )
+
+
 # ─── Agent Canvas ───
 
 @router.get("/agent-canvas", response_class=HTMLResponse)

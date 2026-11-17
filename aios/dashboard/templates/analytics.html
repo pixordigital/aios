@@ -43,6 +43,21 @@
     </div>
 </div>
 
+<!-- Unit cost -->
+<div class="card mb-4">
+    <div class="flex-between mb-3">
+        <h2 style="font-size:1rem;font-weight:600">Custo por resultado (30 dias)</h2>
+        <a href="/api/analytics/unit-cost" class="btn btn-ghost btn-sm" target="_blank" rel="noopener">JSON</a>
+    </div>
+    <div class="grid-4">
+        <div class="stat-card"><p class="stat-label">Custo total</p><p class="stat-value" id="uc-total">-</p></div>
+        <div class="stat-card"><p class="stat-label">Por conversa</p><p class="stat-value" id="uc-conv">-</p></div>
+        <div class="stat-card"><p class="stat-label">Por lead qualificado</p><p class="stat-value" id="uc-lead">-</p></div>
+        <div class="stat-card"><p class="stat-label">Mensagens WhatsApp</p><p class="stat-value" id="uc-wa">-</p></div>
+    </div>
+    <p class="text-xs text-tertiary" id="uc-note" style="margin-top:0.5rem"></p>
+</div>
+
 <!-- Agent Performance Table -->
 <div class="card mb-4">
     <h2 class="mb-3" style="font-size:1rem;font-weight:600">Desempenho dos Agentes</h2>
@@ -99,6 +114,18 @@ async function refreshData() {
         document.getElementById('total-tokens').textContent = summary.total_tokens.toLocaleString();
         document.getElementById('avg-response').textContent = summary.avg_response_ms + 'ms';
         document.getElementById('error-rate').textContent = summary.error_rate_pct + '%';
+
+        // Unit cost — only numbers the usage meter actually persisted.
+        const ucRes = await fetch('/api/analytics/unit-cost');
+        const uc = await ucRes.json();
+        const brl = (v) => (v == null ? '—' : 'R$ ' + Number(v).toFixed(2).replace('.', ','));
+        document.getElementById('uc-total').textContent = brl(uc.totals.total_cost_brl);
+        document.getElementById('uc-conv').textContent = brl(uc.cost_per_conversation_brl);
+        document.getElementById('uc-lead').textContent = brl(uc.cost_per_qualified_lead_brl);
+        document.getElementById('uc-wa').textContent = Number(uc.totals.whatsapp_messages).toLocaleString();
+        document.getElementById('uc-note').textContent = uc.has_cost_data
+            ? `Fonte: ${uc.source} · janela ${uc.window_days}d · ${uc.counts.conversations} conversas · ${uc.counts.qualified_leads} leads · câmbio ${uc.fx_usd_brl}`
+            : 'Sem registro de custo no período — o medidor de uso não gravou nada. Valores ausentes, não zero.';
 
         // Fetch agent metrics
         const agentsRes = await fetch('/api/analytics/telemetry/agents');

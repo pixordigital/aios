@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
@@ -83,30 +85,33 @@ async def get_metrics(user=Depends(get_current_user)):
 _OUTCOME_WINDOW = 500
 
 
-@router.get("/outcomes")
-async def business_outcomes(
-    db: DatabaseBackend = Depends(get_db_backend),
-    org_id: str = Depends(get_org_id),
-):
-    """Business outcomes, not infrastructure metrics.
+def _utcnow() -> datetime:
+    """Naive UTC, matching how TimestampMixin stores datetimes."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
-    Every count is read from persisted rows. Attribution is reported as
-    "a CRM deal linked to an agent", with source and confidence — never as
-    proven revenue.
-    """
+
+async def _outcome_snapshot(
+    db: DatabaseBackend,
+    org_id: str,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> dict:
+    """Outcome counts for one time window. Every value is read from rows."""
     from aios.db.models import CrmDeal, PendingAction
     from aios.verticals.pet_business.metrics import OutcomeCounts, summarize_outcomes
 
-    # Conversations in the window, newest first.
-    conv_rows = (
-        await db.execute(
-            select(Conversation.id)
-            .where(Conversation.org_id == org_id)
-            .order_by(Conversation.created_at.desc())
-            .limit(_OUTCOME_WINDOW)
-        )
-    ).scalars().all()
-    conv_ids = list(conv_rows)
+    conv_q = select(Conversation.id).where(Conversation.org_id == org_id)
+    if since:
+        conv_q = conv_q.where(Conversation.created_at >= since)
+    if until:
+        conv_q = conv_q.where(Conversation.created_at < until)
+    conv_ids = list(
+        (
+            await db.execute(
+                conv_q.order_by(Conversation.created_at.desc()).limit(_OUTCOME_WINDOW)
+            )
+        ).scalars().all()
+    )
 
     enquiries = len(conv_ids)
     answered = 0
@@ -137,30 +142,35 @@ async def business_outcomes(
                     if delta >= 0:
                         first_response_seconds.append(delta)
 
-    qualified = (
-        await db.execute(
-            select(func.count(CrmDeal.id)).where(CrmDeal.org_id == org_id)
-        )
-    ).scalar() or 0
+    deal_q = select(
+        func.count(CrmDeal.id), func.coalesce(func.sum(CrmDeal.value), 0.0)
+    ).where(CrmDeal.org_id == org_id)
+    if since:
+        deal_q = deal_q.where(CrmDeal.created_at >= since)
+    if until:
+        deal_q = deal_q.where(CrmDeal.created_at < until)
+    qualified = int((await db.execute(deal_q)).scalar() or 0)
 
-    attributed_rows = (
-        await db.execute(
-            select(func.count(CrmDeal.id), func.coalesce(func.sum(CrmDeal.value), 0.0))
-            .where(CrmDeal.org_id == org_id, CrmDeal.agent_id.is_not(None))
-        )
-    ).one()
+    attr_q = select(
+        func.count(CrmDeal.id), func.coalesce(func.sum(CrmDeal.value), 0.0)
+    ).where(CrmDeal.org_id == org_id, CrmDeal.agent_id.is_not(None))
+    if since:
+        attr_q = attr_q.where(CrmDeal.created_at >= since)
+    if until:
+        attr_q = attr_q.where(CrmDeal.created_at < until)
+    attributed_rows = (await db.execute(attr_q)).one()
     attributed = int(attributed_rows[0] or 0)
     attributed_value = float(attributed_rows[1] or 0.0)
 
-    handoffs = await db.execute(
-        # "Handoff" is measured as a human decision being required: distinct
-        # conversations with an approval row. `notify_human` alone leaves no
-        # durable row, so counting it would be a guess.
-        select(func.count(func.distinct(PendingAction.conversation_id))).where(
-            PendingAction.org_id == org_id
-        )
+    handoff_q = (
+        select(func.count(func.distinct(PendingAction.conversation_id)))
+        .where(PendingAction.org_id == org_id)
     )
-    handoff_count = int(handoffs.scalar() or 0)
+    if since:
+        handoff_q = handoff_q.where(PendingAction.created_at >= since)
+    if until:
+        handoff_q = handoff_q.where(PendingAction.created_at < until)
+    handoff_count = int((await db.execute(handoff_q)).scalar() or 0)
 
     summary = summarize_outcomes(
         OutcomeCounts(
@@ -181,6 +191,148 @@ async def business_outcomes(
     )
     summary["window_conversations"] = _OUTCOME_WINDOW
     return summary
+
+
+@router.get("/outcomes")
+async def business_outcomes(
+    days: int = 0,
+    baseline_days: int = 0,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Business outcomes, not infrastructure metrics.
+
+    Every count is read from persisted rows. Attribution is reported as
+    "a CRM deal linked to an agent", with source and confidence — never as
+    proven revenue.
+
+    ``days=0`` keeps the original all-time response shape. With ``days>0`` the
+    two windows are compared: the last ``days`` against the ``baseline_days``
+    immediately before it. ``comparable`` is false when the baseline has no
+    conversations — a delta computed against zero is not a result.
+    """
+    if days < 1:
+        return await _outcome_snapshot(db, org_id)
+
+    now = _utcnow()
+    since = now - timedelta(days=days)
+    current = await _outcome_snapshot(db, org_id, since=since, until=now)
+    response = dict(current)
+    response["window"] = {"days": days, "since": since.isoformat(), "until": now.isoformat()}
+
+    if baseline_days > 0:
+        prev_since = since - timedelta(days=baseline_days)
+        previous = await _outcome_snapshot(
+            db, org_id, since=prev_since, until=since
+        )
+        numeric = (
+            "enquiries",
+            "answered",
+            "unanswered",
+            "answered_pct",
+            "qualified_leads",
+            "qualification_pct",
+            "follow_up_completion_pct",
+            "deals_attributed",
+            "attributed_value_brl",
+            "human_handoffs",
+            "human_handoff_pct",
+            "failure_pct",
+            "avg_first_response_seconds",
+        )
+        delta = {
+            key: round(current.get(key) - previous.get(key), 2)
+            for key in numeric
+            if isinstance(current.get(key), (int, float))
+            and isinstance(previous.get(key), (int, float))
+        }
+        response["previous"] = previous
+        response["delta"] = delta
+        response["comparable"] = bool(previous.get("enquiries"))
+    return response
+
+
+# ─── Cost per outcome ───
+
+_COST_WINDOW_DAYS = 30
+
+
+@router.get("/unit-cost")
+async def unit_cost(
+    days: int = _COST_WINDOW_DAYS,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """What one conversation and one qualified lead cost to produce.
+
+    Source of truth is ``usage_records``: it is the only table that persists
+    both LLM spend and WhatsApp charges. It is written by the usage meter, so a
+    deployment where the meter never ran reports zeros — the response says
+    ``has_cost_data: false`` instead of presenting zero as a real number.
+    """
+    from aios.config import settings
+    from aios.db.models import CrmDeal, UsageRecord
+
+    now = _utcnow()
+    since = now - timedelta(days=days)
+    rows = (
+        await db.execute(
+            select(UsageRecord).where(
+                UsageRecord.org_id == org_id,
+                UsageRecord.date >= since.date().isoformat(),
+            )
+        )
+    ).scalars().all()
+
+    llm_usd = sum(r.cost_usd or 0 for r in rows)
+    wa_usd = sum(getattr(r, "whatsapp_cost_usd", 0) or 0 for r in rows)
+    wa_messages = sum(getattr(r, "whatsapp_messages", 0) or 0 for r in rows)
+    tokens = sum(r.llm_tokens or 0 for r in rows)
+    fx = float(settings.usd_brl_rate or 5.5)
+    total_brl = round((llm_usd + wa_usd) * fx, 2)
+
+    conversations = int(
+        (
+            await db.execute(
+                select(func.count(Conversation.id)).where(
+                    Conversation.org_id == org_id, Conversation.created_at >= since
+                )
+            )
+        ).scalar()
+        or 0
+    )
+    qualified = int(
+        (
+            await db.execute(
+                select(func.count(CrmDeal.id)).where(
+                    CrmDeal.org_id == org_id, CrmDeal.created_at >= since
+                )
+            )
+        ).scalar()
+        or 0
+    )
+
+    return {
+        "window_days": days,
+        "since": since.date().isoformat(),
+        "totals": {
+            "llm_cost_brl": round(llm_usd * fx, 2),
+            "whatsapp_cost_brl": round(wa_usd * fx, 2),
+            "total_cost_brl": total_brl,
+            "llm_tokens": tokens,
+            "whatsapp_messages": wa_messages,
+        },
+        "counts": {"conversations": conversations, "qualified_leads": qualified},
+        "cost_per_conversation_brl": (
+            round(total_brl / conversations, 2) if conversations else None
+        ),
+        "cost_per_qualified_lead_brl": (
+            round(total_brl / qualified, 2) if qualified else None
+        ),
+        "fx_usd_brl": fx,
+        "has_cost_data": bool(llm_usd or wa_usd),
+        "source": "usage_records",
+    }
 
 
 # ─── Telemetry Endpoints ───

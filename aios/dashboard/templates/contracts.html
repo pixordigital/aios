@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div>
+    <h1>Contratos de workflow (ICM-X)</h1>
+    <p class="text-sm text-secondary">
+      O runtime recusa executar um agente que declara um workflow pago sem o contrato correspondente.
+      Estes limites são verificados em código, não documentados em prosa.
+    </p>
+  </div>
+  <a href="/dashboard/agents" class="btn btn-ghost btn-sm">Agentes →</a>
+</div>
+
+<div class="grid-2 mb-4">
+  <div class="card">
+    <h2 style="font-size:0.9rem;margin-bottom:0.5rem">Como ler isto</h2>
+    <ul class="text-sm text-secondary" style="margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:0.35rem">
+      <li><b>Teto de custo</b> — valor máximo de LLM por execução. Acima disso a execução não continua.</li>
+      <li><b>Chamadas LLM</b> — número máximo de chamadas ao modelo naquele estágio.</li>
+      <li><b>Ferramentas permitidas / negadas</b> — allowlist e denylist aplicadas ao agente em runtime.</li>
+      <li><b>Aprovação humana</b> — se <code>true</code>, a ferramenta só executa depois de uma decisão em <a href="/dashboard/approvals">Aprovações</a>.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2 style="font-size:0.9rem;margin-bottom:0.5rem">Agentes governados</h2>
+    {% if not governed %}
+    <p class="text-sm text-secondary">Nenhum agente declara <code>workflow_class</code> hoje. Os agentes atuais são internos e seguem o regime opt-in.</p>
+    {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Agente</th><th>Workflow</th><th>Contrato</th><th>Binding ICM</th></tr></thead>
+        <tbody>
+        {% for g in governed %}
+          <tr>
+            <td>{{ g.agent }}</td>
+            <td><code style="font-size:0.7rem">{{ g.workflow_class }}</code></td>
+            <td>{% if g.has_contract %}<span class="badge" style="color:var(--green);border-color:var(--green)">ok</span>{% else %}<span class="badge" style="color:var(--red);border-color:var(--red)">ausente</span>{% endif %}</td>
+            <td>{% if g.bound %}<span class="badge" style="color:var(--green);border-color:var(--green)">{{ g.workspace or 'bound' }}</span>{% else %}<span class="badge" style="color:var(--amber);border-color:var(--amber)">sem icm</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% for c in contracts %}
+<div class="card mb-4">
+  <div class="flex-between" style="align-items:flex-start;gap:1rem;flex-wrap:wrap">
+    <div>
+      <h2 style="font-size:0.95rem;margin:0 0 0.25rem">{{ c.id }} <span class="text-xs text-tertiary">v{{ c.version }}</span></h2>
+      <p class="text-sm text-secondary" style="margin:0;max-width:70ch">{{ c.description }}</p>
+    </div>
+    <span class="badge" style="font-size:0.65rem">workflow_class: {{ c.workflow_class }}</span>
+  </div>
+
+  <div class="grid-4" style="margin-top:0.875rem">
+    <div class="stat-card"><p class="stat-label">Custo máx / execução</p><p class="stat-value">US$ {{ "%.2f"|format(c.max_cost_usd) }}</p></div>
+    <div class="stat-card"><p class="stat-label">Chamadas LLM máx</p><p class="stat-value">{{ c.max_llm_calls }}</p></div>
+    <div class="stat-card"><p class="stat-label">Timeout</p><p class="stat-value">{{ c.timeout_seconds }}s</p></div>
+    <div class="stat-card"><p class="stat-label">Aprovação humana</p><p class="stat-value" style="color:{% if c.approval_required %}var(--amber){% else %}var(--green){% endif %}">{% if c.approval_required %}obrigatória{% else %}não{% endif %}</p></div>
+  </div>
+
+  <div class="grid-2" style="margin-top:0.75rem">
+    <div>
+      <div class="text-xs text-tertiary" style="margin-bottom:0.25rem">Ferramentas permitidas</div>
+      <div style="display:flex;gap:0.25rem;flex-wrap:wrap">
+        {% for t in c.allowed_tools %}<span class="badge" style="font-size:0.65rem;color:var(--green);border-color:var(--green)">{{ t }}</span>{% endfor %}
+      </div>
+    </div>
+    <div>
+      <div class="text-xs text-tertiary" style="margin-bottom:0.25rem">Ferramentas negadas</div>
+      <div style="display:flex;gap:0.25rem;flex-wrap:wrap">
+        {% for t in c.denied_tools %}<span class="badge" style="font-size:0.65rem;color:var(--red);border-color:var(--red)">{{ t }}</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="text-xs text-tertiary" style="margin-top:0.75rem">
+    contexto ≤ {{ c.max_context_tokens }} tokens · retry ≤ {{ c.max_attempts }} · entrada <code>{{ c.inputs_schema }}</code> → saída <code>{{ c.outputs_schema }}</code> · efeitos colaterais: {% if c.side_effects %}sim{% else %}não{% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

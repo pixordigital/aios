@@ -18,9 +18,9 @@
     "semantic_hash": ""
   },
   "aios/api/analytics.py": {
-    "mtime": 1794914354.431671,
-    "seen": 1794916609.9026697,
-    "ast_hash": "817d2e21020fb9ef163901a583b8a5bf",
+    "mtime": 1794927918.132718,
+    "seen": 1794929240.1142423,
+    "ast_hash": "baaede9aee382a32bfae8b0938809bc8",
     "semantic_hash": ""
   },
   "aios/api/approvals.py": {
@@ -798,9 +798,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/app.py": {
-    "mtime": 1794914573.373024,
-    "seen": 1794916609.910253,
-    "ast_hash": "665ce14b7e16365b69029bcf42054b11",
+    "mtime": 1794927932.6460679,
+    "seen": 1794929240.1214397,
+    "ast_hash": "2049efe69d7d8327d1af87592dd36cfe",
     "semantic_hash": ""
   },
   "aios/db/__init__.py": {
@@ -1872,9 +1872,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/templates/analytics.html": {
-    "mtime": 1793060451.48249,
-    "seen": 1793062225.783996,
-    "ast_hash": "f0cbf6c8470972ca23a143e32893e662",
+    "mtime": 1794927988.954305,
+    "seen": 1794929240.1355045,
+    "ast_hash": "2b080b6a887a051d32962f7742f08690",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/automation_compare.html": {
@@ -1908,9 +1908,9 @@
     "semantic_hash": "cb6598c38334be2d56f32359886a6dff"
   },
   "aios/dashboard/templates/base.html": {
-    "mtime": 1794914430.2917242,
-    "seen": 1794916609.9223552,
-    "ast_hash": "68fe37feed32159b9a05d7385fd46eed",
+    "mtime": 1794927969.44049,
+    "seen": 1794929240.1357272,
+    "ast_hash": "19b29f35bad7d9cb143ba9d044007f35",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/billing.html": {
@@ -3459,6 +3459,24 @@
     "mtime": 1794914566.175355,
     "seen": 1794916609.9196954,
     "ast_hash": "66d54068ed8a76f511eb0e62f3b5f2c0",
+    "semantic_hash": ""
+  },
+  "tests/test_paid_workflow_e2e.py": {
+    "mtime": 1794928268.862097,
+    "seen": 1794929240.1317143,
+    "ast_hash": "d20258ce879d5b8f0b7e97b943178d3b",
+    "semantic_hash": ""
+  },
+  "aios/dashboard/templates/approvals.html": {
+    "mtime": 1794927953.2009795,
+    "seen": 1794929240.1355073,
+    "ast_hash": "c2abe75bad280a44d637eaca744a8767",
+    "semantic_hash": ""
+  },
+  "aios/dashboard/templates/contracts.html": {
+    "mtime": 1794927964.2040029,
+    "seen": 1794929240.1358612,
+    "ast_hash": "1f50950ca381a19cd8f03fe32c49af58",
     "semantic_hash": ""
   }
 }

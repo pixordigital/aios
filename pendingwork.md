@@ -13,6 +13,10 @@ Last updated: 2026-11-17
   redeploy, then run the deploy/probe for each agent.
 - Telegram channel `agents-test-telegram-s9` still has an empty bot token and no
   agent/team assignment.
+- Uncommitted (2026-11-17): approvals dashboard, ICM contract viewer, unit-cost
+  endpoint + analytics card, outcomes baseline/delta, `tests/test_paid_workflow_e2e.py`.
+  Nothing deployed. Commit/push only on operator request; then redeploy and
+  verify `/dashboard/approvals` and `/dashboard/contracts` render in the container.
 
 
 ## Open — stateless migration
@@ -268,6 +272,21 @@ bookkeeping, tool cache. Doing the correctness half first.
   loadfile`, EXIT=0) — Phase 6's 1436 plus the 5 new tests, no regressions.
 
 ## Done
+
+- Tier 2 + Tier 3 of the differentiation plan (2026-11-17, uncommitted):
+  - `GET /dashboard/approvals` (+ `POST /{id}/approve|reject`): the HITL queue the
+    API exposed but the dashboard never showed. Decisions are written through
+    `approval_manager` with `decided_by`/`decided_at`, org-scoped.
+  - `GET /dashboard/contracts`: read-only viewer of `WORKFLOW_CONTRACTS` plus the
+    agents that declare `workflow_class` and their ICM binding state.
+  - `GET /api/analytics/unit-cost`: `usage_records` → BRL cost per conversation
+    and per qualified lead. Reports `has_cost_data: false` when the meter never
+    wrote a row — absent, not zero. Analytics page has the matching card.
+  - `GET /api/analytics/outcomes?days=&baseline_days=`: two-window comparison
+    with `previous`, `delta`, `comparable`; `days=0` keeps the legacy shape.
+  - Gate: `tests/test_paid_workflow_e2e.py` (11 passed) walks contract →
+    runtime → approval → outcome, plus the three read-only surfaces.
+    Full suite: 1464 passed, 11 skipped; `ruff check .` clean.
 
 - Internal tool first + strategy items 2-5 (2026-11-17, from the startup/roadmap
   PDF assessment; item 1 — `aios/verticals/` as a *product layer* — was
