@@ -2268,9 +2268,9 @@
     "semantic_hash": ""
   },
   "website/index.html": {
-    "mtime": 1791026931.6609104,
-    "seen": 1791029136.8858004,
-    "ast_hash": "2987240ae62924445394d6650d9b7c66",
+    "mtime": 1794951490.3207083,
+    "seen": 1794951506.1829252,
+    "ast_hash": "155ea66c91913010974afef585ca3051",
     "semantic_hash": ""
   },
   "website/privacy.html": {
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1794916582.15864,
-    "seen": 1794916609.9248018,
-    "ast_hash": "5f139c9cff1148eef675231ca01e4e1e",
+    "mtime": 1794943592.0660124,
+    "seen": 1794951295.217398,
+    "ast_hash": "ad81e579a550bccd73113f2b48679ce7",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -3477,6 +3477,120 @@
     "mtime": 1794927964.2040029,
     "seen": 1794929240.1358612,
     "ast_hash": "1f50950ca381a19cd8f03fe32c49af58",
+    "semantic_hash": ""
+  },
+  "dogfood-output/report.md": {
+    "mtime": 1794941951.3069377,
+    "seen": 1794951295.2173927,
+    "ast_hash": "c9f3bab247480bf7a216aeeb4ebbc6d3",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/founder-operator-report.md": {
+    "mtime": 1794943181.533716,
+    "seen": 1794951295.2174,
+    "ast_hash": "67aab40a7a11a9bea8ac3e4f1289e2ff",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/panel-summary.md": {
+    "mtime": 1794943575.7194877,
+    "seen": 1794951295.2174032,
+    "ast_hash": "48e14535cafbdf828f73c461a8bbd42a",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/persona-founder-operator.yaml": {
+    "mtime": 1794943008.8996098,
+    "seen": 1794951295.217405,
+    "ast_hash": "7bb41c9d05c135d2665af11e1f4ab83a",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/persona-operations-buyer.yaml": {
+    "mtime": 1794943009.7606902,
+    "seen": 1794951295.2174067,
+    "ast_hash": "2ea8c6ffc95447f4d86bd70e98df7810",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/persona-sales-manager.yaml": {
+    "mtime": 1794943009.338651,
+    "seen": 1794951295.2174087,
+    "ast_hash": "6e4bcfa14c90e92f883a8d5d3996efc6",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/sales-manager-report.md": {
+    "mtime": 1794943270.9340565,
+    "seen": 1794951295.2174106,
+    "ast_hash": "2716cd7cd96bf191d1c4b676617d19e3",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/scenario-business-prospect-access.yaml": {
+    "mtime": 1794942986.2344954,
+    "seen": 1794951295.2174122,
+    "ast_hash": "6e60e8bdd544c36988b3d4f785a583cb",
+    "semantic_hash": ""
+  },
+  "dogfood-output/screenshots/login-2fa-expanded.png": {
+    "mtime": 1794941925.5845377,
+    "seen": 1794951295.2176094,
+    "ast_hash": "eca471c98f13fc2594be595ef04736b8",
+    "semantic_hash": ""
+  },
+  "dogfood-output/screenshots/login-initial.png": {
+    "mtime": 1794941893.7165642,
+    "seen": 1794951295.2176116,
+    "ast_hash": "e93a481016d0a9cdc45666937e08d7fd",
+    "semantic_hash": ""
+  },
+  "dogfood-output/screenshots/login-mobile.png": {
+    "mtime": 1794941907.861884,
+    "seen": 1794951295.2176132,
+    "ast_hash": "d72bd73b20e3ac2fdaec7c722ace1273",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/founder-step-01.png": {
+    "mtime": 1794943032.7838383,
+    "seen": 1794951295.2176154,
+    "ast_hash": "9e90e05c64a516bfa73cad94b582d1a1",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/founder-step-02.png": {
+    "mtime": 1794943047.7502344,
+    "seen": 1794951295.217617,
+    "ast_hash": "805403e4a3ee64f0d564092fc7c55127",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/founder-step-03.png": {
+    "mtime": 1794943065.804919,
+    "seen": 1794951295.217619,
+    "ast_hash": "1c99cd9fa2b58140aa79853404ab72f8",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/sales-manager-step-00.png": {
+    "mtime": 1794943161.5908554,
+    "seen": 1794951295.2176213,
+    "ast_hash": "443acd67b52a57144f954d2241467ca9",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/sales-manager-step-01.png": {
+    "mtime": 1794943174.0170145,
+    "seen": 1794951295.217624,
+    "ast_hash": "553b6b2518ed356e553bebdff8afa09b",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/sales-manager-step-02.png": {
+    "mtime": 1794943187.0862339,
+    "seen": 1794951295.2176259,
+    "ast_hash": "02ad9d866d9b3b34e62afece78082f4d",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/sales-manager-step-03.png": {
+    "mtime": 1794943193.4848309,
+    "seen": 1794951295.2176278,
+    "ast_hash": "b582e9efb4a6b4fc4a2b3a8e7d2b39bd",
+    "semantic_hash": ""
+  },
+  "product-feedback/2026-11-17/sales-manager-step-04.png": {
+    "mtime": 1794943213.176668,
+    "seen": 1794951295.2176294,
+    "ast_hash": "8e29e43fe2d1d8f323c2351851bf9787",
     "semantic_hash": ""
   }
 }
