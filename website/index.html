@@ -121,6 +121,21 @@
         .feature-title { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
         .feature-desc { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
 
+        /* ── Sales advisor spotlight ── */
+        .advisor-feature { margin: 0 0 40px; padding: clamp(24px, 4vw, 44px); display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; background: radial-gradient(ellipse at 0% 100%, rgba(0,229,160,0.09), transparent 55%), var(--surface); border: 1px solid rgba(0,229,160,0.35); border-radius: 14px; }
+        .advisor-feature h3 { max-width: 560px; font-size: clamp(24px, 3vw, 34px); line-height: 1.15; letter-spacing: -0.025em; margin-bottom: 14px; }
+        .advisor-feature-copy { color: var(--text-dim); font-size: 15px; line-height: 1.7; max-width: 540px; }
+        .advisor-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 24px; }
+        .advisor-actions .btn-primary { min-height: 44px; display: inline-flex; align-items: center; }
+        .advisor-feature a:focus-visible { outline: 3px solid var(--text); outline-offset: 4px; }
+        .advisor-access-note { color: var(--text-muted); font-size: 12px; }
+        .advisor-preview { background: rgba(10,10,10,0.68); border: 1px solid var(--border); border-radius: 10px; padding: 22px; }
+        .advisor-preview-title { color: var(--cyan); font-size: 12px; font-weight: 600; margin-bottom: 16px; }
+        .advisor-step { display: grid; grid-template-columns: 28px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+        .advisor-step-number { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid rgba(0,229,160,0.5); border-radius: 50%; color: var(--cyan); font: 12px 'JetBrains Mono', monospace; }
+        .advisor-step strong { display: block; font-size: 13px; margin-bottom: 3px; }
+        .advisor-step-description { display: block; color: var(--text-dim); font-size: 12px; line-height: 1.5; }
+
         /* ── Channels ── */
         .channel-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
         .channel-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; text-align: center; transition: all 0.15s; }
@@ -158,6 +173,7 @@
             .voice-diff { grid-template-columns: repeat(2,1fr); }
             .data-grid { grid-template-columns: 1fr; }
             .channel-card[style*="grid-column:span 2"] { grid-column: span 3 !important; }
+            .advisor-feature { grid-template-columns: 1fr; gap: 24px; }
         }
         @media (max-width: 600px) {
             nav .links { display: none; }
@@ -186,6 +202,7 @@
             <a href="#agentes">O que automatizar</a>
             <a href="#customizacao">Do seu jeito</a>
             <a href="#governanca">Exemplos</a>
+            <a href="#orientador-vendas">Orientador comercial</a>
             <a href="#suite-arvo">Controle</a>
             <a href="/docs">Docs</a>
         </div>
@@ -485,14 +502,22 @@
                 <div class="feature-desc">Os assistentes digitais podem consultar informações, organizar contatos, atualizar oportunidades e apoiar tarefas de comunicação conforme as permissões configuradas.</div>
             </div>
         </div>
-        <!-- Acompanhamento de oportunidades -->
-        <div style="margin-top:32px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-            <span style="font-size:28px">📈</span>
-            <div style="flex:1;min-width:260px">
-                <h4 style="font-size:15px;font-weight:700">Acompanhe oportunidades sem depender de várias planilhas</h4>
-                <p style="font-size:13px;color:var(--text-dim);margin-top:4px">Registre contatos, acompanhe em que etapa cada oportunidade está e mantenha as informações organizadas. Para descontos ou decisões importantes, a equipe pode revisar antes de avançar.</p>
+        <div class="advisor-feature" id="orientador-vendas" aria-labelledby="advisor-feature-title">
+            <div>
+                <p class="section-label">Para quem lidera vendas</p>
+                <h3 id="advisor-feature-title">Desenhe um funil que combina com o jeito que sua equipe vende.</h3>
+                <p class="advisor-feature-copy">O Orientador Comercial conversa com você sobre o processo de vendas, considera o que já está registrado no CRM e propõe etapas e medidas para acompanhar. Você revisa tudo antes de aprovar; os negócios existentes não são movidos automaticamente.</p>
+                <div class="advisor-actions">
+                    <a href="/dashboard" class="btn-primary">Acessar o orientador comercial</a>
+                    <span class="advisor-access-note">Disponível para quem já tem acesso ao AIOS.</span>
+                </div>
             </div>
-            <a href="#acesso" class="btn-ghost" style="font-size:13px;white-space:nowrap">Como acessar →</a>
+            <aside class="advisor-preview" aria-labelledby="advisor-preview-title" role="list">
+                <p class="advisor-preview-title" id="advisor-preview-title">Do processo atual a um funil revisado por você</p>
+                <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">1</span><span><strong>Conte como vocês vendem</strong><span class="advisor-step-description">Registre etapas, critérios, responsáveis e metas desejadas.</span></span></div>
+                <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">2</span><span><strong>Confira o retrato do CRM</strong><span class="advisor-step-description">Compare suas respostas com os negócios já cadastrados.</span></span></div>
+                <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">3</span><span><strong>Revise antes de criar</strong><span class="advisor-step-description">Aprove uma proposta de funil ou ajuste as respostas primeiro.</span></span></div>
+            </aside>
         </div>
     </div>
 </section>
