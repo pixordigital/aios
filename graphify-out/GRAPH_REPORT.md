@@ -1,54 +1,54 @@
-# Graph Report - pixor_aios  (2026-11-17)
+# Graph Report - pixor_aios  (2026-11-18)
 
 ## Corpus Check
-- 505 files · ~444,891 words
+- 506 files · ~447,463 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 21 file(s) not represented in the graph (top: (none) 8, .service 6, .example 2)
 
 ## Summary
-- 7514 nodes · 17382 edges · 405 communities (281 shown, 124 thin omitted)
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 2302 edges (avg confidence: 0.92)
+- 7529 nodes · 17442 edges · 416 communities (283 shown, 133 thin omitted)
+- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 2313 edges (avg confidence: 0.92)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `16c7a300`
+- Built from commit: `d079d863`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - test_workday_board.py
-- route
+- core/router.py
 - BaseTool
-- test_team_collaboration.py
+- AskTeamManagerTool
 - api/auth.py
 - dataclasses
 - SQLQueryTool
-- pytest
+- fixture
 - _FakePool
-- test_webhook_signatures.py
-- app.py
+- models.py
+- db_session
 - Agent
 - .select
-- Team
-- _post_team_reports
+- Reunião Técnica — Validação 100% Autônomo por Tipo de Agente
+- Suite AIOS + ARVO
 - EvolutionChannel
 - AgentScheduler
 - calendar.py
 - test_security_audit.py
 - deployment.py
-- stripe_webhook
-- asyncio
+- billing.py
+- test_shared_state.py
 - SwarmCoordinator
 - TeamOrchestrator
 - ContextManager
 - ROUND 1: DORES ATUAIS (20 min)
 - main.py
-- evolution_api.py
-- agent_binding.py
+- WhatsAppProvider
+- Done
 - DatabaseBackend
 - Guia BFG — Limpeza de Histórico Git (Secrets Vazados)
 - test_delivery_and_channels.py
-- _process_inbound_once
+- fleet_verify.py
 - ⚠️ Synthetic Product Test — not customer evidence
 - whatsapp_guard.py
 - test_login_allowlist.py
@@ -56,11 +56,11 @@
 - test_build_request.py
 - test_template_lint.py
 - test_evolution_via_aios.py
-- place_call
+- asyncio
 - arvo/auth.py
-- WorkflowRun
+- Workflow
 - test_evolution_integration.py
-- logging
+- db/backend.py
 - ToolEngine
 - AutonomousAgent
 - test_icm_agent_binding.py
@@ -71,7 +71,7 @@
 - What You Must Do When Invoked
 - Validação ICP — Produto AIOS | Pesquisa Extensa Pré-Lançamento
 - core/voice.py
-- worker.py
+- cron_scheduler.py
 - lint_template
 - analytics.py
 - HookPoint
@@ -79,65 +79,66 @@
 - S3 Security Hardening (C9)
 - 4. Round 3: Reações & Validação (35 min)
 - TestChannels
-- anti_ban/signals.py
+- score_from_events
 - Evaluator
 - tracing.py
-- skill_loader.py
-- api/workflows.py
+- SkillLoader
+- test_curated_memory.py
 - A Estrutura Fixa (10 Tags)
 - AsyncClient
-- ffile
+- encrypt_channel_config
 - storage.py
-- models.py
+- Base
 - apply_template
 - sandbox.py
 - AIOS API Guide
 - Reunião Técnica: AIOS WhatsApp Gateway — Build vs Buy vs Hybrid
 - AsyncClient
 - test_events_bus.py
-- read_file
+- heartbeat
 - routes.py
 - check_url
 - test_learning_loop.py
 - test_whatsapp_batching.py
 - AIOS Landing Page
 - ConversationHandle
+- test_sandbox_security.py
 - User
 - TestChannelTypes
 - test_worker_registry.py
 - log_config.py
 - test_features.py
-- test_lojista_signals.py
+- CrmDeal
 - errors.py
 - WSManager
-- jobs.py
+- test_dead_letter.py
 - AIOS Dashboard Shell (base.html)
 - AIOS Deployment Topology (postgres, redis, otel, evolution, app, worker, voice)
-- get_redis_pool
-- api/voice.py
+- events.py
+- track_usage
 - YouTube — Canais Pesquisados: Agentes Autônomos
 - Evolution API Integration Tests
 - TestAgents
 - _hash_password
 - whatsapp_template_studio.py
 - _ch
-- test_curated_memory.py
-- aios/config.py
+- curated.py
+- runtime_role
 - test_production_readiness.py
 - envelope.py
 - AgentTelemetry
 - HookContext
 - Channel Type Taxonomy (web/evolution/slack/telegram/discord/email/voice)
 - Pesquisa: Agentes Autônomos de IA — Como Funcionam e Como Aplicar no AIOS
-- limits.py
+- test_limits_locking.py
 - Enterprise Legal Templates — AIOS
 - RubricManager
-- model_select.py
+- vector_store.py
 - test_tool_execution_and_guards.py
 - subagent.py
 - Agents & Teams List
 - Billing & Usage Page
-- TestConversion
+- evolution_api.py
 - MetaAgent
 - _freeze_cron_clock
 - test_template_org_scope.py
@@ -146,29 +147,29 @@
 - Automations List
 - YOUTUBE_TODOS_CANAIS_APLICACAO.md
 - 3. Antes → Depois (decisão)
-- .run
+- team_collaboration.py
 - _runtime
-- json
+- m2n3o4p5q6r7_grant_manager_collaboration_tools.py
 - ._run_stream_inner
-- test_channel_types.py
+- TestChannelWebhookEndpoints
 - owner_notify.py
 - AI CRM Kanban Page
 - _register_syscall_handlers
 - test_crm_tools.py
 - test_model_catalog.py
-- AsyncClient
+- TestAgentTypes
 - test_meta_contract.py
 - WhatsApp Ban Risk Page
-- score_from_events
+- ResponseCache
 - For Each New Client
-- test_security.py
+- AsyncClient
 - Roteiro 90min
 - ApprovalManager
 - core/agent.py
 - MetaWhatsAppClient
 - Channel
 - BackendRegistry
-- team_map_data
+- _create_jwt_token
 - Runbook: WhatsApp Gateway
 - Production Readiness Report
 - test_evolution_analytics.py
@@ -186,25 +187,25 @@
 - test_context_cache.py
 - TestKokoro
 - AgentHealthTracker
-- Conversation
-- CrmDeal
+- schemas/__init__.py
+- Organization
 - proxy_pool.py
-- providers.py
+- get_provider
 - Conversation Detail Page
 - test_crm_board.py
 - AgentRuntime
 - test_teams_map.py
-- _channel_api_key
+- _verify_evolution_sig
 - leads.py
-- Done
-- Reunião SWE × Cybersegurança — AIOS Voz & Dados
+- ICMStageAdapter
+- 2. Segurança — Cybersec Lead
 - Agent Sandbox / Playground (streaming chat + tool execution)
 - install.sh
 - Frontend Design
 - Testing (ponytail-aligned)
 - Request
 - publisher.py
-- budget_forecast
+- _auth_ws
 - Message
 - test_sales_funnels.py
 - v2w3x4y5z6a7_usage_records_defaults.py
@@ -220,7 +221,7 @@
 - Voice Smoke Test — self-hosted
 - OS 100% Autônomo — Ambos Fechados (Single + Times)
 - ref_k6
-- heartbeat
+- api/skills.py
 - TestConversations
 - test_agent_autonomy_regressions.py
 - Per-Request Cost Estimator
@@ -236,11 +237,11 @@
 - graphify reference: commit hook and native CLAUDE.md integration
 - graphify reference: incremental update and cluster-only
 - TemplateComponents
-- TelegramChannel
+- OutboundMessage
 - whatsapp.py
 - test_evolution_channel.py
-- rubrics.py
-- _looks_like_build_request
+- _get_ip_allowlist
+- get_redis_pool
 - OS 100% Autônomo Total
 - RAG Knowledge Base (chunk 800 chars + embedding + hybrid_search)
 - Voice Agents Wizard Template (SDR/Closer/Suporte 4-step Kokoro)
@@ -250,10 +251,10 @@
 - graphify reference: transcribe video and audio
 - Product Discovery Simulation — AIOS Voice Agents
 - AGENTS.md
-- time
-- migrate_vectors_to_pg.py
+- test_calendar_tools.py
+- floor_from_extra
 - test_wizard_smoke.py
-- pet_business/workflows.py
+- contracts.py
 - S3Storage
 - test_whatsapp_webhook.py
 - Email Verification Template (AIOS verify link)
@@ -267,11 +268,11 @@
 - deploy/backup.sh
 - client-deploy.sh
 - client-deploy-simple.sh
-- capture_deal_insight
+- Open — stateless migration
 - VibeSec-Skill
 - otel-collector.yml
-- estimate_cost
-- core/memory.py
+- test_webhook_signatures.py
+- .__init__
 - test_icm_x.py
 - service aios build . with ARVO integration HMAC suite-kid
 - Lint Job (ruff check aios/)
@@ -285,9 +286,9 @@
 - website/privacy.html Privacy Policy
 - AGENTS.md Project Guide
 - Server-Side Bugs
-- WorkspacePaths
-- db_session
-- update_deal
+- pathlib
+- Skill
+- evolution.py
 - .test_cross_origin_rejected
 - Instrumentator
 - Análise Detalhada Arquitetura Operacional Times
@@ -312,9 +313,9 @@
 - Requisito: Todos os Agentes 100% Autônomos com HITL
 - Open Redirect
 - Server-Side Request Forgery (SSRF)
-- dashboard_data.py
-- WhatsappTemplate
-- TestQuarantineGate
+- service.py
+- PendingAction
+- .test_prestream_failure_is_still_retried
 - MemoryManager
 - Access Control Issues
 - Insecure File Upload
@@ -323,85 +324,97 @@
 - MetaAPIError
 - f1a2b3c4d5e6_whatsapp_templates.py
 - XML External Entity (XXE)
-- AgentMetric
+- _is_login_allowed
 - lifespan
 - z6a7b8c9d0e1_sales_funnels.py
 - typing
 - AIOS customer viability dogfood
-- test_orchestrator_routing.py
+- /graphify
 - .opencode/opencode.json
-- Credential
+- automations.py
 - registry_entries
 - voice/__init__.py
 - test_cal_booking.py
-- TestKPIHonesty
+- weekly_standup_job
 - TestNewTemplates
-- emit_stream_event
-- aios/metrics.py
+- should_escalate
+- pytest
 - Reunião Técnica — Validação Final: Todos os Agentes e Times 100% Autônomos?
-- manager_narrative
+- _verify_twilio_signature
 - n3o4p5q6r7s8_conversation_per_contact.py
-- 4. Operacional — Dia a dia
-- toggle_proactive_alerts
+- test_suite_integration.py
+- _Permissive
 - test_audit_blockers.py
 - Análise Detalhada — Arquitetura e Operacional de Agentes Autônomos vs AIOS
 - g3a4b5c6d7e8_add_workflow_node_failure_handling.py
 - ensure_business_setup
-- O que foi fechado (5 dias → 99s)
+- _vec_db
 - AIOSClient
 - _FakeClient
-- floor_from_extra
+- _tool_burning_runtime
 - ratelimit.py
-- test_license_heartbeat_gate.py
+- _install_google_stub
+- test_gateway.py
 - api/tools.py
 - test_agent_canvas_events.py
-- test_approve_refuses_cross_org_in_memory_row
+- email_webhook
 - AsyncClient
-- ChannelConnection
+- Conversation
 - ICM-X for AIOS — architecture and rollout
 - httpx
-- _channel_type_label
+- graphify reference: query, path, explain
 - TestGuardSendIsNotDoubleCounted
-- _plan_label
-- _tool_conflicts
+- _extra_fields
+- team_save
 - process_inbound
-- _status_label
+- arvo/client.py
 - Perf Audit
+- http_get.py
+- parametrize
 - test_router.py
-- test_any_tool_use_holds_the_tier
+- content_scan.py
+- _gated_markers
+- .run_structured
 - upload_file
+- .from_dict
 - test_health_rag.py
+- API Contract
+- TestNonIdempotentToolsAreNotRetried
 - test_refresh_token_carries_a_persisted_jti
 - TestScientistIsAnalysisNotModeling
 - test_errors.py
+- test_channel_types.py
 - TestSlackChannelRouting
-- meetings.py
-- whatsapp/config.py
+- jobs.py
+- test_event_retry_uses_fresh_hmac_nonce
 - evolution_client
-- test_ratelimit.py
+- TestEvolutionChannel
+- consent.py
 - x4y5z6a7b8c9_messages_dedup.py
+- _Result
 - 834529df9a09_merge_unify_template_studio_and_.py
 - TestBillingDisabled
+- _memory
 - a0b1c2d3e4f5_owner_notifications.py
-- b7c8d9e0f1a2_pending_actions_org_id.py
+- TestRunGateIsSpendOnly
+- verify_fleet_status
+- creds_env
 - _isolated_run_caches
 - a0deb8aa39f7_agents_add_extra_data_json_models_drift.py
-- team_collaboration.py
-- admin_backup_page
+- expressions.py
+- app.py
 - FakeTransport
-- TestEvolutionInstanceLimit
 - test_retries_transport_errors
-- transcribe.py
 
 ## God Nodes (most connected - your core abstractions)
-1. `db_session()` - 312 edges
+1. `db_session()` - 317 edges
 2. `DatabaseBackend` - 261 edges
 3. `Agent` - 247 edges
 4. `Organization` - 174 edges
-5. `_org_filter()` - 125 edges
+5. `_org_filter()` - 130 edges
 6. `User` - 115 edges
-7. `ChannelConnection` - 114 edges
-8. `CrmDeal` - 114 edges
+7. `CrmDeal` - 115 edges
+8. `ChannelConnection` - 114 edges
 9. `Team` - 97 edges
 10. `AgentRuntime` - 89 edges
 
@@ -439,103 +452,103 @@
 - **RAG + Flow Integration (files.html RAG search feeds flow_editor rag_search node)** — dashboard_templates_files_file, dashboard_templates_knowledge_file, dashboard_templates_flow_editor_file, concept_rag_knowledge_base, concept_flow_workflow_engine [INFERRED 0.85]
 - **WhatsApp Delivery Stack** — aios_dashboard_templates_evolution_evolution_gateway, aios_dashboard_templates_evolution_provider_router, aios_dashboard_templates_evolution_qr_connect, aios_dashboard_templates_channels_evolution_instance_manager, aios_dashboard_templates_whatsapp_risk_risk_score, docker_compose_coolify_evolution_service [INFERRED 0.85]
 
-## Communities (405 total, 124 thin omitted)
+## Communities (416 total, 133 thin omitted)
 
 ### Community 0 - "test_workday_board.py"
 Cohesion: 0.06
 Nodes (34): _digits(), ensure_deal_for_contact(), record_interaction(), _truncate(), board_for_agent(), render_board(), _agent(), _cookie() (+26 more)
 
-### Community 1 - "route"
-Cohesion: 0.13
-Nodes (13): is_routable(), record(), remember_floor(), route(), _hold(), RouteDecision, should_escalate(), stats() (+5 more)
+### Community 1 - "core/router.py"
+Cohesion: 0.22
+Nodes (5): record(), _hold(), RouteDecision, stats(), test_direction_labels_separate_savings_from_repairs()
 
 ### Community 2 - "BaseTool"
-Cohesion: 0.04
-Nodes (26): BaseTool, CodeInput, CodeTool, CurrentDatetimeTool, EtlUrlInput, IfInput, IfTool, LeadScoreInput (+18 more)
+Cohesion: 0.02
+Nodes (51): put_secret(), decrypt_channel_config(), decrypt_secret(), get_org_secrets(), _key(), _legacy_key(), set_org_secret(), SkillSection (+43 more)
 
-### Community 3 - "test_team_collaboration.py"
-Cohesion: 0.11
-Nodes (24): AskTeamManagerTool, NotifyHumanTool, _agent(), _async_empty(), _join(), _org(), _team(), test_agent_orchestrator_import_cycle_resolves_either_way() (+16 more)
+### Community 3 - "AskTeamManagerTool"
+Cohesion: 0.08
+Nodes (23): AskTeamManagerTool, NotifyHumanTool, TestNoBypass, _agent(), _join(), _org(), _team(), test_ask_team_manager_does_not_report_empty_reply_as_success() (+15 more)
 
 ### Community 4 - "api/auth.py"
-Cohesion: 0.04
-Nodes (47): _decode_jwt_token(), forgot_password(), get_jwt_key_info(), _get_jwt_signing_key(), _get_jwt_verification_key(), _get_oauth_redis(), _get_redis(), github_callback() (+39 more)
+Cohesion: 0.07
+Nodes (29): _as_utc(), _get_oauth_redis(), _get_redis(), github_callback(), github_login(), google_calendar_callback(), google_calendar_disconnect(), google_calendar_login() (+21 more)
 
 ### Community 5 - "dataclasses"
 Cohesion: 0.09
-Nodes (19): _outcome_snapshot(), OutcomeCounts, _pct(), summarize_outcomes(), _contains_opt_out(), FollowUpDecision, may_follow_up(), requires_human() (+11 more)
+Nodes (20): _outcome_snapshot(), OutcomeCounts, _pct(), summarize_outcomes(), _contains_opt_out(), FollowUpDecision, may_follow_up(), requires_human() (+12 more)
 
 ### Community 6 - "SQLQueryTool"
-Cohesion: 0.09
-Nodes (7): get_superadmin(), SQLQueryTool, test_scoped_query_is_still_allowed(), test_no_x_api_key_param(), TestSqlOrgScopeBypass, TestSqlOrgScoping, TestSuperadminGate
+Cohesion: 0.12
+Nodes (3): SQLQueryTool, TestSqlOrgScopeBypass, TestSqlOrgScoping
 
-### Community 7 - "pytest"
-Cohesion: 0.05
-Nodes (24): _validate_password(), get_db(), init_db(), _is_postgres(), do_run_migrations(), run_async_migrations(), run_migrations_online(), Pós-deploy (auto) (+16 more)
+### Community 7 - "fixture"
+Cohesion: 0.11
+Nodes (9): async_client(), auth_client(), _reset_tool_registry(), _restore_direct_module_patches(), test_db_session(), test_engine(), test_org(), test_session() (+1 more)
 
 ### Community 8 - "_FakePool"
-Cohesion: 0.10
-Nodes (12): consume_once(), ensure_group(), _FakePool, test_consume_dispatches_then_acks(), fake_dispatch(), test_consume_drops_poison_payload_without_crashing(), test_consume_leaves_failed_dispatch_unacked_for_reclaim(), test_consume_reclaims_entries_abandoned_by_a_dead_consumer() (+4 more)
+Cohesion: 0.08
+Nodes (14): consume_once(), ensure_group(), event_consume_job(), _FakePool, test_consume_dispatches_then_acks(), fake_dispatch(), test_consume_drops_poison_payload_without_crashing(), test_consume_leaves_failed_dispatch_unacked_for_reclaim() (+6 more)
 
-### Community 9 - "test_webhook_signatures.py"
-Cohesion: 0.04
-Nodes (26): email_webhook(), email_webhook_verify(), _process_inbound_email(), _verify_email_signature(), _expected_secret(), telegram_webhook(), download_recording_audio(), get_recording() (+18 more)
+### Community 9 - "models.py"
+Cohesion: 0.03
+Nodes (22): require_admin_key(), email_webhook_verify(), _process_inbound_email(), _channel_id_of(), _find_connection(), slack_webhook(), slack_webhook_verify(), _verify_slack_signature() (+14 more)
 
-### Community 10 - "app.py"
-Cohesion: 0.04
-Nodes (113): get_dashboard_user(), encrypt_channel_config(), encrypt_secret(), read_artifact_text(), get_trace_scoped(), admin_backup_now(), admin_backup_restore(), admin_dlq_retry() (+105 more)
+### Community 10 - "db_session"
+Cohesion: 0.06
+Nodes (87): agent_clone(), agent_delete(), agent_deploy(), agent_save(), agent_test(), agent_verify(), agent_verify_fleet(), agent_verify_fleet_cancel() (+79 more)
 
 ### Community 11 - "Agent"
-Cohesion: 0.04
-Nodes (41): business_setup_status(), export_agent(), get_agent(), get_agent_skills(), list_agents(), workday_status(), publish_version(), rollback_version() (+33 more)
+Cohesion: 0.06
+Nodes (23): remote_health(), business_setup_status(), export_agent(), get_agent(), get_agent_skills(), workday_status(), eval_history(), list_datasets() (+15 more)
 
 ### Community 12 - ".select"
-Cohesion: 0.05
-Nodes (61): check_autoscale(), latest_instances(), system_status(), get_monthly_usage(), admin_dlq(), admin_org_detail(), agent_canvas(), agent_deploy() (+53 more)
+Cohesion: 0.07
+Nodes (54): whatsapp_health(), check_autoscale(), list_dlq(), latest_instances(), admin_dashboard(), admin_dlq(), admin_org_detail(), agent_canvas() (+46 more)
 
-### Community 13 - "Team"
-Cohesion: 0.06
-Nodes (45): fire_event_triggers(), assign_agents(), create_team(), add_node(), dfs(), create_workflow(), import_workflow(), patch_workflow() (+37 more)
+### Community 13 - "Reunião Técnica — Validação 100% Autônomo por Tipo de Agente"
+Cohesion: 0.14
+Nodes (12): main(), 1. Teste Padrão (combinado antes), 4. Debate — É 100% autônomo ou não? (15min), 5. Decisão, Reunião Técnica — Validação 100% Autônomo por Tipo de Agente, 3. Dados — Memória e Skills (Ana, 10min), 4. WhatsApp/Voz — Voz e Evolution autônomos? (8min), 5. UI/UX — O usuário percebe autonomia? (7min) (+4 more)
 
-### Community 14 - "_post_team_reports"
-Cohesion: 0.12
-Nodes (11): monthly_report_job(), _post_team_reports(), weekly_report_job(), Control Center, Deploy, Health, Suite AIOS + ARVO, Suite teste (+3 more)
+### Community 14 - "Suite AIOS + ARVO"
+Cohesion: 0.33
+Nodes (5): Control Center, Deploy, Health, Suite AIOS + ARVO, Suite teste
 
 ### Community 15 - "EvolutionChannel"
 Cohesion: 0.06
-Nodes (10): OutboundMessage, _Batch, EvolutionChannel, _flush_now(), _launch_flush(), _run(), _mergeable(), _merged_message() (+2 more)
+Nodes (3): EvolutionChannel, send_alert_via_evolution(), TestEvolutionSSRF
 
 ### Community 16 - "AgentScheduler"
-Cohesion: 0.08
+Cohesion: 0.07
 Nodes (5): AgentProcess, AgentScheduler, AgentState, SchedulerPolicy, TestSchedulerBookkeeping
 
 ### Community 17 - "calendar.py"
-Cohesion: 0.08
-Nodes (18): CalendarAvailabilityInput, CalendarAvailabilityTool, _query(), CalendarCreateEventInput, CalendarListInput, CalendarListTool, _list(), CalendarTool (+10 more)
+Cohesion: 0.18
+Nodes (9): CalendarAvailabilityInput, _query(), CalendarCreateEventInput, CalendarListInput, _list(), _insert(), _parse_iso(), _resolve_google() (+1 more)
 
 ### Community 18 - "test_security_audit.py"
-Cohesion: 0.05
-Nodes (31): _as_utc(), validate(), _fold(), _is_build_capable(), _looks_like_information_request(), _FakeRequest, _gated_markers(), has_name() (+23 more)
+Cohesion: 0.08
+Nodes (18): validate(), _FakeRequest, _sig(), test_cal_booking_is_granted_to_both_sales_templates(), test_channel_config_is_encrypted_on_write(), test_crm_page_loads_deals_regardless_of_the_flag(), test_empty_signature_header_is_rejected(), test_escape_helper_exists_once_in_base() (+10 more)
 
 ### Community 19 - "deployment.py"
-Cohesion: 0.06
-Nodes (58): verify_fleet_status(), AgentNotReady, AgentStopped, _clean(), deploy_and_verify(), deployment_view(), DeploymentError, _enforce_quota() (+50 more)
-
-### Community 20 - "stripe_webhook"
 Cohesion: 0.12
-Nodes (12): _already_processed(), BudgetCreate, CheckoutRequest, create_budget(), create_checkout(), create_portal(), _org_hmac(), PortalRequest (+4 more)
+Nodes (29): _agent_health_rows(), _health_entry(), AgentNotReady, AgentStopped, _clean(), deploy_and_verify(), deployment_view(), DeploymentError (+21 more)
 
-### Community 21 - "asyncio"
+### Community 20 - "billing.py"
 Cohesion: 0.06
-Nodes (19): EmailChannel, _cached_context_is_fresh(), SavedContext, acquire_lease(), release_lease(), renew_lease(), P1/P2 statelessness fixes  [x] 2026-11-16, Phase 8 — shared agent state  [x] done 2026-11-16 (+11 more)
+Nodes (31): _already_processed(), budget_forecast(), BudgetCreate, CheckoutRequest, create_budget(), create_checkout(), create_portal(), creation_cost() (+23 more)
+
+### Community 21 - "test_shared_state.py"
+Cohesion: 0.08
+Nodes (17): EmailChannel, _cached_context_is_fresh(), SavedContext, acquire_lease(), release_lease(), renew_lease(), P1/P2 statelessness fixes  [x] 2026-11-16, Phase 8 — shared agent state  [x] done 2026-11-16 (+9 more)
 
 ### Community 23 - "SwarmCoordinator"
 Cohesion: 0.11
 Nodes (8): SwarmCoordinator, SwarmMessage, SwarmTask, TeamSwarmConfig, test_claim_complete_vote_reject_foreign_org(), test_list_tasks_scoped_to_org(), test_stats_scoped_to_org(), two_org_tasks()
 
 ### Community 24 - "TeamOrchestrator"
-Cohesion: 0.11
-Nodes (10): verify_org_access(), _embed(), _get_runtime(), _maybe_reflect(), _supervisor_prompt(), TeamOrchestrator, _run_one(), `manager` — Gerente Handoff + SLA (SWE Lead) (+2 more)
+Cohesion: 0.05
+Nodes (28): verify_org_access(), _bow_embed(), _embed(), _load_sentence_transformer(), _get_runtime(), _json_from_text(), _maybe_reflect(), _supervisor_prompt() (+20 more)
 
 ### Community 26 - "ROUND 1: DORES ATUAIS (20 min)"
 Cohesion: 0.05
@@ -543,19 +556,19 @@ Nodes (38): 10. Fernanda — Jurídico LexSmart (20 advogados), 1. Roberto — C
 
 ### Community 27 - "main.py"
 Cohesion: 0.09
-Nodes (12): redis_state(), _is_sqlite(), context_status(), docs_page(), health(), health_live(), health_ready(), landing_page() (+4 more)
+Nodes (11): setup_logging(), _is_sqlite(), context_status(), docs_page(), health(), health_live(), landing_page(), privacy_policy() (+3 more)
 
-### Community 28 - "evolution_api.py"
-Cohesion: 0.05
-Nodes (40): _base(), check_evolution_ip_allowed(), evo_connect(), evo_create_instance(), evo_delete(), evo_fetch_instances(), _evo_headers(), evo_logout() (+32 more)
+### Community 28 - "WhatsAppProvider"
+Cohesion: 0.15
+Nodes (15): evo_delete(), HealthStatus, OutboundMessage, SendResult, WhatsAppProvider, _base(), EvolutionBaileysProvider, _headers() (+7 more)
 
-### Community 29 - "agent_binding.py"
-Cohesion: 0.25
-Nodes (8): assert_paid_workflow_contract(), ICMContractRequired, has_contract(), _agent(), test_internal_agent_needs_no_contract(), test_paid_workflow_with_binding_passes(), test_paid_workflow_without_icm_binding_is_refused(), test_unknown_paid_workflow_is_refused()
+### Community 29 - "Done"
+Cohesion: 0.13
+Nodes (13): assert_paid_workflow_contract(), bind_agent_stage(), ICMContractRequired, verify_fleet_job(), paid_workflow_class(), Done, _fresh_db(), _agent() (+5 more)
 
 ### Community 30 - "DatabaseBackend"
 Cohesion: 0.04
-Nodes (42): business_setup(), create_agent(), delete_agent(), deploy_agent(), import_agent(), promote_canary(), push_agent_to_fleet(), reload_agent_skills() (+34 more)
+Nodes (50): business_setup(), create_agent(), delete_agent(), deploy_agent(), import_agent(), list_agents(), promote_canary(), push_agent_to_fleet() (+42 more)
 
 ### Community 31 - "Guia BFG — Limpeza de Histórico Git (Secrets Vazados)"
 Cohesion: 0.06
@@ -565,9 +578,9 @@ Nodes (34): 1. Criar branch limpa a partir de `f328da5`, 1. Instalar, 1. Instala
 Cohesion: 0.04
 Nodes (22): WebChannel, test_channel_toggle_and_create_start_the_adapter(), test_dlq_replay_marks_recovered_only_after_enqueue(), test_dlq_replay_passes_args_positionally(), test_email_and_voice_webhooks_do_not_pick_an_arbitrary_tenant(), test_email_reply_is_addressed_to_the_sender(), test_event_triggers_actually_fire(), test_failed_agent_run_retries_and_dead_letters() (+14 more)
 
-### Community 33 - "_process_inbound_once"
-Cohesion: 0.12
-Nodes (7): send_message_stream(), event_stream(), is_failed_run(), track_usage(), _process_inbound_once(), test_is_failed_run_flags_every_runtime_failure_notice(), test_is_failed_run_passes_real_answers_through()
+### Community 33 - "fleet_verify.py"
+Cohesion: 0.13
+Nodes (27): verify_fleet(), _acquire_lock(), cancel_fleet_verification(), FleetVerifyError, get_fleet_state(), _key(), _lock_key(), _now() (+19 more)
 
 ### Community 35 - "⚠️ Synthetic Product Test — not customer evidence"
 Cohesion: 0.08
@@ -575,19 +588,19 @@ Nodes (23): 1. Run information, 2. Frozen user contract, 3. Task result, 4. User
 
 ### Community 36 - "whatsapp_guard.py"
 Cohesion: 0.09
-Nodes (25): evolution_webhook(), _resolve_channel(), verify_evolution_webhook(), can_send(), check_opt_out(), _global_quota(), guard_send(), has_spam_signals() (+17 more)
+Nodes (24): evolution_webhook(), _resolve_channel(), verify_evolution_webhook(), can_send(), check_opt_out(), _global_quota(), guard_send(), has_spam_signals() (+16 more)
 
 ### Community 37 - "test_login_allowlist.py"
-Cohesion: 0.08
-Nodes (35): _create_access_token(), _create_email_token(), _create_jwt_token(), _create_refresh_token(), LoginRequest, _allow(), _dash_req(), _DB (+27 more)
+Cohesion: 0.12
+Nodes (30): _create_access_token(), LoginRequest, _allow(), _dash_req(), _DB, _login_page_marker(), _recorder(), _req() (+22 more)
 
 ### Community 38 - "test_auth_hardening.py"
-Cohesion: 0.08
-Nodes (17): HttpRequestInput, HttpRequestTool, _is_private(), _operator_allows_private(), _FakeRequest, _LoginBody, _no_redis(), _noop() (+9 more)
+Cohesion: 0.09
+Nodes (14): HttpRequestInput, _FakeRequest, _LoginBody, _no_redis(), _noop(), test_agent_cannot_disable_ssrf_guard(), test_allow_private_not_in_agent_visible_schema(), test_cloud_metadata_blocked_by_default() (+6 more)
 
 ### Community 39 - "test_build_request.py"
-Cohesion: 0.08
-Nodes (11): RequestBuildTool, _agent(), _deal(), _org(), _team(), TestNoSilentPath, TestOwnerIsAlwaysTold, TestWorkdayDigest (+3 more)
+Cohesion: 0.07
+Nodes (12): RequestBuildTool, _agent(), _deal(), _org(), _team(), TestJustificationGate, TestNoSilentPath, TestOwnerIsAlwaysTold (+4 more)
 
 ### Community 40 - "test_template_lint.py"
 Cohesion: 0.13
@@ -597,40 +610,40 @@ Nodes (28): clean(), ids(), test_bad_names_rejected(), test_dangling_end_rejecte
 Cohesion: 0.09
 Nodes (9): aios_client(), AIOSTestClient, run_manual_test(), test_channel_id(), test_create_instance_via_aios(), test_get_qrcode_via_aios(), test_instance_name(), test_list_instances() (+1 more)
 
-### Community 42 - "place_call"
-Cohesion: 0.18
-Nodes (4): emit_usage_event(), place_call(), _retell_call(), _vapi_call()
+### Community 42 - "asyncio"
+Cohesion: 0.10
+Nodes (9): _fmt(), main(), _ensure_member(), main(), main(), clean_system_prompt(), main(), _get_or_create_agent() (+1 more)
 
 ### Community 43 - "arvo/auth.py"
 Cohesion: 0.17
 Nodes (15): _body_hash(), _canonical(), _clear_nonces(), _register_nonce(), sign_request(), verify_request(), _clear_events(), test_events_idempotency() (+7 more)
 
-### Community 44 - "WorkflowRun"
-Cohesion: 0.16
-Nodes (11): webhook_dispatch(), replay_run(), resume_run(), run_workflow(), _get_org_semaphore(), WorkflowDef, WorkflowEngine, WorkflowNode (+3 more)
+### Community 44 - "Workflow"
+Cohesion: 0.09
+Nodes (36): fire_event_triggers(), webhook_dispatch(), add_node(), dfs(), create_workflow(), delete_node(), delete_workflow(), eval_workflow_run() (+28 more)
 
 ### Community 45 - "test_evolution_integration.py"
 Cohesion: 0.13
 Nodes (9): EvolutionTestClient, run_full_test_suite(), test_01_create_instance(), test_02_get_qrcode(), test_03_wait_for_connection(), test_04_send_text_message(), test_05_send_media_message(), test_06_receive_webhook_simulation() (+1 more)
 
-### Community 46 - "logging"
-Cohesion: 0.05
-Nodes (31): create_credential(), create_from_template(), create_trigger(), list_credentials(), list_executions(), list_templates(), list_triggers(), _require_role() (+23 more)
+### Community 46 - "db/backend.py"
+Cohesion: 0.04
+Nodes (35): get_current_user(), get_org_id(), require_org_id(), create_dataset(), eval_agent(), EvalCase, EvalRequest, EvalResult (+27 more)
 
 ### Community 47 - "ToolEngine"
 Cohesion: 0.05
-Nodes (15): ToolEngine, ToolExecutionError, 5. Ben AI (@BenAI92 — 228K) — 2x $1M ARR, TestToolEngineResilience, TestSolutions, TestNoPhantomToolNames, test_dynamic_tool_schema_is_preserved(), test_registry_consistent_after_importing_every_tool_module() (+7 more)
+Nodes (14): get_metrics(), ToolEngine, ToolExecutionError, TestSolutions, TestNoPhantomToolNames, test_argument_shape_errors_are_not_retried(), test_registry_consistent_after_importing_every_tool_module(), TestRegistryConsistency (+6 more)
 
 ### Community 48 - "AutonomousAgent"
-Cohesion: 0.09
-Nodes (16): AutonomousAgent, 10. OpenAI (@OpenAI), 11. Liam Evans (@liamevansyt — 77K), 12. Liam Ottley (@LiamOttley — 846K) — AAA model, 13. Leadgenman (@LeadGenMan — 6.2K), 14. Rafael Milagre (@RafaelMilagre — 7K, VIVER DE IA), 1. AI Engineer (@aiDotEngineer — 520K), 2. Rafael Melgaço (@melgarafael — 20K) — BR (+8 more)
+Cohesion: 0.06
+Nodes (29): AutonomousAgent, 1. Arquitetura de Referência — Single Agent (100%), 3.1 Single Agent — Todos os 8 Tipos, 3.2 Time — 5 Estratégias, 3.3 OS Total — Checklist 55 itens (Agent Reliability), 3. Auditoria AIOS — Por Tipo e Por Time, 4. Operacional — Dia a dia, 5. Veredito — Estão 100% autônomos? (+21 more)
 
 ### Community 49 - "test_icm_agent_binding.py"
-Cohesion: 0.22
-Nodes (7): seed_team_workspaces(), _agent(), test_agent_allowlist_is_intersected_with_stage(), test_agent_runtime_applies_stage_context_tools_and_timeout(), test_agent_without_icm_config_has_no_stage(), test_every_agent_binding_points_at_a_seeded_stage(), test_team_workspaces_seed_valid_manifests()
+Cohesion: 0.24
+Nodes (8): load_stage_manifest(), seed_team_workspaces(), _agent(), test_agent_allowlist_is_intersected_with_stage(), test_agent_runtime_applies_stage_context_tools_and_timeout(), test_agent_without_icm_config_has_no_stage(), test_every_agent_binding_points_at_a_seeded_stage(), test_team_workspaces_seed_valid_manifests()
 
 ### Community 52 - "SlackChannel"
-Cohesion: 0.11
+Cohesion: 0.10
 Nodes (8): SlackChannel, _Conn, _FakeClient, _FakeResponse, _msg(), _patch(), _factory(), TestSlackOutbound
 
 ### Community 53 - "test_migrations.py"
@@ -642,32 +655,32 @@ Cohesion: 0.08
 Nodes (24): 1. PostgreSQL (Supabase), 2. Redis, 3. Convex (Optional — for real-time features), 4. AIOS App (Main Service), 5. Caddy (Reverse Proxy), App Service Settings:, App won't start, Convex (+16 more)
 
 ### Community 56 - "What You Must Do When Invoked"
-Cohesion: 0.05
-Nodes (31): _search(), For /graphify explain, For /graphify path, graphify reference: query, path, explain, Step 0 — Constrained query expansion (REQUIRED before traversal), Step 1 — Traversal, For /graphify add and --watch, For /graphify query (+23 more)
+Cohesion: 0.13
+Nodes (15): Part A - Structural extraction for code files, Part B - Semantic extraction (parallel subagents), Part C - Merge AST + semantic into final extraction, Step 0 - GitHub repos and multi-path merge (only if a URL or several paths), Step 1 - Ensure graphify is installed, Step 2.5 - Video and audio (only if video files detected), Step 2 - Detect files, Step 3 - Extract entities and relationships (+7 more)
 
 ### Community 57 - "Validação ICP — Produto AIOS | Pesquisa Extensa Pré-Lançamento"
-Cohesion: 0.09
-Nodes (22): 1. ICPs Validados (8 arquétipos), 2.1 Roteiro Entrevista (validar problema, não solução), 2.2 Tarefas Críticas (5) — sucesso = completa sem ajuda em ≤3min, 2.3 Métricas, 2. Metodologia, 3.1 Geral (n=14 entrevistas + 32 surveys), 3.2 Por ICP, 3. Resultados Quantitativos (+14 more)
+Cohesion: 0.08
+Nodes (24): 10. Assinaturas e Próximos Passos, 1. ICPs Validados (8 arquétipos), 2.1 Roteiro Entrevista (validar problema, não solução), 2.2 Tarefas Críticas (5) — sucesso = completa sem ajuda em ≤3min, 2.3 Métricas, 2. Metodologia, 3.1 Geral (n=14 entrevistas + 32 surveys), 3.2 Por ICP (+16 more)
 
 ### Community 58 - "core/voice.py"
-Cohesion: 0.15
-Nodes (8): VoiceChannel, _elevenlabs_tts(), _openai_compat_tts(), _redact_pii(), synthesize(), transcribe_audio(), voice_config(), 3. OS — Memory, Workflow, Voice, Skills (Arquiteto, 15min)
+Cohesion: 0.11
+Nodes (12): VoiceChannel, emit_usage_event(), _elevenlabs_tts(), _openai_compat_tts(), place_call(), _redact_pii(), _retell_call(), synthesize() (+4 more)
 
-### Community 59 - "worker.py"
-Cohesion: 0.08
-Nodes (23): _pattern_sig(), _backup_tick(), run_once(), _try_singleton_lock(), AgentLearning, eval_review_job(), memory_consolidation_job(), optimization_review_job() (+15 more)
+### Community 59 - "cron_scheduler.py"
+Cohesion: 0.12
+Nodes (13): _backup_tick(), _crm_mql_stale_tick(), _expire_pending_tick(), _proactive_alerts_tick(), run_once(), _try_singleton_lock(), cron_tick_job(), telemetry_flush_job() (+5 more)
 
 ### Community 60 - "lint_template"
 Cohesion: 0.21
 Nodes (16): _check_braces(), _check_category(), _check_dangling(), _check_duplicate(), _check_examples(), _check_floating(), _check_footer(), _check_header() (+8 more)
 
 ### Community 61 - "analytics.py"
-Cohesion: 0.10
-Nodes (20): _agent_health_rows(), business_outcomes(), evolution_rate(), get_metrics(), get_proactive_alerts(), get_trace_api(), _health_entry(), overview() (+12 more)
+Cohesion: 0.09
+Nodes (22): business_outcomes(), evolution_rate(), get_proactive_alerts(), get_trace_api(), overview(), OverviewOut, pgvector_health(), ProactiveAlertsToggle (+14 more)
 
 ### Community 62 - "HookPoint"
-Cohesion: 0.07
-Nodes (8): HookPoint, HookRegistry, SyscallDispatcher, SyscallError, SyscallRequest, SyscallResponse, SyscallType, test_register_hooks_is_idempotent_per_process()
+Cohesion: 0.10
+Nodes (6): HookPoint, HookRegistry, SyscallDispatcher, SyscallError, SyscallType, test_register_hooks_is_idempotent_per_process()
 
 ### Community 63 - "Production Configuration Guide"
 Cohesion: 0.10
@@ -681,45 +694,45 @@ Nodes (21): 1. Server-Side Encryption (SSE-S3), 2. Bucket Versioning, 3. Object 
 Cohesion: 0.09
 Nodes (21): 1. Abertura (5 min), 2. Round 1: Dores Atuais (20 min), 3. Round 2: Apresentação Conceitual (10 min), 4. Round 3: Reações & Validação (35 min), 5. Round 4: Objeções & Dealbreakers (15 min), 6. Fechamento & Compromissos (5 min), André (SaaS Série A) — **COMPRARIA Enterprise Embedded**, Carla (Agência) — **COMPRARIA Pro + Revenda** (+13 more)
 
-### Community 67 - "anti_ban/signals.py"
-Cohesion: 0.13
-Nodes (7): gather_counts(), is_quarantined(), looks_like_ban(), record_event(), record_response(), sent_today(), TestBanDetection
+### Community 67 - "score_from_events"
+Cohesion: 0.05
+Nodes (15): instance_report(), org_report(), RiskReport, score_from_events(), gather_counts(), is_quarantined(), looks_like_ban(), record_event() (+7 more)
 
 ### Community 68 - "Evaluator"
-Cohesion: 0.11
-Nodes (14): Evaluator, Reflector, 5 Patterns Zylos (Highest ROI = Reflection), Agent Reliability Checklist (60 itens, 0-20 prototype, 21-40 early, 41-55 production-ready), Auditoria: Agentes AIOS estão 100% autônomos? — Checklist 2026, Checklist Autonomia (0=inert, 1=chatbot, 2=scheduled, 3=contextual, 4=self-directed, 5=fully autonomous), Veredito, 2. Resultados por Tipo (SWE Lead apresenta logs) (+6 more)
+Cohesion: 0.08
+Nodes (19): list_files(), read_file(), Evaluator, Reflector, 3. Análise Detalhada — Por Componente, 5 Patterns Zylos (Highest ROI = Reflection), Agent Reliability Checklist (60 itens, 0-20 prototype, 21-40 early, 41-55 production-ready), Auditoria: Agentes AIOS estão 100% autônomos? — Checklist 2026 (+11 more)
 
 ### Community 69 - "tracing.py"
-Cohesion: 0.13
-Nodes (12): current_trace_id(), end_span(), flush_metrics(), _log_span_event(), _maybe_flush_metrics(), _maybe_otel_export(), _metric_upsert_stmt(), new_trace_id() (+4 more)
+Cohesion: 0.14
+Nodes (13): current_trace_id(), end_span(), flush_metrics(), _log_span_event(), _maybe_flush_metrics(), _maybe_otel_export(), _metric_upsert_stmt(), new_trace_id() (+5 more)
 
-### Community 70 - "skill_loader.py"
-Cohesion: 0.12
-Nodes (3): LoadedSkill, SkillLoader, SkillSection
-
-### Community 71 - "api/workflows.py"
-Cohesion: 0.11
-Nodes (17): ab_test_agent(), PromptTestRequest, test_prompt(), delete_node(), delete_workflow(), eval_workflow_run(), export_workflow(), get_run() (+9 more)
+### Community 71 - "test_curated_memory.py"
+Cohesion: 0.20
+Nodes (13): load_blocks(), MemoryTool, _seed(), test_curated_blocks_land_in_built_context(), test_empty_blocks_add_nothing(), test_loaded_blocks_are_copies(), test_tool_add_persists_and_reloads(), test_tool_memory_block_is_per_agent() (+5 more)
 
 ### Community 72 - "A Estrutura Fixa (10 Tags)"
 Cohesion: 0.10
 Nodes (19): 10. `#FORMATO_SAIDA` — Contrato de saída (crítico para parsing), 11. `#SEGURANCA` — Guardrails, 12. `#VERIFICACAO` — Checklist testável (Runtime Instruction), 1. `#ROLE` — Quem é o agente (âncora de identidade), 2. `#CONTEXTO` — Onde ele opera (variável por chamada), 3. `#OBJETIVO` — O que deve fazer (verbo de ação + prioridades rankeadas), 4. `#CONHECIMENTO` — O que ele sabe (estável vs transitório), 5. `#FERRAMENTAS` — Como age (quando/por que/como) (+11 more)
 
-### Community 75 - "storage.py"
-Cohesion: 0.12
-Nodes (6): backend(), ensure_storage(), _get_backend(), LocalStorage, StorageBackend, transcribe_voice_recording()
+### Community 74 - "encrypt_channel_config"
+Cohesion: 0.11
+Nodes (10): _check_magic(), _get_extension(), validate_file(), encrypt_channel_config(), encrypt_secret(), files_upload(), ffile(), 🔴 Achados críticos (hardening obrigatório antes de Enterprise) (+2 more)
 
-### Community 76 - "models.py"
+### Community 75 - "storage.py"
 Cohesion: 0.08
-Nodes (24): LibraryIndex, Base, AgentKnowledge, AgentReflection, Artifact, Dataset, DeadLetter, EvalRun (+16 more)
+Nodes (9): download_recording_audio(), get_recording(), _highlight_match(), search_recordings(), backend(), _get_backend(), LocalStorage, StorageBackend (+1 more)
+
+### Community 76 - "Base"
+Cohesion: 0.04
+Nodes (36): _expected_secret(), meta_template_status_webhook(), AgentDB, _pattern_sig(), set_goal(), load_durable_state(), Base, AgentKnowledge (+28 more)
 
 ### Community 77 - "apply_template"
-Cohesion: 0.08
+Cohesion: 0.09
 Nodes (3): apply_template(), TestManagerTemplates, TestPerAgentTools
 
 ### Community 78 - "sandbox.py"
-Cohesion: 0.07
-Nodes (21): _collect(), _docker_available(), _image_present(), _run_in_container(), run_isolated(), _scrubbed_env(), validate_code(), PythonSandboxInput (+13 more)
+Cohesion: 0.11
+Nodes (10): _collect(), _docker_available(), _image_present(), _run_in_container(), run_isolated(), _scrubbed_env(), test_child_env_is_scrubbed(), test_sandbox_default_memory_fits_pandas() (+2 more)
 
 ### Community 79 - "AIOS API Guide"
 Cohesion: 0.11
@@ -730,24 +743,24 @@ Cohesion: 0.11
 Nodes (18): 1. Contexto Atual, 2. Posições Iniciais, 3. Análise de Viabilidade: Build vs Buy, 4. Análise de Custos: Otimização "Free/Self-Hosted", 5. Riscos e Mitigações, 6. Decisão: **VAMOS CONSTRUIR (Opção C — Hybrid)**, 7. Próximos Passos Imediatos, 8. Conclusão da Reunião (+10 more)
 
 ### Community 82 - "test_events_bus.py"
-Cohesion: 0.10
-Nodes (14): ev_type_matches(), matching_agents(), subscriptions_for(), proactive_event_job(), render_event_instruction(), test_agent_update_rejects_unmatchable_subscriptions(), test_envelope_from_empty_dict_has_no_type(), test_envelope_requires_type_and_org() (+6 more)
+Cohesion: 0.12
+Nodes (12): ev_type_matches(), matching_agents(), subscriptions_for(), proactive_event_job(), render_event_instruction(), test_agent_update_rejects_unmatchable_subscriptions(), test_envelope_requires_type_and_org(), test_ev_type_matches() (+4 more)
 
-### Community 83 - "read_file"
+### Community 83 - "heartbeat"
 Cohesion: 0.14
-Nodes (11): list_files(), read_file(), `support` — Empatia (SWE Jr + Voz), Fechamento, ICPs (11), Objeções finais + o que ainda precisam, Round 1 — Dores + O que precisam (2min cada), Round 2 — PM apresenta solução atual (com o que eles pediram) (+3 more)
+Nodes (9): heartbeat(), Fechamento, ICPs (11), Round 1 — Dores + O que precisam (2min cada), Round 2 — PM apresenta solução atual (com o que eles pediram), Round 3 — Validação: resolve? compram? o que falta?, Simulação Final — AIOS Voz & Dados Multi-canal 1-Click BYOK, Vale lançar? (+1 more)
 
 ### Community 84 - "routes.py"
-Cohesion: 0.09
-Nodes (24): audit_log(), AuditLog, IntegrationEvent, _forget_nonce(), ArvoEvent, ContextRequest, _db_claim_event(), _db_complete_event() (+16 more)
+Cohesion: 0.12
+Nodes (18): IntegrationEvent, IntegrationNonce, _forget_nonce(), ArvoEvent, ContextRequest, _db_claim_event(), _db_complete_event(), _db_get_event() (+10 more)
 
 ### Community 85 - "check_url"
-Cohesion: 0.12
-Nodes (10): HttpGetInput, HttpGetTool, check_url(), is_private_host(), test_allow_private_override(), test_fails_closed_on_unresolvable_host(), test_internal_targets_blocked(), test_no_hostname() (+2 more)
+Cohesion: 0.22
+Nodes (8): check_url(), is_private_host(), test_allow_private_override(), test_fails_closed_on_unresolvable_host(), test_internal_targets_blocked(), test_no_hostname(), test_non_http_schemes_blocked(), test_public_url_allowed()
 
 ### Community 86 - "test_learning_loop.py"
-Cohesion: 0.09
-Nodes (21): _char_script(), check_store_text(), find_injection(), _has_mixed_script_token(), scrub_invisible(), ReadSkillTool, test_exists_supports_auto_extractor_dedup(), test_fullwidth_lookalikes_cannot_dodge_the_patterns() (+13 more)
+Cohesion: 0.11
+Nodes (19): check_store_text(), find_injection(), scrub_invisible(), ReadSkillTool, test_exists_supports_auto_extractor_dedup(), test_fullwidth_lookalikes_cannot_dodge_the_patterns(), test_instruction_overrides_are_rejected(), test_invisible_unicode_is_stripped_not_blocked() (+11 more)
 
 ### Community 87 - "test_whatsapp_batching.py"
 Cohesion: 0.10
@@ -757,37 +770,41 @@ Nodes (25): _join_texts(), _conn(), _dispatch_recorder(), _send(), fast_window()
 Cohesion: 0.16
 Nodes (18): Control Center Page (Deal Desk Governado), Deal Desk Team Template, Performance Degradation 24h Panel, Audit Trail / 3-Layer Evidence Pack, Human vs Agent Deal Change View (CrmDealVersion), Pricing Guardian Financial Panel, Daily Call Queue With Timing Score, Deal Change History (C6) (+10 more)
 
+### Community 90 - "test_sandbox_security.py"
+Cohesion: 0.12
+Nodes (10): validate_code(), test_sandbox_blocks_ctypes_and_os(), test_escape_rejected_by_validator(), test_escape_returns_error_from_tool(), test_legitimate_data_analysis_still_runs(), test_memory_limit_still_enforced(), test_nested_import_in_function_rejected(), test_run_isolated_enforces_validator_for_all_callers() (+2 more)
+
 ### Community 91 - "User"
-Cohesion: 0.05
-Nodes (51): agent_db_stats(), create_knowledge(), create_learning(), create_reflection(), KnowledgeCreate, LearningCreate, list_knowledge(), list_learnings() (+43 more)
+Cohesion: 0.04
+Nodes (56): agent_db_stats(), create_knowledge(), create_learning(), create_reflection(), KnowledgeCreate, LearningCreate, list_knowledge(), list_learnings() (+48 more)
 
 ### Community 93 - "test_worker_registry.py"
 Cohesion: 0.12
 Nodes (14): budget_alert_job(), _aliased(), _registry(), _registered_names(), test_alias_wrapper_delegates(), test_all_qualified_enqueue_names_resolve(), test_bare_names_still_resolve(), test_budget_alert_job_noops_without_org() (+6 more)
 
 ### Community 94 - "log_config.py"
-Cohesion: 0.12
-Nodes (8): _extra_fields(), JSONFormatter, setup_logging(), TextFormatter, TraceIDFilter, _record(), test_json_formatter_includes_ids_and_extras(), test_text_formatter_shows_ids_and_extras()
+Cohesion: 0.14
+Nodes (8): JSONFormatter, TextFormatter, do_run_migrations(), run_async_migrations(), run_migrations_online(), _record(), test_json_formatter_includes_ids_and_extras(), test_text_formatter_shows_ids_and_extras()
 
 ### Community 95 - "test_features.py"
-Cohesion: 0.10
-Nodes (13): Extractor, _vec_db(), test_approval_approve_flow(), test_approval_reject_flow(), test_approval_timeout(), test_extractor_three_part(), test_fts_hybrid_search(), test_fts_vector_db_has_fts_table() (+5 more)
-
-### Community 96 - "test_lojista_signals.py"
 Cohesion: 0.14
-Nodes (10): rank_queue(), timing_score(), _overdue(), _cookie_for(), test_lojista_bad_phone(), test_lojista_bad_solution(), test_lojista_create_303(), test_lojista_page_renders() (+2 more)
+Nodes (11): Extractor, test_approval_approve_flow(), test_approval_reject_flow(), test_approval_timeout(), test_extractor_three_part(), test_fts_hybrid_search(), test_meta_agent_evaluate_and_history(), test_rubric_create_and_score() (+3 more)
+
+### Community 96 - "CrmDeal"
+Cohesion: 0.10
+Nodes (14): export_org(), rank_queue(), timing_score(), _overdue(), CrmDeal, test_crm_non_stage_edit_does_not_publish(), test_crm_stage_change_publishes_event(), _cookie_for() (+6 more)
 
 ### Community 97 - "errors.py"
-Cohesion: 0.16
-Nodes (8): _problem(), ProblemResponse, register_error_handlers(), global_handler(), http_exception_handler(), validation_handler(), _translate_detail(), limit_body_size()
+Cohesion: 0.17
+Nodes (7): _problem(), ProblemResponse, register_error_handlers(), global_handler(), http_exception_handler(), validation_handler(), _translate_detail()
 
 ### Community 98 - "WSManager"
 Cohesion: 0.09
 Nodes (11): WSManager, 2.1 Taxonomia (Academy + Deloitte + Manager Agent Paper), 2.2 Operacional — Como time autônomo trabalha (Ben AI, Polsia, Jake Van Clief), 2. Arquitetura de Referência — Times Autônomos (100%), _client(), FakeWS, test_approval_requested_carries_org_id(), test_dead_socket_is_unregistered() (+3 more)
 
-### Community 99 - "jobs.py"
-Cohesion: 0.10
-Nodes (14): _entry_to_dict(), write_dlq(), _send_quota_alert(), _now(), agent_run(), event_consume_job(), quota_alert_job(), _admin_headers() (+6 more)
+### Community 99 - "test_dead_letter.py"
+Cohesion: 0.11
+Nodes (15): clear_dlq(), reset_agent_health(), retry_dlq_endpoint(), clear_dlq(), _entry_to_dict(), retry_dlq(), DeadLetter, _now() (+7 more)
 
 ### Community 100 - "AIOS Dashboard Shell (base.html)"
 Cohesion: 0.16
@@ -797,13 +814,13 @@ Nodes (16): Custom Domain Configuration, Admin Organization Detail, Org Suspend 
 Cohesion: 0.31
 Nodes (15): Voice Channel Provider Options (selfhosted/elevenlabs/vapi/retell/livekit), FastAPI App Service (port 8777), Compose Profiles (voice, voice-stt), AIOS Deployment Topology (postgres, redis, otel, evolution, app, worker, voice), Evolution IP Allowlist Hardening (C10), Evolution API v2.3.7 Service, Coolify One-Click Compose Variant, OpenTelemetry Collector (+7 more)
 
-### Community 102 - "get_redis_pool"
-Cohesion: 0.12
-Nodes (12): _claim(), claim_idempotency(), _encode(), _handle(), publish(), publish_many(), _release(), release_idempotency() (+4 more)
+### Community 102 - "events.py"
+Cohesion: 0.15
+Nodes (10): _claim(), claim_idempotency(), _encode(), publish(), publish_many(), _release(), release_idempotency(), test_publish_returns_none_and_does_not_raise_when_redis_down() (+2 more)
 
-### Community 104 - "api/voice.py"
-Cohesion: 0.20
-Nodes (8): call(), CallRequest, _channel_config(), providers(), webhook(), say(), SayRequest, 🟡 Observações (não bloqueia, mas recomenda)
+### Community 104 - "track_usage"
+Cohesion: 0.14
+Nodes (11): event_stream(), call(), CallRequest, _channel_config(), say(), SayRequest, track_usage(), _download_audio() (+3 more)
 
 ### Community 105 - "YouTube — Canais Pesquisados: Agentes Autônomos"
 Cohesion: 0.12
@@ -814,60 +831,60 @@ Cohesion: 0.12
 Nodes (16): 1. Direct Evolution API Test (`test_evolution_integration.py`), 2. Via AIOS API Test (`test_evolution_via_aios.py`), Adding New Tests, CI/CD Integration, Environment Variables, Environment Variables, Evolution API Integration Tests, Prerequisites (+8 more)
 
 ### Community 108 - "_hash_password"
-Cohesion: 0.13
-Nodes (3): _hash_password(), TestAgentQuotas, TestAuth
+Cohesion: 0.12
+Nodes (6): _hash_password(), reset_password(), ResetPasswordRequest, _validate_password(), test_password_validation_helpers(), TestAuth
 
 ### Community 109 - "whatsapp_template_studio.py"
-Cohesion: 0.16
-Nodes (12): can_submit(), errors(), summarise(), warnings(), WhatsappTemplateDraftInput, WhatsappTemplateLint, WhatsappTemplateLintInput, WhatsappTemplateListInput (+4 more)
+Cohesion: 0.14
+Nodes (14): can_submit(), errors(), summarise(), warnings(), _connection(), _existing_bodies(), WhatsappTemplateDraftInput, WhatsappTemplateLint (+6 more)
 
 ### Community 110 - "_ch"
 Cohesion: 0.23
 Nodes (4): _ch(), _FakeResp, TestEvolutionUrlValidation, TestProviderSwitch
 
-### Community 111 - "test_curated_memory.py"
-Cohesion: 0.08
-Nodes (31): add_entry(), _capacity_error(), format_block(), load_blocks(), _locate(), _now(), remove_entry(), replace_entry() (+23 more)
+### Community 111 - "curated.py"
+Cohesion: 0.10
+Nodes (18): add_entry(), _capacity_error(), format_block(), _locate(), _now(), remove_entry(), replace_entry(), save_block() (+10 more)
 
-### Community 112 - "aios/config.py"
-Cohesion: 0.16
-Nodes (11): channels_are_remote(), runs_channels(), runs_cron(), runs_telemetry_flush(), runtime_role(), Phase 1 — runtime role split  [x] done 2026-11-15, test_health_endpoints(), test_all_role_uses_local_manager() (+3 more)
+### Community 112 - "runtime_role"
+Cohesion: 0.19
+Nodes (10): channels_are_remote(), runs_channels(), runs_cron(), runs_telemetry_flush(), runtime_role(), Phase 1 — runtime role split  [x] done 2026-11-15, test_all_role_uses_local_manager(), test_api_role_enqueues_channel_sync() (+2 more)
 
 ### Community 113 - "test_production_readiness.py"
 Cohesion: 0.05
-Nodes (16): Settings, template_code(), test_approval_decisions_pass_org_id(), test_billing_roi_is_not_fabricated(), test_crm_board_columns_come_from_data(), test_dashboard_pending_action_queries_reference_real_column(), test_dashboard_root_is_not_auth_exempt(), test_debug_defaults_to_false() (+8 more)
+Nodes (18): Settings, template_code(), test_agent_metric_has_unique_agent_hour(), test_agent_metric_tracks_samples(), test_approval_decisions_pass_org_id(), test_approve_refuses_cross_org_in_memory_row(), test_billing_roi_is_not_fabricated(), test_crm_board_columns_come_from_data() (+10 more)
 
 ### Community 114 - "envelope.py"
-Cohesion: 0.22
-Nodes (6): decrypt(), encrypt(), log_action(), check_consent(), _hash(), record_consent()
+Cohesion: 0.29
+Nodes (3): decrypt(), encrypt(), log_action()
 
 ### Community 116 - "HookContext"
-Cohesion: 0.13
-Nodes (11): init(), _lifecycle_event(), _on_agent_end(), _on_agent_error(), _on_agent_start(), _pump(), register_hooks(), shutdown() (+3 more)
+Cohesion: 0.18
+Nodes (10): init(), _lifecycle_event(), _on_agent_end(), _on_agent_error(), _on_agent_start(), _pump(), register_hooks(), shutdown() (+2 more)
 
 ### Community 117 - "Channel Type Taxonomy (web/evolution/slack/telegram/discord/email/voice)"
 Cohesion: 0.14
 Nodes (15): Channel List With Type Icon And Active Badge, Channel Connection Test Endpoint (/api/channels/test), Channel Type Taxonomy (web/evolution/slack/telegram/discord/email/voice), Channels Dashboard Page, Quick Channel Connect Modal, Human Handover With SLA Timer, Bot / Human / Assigned Conversation State, Client-Side Inbox Filter (channel/assignment/text) (+7 more)
 
 ### Community 118 - "Pesquisa: Agentes Autônomos de IA — Como Funcionam e Como Aplicar no AIOS"
-Cohesion: 0.13
-Nodes (15): 1. O que é Agente Autônomo (vs Chatbot), 2.1 Loop ReAct (base de tudo), 2.2 Loop Reflexion (self-correction), 2.3 Loop ReflAct (world-grounded), 2.4 AutoGPT / BabyAGI (YouTube AutoGPT Tutorial), 2.5 Memória Autônoma (U-Mem, MemInsight, Agentic Memory), 2. Como Funciona — O Loop (YouTube + Papers), 4.1 Estado Atual (chatbot+) (+7 more)
+Cohesion: 0.12
+Nodes (16): 1. O que é Agente Autônomo (vs Chatbot), 2.1 Loop ReAct (base de tudo), 2.2 Loop Reflexion (self-correction), 2.3 Loop ReflAct (world-grounded), 2.4 AutoGPT / BabyAGI (YouTube AutoGPT Tutorial), 2.5 Memória Autônoma (U-Mem, MemInsight, Agentic Memory), 2. Como Funciona — O Loop (YouTube + Papers), 3. YouTube — Vídeos Chave e Comportamento (+8 more)
 
-### Community 119 - "limits.py"
-Cohesion: 0.05
-Nodes (22): check_org_limits(), _fx(), _get_plan(), _is_sqlite(), _plan_limit(), _send_budget_alert(), Budget, UsageRecord (+14 more)
+### Community 119 - "test_limits_locking.py"
+Cohesion: 0.12
+Nodes (9): _is_sqlite(), _FakeDB, _FakeSess, test_is_sqlite_awaits_and_reports_dialect(), test_is_sqlite_returns_bool_not_coroutine(), test_no_never_awaited_coroutine_warning(), run(), test_postgres_limit_check_emits_for_update() (+1 more)
 
 ### Community 120 - "Enterprise Legal Templates — AIOS"
-Cohesion: 0.22
-Nodes (5): WorkflowPlanner, 1. MSA — Master Service Agreement (resumo), 3. SLA 99,9% — Enterprise, 4. Checklist de Assinatura, Enterprise Legal Templates — AIOS
+Cohesion: 0.40
+Nodes (3): 3. SLA 99,9% — Enterprise, 4. Checklist de Assinatura, Enterprise Legal Templates — AIOS
 
-### Community 122 - "model_select.py"
-Cohesion: 0.19
-Nodes (14): _aa(), _eligible(), fetch_catalog(), _main(), Pick, _price(), profile_for(), rank() (+6 more)
+### Community 122 - "vector_store.py"
+Cohesion: 0.06
+Nodes (32): _aa(), _eligible(), fetch_catalog(), _main(), Pick, _price(), profile_for(), rank() (+24 more)
 
 ### Community 123 - "test_tool_execution_and_guards.py"
-Cohesion: 0.07
-Nodes (18): SendEmailTool, _sql(), test_argument_shape_errors_are_not_retried(), test_calendar_reads_per_org_credential(), test_code_tool_executes(), test_current_datetime_returns_the_time(), test_customer_authored_dynamic_tool_runs(), test_http_get_rejects_plain_http_instead_of_raising_nameerror() (+10 more)
+Cohesion: 0.08
+Nodes (21): hybrid_search(), ProactiveAlertsTool, RagSearchTool, ReadFileTool, _sql(), test_calendar_reads_per_org_credential(), test_code_tool_executes(), test_current_datetime_returns_the_time() (+13 more)
 
 ### Community 124 - "subagent.py"
 Cohesion: 0.14
@@ -881,17 +898,17 @@ Nodes (14): Agent Version History Modal (GET /api/agents/{id}/versions), Version
 Cohesion: 0.19
 Nodes (14): Internal Mode Nav Label (Uso & Custos vs Cobranca), Billing & Usage Page, Budget CRUD API (/api/billing/budget), Budget Burn Forecast (how long the budget lasts), Budget Scoping (org / team / agent), Cost Breakdown by Agent and by Model, 14-Day Pro Trial Offer, Internal Mode Cost Control (AIOS_INTERNAL_MODE) (+6 more)
 
-### Community 127 - "TestConversion"
-Cohesion: 0.17
-Nodes (3): _columns(), D, TestConversion
+### Community 127 - "evolution_api.py"
+Cohesion: 0.19
+Nodes (17): _base(), evo_connect(), evo_create_instance(), evo_fetch_instances(), _evo_headers(), evo_logout(), evo_restart(), evo_send_text() (+9 more)
 
 ### Community 129 - "_freeze_cron_clock"
 Cohesion: 0.13
 Nodes (7): _freeze_cron_clock(), test_mql_stale_tick_publishes_instead_of_texting(), test_mql_tick_does_not_run_before_its_hour(), test_mql_tick_still_runs_after_a_delayed_worker(), fake_publish(), test_sales_drop_tick_publishes_instead_of_texting(), test_sales_drop_tick_skips_org_that_did_not_opt_in()
 
 ### Community 130 - "test_template_org_scope.py"
-Cohesion: 0.09
-Nodes (20): apply_meta_state(), _expected_secret(), meta_template_status_webhook(), WhatsappConnection, WhatsappTemplateDraft, WhatsappTemplateList, _mk_tpl(), test_agent_tools_refuse_without_org() (+12 more)
+Cohesion: 0.12
+Nodes (16): apply_meta_state(), WhatsappTemplateDraft, _mk_tpl(), test_agent_tools_refuse_without_org(), test_apply_state_is_idempotent(), test_connection_model_carries_org(), test_no_agent_submit_tool(), test_no_plaintext_token_column() (+8 more)
 
 ### Community 131 - "Agent Create/Edit Form"
 Cohesion: 0.22
@@ -913,20 +930,20 @@ Nodes (11): Anthropic Workflows vs Agents, Ben AI Manager Agent Team, 100% auton
 Cohesion: 0.15
 Nodes (12): 1. Diagnóstico — O que está pouco profissional hoje (Copywriter), 2. Princípios de Copy Aprovados (todos), 3. Antes → Depois (decisão), 4. Textos Finais Aprovados (para dev implementar), 5. Checklist Pós-Implementação, Data Section, Features, Hero (+4 more)
 
-### Community 136 - ".run"
-Cohesion: 0.23
-Nodes (6): _caller_team(), _collab_thread(), _has_evidence(), _require_org(), _resolve_team(), _team_id()
+### Community 136 - "team_collaboration.py"
+Cohesion: 0.10
+Nodes (15): human_slack_targets(), AskTeamManagerInput, _caller_team(), _collab_thread(), _fold(), _has_evidence(), _is_build_capable(), _looks_like_build_request() (+7 more)
 
 ### Community 137 - "_runtime"
 Cohesion: 0.23
 Nodes (12): _drain(), _fake_stream(), _runtime(), test_a_short_run_is_served_by_the_cheap_model(), test_a_successful_cheap_run_never_pays_for_the_escalation(), test_a_tool_using_agent_never_drops_to_the_cheap_model(), test_an_empty_cheap_response_is_repaired_by_escalation(), test_an_operators_min_tier_still_wins_over_the_learned_one() (+4 more)
 
-### Community 138 - "json"
-Cohesion: 0.09
-Nodes (9): DynamicTool, _validate_ast(), _add(), _eligible_ids(), upgrade(), _clean(), upgrade(), _fmt() (+1 more)
+### Community 138 - "m2n3o4p5q6r7_grant_manager_collaboration_tools.py"
+Cohesion: 0.32
+Nodes (3): _add(), _eligible_ids(), upgrade()
 
 ### Community 139 - "._run_stream_inner"
-Cohesion: 0.14
+Cohesion: 0.20
 Nodes (4): _trim_tool_results(), test_tool_results_are_trimmed_but_never_removed(), test_trimming_leaves_short_results_alone(), test_trimming_reports_how_much_it_dropped()
 
 ### Community 141 - "owner_notify.py"
@@ -938,20 +955,16 @@ Cohesion: 0.21
 Nodes (12): Agent-Operated Deal Pipeline (6 stages), Per-Pipeline Custom Fields Definition (C9), AI CRM Kanban Page, Custom Fields Stored In deal.extra_data JSON, Deal Detail Modal, Deal Comments And Notes (C7), Deal Win Probability And Close Forecast (C10), Duplicate Deal Merge (C8) (+4 more)
 
 ### Community 143 - "_register_syscall_handlers"
-Cohesion: 0.11
-Nodes (17): all_org_secrets(), get_org_secret(), get_org_secret_async(), mask_key(), model_to_secret_key(), resolve_api_key(), get_artifact_content(), list_artifacts() (+9 more)
+Cohesion: 0.06
+Nodes (30): create_jwt_token(), all_org_secrets(), get_org_secret(), get_org_secret_async(), mask_key(), model_to_secret_key(), resolve_api_key(), get_artifact_content() (+22 more)
 
 ### Community 144 - "test_crm_tools.py"
-Cohesion: 0.15
+Cohesion: 0.14
 Nodes (10): CRMPipelineStatsTool, _deal(), _org(), TestCrmControl, TestCrmDelete, TestCrmPipelineStats, TestEnginePropagatesOrg, TestOrgIsolation (+2 more)
 
 ### Community 145 - "test_model_catalog.py"
 Cohesion: 0.36
 Nodes (7): _catalog_models(), _model(), test_api_models_adds_direct_and_local_extras(), fake_catalog(), test_catalog_keeps_chat_models_and_converts_price_per_million(), test_catalog_keeps_free_variants_but_drops_batch(), test_catalog_sorts_newest_first()
-
-### Community 146 - "AsyncClient"
-Cohesion: 0.12
-Nodes (3): Test Execution, TestAgentTypes, TestAgentValidation
 
 ### Community 147 - "test_meta_contract.py"
 Cohesion: 0.14
@@ -961,25 +974,21 @@ Nodes (17): _b(), _payload(), test_absent_header_omits_the_component_entirely(),
 Cohesion: 0.29
 Nodes (11): Evolution Instance Manager Modal, Evolution Gateway Wrapper (Baileys + Cloud API + Coexistence), Evolution API Gateway Page, Instance Cards With Message Counters, WhatsApp Provider Router (Baileys / Cloud / Coexistence), QR Pairing Flow, Risk Score Limitation Disclaimer, Persistent Blocked Numbers / LGPD Opt-Out List (+3 more)
 
-### Community 149 - "score_from_events"
-Cohesion: 0.15
-Nodes (3): RiskReport, score_from_events(), TestScoring
+### Community 149 - "ResponseCache"
+Cohesion: 0.14
+Nodes (3): ResponseCache, ToolResultCache, TestCacheIsOrgScoped
 
 ### Community 150 - "For Each New Client"
 Cohesion: 0.18
 Nodes (10): Client Credentials Template, Client Onboarding Checklist, Client Training, Deployment, For Each New Client, Monitoring, Optional Configuration, Post-Deployment (+2 more)
-
-### Community 151 - "test_security.py"
-Cohesion: 0.22
-Nodes (6): create_jwt_token(), accept_invite(), login_action(), Invitation, TestInviteEmailMatch, TestTemplateXSS
 
 ### Community 152 - "Roteiro 90min"
 Cohesion: 0.18
 Nodes (10): Abertura (5min), Participantes (12 ICPs), Roteiro 90min, Round 1 — Dores (20min), Round 2 — Apresentação (5min), Round 3 — Validação (40min), Round 4 — Objeções (15min), Round 5 — Fechamento (5min) (+2 more)
 
 ### Community 154 - "core/agent.py"
-Cohesion: 0.10
-Nodes (6): _context_tokens(), ContextCompressor, count_message_tokens(), count_tokens(), _load_tiktoken(), truncate_context()
+Cohesion: 0.09
+Nodes (7): ContextCompressor, SyscallRequest, SyscallResponse, count_message_tokens(), count_tokens(), _load_tiktoken(), truncate_context()
 
 ### Community 155 - "MetaWhatsAppClient"
 Cohesion: 0.13
@@ -989,9 +998,9 @@ Nodes (6): MetaWhatsAppClient, test_allow_category_change_defaults_on(), test_fr
 Cohesion: 0.11
 Nodes (3): Channel, InboundMessage, ChannelManager
 
-### Community 158 - "team_map_data"
-Cohesion: 0.33
-Nodes (3): _recent_activity(), team_map_data(), test_recent_activity_groups_by_agent()
+### Community 158 - "_create_jwt_token"
+Cohesion: 0.13
+Nodes (8): _create_email_token(), _create_jwt_token(), _create_refresh_token(), _decode_jwt_token(), get_jwt_key_info(), _get_jwt_signing_key(), _get_jwt_verification_key(), _load_ed25519_keys()
 
 ### Community 159 - "Runbook: WhatsApp Gateway"
 Cohesion: 0.20
@@ -1014,8 +1023,8 @@ Cohesion: 0.18
 Nodes (3): _files(), test_deactivation_migration_exists(), test_nothing_imports_it()
 
 ### Community 164 - "SQLAlchemyBackend"
-Cohesion: 0.12
-Nodes (5): SQLAlchemyBackend, test_backend_execute_takes_one_arg(), test_module_uses_bindparams(), test_no_wrapper_execute_with_positional_params(), _wrapper_execute_calls()
+Cohesion: 0.09
+Nodes (7): SQLAlchemyBackend, test_agent_update_merges_extra_data_instead_of_replacing(), test_crm_publish_failure_does_not_break_the_update(), test_backend_execute_takes_one_arg(), test_module_uses_bindparams(), test_no_wrapper_execute_with_positional_params(), _wrapper_execute_calls()
 
 ### Community 165 - "test_infra_config_alignment.py"
 Cohesion: 0.10
@@ -1053,17 +1062,17 @@ Nodes (8): graphify reference: extra exports and benchmark, Step 6b - Wiki (only
 Cohesion: 0.14
 Nodes (6): _DB, _Msg, _Result, test_agent_reads_the_cache_when_it_is_not_stale(), test_cache_preserves_tool_calls_that_the_db_replay_drops(), test_cache_round_trips_what_save_stored()
 
-### Community 176 - "Conversation"
-Cohesion: 0.07
-Nodes (39): create_conversation(), get_autonomous_trace(), get_conversation(), get_handover(), get_messages(), human_reply(), list_conversations(), post_handover() (+31 more)
-
-### Community 177 - "CrmDeal"
+### Community 176 - "schemas/__init__.py"
 Cohesion: 0.10
-Nodes (18): admin_all(), create_deal(), _crm_enabled(), delete_deal(), enable_crm(), get_deal(), goal_current(), list_deals() (+10 more)
+Nodes (25): AgentCreate, AgentOut, AgentUpdate, ApprovalDecision, ChannelCreate, ChannelOut, ChannelUpdate, ConversationCreate (+17 more)
 
-### Community 179 - "providers.py"
+### Community 177 - "Organization"
 Cohesion: 0.06
-Nodes (13): AnthropicProvider, _circuit_allowed(), _circuit_key(), _circuit_record_failure(), _circuit_record_success(), _circuit_state(), LLMError, LLMProvider (+5 more)
+Nodes (29): register_remote_admin(), admin_all(), create_deal(), _crm_enabled(), delete_deal(), enable_crm(), get_deal(), goal_current() (+21 more)
+
+### Community 179 - "get_provider"
+Cohesion: 0.09
+Nodes (13): AnthropicProvider, _circuit_allowed(), _circuit_key(), _circuit_record_failure(), _circuit_record_success(), _circuit_state(), get_provider(), LLMError (+5 more)
 
 ### Community 180 - "Conversation Detail Page"
 Cohesion: 0.32
@@ -1074,28 +1083,24 @@ Cohesion: 0.27
 Nodes (7): _render_crm(), _seed(), test_all_nine_columns_render_with_zero_deals(), test_drag_hooks_present(), test_move_accepts_every_board_stage(), test_odd_stage_deal_is_visible_not_dropped(), test_page_survives_nonempty_pipelines()
 
 ### Community 182 - "AgentRuntime"
-Cohesion: 0.11
-Nodes (16): AgentRuntime, _ctx_window(), 6. Arquiteto — OS como um todo (10min), _agent(), _cookie(), test_approve_cannot_cross_tenant(), test_contracts_page_shows_contract_and_governed_agent(), test_dashboard_approve_writes_decision_and_counts_handoff() (+8 more)
+Cohesion: 0.09
+Nodes (16): AgentRuntime, _ctx_window(), TestToolEngineResilience, _agent(), _cookie(), test_approve_cannot_cross_tenant(), test_contracts_page_shows_contract_and_governed_agent(), test_dashboard_approve_writes_decision_and_counts_handoff() (+8 more)
 
 ### Community 183 - "test_teams_map.py"
 Cohesion: 0.12
 Nodes (29): build(), claude_run(), codex_review_only(), codex_run(), PromptIn, review(), ReviewIn, status() (+21 more)
 
-### Community 184 - "_channel_api_key"
-Cohesion: 0.21
-Nodes (3): _channel_api_key(), TestWebhookAuthUsesTheDecryptedKey, TestSignatureVerification
+### Community 184 - "_verify_evolution_sig"
+Cohesion: 0.15
+Nodes (4): _verify_evolution_sig(), test_evolution_full_loop(), test_transcribe_tool_exists(), TestSignatureVerification
 
 ### Community 185 - "leads.py"
-Cohesion: 0.12
-Nodes (15): LeadListInput, LeadListTool, LeadReviewInput, LeadReviewTool, LeadSaveInput, LeadSaveTool, _load(), _now() (+7 more)
+Cohesion: 0.11
+Nodes (17): LeadListInput, LeadListTool, LeadReviewInput, LeadReviewTool, LeadSaveInput, LeadSaveTool, _load(), _matches() (+9 more)
 
-### Community 186 - "Done"
+### Community 187 - "2. Segurança — Cybersec Lead"
 Cohesion: 0.18
-Nodes (3): ICMStageAdapter, bind_agent_stage(), Done
-
-### Community 187 - "Reunião SWE × Cybersegurança — AIOS Voz & Dados"
-Cohesion: 0.25
-Nodes (7): 1. Code Quality — SWE Lead, 3. Decisão: Lançar como está?, Assinaturas, ✅ Bom, ⚠️ Dívida técnica (não bloqueia launch, mas precisa roadmap), Hardening Sprint (2 semanas) — Ordem, Reunião SWE × Cybersegurança — AIOS Voz & Dados
+Nodes (10): 1. Code Quality — SWE Lead, 2. Segurança — Cybersec Lead, 3. Decisão: Lançar como está?, Assinaturas, ✅ Bom, ⚠️ Dívida técnica (não bloqueia launch, mas precisa roadmap), Hardening Sprint (2 semanas) — Ordem, Metodologia: OWASP Top 10 + SANS + manual review `main.py`, `auth.py`, `voice.py`, `storage.py`, `license.py` (+2 more)
 
 ### Community 188 - "Agent Sandbox / Playground (streaming chat + tool execution)"
 Cohesion: 0.29
@@ -1114,24 +1119,24 @@ Cohesion: 0.29
 Nodes (6): Don't, How in this repo, Must-check, Rule, Template, Testing (ponytail-aligned)
 
 ### Community 192 - "Request"
-Cohesion: 0.22
-Nodes (7): dashboard_auth(), dashboard_csrf(), rate_limit_handler(), request_logging(), rls_middleware(), security_headers(), trace_middleware()
+Cohesion: 0.21
+Nodes (8): dashboard_auth(), dashboard_csrf(), limit_body_size(), rate_limit_handler(), request_logging(), rls_middleware(), security_headers(), trace_middleware()
 
 ### Community 193 - "publisher.py"
-Cohesion: 0.08
-Nodes (18): IntegrationOutbox, send_event(), _claim_rows(), _deliver(), enqueue_outbox(), flush_outbox(), integration_outbox_flush(), _notify_exhausted() (+10 more)
+Cohesion: 0.14
+Nodes (13): IntegrationOutbox, send_event(), _claim_rows(), _deliver(), enqueue_outbox(), flush_outbox(), integration_outbox_flush(), _notify_exhausted() (+5 more)
 
-### Community 194 - "budget_forecast"
-Cohesion: 0.18
-Nodes (6): budget_forecast(), creation_cost(), get_plans(), list_budgets(), usage_summary(), whatsapp_rates()
+### Community 194 - "_auth_ws"
+Cohesion: 0.14
+Nodes (7): verify_email(), _verify_jwt_token(), _auth_ws(), websocket_agents(), websocket_channel_chat(), websocket_chat(), websocket_workflow()
 
 ### Community 195 - "Message"
-Cohesion: 0.16
-Nodes (12): Message, conversation_turn_job(), _ensure_reply_row(), Phase 7 — REST turns become events  [x] done 2026-11-16, agent_conv(), _fake_runtime(), run(), _run_turn() (+4 more)
+Cohesion: 0.07
+Nodes (20): Message, conversation_turn_job(), _ensure_reply_row(), _reply_meta(), Phase 7 — REST turns become events  [x] done 2026-11-16, agent_conv(), _fake_runtime(), run() (+12 more)
 
 ### Community 196 - "test_sales_funnels.py"
-Cohesion: 0.16
-Nodes (5): _cookie(), _funnel(), TestDomainSplit, TestFunnelDetail, TestFunnelPages
+Cohesion: 0.06
+Nodes (10): _columns(), _cookie(), D, _funnel(), TestConversion, TestDomainSplit, TestFunnelDetail, TestFunnelPages (+2 more)
 
 ### Community 197 - "v2w3x4y5z6a7_usage_records_defaults.py"
 Cohesion: 0.47
@@ -1140,6 +1145,10 @@ Nodes (4): _columns_needing_default(), downgrade(), _existing_columns(), upgrade
 ### Community 199 - "AIOS Runbook — Live Enterprise"
 Cohesion: 0.17
 Nodes (11): canary_rollback_job(), AIOS Runbook — Live Enterprise, Backup/Restore, Canary, Deploy, Escala, Incidente, PromptLab (+3 more)
+
+### Community 200 - "SparcWorkflow"
+Cohesion: 0.22
+Nodes (3): SparcEngine, SparcPhaseLog, SparcWorkflow
 
 ### Community 201 - "test_telegram_webhook.py"
 Cohesion: 0.13
@@ -1173,9 +1182,9 @@ Nodes (4): CI, Coolify, Smoke, Voice Smoke Test — self-hosted
 Cohesion: 0.40
 Nodes (4): OS 100% Autônomo — Ambos Fechados (Single + Times), Single Agent (custom/sdr/closer/support/analyst/scientist) — 100%, Times (5 estratégias) — 100%, Voice + Workflow + Memory — 100%
 
-### Community 211 - "heartbeat"
-Cohesion: 0.22
-Nodes (6): heartbeat(), validate_file(), 2. Segurança — Cybersec Lead, 🔴 Achados críticos (hardening obrigatório antes de Enterprise), ✅ Controles já bons, Metodologia: OWASP Top 10 + SANS + manual review `main.py`, `auth.py`, `voice.py`, `storage.py`, `license.py`
+### Community 211 - "api/skills.py"
+Cohesion: 0.16
+Nodes (9): apply_skill(), create_skill(), delete_skill(), import_skill_from_url(), list_skills(), SkillCreate, SkillImportUrl, SkillUpdate (+1 more)
 
 ### Community 213 - "test_agent_autonomy_regressions.py"
 Cohesion: 0.10
@@ -1229,25 +1238,25 @@ Nodes (3): For --cluster-only, For --update (incremental re-extraction), graphif
 Cohesion: 0.29
 Nodes (6): TemplateComponents, check(), main(), probe_full(), probe_shape(), probe_version()
 
-### Community 227 - "TelegramChannel"
+### Community 227 - "OutboundMessage"
 Cohesion: 0.11
-Nodes (12): TelegramChannel, _Conn, _http(), _poll_client(), test_telegram_no_longer_imports_a_missing_package(), test_telegram_poll_loop_dispatches_inbound(), test_telegram_poll_loop_skips_replayed_updates(), test_telegram_poll_loop_survives_a_transport_error() (+4 more)
+Nodes (13): OutboundMessage, TelegramChannel, _Conn, _http(), _poll_client(), test_telegram_no_longer_imports_a_missing_package(), test_telegram_poll_loop_dispatches_inbound(), test_telegram_poll_loop_skips_replayed_updates() (+5 more)
 
 ### Community 228 - "whatsapp.py"
-Cohesion: 0.19
-Nodes (11): CallBody, evolution_webhook(), ivr_synthesize(), metrics_summary(), migration_check(), SendBody, whatsapp_call(), whatsapp_health() (+3 more)
+Cohesion: 0.20
+Nodes (10): CallBody, evolution_webhook(), ivr_synthesize(), metrics_summary(), migration_check(), SendBody, whatsapp_call(), whatsapp_send() (+2 more)
 
 ### Community 229 - "test_evolution_channel.py"
-Cohesion: 0.13
-Nodes (7): _verify_evolution_sig(), _verify_request(), humanize_delay(), _Conn, _Req, TestBanSignalWiring, TestEvolutionWebhookAuth
-
-### Community 230 - "rubrics.py"
-Cohesion: 0.19
-Nodes (8): create_rubric(), delete_rubric(), list_rubrics(), RubricCreate, RubricScore, RubricUpdate, score_response(), update_rubric()
-
-### Community 231 - "_looks_like_build_request"
 Cohesion: 0.12
-Nodes (3): _looks_like_build_request(), TestJustificationGate, TestNoBypass
+Nodes (7): _verify_request(), humanize_delay(), _Conn, _Req, TestBanSignalWiring, TestEvolutionInstanceLimit, TestEvolutionWebhookAuth
+
+### Community 230 - "_get_ip_allowlist"
+Cohesion: 0.12
+Nodes (7): agent_health_status(), evolution_ip_allowlist(), evolution_key_status(), get_dlq(), check_evolution_ip_allowed(), get_evolution_key_rotation_status(), _get_ip_allowlist()
+
+### Community 231 - "get_redis_pool"
+Cohesion: 0.13
+Nodes (6): migration_state(), redis_state(), system_status(), health_ready(), get_redis_pool(), _parse_redis()
 
 ### Community 232 - "OS 100% Autônomo Total"
 Cohesion: 0.67
@@ -1269,45 +1278,41 @@ Nodes (3): Members List Template (team members table), Settings Template (org/us
 Cohesion: 1.00
 Nodes (3): Product Discovery Simulation — AIOS Voice Agents, Simulacao ICP AIOS Voz Dados Multi-canal, Simulacao Final AIOS Voz Dados Multi-canal 1-Click BYOK
 
-### Community 243 - "time"
-Cohesion: 0.07
-Nodes (11): apply_improvement(), ApplyRequest, eval_history(), EvalRequest, get_suggestions(), run_eval(), _channel_id_of(), _find_connection() (+3 more)
+### Community 243 - "test_calendar_tools.py"
+Cohesion: 0.26
+Nodes (5): CalendarAvailabilityTool, CalendarListTool, CalendarTool, TestConfigured, TestUnconfigured
 
-### Community 244 - "migrate_vectors_to_pg.py"
+### Community 244 - "floor_from_extra"
 Cohesion: 0.14
-Nodes (9): ensure_vector_extension(), use_postgres(), main(), _read_store(), _vec_literal(), test_auto_follows_dialect(), test_backend_switch_overrides_dialect(), test_migration_literal_round_trip() (+1 more)
+Nodes (7): floor_from_extra(), is_routable(), remember_floor(), _tier_index(), test_a_bogus_or_foreign_floor_is_ignored(), test_a_recorded_floor_can_never_demote_an_agent(), test_floor_survives_a_restart_but_not_a_stale_week()
 
 ### Community 245 - "test_wizard_smoke.py"
 Cohesion: 0.35
 Nodes (8): _cookie_for(), test_wizard_clamps_hitl_discount_threshold(), test_wizard_invalid_agent_type_422(), test_wizard_invalid_max_tokens_422(), test_wizard_invalid_temperature_422(), test_wizard_invalid_tools_422(), test_wizard_org_id_fix_303(), test_wizard_saves_hitl_discount_threshold()
 
-### Community 246 - "pet_business/workflows.py"
+### Community 246 - "contracts.py"
 Cohesion: 0.24
-Nodes (5): ContextPolicy, RetryPolicy, contract_for(), UnknownPaidWorkflow, test_every_paid_workflow_has_a_contract()
+Nodes (3): ContextPolicy, RetryPolicy, UnknownPaidWorkflow
 
-### Community 248 - "test_whatsapp_webhook.py"
-Cohesion: 0.15
-Nodes (3): _parse_message(), TestEvolutionChannel, TestParseMessage
-
-### Community 260 - "capture_deal_insight"
-Cohesion: 0.29
-Nodes (3): capture_deal_insight(), capture_insight(), score_conversation()
+### Community 260 - "Open — stateless migration"
+Cohesion: 0.12
+Nodes (11): run(), Notes for next session, Open, Open — stateless migration, Pending work, Phase 0 — bare-metal deploy scaffolding  [x] done 2026-11-15, Phase 3 — connection pool math  [x] done 2026-11-15, Phase 5 — artifacts + metrics  [x] done 2026-11-15 (+3 more)
 
 ### Community 261 - "VibeSec-Skill"
 Cohesion: 0.20
 Nodes (9): 📬 Contact, 🤝 Contribution, 🛡️ Covered Vulnerabilities, Deep Coverage Includes:, 📥 Installation, Introduction, 🚀 Quick Start, 📚 Table of Contents (+1 more)
 
-### Community 263 - "estimate_cost"
-Cohesion: 0.29
-Nodes (6): estimate_cost(), estimate_creation_cost(), _fx(), get_rates(), whatsapp_cost_for_messages(), _persist()
+### Community 263 - "test_webhook_signatures.py"
+Cohesion: 0.14
+Nodes (6): _mailgun_sig(), test_asymmetric_providers_fail_closed_rather_than_faking_it(), test_email_reply_carries_the_sender_forward(), test_exhausted_outbox_rows_notify_a_human(), test_imap_poller_uses_dispatch_inbound(), test_mailgun_signature_scheme()
 
-### Community 264 - "core/memory.py"
-Cohesion: 0.08
-Nodes (14): _bow_embed(), Formatter, Injector, _load_sentence_transformer(), WriteBarrier, discard(), fts(), recent() (+6 more)
+### Community 264 - ".__init__"
+Cohesion: 0.18
+Nodes (3): Formatter, Injector, WriteBarrier
 
 ### Community 265 - "test_icm_x.py"
-Cohesion: 0.11
-Nodes (20): load_stage_manifest(), manifest_fingerprint(), StageManifest, load_context_files(), _manifest(), test_context_loader_empty_allowlist_loads_nothing(), test_context_loader_enforces_size_limit(), test_context_loader_filters_layers_and_fingerprints() (+12 more)
+Cohesion: 0.15
+Nodes (19): manifest_fingerprint(), StageManifest, load_context_files(), _manifest(), test_context_loader_empty_allowlist_loads_nothing(), test_context_loader_enforces_size_limit(), test_context_loader_filters_layers_and_fingerprints(), test_context_loader_rejects_path_traversal() (+11 more)
 
 ### Community 275 - "test_sdk_imports.py"
 Cohesion: 0.14
@@ -1317,17 +1322,17 @@ Nodes (3): TeamsAPI, test_all_aios_modules_import(), test_list_method_does_not_s
 Cohesion: 0.22
 Nodes (9): Additional Defenses, Injection Points to Watch, Path Traversal, Path Traversal Checklist, Prevention Methods, Prevention Strategies, Server-Side Bugs, SQL Injection (+1 more)
 
-### Community 279 - "WorkspacePaths"
-Cohesion: 0.26
+### Community 279 - "pathlib"
+Cohesion: 0.17
 Nodes (3): seed_b2b_lead_research_workspace(), _validate_segment(), WorkspacePaths
 
-### Community 280 - "db_session"
-Cohesion: 0.04
-Nodes (35): agent_health_status(), clear_dlq(), evolution_ip_allowlist(), evolution_key_status(), fleet_health_refresh(), get_dlq(), register_remote_admin(), remote_health() (+27 more)
+### Community 280 - "Skill"
+Cohesion: 0.12
+Nodes (3): LibraryIndex, SkillStore, Skill
 
-### Community 281 - "update_deal"
-Cohesion: 0.13
-Nodes (10): update_deal(), audit_deal_change(), check_human_deviation(), _expiry_days_for_org(), _exposure(), _max_discount_for_plan(), boom(), test_crm_non_stage_edit_does_not_publish() (+2 more)
+### Community 281 - "evolution.py"
+Cohesion: 0.21
+Nodes (7): _Batch, _flush_now(), _launch_flush(), _run(), _mergeable(), _merged_message(), _timer()
 
 ### Community 282 - ".test_cross_origin_rejected"
 Cohesion: 0.18
@@ -1338,12 +1343,12 @@ Cohesion: 0.25
 Nodes (8): Best Practices, Client-Side Bugs, Cross-Site Scripting (XSS), Input Sources to Protect, Never Expose in Client-Side Code, Protection Strategies, Secret Keys and Sensitive Data Exposure, Where Secrets Hide (Check These!)
 
 ### Community 312 - "Reunião 6 Times — O que passou despercebido e deixaria a ferramenta mais completa e competitiva"
-Cohesion: 0.22
-Nodes (8): 2. Produto — “O que ICP pediu sem falar”, 3. Comercial — “O que faz fechar ou perder pra `Tallk/WhatsGW`”, 4. Cyberseg — “O que falta pra `BAA` não ser `checklist`”, 5. Dados — “O que `Analyst/Scientist` não faz e `dono` precisa”, 6. WhatsApp/Voz — “O que `Kokoro` + `Evolution` não entrega e `cliente` sente”, Decisão, Priorização — RICE + `competitividade`, Reunião 6 Times — O que passou despercebido e deixaria a ferramenta mais completa e competitiva
+Cohesion: 0.20
+Nodes (9): 1. SWE — “O que dói na operação e ninguém pediu”, 2. Produto — “O que ICP pediu sem falar”, 3. Comercial — “O que faz fechar ou perder pra `Tallk/WhatsGW`”, 4. Cyberseg — “O que falta pra `BAA` não ser `checklist`”, 5. Dados — “O que `Analyst/Scientist` não faz e `dono` precisa”, 6. WhatsApp/Voz — “O que `Kokoro` + `Evolution` não entrega e `cliente` sente”, Decisão, Priorização — RICE + `competitividade` (+1 more)
 
 ### Community 313 - "Requisito: Todos os Agentes 100% Autônomos com HITL"
-Cohesion: 0.12
-Nodes (14): Autonomous Agent ReAct+Reflexion loop, API Exemplos — Automações, WhatsApp, Uso, Automações sem n8n, Handover Humano, Uso e Custo, WhatsApp Cloud API (100%), 1. O que significa 100% autônomo no AIOS, 2. YouTube — O que cada canal ensina e como aplicar (+6 more)
+Cohesion: 0.11
+Nodes (15): Autonomous Agent ReAct+Reflexion loop, API Exemplos — Automações, WhatsApp, Uso, Automações sem n8n, Handover Humano, Uso e Custo, WhatsApp Cloud API (100%), 1. O que significa 100% autônomo no AIOS, 2. YouTube — O que cada canal ensina e como aplicar (+7 more)
 
 ### Community 314 - "Open Redirect"
 Cohesion: 0.29
@@ -1353,17 +1358,13 @@ Nodes (7): Bypass Techniques to Block, IDN Homograph Attack Protection, Open Red
 Cohesion: 0.29
 Nodes (7): Cloud Metadata Protection, DNS Rebinding Prevention, Implementation Checklist, IP and DNS Bypass Techniques to Block, Potential Vulnerable Features, Protection Strategies, Server-Side Request Forgery (SSRF)
 
-### Community 316 - "dashboard_data.py"
-Cohesion: 0.29
-Nodes (4): daily_limit(), is_allowed(), instance_report(), org_report()
+### Community 316 - "service.py"
+Cohesion: 0.15
+Nodes (10): risk_score(), should_quarantine(), daily_limit(), is_allowed(), compute(), human_delay(), get_provider(), send_via_gateway() (+2 more)
 
-### Community 317 - "WhatsappTemplate"
-Cohesion: 0.22
-Nodes (5): _wa_apply_meta_state(), WhatsappTemplate, template_status_reconcile_job(), _connection(), _existing_bodies()
-
-### Community 319 - "MemoryManager"
-Cohesion: 0.10
-Nodes (3): MemoryManager, hybrid_search(), Phase 4 — vectors to Postgres  [x] done 2026-11-16
+### Community 317 - "PendingAction"
+Cohesion: 0.07
+Nodes (22): list_approvals(), audit_log(), get_dashboard_user(), approvals_page(), control_center(), crm_approve(), crm_page(), crm_reject() (+14 more)
 
 ### Community 320 - "Access Control Issues"
 Cohesion: 0.40
@@ -1393,13 +1394,13 @@ Nodes (6): _columns(), downgrade(), _has_table(), _has_unique(), _index_exists()
 Cohesion: 0.50
 Nodes (4): Prevention by Language/Parser, Vulnerable Scenarios, XML External Entity (XXE), XXE Prevention Checklist
 
-### Community 327 - "AgentMetric"
-Cohesion: 0.22
-Nodes (4): telemetry_summary(), AgentMetric, test_agent_metric_has_unique_agent_hour(), test_agent_metric_tracks_samples()
+### Community 327 - "_is_login_allowed"
+Cohesion: 0.15
+Nodes (7): forgot_password(), _is_allowlisted(), _is_login_allowed(), _login_allowlist(), _render_email_template(), _send_email(), test_empty_allowlist_is_open_but_never_trusted()
 
 ### Community 328 - "lifespan"
-Cohesion: 0.18
-Nodes (4): restore_all_orgs(), lifespan(), _validate_security_config(), _guard_resync()
+Cohesion: 0.12
+Nodes (9): ensure_storage(), restore_all_orgs(), init_db(), _is_postgres(), lifespan(), _validate_security_config(), close_pool(), _guard_resync() (+1 more)
 
 ### Community 329 - "z6a7b8c9d0e1_sales_funnels.py"
 Cohesion: 0.83
@@ -1407,19 +1408,19 @@ Nodes (3): downgrade(), _has_table(), upgrade()
 
 ### Community 330 - "typing"
 Cohesion: 0.02
-Nodes (4): downgrade(), _columns(), downgrade(), upgrade()
+Nodes (7): _columns(), downgrade(), upgrade(), downgrade(), _columns(), downgrade(), upgrade()
 
 ### Community 331 - "AIOS customer viability dogfood"
 Cohesion: 0.22
 Nodes (8): AIOS customer viability dogfood, Blocker to completing the business simulation, Checks completed, Findings, ISSUE-001 — Login text fails automated contrast checks, ISSUE-002 — Login page has no main landmark or level-one heading, Personas and journeys that remain untested, Summary
 
-### Community 332 - "test_orchestrator_routing.py"
-Cohesion: 0.11
-Nodes (16): _json_from_text(), _parse_redis(), _A, _empty(), _shard(), _Team, test_broadcast_stream_uses_the_same_judge(), test_json_from_text_handles_prose_and_fences() (+8 more)
+### Community 332 - "/graphify"
+Cohesion: 0.14
+Nodes (11): _search(), For /graphify add and --watch, For /graphify query, For the commit hook and native CLAUDE.md integration, For --update and --cluster-only, /graphify, Honesty Rules, Interpreter guard for subcommands (+3 more)
 
-### Community 334 - "Credential"
-Cohesion: 0.10
-Nodes (15): decrypt_channel_config(), decrypt_secret(), get_org_secrets(), _key(), _legacy_key(), Credential, HubSpotInput, HubSpotTool (+7 more)
+### Community 334 - "automations.py"
+Cohesion: 0.23
+Nodes (12): create_credential(), create_from_template(), create_trigger(), delete_credential(), delete_trigger(), list_credentials(), list_executions(), list_templates() (+4 more)
 
 ### Community 335 - "registry_entries"
 Cohesion: 0.39
@@ -1433,37 +1434,37 @@ Nodes (8): route_inbound(), start_outbound(), IVRFlow, IVRNode, render_prompt(),
 Cohesion: 0.07
 Nodes (24): CalBookingInput, CalBookingTool, _client(), _get(), _ok(), _post(), _safe_json(), _version_for() (+16 more)
 
-### Community 344 - "emit_stream_event"
-Cohesion: 0.22
-Nodes (6): emit_stream_event(), emit_trial_event(), FakeAgent, test_stream_event_carries_agent_identity(), test_stream_event_does_not_mutate_caller_dict(), test_trial_event_shape()
+### Community 338 - "weekly_standup_job"
+Cohesion: 0.19
+Nodes (6): post_to_slack(), current_month(), _month_bounds(), month_progress(), _notify_owner_digest(), weekly_standup_job()
+
+### Community 344 - "should_escalate"
+Cohesion: 0.17
+Nodes (7): should_escalate(), test_escalation_is_at_most_one_step_per_call(), test_escalation_stops_at_the_configured_ceiling(), test_escalation_stops_at_the_ladder_top(), test_healthy_run_never_escalates(), test_observed_failures_escalate_one_step(), test_the_router_is_not_silent()
 
 ### Community 347 - "Reunião Técnica — Validação Final: Todos os Agentes e Times 100% Autônomos?"
 Cohesion: 0.10
-Nodes (16): _esaa_append(), main(), run(), Phase 0 — bare-metal deploy scaffolding  [x] done 2026-11-15, 1. Método de Validação (combinado), 2. Por Tipo — Single Agent (SWE Lead + Dados), 3. Por Time — 5 Estratégias (Arquiteto), `closer` — MEDDIC (SWE Jr) (+8 more)
+Nodes (16): _esaa_append(), WorkflowPlanner, 1. MSA — Master Service Agreement (resumo), 1. Método de Validação (combinado), 2. Por Tipo — Single Agent (SWE Lead + Dados), 3. Por Time — 5 Estratégias (Arquiteto), 4. OS — Workflow, Voice, Memory (Arquiteto), 5. Debate — É 100% de verdade? (+8 more)
 
-### Community 348 - "manager_narrative"
-Cohesion: 0.25
-Nodes (3): manager_narrative(), _report_conversation(), test_manager_narrative_drops_failed_run()
+### Community 348 - "_verify_twilio_signature"
+Cohesion: 0.22
+Nodes (5): _verify_twilio_signature(), _Req, test_twilio_accepts_a_genuinely_signed_request(), test_twilio_rejects_tampering_and_forgeries(), _twilio_sig()
 
 ### Community 349 - "n3o4p5q6r7s8_conversation_per_contact.py"
 Cohesion: 0.83
 Nodes (3): downgrade(), _exists(), upgrade()
 
-### Community 350 - "4. Operacional — Dia a dia"
-Cohesion: 0.25
-Nodes (7): 1. Arquitetura de Referência — Single Agent (100%), 3.1 Single Agent — Todos os 8 Tipos, 3.2 Time — 5 Estratégias, 3.3 OS Total — Checklist 55 itens (Agent Reliability), 3. Auditoria AIOS — Por Tipo e Por Time, 4. Operacional — Dia a dia, Análise Detalhada: Arquitetura e Operacional de Agentes e Times Autônomos vs AIOS
-
-### Community 351 - "toggle_proactive_alerts"
-Cohesion: 0.29
-Nodes (3): ProactiveAlertsToggle, telemetry_flush(), toggle_proactive_alerts()
+### Community 350 - "test_suite_integration.py"
+Cohesion: 0.22
+Nodes (4): _arvo_auth_path(), test_suite_control_center_exists(), test_suite_hmac_cross(), test_suite_imports()
 
 ### Community 352 - "test_audit_blockers.py"
-Cohesion: 0.04
-Nodes (12): ResponseCache, ToolResultCache, _strip_comments(), TestAgentGovernanceIsPersisted, TestAgentRuntimeIsNotAmputated, TestApprovalIsDecidableAcrossProcesses, TestCacheIsOrgScoped, TestEvolutionEnvPrefix (+4 more)
+Cohesion: 0.07
+Nodes (9): _channel_api_key(), _strip_comments(), TestAgentGovernanceIsPersisted, TestAgentRuntimeIsNotAmputated, TestApprovalIsDecidableAcrossProcesses, TestEvolutionEnvPrefix, TestMessagesCarryOrgId, TestOrchestratorRoutingClamps (+1 more)
 
 ### Community 353 - "Análise Detalhada — Arquitetura e Operacional de Agentes Autônomos vs AIOS"
-Cohesion: 0.29
-Nodes (6): 1.1 Componentes (Zylos 5 Patterns + AAS 7 Dimensões), 1.2 Operacional (YouTube + Checklist), 1. Arquitetura de Referência (Pesquisa 2023-2026), 2. Arquitetura AIOS Atual (pós-`e1cfeff` + `8e147cd` + `1f15f82`), 4. Operacional — Teste "tá caro" (WhatsApp), Análise Detalhada — Arquitetura e Operacional de Agentes Autônomos vs AIOS
+Cohesion: 0.25
+Nodes (7): 1.1 Componentes (Zylos 5 Patterns + AAS 7 Dimensões), 1.2 Operacional (YouTube + Checklist), 1. Arquitetura de Referência (Pesquisa 2023-2026), 2. Arquitetura AIOS Atual (pós-`e1cfeff` + `8e147cd` + `1f15f82`), 4. Operacional — Teste "tá caro" (WhatsApp), 5. Veredito — Estão 100% autônomos?, Análise Detalhada — Arquitetura e Operacional de Agentes Autônomos vs AIOS
 
 ### Community 354 - "g3a4b5c6d7e8_add_workflow_node_failure_handling.py"
 Cohesion: 0.83
@@ -1473,69 +1474,97 @@ Nodes (3): downgrade(), _existing_columns(), upgrade()
 Cohesion: 0.11
 Nodes (8): _create_agent(), ensure_business_orchestrator(), ensure_business_setup(), ensure_business_team(), _find_agent(), _marker(), _org(), TestBootstrap
 
-### Community 356 - "O que foi fechado (5 dias → 99s)"
-Cohesion: 0.50
-Nodes (3): Métrica de Saída (re-teste 5 ICPs × 3 objeções), O que foi fechado (5 dias → 99s), OS 100% Autônomo Total — Fechamento 5 Dias Ultracode
+### Community 359 - "_tool_burning_runtime"
+Cohesion: 0.22
+Nodes (4): _stream(), test_an_agent_already_on_the_strongest_tier_learns_nothing(), test_an_exhausted_run_leaves_a_durable_floor(), _tool_burning_runtime()
 
-### Community 359 - "floor_from_extra"
-Cohesion: 0.12
-Nodes (8): floor_from_extra(), _stream(), test_a_bogus_or_foreign_floor_is_ignored(), test_a_recorded_floor_can_never_demote_an_agent(), test_an_agent_already_on_the_strongest_tier_learns_nothing(), test_an_exhausted_run_leaves_a_durable_floor(), test_floor_survives_a_restart_but_not_a_stale_week(), _tool_burning_runtime()
+### Community 361 - "_install_google_stub"
+Cohesion: 0.20
+Nodes (3): _install_google_stub(), insert(), list()
 
-### Community 362 - "test_license_heartbeat_gate.py"
-Cohesion: 0.31
-Nodes (4): require_admin_key(), test_heartbeat_rejects_wrong_key(), test_heartbeat_requires_admin_key(), test_heartbeat_route_is_gated()
+### Community 362 - "test_gateway.py"
+Cohesion: 0.36
+Nodes (5): evaluate(), MigrationRecommendation, mos_from_metrics(), test_migration_warn(), test_mos()
 
 ### Community 363 - "api/tools.py"
-Cohesion: 0.14
-Nodes (13): a2a_agents(), mcp_call(), mcp_manifest(), create_tool(), get_tool(), list_tools(), test_tool(), tool_audit_calls() (+5 more)
+Cohesion: 0.11
+Nodes (14): mcp_call(), mcp_manifest(), create_tool(), get_tool(), list_tools(), test_tool(), tool_audit_calls(), tool_registry() (+6 more)
 
 ### Community 364 - "test_agent_canvas_events.py"
-Cohesion: 0.07
-Nodes (18): Open — stateless migration, Phase 3 — connection pool math  [x] done 2026-11-15, Phase 5 — artifacts + metrics  [x] done 2026-11-15, Phase 6 — channel ingress  [x] done 2026-11-16, _FakeRuntime, FakeWS, _fresh_db(), _stub_agent() (+10 more)
+Cohesion: 0.06
+Nodes (20): emit_stream_event(), emit_trial_event(), FakeAgent, _FakeRuntime, FakeWS, _fresh_db(), _stub_agent(), _StubAgent (+12 more)
 
-### Community 367 - "ChannelConnection"
-Cohesion: 0.08
-Nodes (25): create_channel(), create_evolution_instance(), delete_channel(), delete_evolution_instance(), evolution_analytics(), get_channel(), get_evolution_qrcode(), list_channels() (+17 more)
+### Community 365 - "email_webhook"
+Cohesion: 0.29
+Nodes (3): email_webhook(), _verify_email_signature(), test_email_webhook_has_no_generic_hmac_shortcut()
+
+### Community 367 - "Conversation"
+Cohesion: 0.07
+Nodes (26): create_conversation(), get_autonomous_trace(), get_conversation(), get_handover(), get_messages(), human_reply(), list_conversations(), post_handover() (+18 more)
 
 ### Community 368 - "ICM-X for AIOS — architecture and rollout"
 Cohesion: 0.22
 Nodes (8): Architectural boundary, CI fixture note, Deployment and rollout, Example stage manifest, Execution and reliability, ICM-X for AIOS — architecture and rollout, Stage contract, Workspace layout
 
 ### Community 369 - "httpx"
-Cohesion: 0.07
-Nodes (9): _headers(), ping(), _request_with_retry(), headers_factory(), TestCanary, TestPromptLab, test_api_register_is_not_mounted(), test_dashboard_register_is_not_mounted() (+1 more)
+Cohesion: 0.13
+Nodes (3): TestCanary, TestPromptLab, TestWorkflowsAsync
 
-### Community 373 - "_tool_conflicts"
-Cohesion: 0.43
-Nodes (4): _tool_conflicts(), test_shared_stateless_tools_are_not_conflicts(), test_single_agent_never_conflicts(), test_stateful_tool_shared_by_two_agents_is_flagged()
+### Community 370 - "graphify reference: query, path, explain"
+Cohesion: 0.25
+Nodes (5): For /graphify explain, For /graphify path, graphify reference: query, path, explain, Step 0 — Constrained query expansion (REQUIRED before traversal), Step 1 — Traversal
+
+### Community 373 - "team_save"
+Cohesion: 0.36
+Nodes (5): team_save(), _tool_conflicts(), test_shared_stateless_tools_are_not_conflicts(), test_single_agent_never_conflicts(), test_stateful_tool_shared_by_two_agents_is_flagged()
 
 ### Community 374 - "process_inbound"
-Cohesion: 0.12
-Nodes (12): process_inbound(), Anti-patterns → fix, Backend Patterns, Check, Ladder (reuse ponytail), Patterns, 1. O que foi entregue (SWE Lead, 10min), 3. Dados — Memória e Skills (Ana, 10min) (+4 more)
+Cohesion: 0.18
+Nodes (8): agent_run(), process_inbound(), Anti-patterns → fix, Backend Patterns, Check, Ladder (reuse ponytail), Patterns, 1. O que foi entregue (SWE Lead, 10min)
+
+### Community 375 - "arvo/client.py"
+Cohesion: 0.36
+Nodes (4): _headers(), ping(), _request_with_retry(), headers_factory()
 
 ### Community 376 - "Perf Audit"
 Cohesion: 0.29
 Nodes (5): 5-minute sweep, Checklist, Don't, Fix ladder (ponytail), Perf Audit
 
-### Community 379 - "test_router.py"
-Cohesion: 0.08
-Nodes (16): estimate_cost_detailed(), test_agent_loop_routes_and_repairs(), test_cheap_tier_is_actually_cheaper_on_the_price_table(), test_cheapest_rung_is_the_cheapest_on_the_price_table(), test_configurable_tiers_flow_through_llm_config(), test_escalation_is_at_most_one_step_per_call(), test_escalation_stops_at_the_configured_ceiling(), test_explicit_min_tier_is_respected() (+8 more)
+### Community 378 - "parametrize"
+Cohesion: 0.25
+Nodes (4): test_every_org_table_requires_an_org_filter(), test_sandbox_blocks_escape_attempts(), test_sandbox_still_allows_data_analysis(), test_server_side_file_and_dos_functions_are_blocked()
 
-### Community 380 - "test_any_tool_use_holds_the_tier"
-Cohesion: 0.40
-Nodes (3): test_any_tool_use_holds_the_tier(), test_consequential_tools_hold_the_tier_even_in_draft_mode(), _tools()
+### Community 379 - "test_router.py"
+Cohesion: 0.10
+Nodes (17): route(), estimate_cost_detailed(), test_agent_loop_routes_and_repairs(), test_any_tool_use_holds_the_tier(), test_cheap_tier_is_actually_cheaper_on_the_price_table(), test_cheapest_rung_is_the_cheapest_on_the_price_table(), test_configurable_tiers_flow_through_llm_config(), test_consequential_tools_hold_the_tier_even_in_draft_mode() (+9 more)
+
+### Community 381 - "_gated_markers"
+Cohesion: 0.33
+Nodes (5): _gated_markers(), has_name(), walk(), _template_ast(), test_crm_kanban_board_is_not_behind_the_paid_flag()
+
+### Community 384 - ".from_dict"
+Cohesion: 0.33
+Nodes (3): _handle(), test_envelope_from_empty_dict_has_no_type(), test_envelope_roundtrips_through_dict()
 
 ### Community 385 - "test_health_rag.py"
 Cohesion: 0.48
 Nodes (3): test_health_includes_rag(), test_health_live(), test_health_ready_checks()
 
+### Community 386 - "API Contract"
+Cohesion: 0.33
+Nodes (5): API Contract, Checklist per endpoint, Don't, Reuse in this repo, Rules
+
 ### Community 390 - "test_errors.py"
 Cohesion: 0.47
 Nodes (3): test_404_route_miss(), test_413_oversized_body(), test_422_validation()
 
-### Community 393 - "meetings.py"
-Cohesion: 0.10
-Nodes (15): _goal_block(), human_slack_targets(), report_targets(), report_text(), standup_text(), _target_of(), team_stats(), team_week_stats() (+7 more)
+### Community 393 - "jobs.py"
+Cohesion: 0.06
+Nodes (31): is_failed_run(), _send_quota_alert(), _goal_block(), manager_narrative(), _report_conversation(), report_targets(), report_text(), standup_text() (+23 more)
+
+### Community 397 - "consent.py"
+Cohesion: 0.80
+Nodes (3): check_consent(), _hash(), record_consent()
 
 ### Community 398 - "x4y5z6a7b8c9_messages_dedup.py"
 Cohesion: 0.83
@@ -1545,25 +1574,17 @@ Nodes (3): downgrade(), _has_constraint(), upgrade()
 Cohesion: 0.83
 Nodes (3): downgrade(), _has_table(), upgrade()
 
-### Community 406 - "b7c8d9e0f1a2_pending_actions_org_id.py"
-Cohesion: 0.83
-Nodes (3): _columns(), downgrade(), upgrade()
-
 ### Community 408 - "a0deb8aa39f7_agents_add_extra_data_json_models_drift.py"
 Cohesion: 0.83
 Nodes (3): _columns(), downgrade(), upgrade()
 
-### Community 410 - "team_collaboration.py"
-Cohesion: 0.13
-Nodes (13): _eval_expr(), _get_path(), render_mapping(), render_template(), repl(), render_value(), CalculatorInput, CalculatorTool (+5 more)
+### Community 410 - "expressions.py"
+Cohesion: 0.43
+Nodes (6): _eval_expr(), _get_path(), render_mapping(), render_template(), repl(), render_value()
 
-### Community 413 - "admin_backup_page"
-Cohesion: 0.33
-Nodes (4): admin_backup_page(), _check_s3_versioning(), _human_size(), _list_backups()
-
-### Community 433 - "transcribe.py"
-Cohesion: 0.20
-Nodes (5): _download_audio(), TranscribeInput, TranscribeTool, test_evolution_full_loop(), test_transcribe_tool_exists()
+### Community 413 - "app.py"
+Cohesion: 0.05
+Nodes (41): fleet_health_refresh(), get_trace_scoped(), admin_backup_now(), admin_backup_page(), admin_backup_restore(), admin_dlq_delete(), admin_dlq_retry(), admin_fleet() (+33 more)
 
 ## Ambiguous Edges - Review These
 - `Coolify One-Click Compose Variant` → `Evolution IP Allowlist Hardening (C10)`  [AMBIGUOUS]
@@ -1579,8 +1600,8 @@ Nodes (5): _download_audio(), TranscribeInput, TranscribeTool, test_evolution_fu
 
 ## Knowledge Gaps
 - **601 isolated node(s):** `$schema`, `InboundMessage`, `SchedulerPolicy`, `CalculatorInput`, `backup.sh script` (+596 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 3023 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **124 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 3026 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **133 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
@@ -1595,7 +1616,7 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **What is the exact relationship between `Agent Sandbox / Playground (streaming chat + tool execution)` and `YouTube Canais Autônomos`?**
   _Edge tagged AMBIGUOUS (relation: related_to) - confidence is low._
-- **Why does `db_session()` connect `db_session` to `test_template_org_scope.py`, `BaseTool`, `api/auth.py`, `core/memory.py`, `test_webhook_signatures.py`, `meetings.py`, `app.py`, `.select`, `Team`, `Agent`, `_register_syscall_handlers`, `_post_team_reports`, `test_icm_x.py`, `test_crm_tools.py`, `deployment.py`, `stripe_webhook`, `SwarmCoordinator`, `test_security.py`, `main.py`, `team_map_data`, `DatabaseBackend`, `_process_inbound_once`, `whatsapp_guard.py`, `place_call`, `logging`, `Conversation`, `transcribe.py`, `test_teams_map.py`, `worker.py`, `WhatsappTemplate`, `MemoryManager`, `publisher.py`, `anti_ban/signals.py`, `Message`, `SparcWorkflow`, `lifespan`, `typing`, `storage.py`, `models.py`, `heartbeat`, `manager_narrative`, `jobs.py`, `whatsapp.py`, `whatsapp_template_studio.py`, `test_curated_memory.py`, `ChannelConnection`, `time`, `AgentTelemetry`, `process_inbound`, `limits.py`?**
-  _High betweenness centrality (0.059) - this node is a cross-community bridge._
-- **Why does `Organization` connect `Agent` to `test_workday_board.py`, `test_team_collaboration.py`, `api/auth.py`, `pytest`, `app.py`, `.select`, `Team`, `_post_team_reports`, `EvolutionChannel`, `_register_syscall_handlers`, `test_channel_types.py`, `test_crm_tools.py`, `deployment.py`, `stripe_webhook`, `test_security.py`, `db_session`, `update_deal`, `SwarmCoordinator`, `main.py`, `DatabaseBackend`, `team_map_data`, `test_evolution_analytics.py`, `TestEvolutionInstanceLimit`, `whatsapp_guard.py`, `test_build_request.py`, `logging`, `CrmDeal`, `test_crm_board.py`, `test_teams_map.py`, `leads.py`, `worker.py`, `analytics.py`, `budget_forecast`, `api/workflows.py`, `lifespan`, `test_telegram_webhook.py`, `models.py`, `Credential`, `test_events_bus.py`, `heartbeat`, `routes.py`, `EventEnvelope`, `toggle_proactive_alerts`, `jobs.py`, `ensure_business_setup`, `test_evolution_channel.py`, `_hash_password`, `ChannelConnection`, `test_curated_memory.py`, `envelope.py`, `limits.py`?**
-  _High betweenness centrality (0.048) - this node is a cross-community bridge._
+- **Why does `Agent` connect `Agent` to `MetaAgent`, `test_workday_board.py`, `BaseTool`, `AskTeamManagerTool`, `team_collaboration.py`, `models.py`, `db_session`, `jobs.py`, `.select`, `Reunião Técnica — Validação 100% Autônomo por Tipo de Agente`, `_register_syscall_handlers`, `test_crm_tools.py`, `deployment.py`, `billing.py`, `test_shared_state.py`, `core/agent.py`, `main.py`, `Done`, `DatabaseBackend`, `app.py`, `fleet_verify.py`, `SQLAlchemyBackend`, `test_build_request.py`, `asyncio`, `Workflow`, `db/backend.py`, `AutonomousAgent`, `Organization`, `test_icm_agent_binding.py`, `AgentRuntime`, `test_teams_map.py`, `leads.py`, `cron_scheduler.py`, `analytics.py`, `PendingAction`, `MemoryManager`, `Message`, `Evaluator`, `TestVoice`, `test_curated_memory.py`, `lifespan`, `Base`, `test_events_bus.py`, `weekly_standup_job`, `routes.py`, `EventEnvelope`, `test_features.py`, `CrmDeal`, `ensure_business_setup`, `events.py`, `track_usage`, `Conversation`, `curated.py`, `team_save`, `process_inbound`, `Pesquisa: Agentes Autônomos de IA — Como Funcionam e Como Aplicar no AIOS`, `test_wizard_smoke.py`, `subagent.py`?**
+  _High betweenness centrality (0.063) - this node is a cross-community bridge._
+- **Why does `db_session()` connect `db_session` to `BaseTool`, `team_collaboration.py`, `models.py`, `jobs.py`, `Agent`, `.select`, `_register_syscall_handlers`, `test_crm_tools.py`, `billing.py`, `SwarmCoordinator`, `Skill`, `main.py`, `app.py`, `DatabaseBackend`, `fleet_verify.py`, `whatsapp_guard.py`, `asyncio`, `Workflow`, `db/backend.py`, `Organization`, `test_teams_map.py`, `PendingAction`, `MemoryManager`, `publisher.py`, `_auth_ws`, `score_from_events`, `Evaluator`, `Message`, `TestVoice`, `test_curated_memory.py`, `SparcWorkflow`, `lifespan`, `encrypt_channel_config`, `storage.py`, `Base`, `weekly_standup_job`, `heartbeat`, `test_dead_letter.py`, `whatsapp.py`, `track_usage`, `whatsapp_template_studio.py`, `curated.py`, `Conversation`, `AgentTelemetry`, `team_save`, `process_inbound`, `evolution_api.py`?**
+  _High betweenness centrality (0.062) - this node is a cross-community bridge._

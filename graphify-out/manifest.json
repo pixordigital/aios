@@ -798,9 +798,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/app.py": {
-    "mtime": 1794927932.6460679,
-    "seen": 1794929240.1214397,
-    "ast_hash": "2049efe69d7d8327d1af87592dd36cfe",
+    "mtime": 1795003312.6971684,
+    "seen": 1795003475.3680618,
+    "ast_hash": "0932ad4655ef309c642006ab6e171730",
     "semantic_hash": ""
   },
   "aios/db/__init__.py": {
@@ -828,9 +828,9 @@
     "semantic_hash": ""
   },
   "aios/db/models.py": {
-    "mtime": 1794570842.6373112,
-    "seen": 1794866953.4897966,
-    "ast_hash": "6a0802950624ce500fe806ff8da16dcf",
+    "mtime": 1795003209.6045535,
+    "seen": 1795003475.3686519,
+    "ast_hash": "fae73be0ffd36557d53cdb26c96a0b8c",
     "semantic_hash": ""
   },
   "aios/governance/deal_desk.py": {
@@ -1968,9 +1968,9 @@
     "semantic_hash": "6ff05784e6da0928d9a9413537c8627c"
   },
   "aios/dashboard/templates/dashboard.html": {
-    "mtime": 1794914438.1224523,
-    "seen": 1794916609.9227147,
-    "ast_hash": "3792c84976646459f45bfff6653b4968",
+    "mtime": 1795003789.6286755,
+    "seen": 1795003813.579425,
+    "ast_hash": "81f2e4c3dde2102c8b8bbe86c1aa3b9d",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/dev.html": {
@@ -2550,8 +2550,8 @@
     "semantic_hash": ""
   },
   "alembic/versions/z6a7b8c9d0e1_sales_funnels.py": {
-    "mtime": 1790868170.714125,
-    "seen": 1790904342.7302828,
+    "mtime": 1795003229.7064283,
+    "seen": 1795003475.3845186,
     "ast_hash": "fdd511b9c3ab45a0525818acf499a0cb",
     "semantic_hash": ""
   },
@@ -2586,9 +2586,9 @@
     "semantic_hash": ""
   },
   "tests/test_sales_funnels.py": {
-    "mtime": 1794914573.352022,
-    "seen": 1794916609.9191122,
-    "ast_hash": "962bfdb3ea3190e7e1b597c5b45b8e82",
+    "mtime": 1795003342.2529247,
+    "seen": 1795003475.3959577,
+    "ast_hash": "50ca2c8b8091c885d5d2cbcdf82a7f44",
     "semantic_hash": ""
   },
   "tests/test_sandbox_security.py": {
@@ -2712,15 +2712,15 @@
     "semantic_hash": ""
   },
   "aios/dashboard/templates/funnel_detail.html": {
-    "mtime": 1790871342.6737583,
-    "seen": 1790904342.737484,
-    "ast_hash": "7f538f0bc401099bb608fd14dd82b3b1",
+    "mtime": 1795003319.9268425,
+    "seen": 1795003475.4096122,
+    "ast_hash": "aac199b41a73edc82203813233543038",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/funnels.html": {
-    "mtime": 1790868228.9585698,
-    "seen": 1790904342.7374868,
-    "ast_hash": "db282e9e46e751801103ef98189b58b0",
+    "mtime": 1795003308.3587637,
+    "seen": 1795003475.4096189,
+    "ast_hash": "36c6b8dc207d319ce5ea88f58ca7cb07",
     "semantic_hash": ""
   },
   "aios/api/meta_webhook.py": {
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1794943592.0660124,
-    "seen": 1794951295.217398,
-    "ast_hash": "ad81e579a550bccd73113f2b48679ce7",
+    "mtime": 1795003682.2886565,
+    "seen": 1795003813.5824685,
+    "ast_hash": "8d49d9cf61a61c8c033d8cea95157bba",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -3591,6 +3591,18 @@
     "mtime": 1794943213.176668,
     "seen": 1794951295.2176294,
     "ast_hash": "8e29e43fe2d1d8f323c2351851bf9787",
+    "semantic_hash": ""
+  },
+  "aios/dashboard/templates/funnel_advisor.html": {
+    "mtime": 1795003639.5066633,
+    "seen": 1795003672.3530414,
+    "ast_hash": "2ea68cb2afd2ada7f5ca199600fbc701",
+    "semantic_hash": ""
+  },
+  "alembic/versions/d1e2f3a4b5c6_sales_pipeline_advisor.py": {
+    "mtime": 1795003549.6802793,
+    "seen": 1795003574.768731,
+    "ast_hash": "78692db599cf25f8b2beb0d044277e0a",
     "semantic_hash": ""
   }
 }

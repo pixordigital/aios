@@ -3516,6 +3516,140 @@ async def funnel_create(
     return RedirectResponse("/dashboard/funnels", status_code=303)
 
 
+_ADVISOR_QUESTIONS = [
+    ("offer", "O que vocês vendem, para quem, e qual problema isso resolve?"),
+    ("sources", "De onde chegam os contatos hoje? Quais fontes costumam trazer bons clientes?"),
+    ("qualification", "Como vocês decidem se um contato vale acompanhamento? Que sinais precisam confirmar?"),
+    ("stages", "Quais passos um negócio percorre, da primeira conversa até ganho ou perda? Um passo por linha ajuda."),
+    ("followup", "Quem cuida de cada negócio e como vocês fazem o próximo contato? Quanto costuma durar uma venda?"),
+    ("goals", "Que resultado vocês acompanham e onde os negócios mais costumam travar? Separe metas desejadas de resultados reais."),
+]
+
+
+def _advisor_proposal(answers, evidence):
+    stages = [x.strip()[:30] for x in answers.get("stages", "").splitlines() if x.strip()]
+    if len(stages) < 2:
+        return {}
+    if not any(x.lower() in ("closed_won", "ganho", "ganha", "fechado ganho") for x in stages):
+        stages.append("ganho")
+    if not any(x.lower() in ("closed_lost", "perdido", "perdida") for x in stages):
+        stages.append("perdido")
+    return {
+        "name": "Pipeline comercial",
+        "description": "Etapas sugeridas a partir do processo informado pela equipe.",
+        "stages": stages,
+        "guidance": {s: "Registre o próximo passo e quem ficou responsável." for s in stages},
+        "measures": [
+            {"key": "open_deals", "name": "Negócios em andamento", "meaning": "Quantos negócios estão registrados no CRM.", "why": "Ajuda a ver o volume de trabalho aberto.", "calculation": "Contagem dos negócios atuais no CRM.", "action": "Revise negócios sem próximo passo.", "supported": True},
+            {"key": "win_rate", "name": "Percentual ganho", "meaning": "Parte dos negócios registrados que está marcada como ganha.", "why": "Mostra o resultado observado no cadastro atual.", "calculation": f"{evidence.get('won', 0)} ganhos entre {evidence.get('total', 0)} negócios; pode refletir histórico incompleto.", "action": "Confira se ganhos e perdas são registrados com consistência.", "supported": evidence.get("total", 0) > 0},
+        ],
+        "evidence": evidence,
+        "assumptions": ["O CRM representa apenas os negócios que a equipe registrou."],
+        "open_questions": ["Ainda não há histórico suficiente para metas de conversão confiáveis."],
+    }
+
+
+@router.get("/funnels/advisor", response_class=HTMLResponse)
+async def funnel_advisor(request: Request):
+    from aios.db.models import SalesPipelineAssessment, CrmDeal
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        assessment = (await db.execute(select(SalesPipelineAssessment).where(
+            SalesPipelineAssessment.org_id == org_id,
+            SalesPipelineAssessment.status.notin_(["implemented", "rejected"]),
+        ).order_by(SalesPipelineAssessment.updated_at.desc()))).scalars().first()
+        if not assessment:
+            assessment = SalesPipelineAssessment(org_id=org_id)
+            db.add(assessment)
+            await db.flush()
+        deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id))).scalars().all()
+        assessment.crm_evidence = {"total": len(deals), "won": sum(1 for d in deals if d.stage == "closed_won"),
+                                   "open": sum(1 for d in deals if d.stage not in ("closed_won", "closed_lost")),
+                                   "stages": sorted({d.stage for d in deals})}
+        await db.commit()
+        answers = assessment.answers or {}
+        return await _render("funnel_advisor.html", request, title="Orientador comercial",
+                             assessment=assessment, answers=answers, questions=_ADVISOR_QUESTIONS,
+                             next_key=next((k for k, _ in _ADVISOR_QUESTIONS if not answers.get(k, "").strip()), None),
+                             question_map=dict(_ADVISOR_QUESTIONS))
+
+
+@router.post("/funnels/advisor/{assessment_id}/answer")
+async def funnel_advisor_answer(request: Request, assessment_id: str,
+                                answer: str = Form(...), field: str = Form(...)):
+    from aios.db.models import SalesPipelineAssessment
+    org_id = await _org_filter(request)
+    if field not in dict(_ADVISOR_QUESTIONS):
+        return HTMLResponse("Campo inválido", status_code=400)
+    async with db_session() as db:
+        a = await db.get(SalesPipelineAssessment, assessment_id)
+        if not a or a.org_id != org_id:
+            return HTMLResponse("Avaliação não encontrada", status_code=404)
+        answers = dict(a.answers or {})
+        answers[field] = answer.strip()[:4000]
+        a.answers = answers
+        a.status = "interview"
+        a.proposal = {}
+        await db.commit()
+    return RedirectResponse("/dashboard/funnels/advisor", status_code=303)
+
+
+@router.post("/funnels/advisor/{assessment_id}/confirm")
+async def funnel_advisor_confirm(request: Request, assessment_id: str, correction: str = Form("")):
+    from aios.db.models import SalesPipelineAssessment
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        a = await db.get(SalesPipelineAssessment, assessment_id)
+        if not a or a.org_id != org_id:
+            return HTMLResponse("Avaliação não encontrada", status_code=404)
+        answers = dict(a.answers or {})
+        if correction.strip():
+            answers["correction"] = correction.strip()[:4000]
+            a.answers = answers
+            a.status = "interview"
+            a.proposal = {}
+        elif all((answers.get(k) or "").strip() for k, _ in _ADVISOR_QUESTIONS):
+            a.status = "confirmed"
+            a.proposal = _advisor_proposal(answers, a.crm_evidence or {})
+        await db.commit()
+    return RedirectResponse("/dashboard/funnels/advisor", status_code=303)
+
+
+@router.post("/funnels/advisor/{assessment_id}/approve")
+async def funnel_advisor_approve(request: Request, assessment_id: str):
+    from aios.db.models import SalesPipelineAssessment, SalesFunnel
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        a = await db.get(SalesPipelineAssessment, assessment_id)
+        if not a or a.org_id != org_id:
+            return HTMLResponse("Avaliação não encontrada", status_code=404)
+        if a.status != "confirmed" or not (a.proposal or {}).get("stages"):
+            return RedirectResponse("/dashboard/funnels/advisor", status_code=303)
+        p = a.proposal
+        funnel = SalesFunnel(org_id=org_id, name=p["name"], description=p["description"], pipeline=f"advisor-{a.id[:12]}",
+                             extra_data={"stages": p["stages"], "guidance": p["guidance"], "measures": p["measures"], "proposal_evidence": p["evidence"]})
+        db.add(funnel)
+        await db.flush()
+        a.funnel_id = funnel.id
+        a.status = "implemented"
+        await db.commit()
+        funnel_id = funnel.id
+    return RedirectResponse(f"/dashboard/funnels/{funnel_id}", status_code=303)
+
+
+@router.post("/funnels/advisor/{assessment_id}/reject")
+async def funnel_advisor_reject(request: Request, assessment_id: str):
+    from aios.db.models import SalesPipelineAssessment
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        a = await db.get(SalesPipelineAssessment, assessment_id)
+        if not a or a.org_id != org_id:
+            return HTMLResponse("Avaliação não encontrada", status_code=404)
+        a.status = "rejected"
+        await db.commit()
+    return RedirectResponse("/dashboard/funnels", status_code=303)
+
+
 @router.get("/funnels/{funnel_id}", response_class=HTMLResponse)
 async def funnel_detail(request: Request, funnel_id: str):
     org_id = await _org_filter(request)
@@ -3533,6 +3667,8 @@ async def funnel_detail(request: Request, funnel_id: str):
             .order_by(FunnelInsight.created_at.desc())
         )).scalars().all()
         stages = _stage_list(funnel)
+        funnel.guidance = (funnel.extra_data or {}).get("guidance", {})
+        funnel.measures = (funnel.extra_data or {}).get("measures", [])
         st = _funnel_stats(deals)
         funnel.stage_list = stages
         transitions = await _stage_transitions(db, org_id, stages, {d.id for d in deals})

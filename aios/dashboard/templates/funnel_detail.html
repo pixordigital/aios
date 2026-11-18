@@ -31,6 +31,7 @@
   <div style="min-width:200px;flex:1;background:var(--bg-hover);border-radius:var(--radius);padding:0.75rem">
     <div class="flex-between mb-2">
       <p class="text-sm" style="font-weight:600">{{ col.stage }}</p>
+      {% if funnel.guidance.get(col.stage) %}<p class="text-xs text-secondary">{{ funnel.guidance.get(col.stage) }}</p>{% endif %}
       <span class="text-xs text-tertiary">{{ col.deals|length }} • R$ {{ "%.0f"|format(col.value) }}</span>
     </div>
     {% for d in col.deals %}
@@ -49,6 +50,8 @@
   </div>
   {% endfor %}
 </div>
+
+{% if funnel.measures %}<div class="card mb-4"><h2 class="mb-2">Medidas recomendadas</h2>{% for m in funnel.measures %}<div class="mb-2"><strong>{{ m.name }}</strong>{% if not m.supported %}<span class="text-xs text-tertiary"> — ainda sem dados suficientes</span>{% endif %}<p class="text-sm">{{ m.meaning }} {{ m.why }} Cálculo: {{ m.calculation }} Ação possível: {{ m.action }}</p></div>{% endfor %}</div>{% endif %}
 
 <div class="card">
   <div class="flex-between mb-3">

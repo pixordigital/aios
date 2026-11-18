@@ -716,6 +716,17 @@ class SalesFunnel(Base, TimestampMixin, OrgScopedMixin):
     data_agent = relationship("Agent", foreign_keys=[data_agent_id])
 
 
+class SalesPipelineAssessment(Base, TimestampMixin, OrgScopedMixin):
+    """Owner-led sales discovery and its approved pipeline proposal."""
+    __tablename__ = "sales_pipeline_assessments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    status: Mapped[str] = mapped_column(String(30), default="interview")
+    answers: Mapped[dict] = mapped_column(JSON, default=dict)
+    crm_evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    proposal: Mapped[dict] = mapped_column(JSON, default=dict)
+    funnel_id: Mapped[str | None] = mapped_column(ForeignKey("sales_funnels.id"), nullable=True)
+
+
 class FunnelInsight(Base, TimestampMixin, OrgScopedMixin):
     """A Data-team finding posted on a funnel. Read-only to Sales.
 

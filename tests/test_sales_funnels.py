@@ -80,6 +80,61 @@ class TestFunnelPages:
                                           "negotiation", "closed_won"]
 
 
+class TestPipelineAdvisor:
+    async def test_requires_complete_interview_and_confirmation_before_proposal(
+        self, async_client: AsyncClient, test_session, test_org, test_user
+    ):
+        async_client.cookies.set("aios_token", _cookie(test_user))
+        r = await async_client.get("/dashboard/funnels/advisor")
+        assert r.status_code == 200
+        assert "O que vocês vendem" in r.text
+        from sqlalchemy import select
+        from aios.db.models import SalesPipelineAssessment
+        a = (await test_session.execute(select(SalesPipelineAssessment))).scalars().first()
+        assert a.org_id == test_org.id
+        for field, _ in __import__("aios.dashboard.app", fromlist=["_ADVISOR_QUESTIONS"])._ADVISOR_QUESTIONS:
+            await async_client.post(f"/dashboard/funnels/advisor/{a.id}/answer", data={"field": field, "answer": "Resposta para " + field})
+        await test_session.refresh(a)
+        assert a.proposal == {}
+        await async_client.post(f"/dashboard/funnels/advisor/{a.id}/confirm", data={"correction": ""})
+        await test_session.refresh(a)
+        assert a.status == "confirmed"
+        assert a.proposal["stages"][-2:] == ["ganho", "perdido"]
+
+    async def test_approval_creates_scoped_funnel_with_guidance_and_measures(
+        self, async_client: AsyncClient, test_session, test_org, test_user
+    ):
+        from aios.db.models import SalesPipelineAssessment, SalesFunnel
+        from sqlalchemy import select
+        async_client.cookies.set("aios_token", _cookie(test_user))
+        a = SalesPipelineAssessment(org_id=test_org.id, status="confirmed",
+            answers={"stages": "conversa\nproposta"},
+            proposal={"name": "Meu pipeline", "description": "Sugestão", "stages": ["conversa", "ganho", "perdido"],
+                      "guidance": {"conversa": "Marque o próximo passo."}, "measures": [], "evidence": {"total": 0}})
+        test_session.add(a)
+        await test_session.commit()
+        await test_session.refresh(a)
+        r = await async_client.post(f"/dashboard/funnels/advisor/{a.id}/approve", follow_redirects=False)
+        assert r.status_code == 303
+        await test_session.refresh(a)
+        assert a.status == "implemented"
+        f = await test_session.get(SalesFunnel, a.funnel_id)
+        assert f.org_id == test_org.id
+        assert f.extra_data["guidance"]["conversa"] == "Marque o próximo passo."
+        r = await async_client.get(f"/dashboard/funnels/{f.id}")
+        assert "Marque o próximo passo" in r.text
+
+    async def test_other_org_cannot_approve_assessment(self, async_client, test_session, test_org, test_user):
+        from aios.db.models import SalesPipelineAssessment
+        a = SalesPipelineAssessment(org_id="another-org", status="confirmed", proposal={"stages": ["a", "b"]})
+        test_session.add(a)
+        await test_session.commit()
+        await test_session.refresh(a)
+        async_client.cookies.set("aios_token", _cookie(test_user))
+        r = await async_client.post(f"/dashboard/funnels/advisor/{a.id}/approve")
+        assert r.status_code == 404
+
+
 class TestFunnelDetail:
     async def test_detail_renders_stage_columns(self, async_client: AsyncClient, test_session, test_org, test_user):
         from aios.db.models import CrmDeal
