@@ -78,6 +78,15 @@
         .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
         .hero-note { font-size: 13px; color: var(--text-muted); margin-top: 16px; }
 
+        /* ── Sales advisor entry point ── */
+        .advisor-teaser { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 14px; align-items: center; max-width: 600px; margin-top: 28px; padding: 16px 18px; border: 1px solid rgba(0,229,160,0.5); border-left: 4px solid var(--cyan); border-radius: 10px; background: linear-gradient(110deg, rgba(0,229,160,0.13), rgba(17,17,17,0.88) 78%); color: var(--text); text-decoration: none; transition: border-color 0.15s, background 0.15s, transform 0.15s; }
+        .advisor-teaser:hover { border-color: var(--cyan); background: linear-gradient(110deg, rgba(0,229,160,0.19), rgba(17,17,17,0.94) 78%); transform: translateY(-2px); }
+        .advisor-teaser:focus-visible { outline: 3px solid var(--text); outline-offset: 4px; }
+        .advisor-teaser-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 9px; background: var(--cyan); color: var(--bg); font-size: 21px; font-weight: 700; }
+        .advisor-teaser-title { display: block; color: var(--cyan); font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+        .advisor-teaser-copy { display: block; color: var(--text-dim); font-size: 13px; line-height: 1.5; }
+        .advisor-teaser-action { color: var(--text); font-size: 13px; font-weight: 600; white-space: nowrap; }
+
         /* ── Terminal ── */
         .terminal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.7; position: relative; z-index: 1; }
         .terminal-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
@@ -122,7 +131,8 @@
         .feature-desc { font-size: 14px; color: var(--text-dim); line-height: 1.6; }
 
         /* ── Sales advisor spotlight ── */
-        .advisor-feature { margin: 0 0 40px; padding: clamp(24px, 4vw, 44px); display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; background: radial-gradient(ellipse at 0% 100%, rgba(0,229,160,0.09), transparent 55%), var(--surface); border: 1px solid rgba(0,229,160,0.35); border-radius: 14px; }
+        .advisor-section { padding: 56px 24px 64px; }
+        .advisor-feature { margin: 0 auto; max-width: 1200px; padding: clamp(24px, 4vw, 44px); display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 40px; align-items: center; background: radial-gradient(ellipse at 0% 100%, rgba(0,229,160,0.13), transparent 55%), var(--surface); border: 1px solid rgba(0,229,160,0.5); border-radius: 14px; box-shadow: 0 18px 64px rgba(0,0,0,0.22); }
         .advisor-feature h3 { max-width: 560px; font-size: clamp(24px, 3vw, 34px); line-height: 1.15; letter-spacing: -0.025em; margin-bottom: 14px; }
         .advisor-feature-copy { color: var(--text-dim); font-size: 15px; line-height: 1.7; max-width: 540px; }
         .advisor-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 24px; }
@@ -181,6 +191,10 @@
             .channel-card[style*="grid-column:span 2"] { grid-column: span 2 !important; }
             .voice-diff { grid-template-columns: 1fr; }
             .hero h1 { font-size: 32px; }
+            .advisor-teaser { grid-template-columns: 40px minmax(0, 1fr); gap: 12px; padding: 14px; }
+            .advisor-teaser-icon { width: 38px; height: 38px; }
+            .advisor-teaser-action { grid-column: 2; }
+            .advisor-section { padding: 40px 16px 48px; }
             footer .inner { grid-template-columns: 1fr; }
         }
 
@@ -228,6 +242,14 @@
                 <a href="#agentes" class="btn-primary">Veja o que sua equipe pode automatizar →</a>
                 <a href="#governanca" class="btn-ghost">Ver exemplos</a>
             </div>
+            <a href="#orientador-vendas" class="advisor-teaser">
+                <span class="advisor-teaser-icon" aria-hidden="true">↗</span>
+                <span>
+                    <span class="advisor-teaser-title">Orientador comercial</span>
+                    <span class="advisor-teaser-copy">Converse sobre suas vendas e receba uma proposta de funil para revisar.</span>
+                </span>
+                <span class="advisor-teaser-action">Conheça →</span>
+            </a>
             <p class="hero-note">Plataforma de uso interno · Acesso criado pela sua empresa · Instalada em ambiente próprio</p>
 
             <div class="status-bar">
@@ -263,6 +285,27 @@
                 </div>
             </div>
         </div>
+    </div>
+</section>
+
+<!-- Orientador comercial -->
+<section class="advisor-section" aria-label="Orientador comercial">
+    <div class="advisor-feature" id="orientador-vendas" aria-labelledby="advisor-feature-title">
+        <div>
+            <p class="section-label">Para quem lidera vendas</p>
+            <h3 id="advisor-feature-title">Desenhe um funil que combina com o jeito que sua equipe vende.</h3>
+            <p class="advisor-feature-copy">O Orientador Comercial conversa com você sobre o processo de vendas, considera o que já está registrado no CRM e propõe etapas e medidas para acompanhar. Você revisa tudo antes de aprovar; os negócios existentes não são movidos automaticamente.</p>
+            <div class="advisor-actions">
+                <a href="/dashboard" class="btn-primary">Acessar o orientador comercial</a>
+                <span class="advisor-access-note">Disponível para quem já tem acesso ao AIOS.</span>
+            </div>
+        </div>
+        <aside class="advisor-preview" aria-labelledby="advisor-preview-title" role="list">
+            <p class="advisor-preview-title" id="advisor-preview-title">Do processo atual a um funil revisado por você</p>
+            <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">1</span><span><strong>Conte como vocês vendem</strong><span class="advisor-step-description">Registre etapas, critérios, responsáveis e metas desejadas.</span></span></div>
+            <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">2</span><span><strong>Confira o retrato do CRM</strong><span class="advisor-step-description">Compare suas respostas com os negócios já cadastrados.</span></span></div>
+            <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">3</span><span><strong>Revise antes de criar</strong><span class="advisor-step-description">Aprove uma proposta de funil ou ajuste as respostas primeiro.</span></span></div>
+        </aside>
     </div>
 </section>
 
@@ -501,23 +544,6 @@
                 <div class="feature-title">Conectado às tarefas do dia a dia</div>
                 <div class="feature-desc">Os assistentes digitais podem consultar informações, organizar contatos, atualizar oportunidades e apoiar tarefas de comunicação conforme as permissões configuradas.</div>
             </div>
-        </div>
-        <div class="advisor-feature" id="orientador-vendas" aria-labelledby="advisor-feature-title">
-            <div>
-                <p class="section-label">Para quem lidera vendas</p>
-                <h3 id="advisor-feature-title">Desenhe um funil que combina com o jeito que sua equipe vende.</h3>
-                <p class="advisor-feature-copy">O Orientador Comercial conversa com você sobre o processo de vendas, considera o que já está registrado no CRM e propõe etapas e medidas para acompanhar. Você revisa tudo antes de aprovar; os negócios existentes não são movidos automaticamente.</p>
-                <div class="advisor-actions">
-                    <a href="/dashboard" class="btn-primary">Acessar o orientador comercial</a>
-                    <span class="advisor-access-note">Disponível para quem já tem acesso ao AIOS.</span>
-                </div>
-            </div>
-            <aside class="advisor-preview" aria-labelledby="advisor-preview-title" role="list">
-                <p class="advisor-preview-title" id="advisor-preview-title">Do processo atual a um funil revisado por você</p>
-                <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">1</span><span><strong>Conte como vocês vendem</strong><span class="advisor-step-description">Registre etapas, critérios, responsáveis e metas desejadas.</span></span></div>
-                <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">2</span><span><strong>Confira o retrato do CRM</strong><span class="advisor-step-description">Compare suas respostas com os negócios já cadastrados.</span></span></div>
-                <div class="advisor-step" role="listitem"><span class="advisor-step-number" aria-hidden="true">3</span><span><strong>Revise antes de criar</strong><span class="advisor-step-description">Aprove uma proposta de funil ou ajuste as respostas primeiro.</span></span></div>
-            </aside>
         </div>
     </div>
 </section>
