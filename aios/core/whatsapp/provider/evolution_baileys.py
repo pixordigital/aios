@@ -5,7 +5,7 @@ from .base import WhatsAppProvider, OutboundMessage, SendResult, HealthStatus
 logger = logging.getLogger(__name__)
 
 def _base(): return (global_settings.evolution_server_url or "http://evolution:8080").rstrip("/")
-def _headers(): return {"apikey": global_settings.evolution_api_key or "evolution_secret_change_me", "Content-Type": "application/json"}
+def _headers(): return {"apikey": global_settings.evolution_api_key, "Content-Type": "application/json"}
 
 class EvolutionBaileysProvider(WhatsAppProvider):
     provider_type = "baileys"  # type: ignore

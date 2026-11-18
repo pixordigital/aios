@@ -283,9 +283,9 @@ app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="AIOS — plataforma de orquestração de agentes de IA multi-tenant com cobrança, canais e observabilidade.",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/api/docs" if settings.debug else None,
+    redoc_url="/api/redoc" if settings.debug else None,
+    openapi_url="/openapi.json" if settings.debug else None,
     lifespan=lifespan,
 )
 app.include_router(api_router)
@@ -310,8 +310,12 @@ app.include_router(inbox_router)
 from aios.api.telegram_webhook import router as telegram_router  # noqa: E402
 app.include_router(telegram_router)
 
-# Prometheus metrics instrumentation
-Instrumentator().instrument(app).expose(app)
+# Prometheus route can expose runtime counters without authentication. Keep the
+# instrumentation hooks in all environments, but publish /metrics only in dev;
+# production metrics leave through the authenticated/privately-networked OTel path.
+_instrumentator = Instrumentator().instrument(app)
+if settings.debug:
+    _instrumentator.expose(app)
 
 # Rate limiter middleware (must be added at app creation, not in lifespan)
 if not settings.debug:
@@ -399,6 +403,49 @@ async def security_headers(request: Request, call_next):
         )
     return response
 
+
+@app.middleware("http")
+async def enforce_https(request: Request, call_next):
+    """Keep public credentials and session traffic off cleartext HTTP.
+
+    Only health probes and the Evolution webhook on the private Docker network
+    are allowed to use HTTP. Uvicorn's forwarded headers are trusted only from
+    private proxy addresses (see Dockerfile), so a public client cannot claim
+    that its cleartext request arrived through HTTPS.
+    """
+    if settings.debug or not settings.https_only or request.url.scheme == "https":
+        return await call_next(request)
+
+    path = request.url.path
+    if path in {"/health", "/health/live", "/health/ready"}:
+        return await call_next(request)
+
+    peer = request.client.host if request.client else ""
+    try:
+        import ipaddress
+
+        address = ipaddress.ip_address(peer)
+        private_peer = address.is_private or address.is_loopback
+    except ValueError:
+        private_peer = False
+    if private_peer and path.startswith("/api/evolution/webhook/"):
+        return await call_next(request)
+
+    from urllib.parse import urlsplit
+
+    canonical = urlsplit(settings.app_url)
+    if canonical.scheme != "https" or not canonical.netloc:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "HTTPS is required; configure AIOS_APP_URL with the public HTTPS origin."},
+        )
+    location = settings.app_url.rstrip("/") + request.url.path
+    if request.url.query:
+        location += "?" + request.url.query
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(location, status_code=308)
+
 # CORS — locked to configured origins in production
 _cors_origins = ["*"]
 if settings.cors_origins:
@@ -428,7 +475,12 @@ app.add_middleware(
 # Verified live against production: an unauthenticated GET /dashboard/ returned
 # 200 and ~165KB of that tenant's data. Every other /dashboard/* path redirects
 # to login.
-AUTH_EXEMPT = {"/dashboard/login", "/dashboard/register", "/dashboard/logout"}
+AUTH_EXEMPT = {
+    "/dashboard/login",
+    "/dashboard/register",
+    "/dashboard/logout",
+    "/dashboard/toggle-mode",
+}
 
 # ponytail: referer check for dashboard state-changes — CSRF defense without token state
 # Covers POST (all) + GET mutations (delete/clone/toggle/revoke/remove/suspend/deploy).
@@ -464,7 +516,7 @@ _DASHBOARD_MUTATING_GET_ACTIONS = frozenset({
 @app.middleware("http")
 async def dashboard_auth(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/dashboard") and path not in AUTH_EXEMPT:
+    if path.startswith("/dashboard") and path not in AUTH_EXEMPT and not path.startswith("/dashboard/view-mode/"):
         from aios.api.deps import get_dashboard_user
         user = await get_dashboard_user(request)
         if not user:
@@ -659,8 +711,14 @@ def _validate_security_config():
             "AIOS_JWT_SECRET is still the default value 'change-me-in-production'. "
             "Generate a new secret with: openssl rand -hex 32"
         )
-    if not settings.https_only and not settings.debug:
-        logger.warning("HTTPS is not enforced. Set AIOS_HTTPS_ONLY=true in production.")
+    if not settings.debug:
+        from urllib.parse import urlsplit
+
+        if not settings.https_only:
+            raise RuntimeError("AIOS_HTTPS_ONLY must be true in production.")
+        app_origin = urlsplit(settings.app_url)
+        if app_origin.scheme != "https" or not app_origin.netloc:
+            raise RuntimeError("AIOS_APP_URL must be an absolute https:// origin in production.")
     # Fail-open when unset is a footgun: any registered user can log in until
     # the operator sets it. Loud at every boot so the gap cannot go unnoticed.
     if not (settings.login_allowlist or "").strip():
@@ -866,4 +924,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-

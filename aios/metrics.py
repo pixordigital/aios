@@ -8,8 +8,9 @@ Provides a minimal /metrics endpoint exposing counters for:
 Uses `aioprometheus` Registry directly; no background Service is started.
 """
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from aioprometheus import Counter, Histogram, Registry
+from aios.api.deps import get_current_user
 
 router = APIRouter()
 
@@ -37,7 +38,9 @@ async def _ensure_registry():
 
 
 @router.get("/metrics")
-async def get_metrics() -> Response:
+async def get_metrics(user=Depends(get_current_user)) -> Response:
     """Expose Prometheus metrics in the text exposition format."""
+    if user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Platform administrator required")
     await _ensure_registry()
     return Response(content=await _registry.render(), media_type="text/plain; version=0.0.4")

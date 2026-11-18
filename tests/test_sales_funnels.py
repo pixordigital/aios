@@ -105,7 +105,6 @@ class TestPipelineAdvisor:
         self, async_client: AsyncClient, test_session, test_org, test_user
     ):
         from aios.db.models import SalesPipelineAssessment, SalesFunnel
-        from sqlalchemy import select
         async_client.cookies.set("aios_token", _cookie(test_user))
         a = SalesPipelineAssessment(org_id=test_org.id, status="confirmed",
             answers={"stages": "conversa\nproposta"},

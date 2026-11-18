@@ -277,6 +277,9 @@ _env.globals["channel_type_label"] = _channel_type_label
 _env.globals["status_label"] = _status_label
 
 
+VIEW_MODE_COOKIE = "aios_view_mode"
+
+
 async def _render(name: str, request: Request, **kw) -> str:
     t = _env.get_template(name)
     state = getattr(request, "state", None)
@@ -289,8 +292,10 @@ async def _render(name: str, request: Request, **kw) -> str:
     active_org_id = getattr(state, "org_id", None) if state else None
     if "agent_templates" not in kw:
         kw["agent_templates"] = TEMPLATES
+    view_mode = request.cookies.get(VIEW_MODE_COOKIE, "simple")
     return t.render({
         "request": request,
+        "view_mode": view_mode,
         "user_email": getattr(state, "user_email", None) if state else None,
         "is_superadmin": is_sa,
         "internal_mode": settings.internal_mode,
@@ -299,6 +304,29 @@ async def _render(name: str, request: Request, **kw) -> str:
         "active_org_id": active_org_id,
         **kw,
     })
+
+
+@router.get("/toggle-mode")
+async def toggle_view_mode(request: Request):
+    current = request.cookies.get(VIEW_MODE_COOKIE, "simple")
+    new_mode = "pro" if current == "simple" else "simple"
+    referer = request.headers.get("referer") or "/dashboard"
+    if new_mode == "simple" and any(seg in referer for seg in ["/sandbox", "/lab", "/flows", "/contracts", "/control-center"]):
+        referer = "/dashboard"
+    resp = RedirectResponse(referer, status_code=303)
+    resp.set_cookie(VIEW_MODE_COOKIE, new_mode, max_age=86400 * 365, path="/")
+    return resp
+
+
+@router.get("/view-mode/{mode}")
+async def set_view_mode(request: Request, mode: str):
+    target_mode = "pro" if mode in ["pro", "advanced", "avancado"] else "simple"
+    referer = request.headers.get("referer") or "/dashboard"
+    if target_mode == "simple" and any(seg in referer for seg in ["/sandbox", "/lab", "/flows", "/contracts", "/control-center"]):
+        referer = "/dashboard"
+    resp = RedirectResponse(referer, status_code=303)
+    resp.set_cookie(VIEW_MODE_COOKIE, target_mode, max_age=86400 * 365, path="/")
+    return resp
 
 
 # ─── Auth routes ───
@@ -509,6 +537,60 @@ async def dashboard_home(request: Request):
         from aios.core.deployment import latest_instances
 
         deployments = await latest_instances(db, org_id, [a.id for a in agents])
+
+        if request.cookies.get(VIEW_MODE_COOKIE, "simple") == "simple":
+            wa_ch = (await db.execute(
+                select(ChannelConnection).where(
+                    ChannelConnection.org_id == org_id,
+                    ChannelConnection.channel_type.in_(["evolution", "whatsapp"]),
+                    ChannelConnection.is_active == True,
+                )
+            )).scalars().first()
+            whatsapp_connected = wa_ch is not None
+
+            convs = (await db.execute(
+                select(Conversation).where(Conversation.org_id == org_id).order_by(Conversation.created_at.desc()).limit(50)
+            )).scalars().all()
+            handover_pending = sum(
+                1 for c in convs
+                if (c.extra_data or {}).get("handover", {}).get("status") == "human"
+            )
+
+            cost_val = 0.0
+            if isinstance(usage_monthly, dict):
+                cost_val = float(usage_monthly.get("total_cost_all", 0.0) or 0.0)
+            elif hasattr(usage_monthly, "total_cost_all"):
+                cost_val = float(getattr(usage_monthly, "total_cost_all", 0.0) or 0.0)
+            cost_reais = cost_val * 5.5
+
+            unanswered = []
+            for c in convs:
+                unans = (c.extra_data or {}).get("unanswered_questions", [])
+                for u in unans:
+                    q_text = u if isinstance(u, str) else u.get("question", "")
+                    if q_text:
+                        unanswered.append({
+                            "question": q_text,
+                            "asked_at": c.created_at.strftime("%d/%m %H:%M") if c.created_at else "Hoje"
+                        })
+
+            return await _render(
+                "simple_home.html",
+                request,
+                title="Painel da Empresa",
+                stats={
+                    "conversations": cc,
+                    "messages": mc,
+                    "total_agents": ac,
+                    "active_agents": sum(1 for a in agents if a.status == "active"),
+                    "handover_pending": handover_pending,
+                    "cost_reais": cost_reais,
+                },
+                whatsapp_connected=whatsapp_connected,
+                assistants=agents,
+                unanswered_questions=unanswered[:5],
+            )
+
     return await _render("dashboard.html", request, title="Dashboard",
                    stats={"agents": ac, "teams": tc, "conversations": cc, "messages": mc,
                           "total_cost": total_cost,
@@ -2364,6 +2446,46 @@ async def _check_s3_versioning(bucket: str) -> bool:
         return False
 
 
+def _restore_backup_dump(local_path: Path, database_url: str, timeout: int = 600) -> tuple[int, str, str]:
+    """Restore a gzip-compressed plain SQL dump without invoking a shell."""
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    decompressor = subprocess.Popen(
+        ["gzip", "-dc", "--", str(local_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    restore = None
+    try:
+        assert decompressor.stdout is not None
+        restore = subprocess.Popen(
+            ["psql", database_url],
+            stdin=decompressor.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        decompressor.stdout.close()
+        stdout, stderr = restore.communicate(timeout=timeout)
+        gzip_status = decompressor.wait(timeout=10)
+        error = stderr.decode(errors="replace")
+        if restore.returncode == 0 and gzip_status != 0:
+            return 1, stdout.decode(errors="replace"), "Could not decompress backup"
+        return restore.returncode or 0, stdout.decode(errors="replace"), error
+    except subprocess.TimeoutExpired:
+        if restore is not None:
+            restore.kill()
+            restore.communicate()
+        decompressor.kill()
+        decompressor.wait()
+        return 124, "", "Restore timed out"
+    finally:
+        if restore is not None and restore.poll() is None:
+            restore.kill()
+            restore.wait()
+        if decompressor.poll() is None:
+            decompressor.kill()
+            decompressor.wait()
+
+
 @router.get("/admin/backup", response_class=HTMLResponse)
 async def admin_backup_page(request: Request):
     denied = await _require_superadmin(request)
@@ -2434,20 +2556,18 @@ async def admin_backup_restore(request: Request, backup_name: str = Form(...), c
     elif backup["source"] == "s3":
         return JSONResponse({"ok": False, "error": "aws cli não disponível para download do S3"}, status_code=500)
     
-    # pg_restore (mock if not postgres)
+    # Restore a gzip-compressed plain SQL dump (mock if pg tools are unavailable).
     pgurl = os.getenv("AIOS_DATABASE_URL", "postgresql://aios:aios@postgres:5432/aios")
     try:
-        if shutil.which("pg_restore") and shutil.which("gunzip"):
-            # gunzip | pg_restore
+        if shutil.which("psql") and shutil.which("gzip"):
             proc = await asyncio.to_thread(
-                subprocess.run,
-                f"gunzip -c {local_path} | pg_restore --clean --if-exists -d {pgurl}",
-                shell=True, capture_output=True, text=True, timeout=600
+                _restore_backup_dump, local_path, pgurl, 600
             )
-            if proc.returncode == 0:
-                return JSONResponse({"ok": True, "message": f"Restaurado {backup_name} via pg_restore"})
+            returncode, stdout, stderr = proc
+            if returncode == 0:
+                return JSONResponse({"ok": True, "message": f"Restaurado {backup_name} via psql"})
             else:
-                return JSONResponse({"ok": False, "error": f"pg_restore falhou: {proc.stderr}"}, status_code=500)
+                return JSONResponse({"ok": False, "error": f"psql restore failed: {stderr or stdout}"}, status_code=500)
         else:
             # Mock restore for test environments
             return JSONResponse({"ok": True, "message": f"Mock restore de {backup_name} OK (pg_restore não disponível)"})
@@ -3943,7 +4063,74 @@ async def crm_page(request: Request, q: str = "", agent_id: str = "", pipeline: 
         custom_fields = {}
         if org and org.extra_data:
             custom_fields = org.extra_data.get("crm_custom_fields", {})
-        return await _render("crm.html", request, title="CRM IA", crm_enabled=crm_enabled, deals=deals, stats=stats, pending=pending, agents=agents, q=q, agent_id=agent_id, queue=queue, pipelines=pipelines, pipeline=pipeline, sort=sort, pipeline_stats=pipeline_stats, custom_fields=custom_fields)
+        from aios.core.sales_goals import current_month, month_progress
+        goal_progress = await month_progress(db, org_id)
+        return await _render("crm.html", request, title="CRM IA", crm_enabled=crm_enabled, deals=deals, stats=stats, pending=pending, agents=agents, q=q, agent_id=agent_id, queue=queue, pipelines=pipelines, pipeline=pipeline, sort=sort, pipeline_stats=pipeline_stats, custom_fields=custom_fields, goal_progress=goal_progress, current_month=current_month())
+
+
+@router.post("/crm/goals")
+async def crm_goal_save(request: Request):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    try:
+        target = max(0.0, float(form.get("target_brl", 0)))
+    except (TypeError, ValueError):
+        target = 0.0
+    from aios.core.sales_goals import set_goal, current_month
+    async with db_session() as db:
+        await set_goal(db, org_id, current_month(), target, created_by=getattr(request.state, "user_id", None))
+    return RedirectResponse("/dashboard/crm#goals", status_code=303)
+
+
+@router.get("/sales-reports/{report_id}", response_class=HTMLResponse)
+async def weekly_sales_report_page(request: Request, report_id: str):
+    org_id = await _org_filter(request)
+    from aios.db.models import WeeklySalesReport, WeeklySalesRecommendation
+    async with db_session() as db:
+        report = (await db.execute(select(WeeklySalesReport).where(WeeklySalesReport.id == report_id,
+            WeeklySalesReport.org_id == org_id))).scalar_one_or_none()
+        if report is None:
+            raise HTTPException(status_code=404, detail="Relatório não encontrado")
+        recs = (await db.execute(select(WeeklySalesRecommendation).where(
+            WeeklySalesRecommendation.report_id == report.id, WeeklySalesRecommendation.org_id == org_id
+        ).order_by(WeeklySalesRecommendation.created_at))).scalars().all()
+        return await _render("weekly_sales_report.html", request, title="Relatório semanal de vendas", report=report, recommendations=recs)
+
+
+@router.get("/sales-reports/{report_id}/pdf")
+async def weekly_sales_report_pdf(request: Request, report_id: str):
+    org_id = await _org_filter(request)
+    from aios.core.weekly_sales_report import render_pdf
+    from aios.db.models import WeeklySalesReport, WeeklySalesRecommendation
+    async with db_session() as db:
+        report = (await db.execute(select(WeeklySalesReport).where(WeeklySalesReport.id == report_id,
+            WeeklySalesReport.org_id == org_id))).scalar_one_or_none()
+        if report is None:
+            raise HTTPException(status_code=404, detail="Relatório não encontrado")
+        recs = (await db.execute(select(WeeklySalesRecommendation).where(
+            WeeklySalesRecommendation.report_id == report.id, WeeklySalesRecommendation.org_id == org_id))).scalars().all()
+        from aios.config import settings
+        url = f"{settings.app_url.rstrip('/')}/dashboard/sales-reports/{report.id}"
+        pdf = render_pdf(report.payload, [{"title": r.title, "evidence": r.evidence, "action": r.action} for r in recs], url)
+    return StreamingResponse(iter([pdf]), media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="relatorio-vendas-{report.week_start:%Y-%m-%d}.pdf"'})
+
+
+@router.post("/sales-reports/{report_id}/recommendations/{recommendation_id}")
+async def weekly_sales_recommendation_review(request: Request, report_id: str, recommendation_id: str):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    from aios.db.models import WeeklySalesRecommendation
+    async with db_session() as db:
+        rec = (await db.execute(select(WeeklySalesRecommendation).where(
+            WeeklySalesRecommendation.id == recommendation_id, WeeklySalesRecommendation.report_id == report_id,
+            WeeklySalesRecommendation.org_id == org_id))).scalar_one_or_none()
+        if rec is None:
+            raise HTTPException(status_code=404, detail="Sugestão não encontrada")
+        rec.tried = form.get("tried") == "yes"
+        rec.outcome = str(form.get("outcome", ""))[:2000]
+        await db.commit()
+    return RedirectResponse(f"/dashboard/sales-reports/{report_id}", status_code=303)
 
 @router.post("/crm/enable")
 async def crm_enable(request: Request):
@@ -4530,9 +4717,11 @@ async def settings_page(request: Request):
         from aios.db.models import Organization
         org = await db.get(Organization, org_id)
         secrets: dict[str, str] = {}
+        weekly_report_email = ""
         pending_expiry_days = 7
         if org and isinstance(org.extra_data, dict):
             secrets = all_org_secrets(org.extra_data)
+            weekly_report_email = org.extra_data.get("weekly_report_email", "")
             try:
                 pending_expiry_days = int(org.extra_data.get("pending_expiry_days", 7))
                 if not 1 <= pending_expiry_days <= 60:
@@ -4562,6 +4751,7 @@ async def settings_page(request: Request):
         workday_enabled=workday_enabled,
         workday_agent_count=len(workday_agents),
         workday_active_total=len(active_agents),
+        weekly_report_email=weekly_report_email,
     )
 
 
@@ -4576,6 +4766,7 @@ async def settings_save(request: Request):
         if not org:
             return RedirectResponse("/dashboard/settings", status_code=303)
         data = dict(org.extra_data) if isinstance(org.extra_data, dict) else {}
+        data["weekly_report_email"] = (fstr(form, "weekly_report_email", "") or "").strip()
         # Secrets now live encrypted in _secrets_enc. This loop used to assign
         # them into extra_data["secrets"] verbatim, so every API key, SMTP
         # password and service-account JSON an operator typed sat in cleartext
@@ -5186,3 +5377,262 @@ def _wa_apply_meta_state(tpl, info: dict) -> None:
 @router.get("/whatsapp/templates/{tpl_id}", response_class=HTMLResponse)
 async def wa_template_detail(request: Request, tpl_id: str):
     return RedirectResponse(f"/dashboard/whatsapp/templates/{tpl_id}/edit", status_code=303)
+
+
+# ─── Simple Mode Routes (Camada de Abstração Não-Técnica) ───
+
+from aios.core.simple_compiler import PLUG_AND_PLAY_SOLUTIONS, compile_plug_and_play_agent
+
+
+@router.get("/simple/wizard", response_class=HTMLResponse)
+async def simple_wizard_page(request: Request):
+    """Wizard plug-and-play de 1 minuto para criação de atendentes."""
+    return await _render(
+        "simple_assistant_wizard.html",
+        request,
+        title="Criar Atendente em 1 Minuto",
+        solutions=PLUG_AND_PLAY_SOLUTIONS,
+    )
+
+
+@router.post("/simple/create")
+async def simple_create_agent(
+    request: Request,
+    solution_key: str = Form("whatsapp_atendente"),
+    name: str = Form(""),
+    business_name: str = Form(""),
+    business_description: str = Form(""),
+    intelligence_level: str = Form("fast"),
+    tone: str = Form("amigavel"),
+    business_hours: str = Form("Segunda a Sexta, das 08h às 18h"),
+    off_hours_behavior: str = Form("take_note"),
+    rules: list[str] = Form(default=[]),
+):
+    org_id = await _org_filter(request)
+    compiled = compile_plug_and_play_agent(
+        solution_key=solution_key,
+        name=name,
+        business_name=business_name,
+        business_description=business_description,
+        intelligence_level=intelligence_level,
+        tone=tone,
+        rules=rules,
+        business_hours=business_hours,
+        off_hours_behavior=off_hours_behavior,
+    )
+
+    async with db_session() as db:
+        agent = Agent(
+            org_id=org_id,
+            name=compiled["name"],
+            agent_type=compiled["agent_type"],
+            system_prompt=compiled["system_prompt"],
+            llm_config=compiled["llm_config"],
+            tools=compiled["tools"],
+            memory_config=compiled["memory_config"],
+            governance_config=compiled["governance_config"],
+            extra_data=compiled["extra_data"],
+            status="active",
+        )
+        db.add(agent)
+        await db.commit()
+
+        # Vincula ao canal WhatsApp existente se houver um sem agente
+        wa_ch = (await db.execute(
+            select(ChannelConnection).where(
+                ChannelConnection.org_id == org_id,
+                ChannelConnection.channel_type.in_(["evolution", "whatsapp"]),
+            )
+        )).scalars().first()
+        if wa_ch and not wa_ch.agent_id:
+            wa_ch.agent_id = agent.id
+            await db.commit()
+
+    return RedirectResponse("/dashboard/simple/assistants", status_code=303)
+
+
+@router.get("/simple/assistants", response_class=HTMLResponse)
+async def simple_assistants_page(request: Request):
+    """Lista visual dos atendentes em cards descomplicados."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        agents = (await db.execute(
+            select(Agent).where(Agent.org_id == org_id).order_by(Agent.created_at.desc())
+        )).scalars().all()
+    return await _render(
+        "simple_assistants.html",
+        request,
+        title="Meus Atendentes",
+        assistants=agents,
+    )
+
+
+@router.post("/simple/assistants/{agent_id}/toggle")
+async def simple_toggle_assistant(request: Request, agent_id: str):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        ag = (await db.execute(
+            select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
+        )).scalars().first()
+        if ag:
+            ag.status = "paused" if ag.status == "active" else "active"
+            await db.commit()
+    referer = request.headers.get("referer") or "/dashboard/simple/assistants"
+    return RedirectResponse(referer, status_code=303)
+
+
+@router.get("/simple/inbox", response_class=HTMLResponse)
+async def simple_inbox_page(request: Request, conv_id: str | None = None):
+    """Inbox estilo WhatsApp Web limpo com transbordo humano de 1 clique."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        convs = (await db.execute(
+            select(Conversation).where(Conversation.org_id == org_id).order_by(Conversation.created_at.desc()).limit(100)
+        )).scalars().all()
+
+        for c in convs:
+            mc = (await db.execute(
+                select(func.count(Message.id)).where(Message.conversation_id == c.id)
+            )).scalar() or 0
+            setattr(c, "_msg_count", mc)
+
+        selected_conv = None
+        messages = []
+        target_id = conv_id or (convs[0].id if convs else None)
+        if target_id:
+            selected_conv = (await db.execute(
+                select(Conversation).where(Conversation.id == target_id, Conversation.org_id == org_id)
+            )).scalars().first()
+            if selected_conv:
+                messages = (await db.execute(
+                    select(Message).where(Message.conversation_id == selected_conv.id).order_by(Message.created_at.asc())
+                )).scalars().all()
+
+    return await _render(
+        "simple_inbox.html",
+        request,
+        title="Atendimento & Conversas",
+        conversations=convs,
+        selected_conv=selected_conv,
+        messages=messages,
+    )
+
+
+@router.post("/simple/inbox/{conv_id}/handover")
+async def simple_handover_action(request: Request, conv_id: str, action: str = Form(...)):
+    """Transbordo imediato: 'take' (humano assume) ou 'release' (devolve para o robô)."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        conv = (await db.execute(
+            select(Conversation).where(Conversation.id == conv_id, Conversation.org_id == org_id)
+        )).scalars().first()
+        if conv:
+            ed = dict(conv.extra_data or {})
+            hd = dict(ed.get("handover", {}))
+            hd["status"] = "human" if action == "take" else "bot"
+            ed["handover"] = hd
+            conv.extra_data = ed
+            await db.commit()
+    return RedirectResponse(f"/dashboard/simple/inbox?conv_id={conv_id}", status_code=303)
+
+
+@router.get("/simple/knowledge", response_class=HTMLResponse)
+async def simple_knowledge_page(request: Request):
+    """Página de base de conhecimento descomplicada para o gestor."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        docs = []
+        try:
+            from aios.db.models import FileUpload
+            docs = (await db.execute(
+                select(FileUpload).where(FileUpload.org_id == org_id).order_by(FileUpload.created_at.desc())
+            )).scalars().all()
+        except Exception:
+            pass
+
+        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
+        org_faqs = (org.extra_data or {}).get("faqs", []) if org else []
+
+    return await _render(
+        "simple_knowledge.html",
+        request,
+        title="Treinar Atendentes",
+        files=docs,
+        faqs=org_faqs,
+    )
+
+
+@router.post("/simple/knowledge/faq")
+async def simple_add_faq(request: Request, question: str = Form(...), answer: str = Form(...)):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
+        if org:
+            ed = dict(org.extra_data or {})
+            faqs = list(ed.get("faqs", []))
+            faqs.append({"question": question.strip(), "answer": answer.strip()})
+            ed["faqs"] = faqs
+            org.extra_data = ed
+            await db.commit()
+    return RedirectResponse("/dashboard/simple/knowledge", status_code=303)
+
+
+@router.post("/simple/knowledge/quick-teach")
+async def simple_quick_teach(request: Request, question: str = Form(...), answer: str = Form(...)):
+    """Ensina uma dúvida não respondida direto do card do dashboard inicial."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
+        if org:
+            ed = dict(org.extra_data or {})
+            faqs = list(ed.get("faqs", []))
+            faqs.append({"question": question.strip(), "answer": answer.strip()})
+            ed["faqs"] = faqs
+            org.extra_data = ed
+            await db.commit()
+    return RedirectResponse("/dashboard", status_code=303)
+
+
+@router.get("/simple/alerts", response_class=HTMLResponse)
+async def simple_alerts_page(request: Request):
+    """Configuração de notificações de WhatsApp do gestor e resumo diário."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
+        settings_data = (org.extra_data or {}).get("manager_alerts", {}) if org else {}
+    return await _render(
+        "simple_alerts.html",
+        request,
+        title="Plantão & Notificações",
+        settings_data=settings_data,
+    )
+
+
+@router.post("/simple/alerts")
+async def simple_alerts_save(
+    request: Request,
+    manager_phone: str = Form(""),
+    alert_handover: str = Form(default=""),
+    alert_sales: str = Form(default=""),
+    alert_complaints: str = Form(default=""),
+    daily_summary_enabled: str = Form(default=""),
+    daily_summary_time: str = Form("19:00"),
+    budget_limit_reais: float = Form(50.0),
+):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
+        if org:
+            ed = dict(org.extra_data or {})
+            ed["manager_alerts"] = {
+                "manager_phone": manager_phone.strip(),
+                "alert_handover": alert_handover == "1",
+                "alert_sales": alert_sales == "1",
+                "alert_complaints": alert_complaints == "1",
+                "daily_summary_enabled": daily_summary_enabled == "1",
+                "daily_summary_time": daily_summary_time,
+                "budget_limit_reais": budget_limit_reais,
+            }
+            org.extra_data = ed
+            await db.commit()
+    return RedirectResponse("/dashboard/simple/alerts", status_code=303)

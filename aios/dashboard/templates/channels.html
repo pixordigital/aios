@@ -119,6 +119,7 @@
 </dialog>
 
 <script>
+function escAttr(value) { return esc(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
     var CHANNEL_FIELDS = {
         'web': '<div class="text-sm text-secondary" style="text-align:center;padding:0.5rem">O Chat Web funciona direto.</div>',
         'slack': '<div class="flex-col gap-2"><div><label>Token do bot</label><input type="text" name="config_slack_token" class="input input-mono" placeholder="xoxb-..."></div><div><label>Segredo de assinatura</label><input type="text" name="config_slack_secret" class="input input-mono" placeholder="abc..."></div></div>',
@@ -200,20 +201,26 @@
                             '<span class="badge" style="border-color:var(--green);color:var(--green)"><span class="badge-dot" style="background:var(--green)"></span> Conectado</span>' :
                             '<span class="badge" style="border-color:var(--amber);color:var(--amber)"><span class="badge-dot" style="background:var(--amber)"></span> Desconectado</span>';
                         return '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem;border-bottom:1px solid var(--border)">' +
-                            '<div><strong>' + name + '</strong> <span class="text-xs text-tertiary">(' + provider + ')</span></div>' +
+                            '<div><strong>' + esc(name) + '</strong> <span class="text-xs text-tertiary">(' + esc(provider) + ')</span></div>' +
                             '<div class="flex-center gap-2">' + badge +
-                            '<button class="btn btn-ghost btn-sm" onclick="getQRCode(\'' + name + '\')" style="font-size:0.6875rem">QR</button>' +
-                            '<button class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red);font-size:0.6875rem" onclick="deleteInstance(\'' + name + '\')">Excluir</button></div>' +
+                            '<button class="btn btn-ghost btn-sm" data-evo-action="qr" data-instance="' + escAttr(name) + '" style="font-size:0.6875rem">QR</button>' +
+                            '<button class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red);font-size:0.6875rem" data-evo-action="delete" data-instance="' + escAttr(name) + '">Excluir</button></div>' +
                             '</div>';
                     }).join('');
+                    list.querySelectorAll('[data-evo-action]').forEach(function(button) {
+                        button.addEventListener('click', function() {
+                            if (button.dataset.evoAction === 'qr') getQRCode(button.dataset.instance);
+                            else deleteInstance(button.dataset.instance);
+                        });
+                    });
                 }
             } else {
-                list.innerHTML = '<div class="text-sm" style="color:var(--red);padding:1rem">Erro: ' + (data.message || 'Falha ao carregar') + '</div>';
+                list.innerHTML = '<div class="text-sm" style="color:var(--red);padding:1rem">Erro: ' + esc(data.message || 'Falha ao carregar') + '</div>';
             }
         } catch(e) {
             loading.style.display = 'none';
             list.style.display = 'block';
-            list.innerHTML = '<div class="text-sm" style="color:var(--red);padding:1rem">Erro: ' + e.message + '</div>';
+            list.innerHTML = '<div class="text-sm" style="color:var(--red);padding:1rem">Erro: ' + esc(e.message) + '</div>';
         }
     }
     async function createInstance() {

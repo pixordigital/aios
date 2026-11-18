@@ -4,11 +4,17 @@ set -euo pipefail
 
 CLIENT_NAME="${1:-}"
 CLIENT_EMAIL="${2:-}"
+APP_URL="${AIOS_APP_URL:-}"
 
 if [[ -z "$CLIENT_NAME" || -z "$CLIENT_EMAIL" ]]; then
     echo "Usage: bash client-deploy-simple.sh <client-name> <admin-email>"
     echo "  client-name  — e.g. 'AcmeCorp'"
     echo "  admin-email  — their admin email for login"
+    exit 1
+fi
+
+if [[ ! "$APP_URL" =~ ^https://[^/]+(/.*)?$ ]]; then
+    echo "Set AIOS_APP_URL to the public https:// origin before deploying."
     exit 1
 fi
 
@@ -33,7 +39,7 @@ AIOS_DATABASE_URL="sqlite+aiosqlite:///./aios.db"
 AIOS_JWT_SECRET="$JWT_SECRET"
 AIOS_OPENROUTER_API_KEY=""
 AIOS_DEBUG=false
-AIOS_APP_URL="http://$(curl -s ifconfig.me):8777"
+AIOS_APP_URL="$APP_URL"
 ENVEOF
 
 # Systemd service
@@ -49,7 +55,7 @@ WorkingDirectory=/opt/aios
 Environment=PYTHONUNBUFFERED=1
 ExecStart=$(which gunicorn) aios.main:app \\
     --worker-class uvicorn.workers.UvicornWorker \\
-    --bind 0.0.0.0:8777 \\
+    --bind 127.0.0.1:8777 \\
     --workers 2 --timeout 120 \\
     --access-logfile /var/log/aios-client.log \\
     --error-logfile /var/log/aios-client.log
@@ -72,14 +78,15 @@ curl -s -X POST http://localhost:8777/dashboard/register \
 
 echo ""
 echo "=== $CLIENT_NAME AIOS LIVE ==="
-echo "  URL:       http://$(curl -s ifconfig.me):8777"
+echo "  URL:       $APP_URL"
+echo "  Note:      Configure a TLS reverse proxy to 127.0.0.1:8777 before login."
 echo "  Login:     $CLIENT_EMAIL"
 echo "  Password:  $PASS"
 echo ""
 
 cat > /root/aios-${CLIENT_NAME}-creds.txt << CRED
 CLIENT: $CLIENT_NAME
-URL: http://$(curl -s ifconfig.me):8777
+URL: $APP_URL
 ADMIN: $CLIENT_EMAIL
 PASS: $PASS
 CRED

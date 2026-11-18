@@ -6,6 +6,7 @@ set -euo pipefail
 CLIENT_NAME="${1:-}"
 CLIENT_EMAIL="${2:-}"
 SUPERADMIN_KEY="${3:-}"
+APP_URL="${AIOS_APP_URL:-}"
 
 if [[ -z "$CLIENT_NAME" || -z "$CLIENT_EMAIL" ]]; then
     echo "Usage: ./deploy/client-deploy.sh <client-name> <admin-email> [superadmin-key]"
@@ -16,10 +17,18 @@ if [[ -z "$CLIENT_NAME" || -z "$CLIENT_EMAIL" ]]; then
     exit 1
 fi
 
+if [[ ! "$APP_URL" =~ ^https://[^/]+(/.*)?$ ]]; then
+    echo "Set AIOS_APP_URL to the public https:// origin before deploying."
+    exit 1
+fi
+
 CLIENT_SLUG=$(echo "$CLIENT_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
 PASS=$(openssl rand -base64 16)
 JWT_SECRET=$(openssl rand -hex 32)
 MASTER_KEY=$(openssl rand -hex 32)
+DB_PASS=$(openssl rand -hex 32)
+REDIS_PASS=$(openssl rand -hex 32)
+docker network inspect aios-private >/dev/null 2>&1 || docker network create aios-private >/dev/null
 
 echo "=== AIOS Deploy for $CLIENT_NAME ==="
 echo ""
@@ -31,30 +40,30 @@ apt-get update -qq && apt-get install -y -qq docker.io docker-compose curl >/dev
 # ─── PostgreSQL ───
 echo "[2/8] Starting PostgreSQL..."
 docker run -d --name aios-db \
+    --network aios-private \
     -e POSTGRES_DB=aios \
     -e POSTGRES_USER=aios \
-    -e POSTGRES_PASSWORD="$PASS" \
-    -p 5432:5432 \
+    -e POSTGRES_PASSWORD="$DB_PASS" \
     postgres:16-alpine >/dev/null 2>&1
-DATABASE_URL="postgresql+asyncpg://aios:$PASS@localhost:5432/aios"
+DATABASE_URL="postgresql+asyncpg://aios:$DB_PASS@aios-db:5432/aios"
 
 # ─── Redis ───
 echo "[3/8] Starting Redis..."
 docker run -d --name aios-redis \
-    -p 6379:6379 \
-    redis:7-alpine >/dev/null 2>&1
+    --network aios-private \
+    redis:7-alpine redis-server --requirepass "$REDIS_PASS" >/dev/null 2>&1
 
 # ─── AIOS Container ───
 echo "[4/8] Starting AIOS..."
-PUBLIC_IP=$(curl -s ifconfig.me)
 docker run -d --name aios \
-    -p 8777:8777 \
+    --network aios-private \
+    -p 127.0.0.1:8777:8777 \
     -e AIOS_DATABASE_URL="$DATABASE_URL" \
     -e AIOS_JWT_SECRET="$JWT_SECRET" \
     -e AIOS_ADMIN_MASTER_KEY="$MASTER_KEY" \
-    -e AIOS_REDIS_URL="redis://localhost:6379" \
+    -e AIOS_REDIS_URL="redis://:$REDIS_PASS@aios-redis:6379/0" \
     -e AIOS_OPENROUTER_API_KEY="${OPENROUTER_KEY:-}" \
-    -e AIOS_APP_URL="http://$PUBLIC_IP:8777" \
+    -e AIOS_APP_URL="$APP_URL" \
     -e AIOS_DEBUG=false \
     -e AIOS_LOG_FORMAT=json \
     -v aios-data:/data \
@@ -109,9 +118,10 @@ fi
 echo ""
 echo "=== $CLIENT_NAME AIOS is LIVE ==="
 echo ""
-echo "  URL:          http://$PUBLIC_IP:8777"
-echo "  Dashboard:    http://$PUBLIC_IP:8777/dashboard"
-echo "  Landing:      http://$PUBLIC_IP:8777/"
+echo "  URL:          $APP_URL"
+echo "  Dashboard:    $APP_URL/dashboard"
+echo "  Landing:      $APP_URL/"
+echo "  Note:         Configure a TLS reverse proxy to 127.0.0.1:8777 before login."
 echo "  Login:        $CLIENT_EMAIL"
 echo "  Password:     $PASS"
 echo "  Master Key:   $MASTER_KEY"
@@ -120,8 +130,8 @@ echo ""
 # Save credentials
 cat > "/root/aios-${CLIENT_SLUG}-credentials.txt" << CRED
 AIOS CLIENT: $CLIENT_NAME
-URL: http://$PUBLIC_IP:8777
-DASHBOARD: http://$PUBLIC_IP:8777/dashboard
+URL: $APP_URL
+DASHBOARD: $APP_URL/dashboard
 ADMIN: $CLIENT_EMAIL
 PASSWORD: $PASS
 JWT_SECRET: $JWT_SECRET

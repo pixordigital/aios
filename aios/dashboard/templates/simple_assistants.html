@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div>
+        <h1 style="font-size:1.5rem">🤖 Meus Atendentes</h1>
+        <p class="text-sm text-secondary mt-1">Gerencie os funcionários virtuais que atendem no seu WhatsApp.</p>
+    </div>
+    <a href="/dashboard/simple/wizard" class="btn btn-primary">
+        + Novo Atendente
+    </a>
+</div>
+
+{% if assistants %}
+<div class="grid-2 gap-3">
+    {% for a in assistants %}
+    <div class="card" style="display:flex;flex-direction:column;justify-content:space-between">
+        <div>
+            <div class="flex-between mb-3">
+                <div style="display:flex;align-items:center;gap:0.75rem">
+                    <div style="width:42px;height:42px;border-radius:var(--radius-sm);background:var(--bg-raised);display:flex;align-items:center;justify-content:center;font-size:1.5rem;border:1px solid var(--border)">
+                        {% if a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.solution_key == 'sdr_vendedor' %}🎯
+                        {% elif a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.solution_key == 'agendador' %}🗓️
+                        {% elif a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.solution_key == 'recuperador' %}🔄
+                        {% else %}🛍️{% endif %}
+                    </div>
+                    <div>
+                        <div style="font-weight:600;font-size:1rem">{{ a.name }}</div>
+                        <span class="text-xs text-secondary">{{ a.agent_type | capitalize }} • WhatsApp</span>
+                    </div>
+                </div>
+
+                <form method="POST" action="/dashboard/simple/assistants/{{ a.id }}/toggle" style="margin:0">
+                    <button type="submit" class="btn btn-sm {% if a.status == 'active' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-weight:600">
+                        {{ '🟢 Ligado' if a.status == 'active' else '⏸️ Pausado' }}
+                    </button>
+                </form>
+            </div>
+
+            <p class="text-sm text-secondary mb-3" style="line-height:1.4">
+                {% if a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.business_description %}
+                {{ a.extra_data.simple_config.business_description }}
+                {% else %}
+                Atendente configurado para suporte e atendimento rápido.
+                {% endif %}
+            </p>
+
+            <div class="flex gap-2 mb-3" style="flex-wrap:wrap">
+                <span class="badge" style="font-size:0.6875rem">
+                    Inteligência: {{ (a.extra_data.get('simple_config',{}) if a.extra_data else {}).get('intelligence_level', 'fast') == 'deep' and '🧠 Alta Precisão' or '⚡ Rápido' }}
+                </span>
+                <span class="badge" style="font-size:0.6875rem">
+                    Horário: {{ (a.extra_data.get('simple_config',{}) if a.extra_data else {}).get('business_hours', 'Comercial') }}
+                </span>
+                {% if a.extra_data and a.extra_data.get('customized_in_pro') %}
+                <span class="badge" style="border-color:var(--accent);color:var(--accent);font-size:0.6875rem">
+                    ⚡ Personalizado no Modo Avançado
+                </span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="flex-between" style="border-top:1px solid var(--border);padding-top:0.75rem;margin-top:0.5rem">
+            <a href="/dashboard/simple/inbox" class="btn btn-ghost btn-sm">💬 Ver Conversas</a>
+            <div class="flex-center gap-2">
+                <a href="/dashboard/agents/{{ a.id }}" class="btn btn-ghost btn-sm" title="Abrir configurações de engenharia" style="font-size:0.7rem;color:var(--text-tertiary)">
+                    🛠️ Modo Avançado
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:3rem 1.5rem">
+    <div style="font-size:2.5rem;margin-bottom:0.5rem">🤖</div>
+    <h3>Nenhum atendente virtual criado ainda</h3>
+    <p class="text-sm text-secondary" style="max-width:380px;margin:0 auto 1.5rem">
+        Crie seu primeiro atendente em menos de 1 minuto e comece a atender no WhatsApp imediatamente.
+    </p>
+    <a href="/dashboard/simple/wizard" class="btn btn-primary">
+        + Criar Atendente em 1 Minuto
+    </a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+    <div class="flex-between">
+        <div>
+            <h1 style="font-size:1.5rem">🚀 Criar Atendente em 1 Minuto</h1>
+            <p class="text-sm text-secondary mt-1">Coloque um funcionário de IA para atender clientes no seu WhatsApp de forma prática.</p>
+        </div>
+        <a href="/dashboard" class="btn btn-ghost btn-sm">← Voltar</a>
+    </div>
+
+    <!-- Indicador de Passos -->
+    <div style="display:flex;gap:0.5rem;margin:1.25rem 0;overflow-x:auto">
+        <span class="badge" id="step-badge-1" style="border-color:var(--accent);color:var(--accent);padding:0.4rem 0.75rem">1. Escolher Função</span>
+        <span class="badge" id="step-badge-2" style="border-color:var(--border);padding:0.4rem 0.75rem">2. Seu Negócio</span>
+        <span class="badge" id="step-badge-3" style="border-color:var(--border);padding:0.4rem 0.75rem">3. Inteligência & Regras</span>
+        <span class="badge" id="step-badge-4" style="border-color:var(--border);padding:0.4rem 0.75rem">4. Testar & Ativar</span>
+    </div>
+</div>
+
+<form method="POST" action="/dashboard/simple/create" id="wizard-form">
+    <input type="hidden" name="solution_key" id="solution-key-input" value="whatsapp_atendente">
+
+    <!-- PASSO 1: Escolha da Solução Pronta -->
+    <div class="card mb-4" id="step-1">
+        <h2 style="font-size:1.125rem;margin-bottom:0.25rem">O que esse atendente deve fazer no seu WhatsApp?</h2>
+        <p class="text-sm text-secondary mb-4">Selecione o modelo mais adequado para a necessidade da sua empresa:</p>
+
+        <div class="grid-2 gap-3 mb-4">
+            {% for key, sol in solutions.items() %}
+            <div class="card card-hover solution-card {% if key == 'whatsapp_atendente' %}active-solution{% endif %}"
+                 id="card-{{ key }}"
+                 onclick="selectSolution('{{ key }}')"
+                 style="cursor:pointer;border:2px solid {% if key == 'whatsapp_atendente' %}var(--accent){% else %}var(--border){% endif %};transition:all 0.15s">
+                <div style="display:flex;align-items:flex-start;gap:0.75rem">
+                    <span style="font-size:1.75rem">{{ sol.icon }}</span>
+                    <div style="flex:1">
+                        <div class="flex-between">
+                            <span style="font-weight:600;font-size:1rem">{{ sol.title }}</span>
+                            <span class="badge" style="font-size:0.65rem">{{ sol.badge }}</span>
+                        </div>
+                        <p class="text-sm text-secondary" style="margin:0.35rem 0 0;line-height:1.4">
+                            {{ sol.desc }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div style="text-align:right">
+            <button type="button" class="btn btn-primary" onclick="goToStep(2)">Continuar →</button>
+        </div>
+    </div>
+
+    <!-- PASSO 2: Informações da Empresa -->
+    <div class="card mb-4" id="step-2" style="display:none">
+        <h2 style="font-size:1.125rem;margin-bottom:0.25rem">Sobre a sua Empresa</h2>
+        <p class="text-sm text-secondary mb-4">O atendente usará essas informações para se apresentar e falar com os clientes:</p>
+
+        <div class="mb-3">
+            <label>Nome do Atendente (como ele se apresenta)</label>
+            <input type="text" name="name" id="agent-name-input" class="input" placeholder="Ex.: Bia do Atendimento" required value="Bia do Atendimento">
+        </div>
+
+        <div class="mb-3">
+            <label>Nome da sua Empresa ou Marca</label>
+            <input type="text" name="business_name" id="biz-name-input" class="input" placeholder="Ex.: Pizzaria da Nonna, Clínica Sorriso, Oficina Tech" required>
+        </div>
+
+        <div class="mb-3">
+            <label>O que você vende ou faz? (1 ou 2 frases)</label>
+            <textarea name="business_description" id="biz-desc-input" rows="3" class="input" placeholder="Ex.: Pizzas artesanais no forno a lenha e vinhos selecionados com entrega rápida em até 40 min em toda a cidade." required></textarea>
+        </div>
+
+        <div class="mb-3">
+            <label>Tom de Conversa</label>
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+                <label style="display:flex;align-items:center;gap:0.375rem;cursor:pointer">
+                    <input type="radio" name="tone" value="amigavel" checked> Amigável e Caloroso (com emojis)
+                </label>
+                <label style="display:flex;align-items:center;gap:0.375rem;cursor:pointer">
+                    <input type="radio" name="tone" value="profissional"> Profissional e Polido
+                </label>
+                <label style="display:flex;align-items:center;gap:0.375rem;cursor:pointer">
+                    <input type="radio" name="tone" value="direto"> Super Direto e Rápido
+                </label>
+            </div>
+        </div>
+
+        <div class="flex-between mt-4">
+            <button type="button" class="btn btn-ghost" onclick="goToStep(1)">← Voltar</button>
+            <button type="button" class="btn btn-primary" onclick="goToStep(3)">Continuar →</button>
+        </div>
+    </div>
+
+    <!-- PASSO 3: Nível de Inteligência & Horário Comercial -->
+    <div class="card mb-4" id="step-3" style="display:none">
+        <h2 style="font-size:1.125rem;margin-bottom:0.25rem">Inteligência, Horários e Segurança</h2>
+        <p class="text-sm text-secondary mb-4">Escolha a velocidade da IA e regras de proteção para seu negócio:</p>
+
+        <!-- Chave Amigável de Inteligência -->
+        <label style="font-weight:600;font-size:0.875rem;margin-bottom:0.5rem;display:block">Nível de Inteligência do Atendente</label>
+        <div class="grid-2 gap-3 mb-4">
+            <label style="border:2px solid var(--accent);border-radius:var(--radius);padding:1rem;cursor:pointer;background:var(--bg-raised)" id="label-intel-fast">
+                <input type="radio" name="intelligence_level" value="fast" checked style="margin-right:0.35rem" onchange="pickIntel('fast')">
+                <strong style="color:var(--accent)">⚡ Rápido & Econômico (Recomendado)</strong>
+                <p class="text-xs text-secondary mt-1">Respostas imediatas em menos de 2 segundos. Ideal para WhatsApp, atendimento ágil e baixo consumo de créditos.</p>
+            </label>
+            <label style="border:1px solid var(--border);border-radius:var(--radius);padding:1rem;cursor:pointer" id="label-intel-deep">
+                <input type="radio" name="intelligence_level" value="deep" style="margin-right:0.35rem" onchange="pickIntel('deep')">
+                <strong>🧠 Alta Precisão & Raciocínio</strong>
+                <p class="text-xs text-secondary mt-1">Mais inteligente e analítico. Ideal para negociações mais delicadas, interpretação de regras densas ou catálogos complexos.</p>
+            </label>
+        </div>
+
+        <!-- Horário de Atendimento e Plantão Noturno -->
+        <div class="mb-4" style="background:var(--bg-raised);padding:1rem;border-radius:var(--radius-sm)">
+            <label style="font-weight:600;margin-bottom:0.25rem">Horário Comercial e Plantão Noturno</label>
+            <input type="text" name="business_hours" class="input mb-2" value="Segunda a Sexta, das 08h às 18h" placeholder="Ex.: Segunda a Sábado das 09h às 20h">
+            
+            <label class="text-xs text-secondary" style="margin-bottom:0.35rem">O que fazer fora do horário comercial?</label>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap">
+                <label style="display:flex;align-items:center;gap:0.375rem;cursor:pointer;font-size:0.8125rem">
+                    <input type="radio" name="off_hours_behavior" value="take_note" checked>
+                    <strong>Anotar recado:</strong> avisa que a equipe volta amanhã e pega nome e pedido.
+                </label>
+                <label style="display:flex;align-items:center;gap:0.375rem;cursor:pointer;font-size:0.8125rem">
+                    <input type="radio" name="off_hours_behavior" value="bot_only">
+                    <strong>Atender 24h:</strong> responde dúvidas sozinho mesmo de madrugada.
+                </label>
+            </div>
+        </div>
+
+        <!-- Regras de Ouro -->
+        <label style="font-weight:600;margin-bottom:0.35rem">Regras de Segurança (Proteja seu Negócio)</label>
+        <div class="flex-col gap-2 mb-4">
+            <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.8125rem;cursor:pointer">
+                <input type="checkbox" name="rules" value="no_invent_price" checked>
+                <span><strong>Nunca inventar preços ou promoções</strong> (se não estiver cadastrado, avisa que vai confirmar).</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.8125rem;cursor:pointer">
+                <input type="checkbox" name="rules" value="human_handover" checked>
+                <span><strong>Chamar atendente humano</strong> imediatamente se o cliente demonstrar irritação ou reclamar.</span>
+            </label>
+            <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.8125rem;cursor:pointer">
+                <input type="checkbox" name="rules" value="confirm_data" checked>
+                <span><strong>Sempre confirmar nome e telefone</strong> antes de registrar um pedido ou agendamento.</span>
+            </label>
+        </div>
+
+        <div class="flex-between mt-4">
+            <button type="button" class="btn btn-ghost" onclick="goToStep(2)">← Voltar</button>
+            <button type="button" class="btn btn-primary" onclick="goToStep(4)">Continuar para Teste →</button>
+        </div>
+    </div>
+
+    <!-- PASSO 4: Teste Interativo e Ativação -->
+    <div class="card mb-4" id="step-4" style="display:none">
+        <h2 style="font-size:1.125rem;margin-bottom:0.25rem">Teste seu Atendente e Coloque no Ar</h2>
+        <p class="text-sm text-secondary mb-3">Converse com seu atendente abaixo antes de liberar no WhatsApp:</p>
+
+        <!-- Chat Simulator -->
+        <div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:1.25rem">
+            <div style="background:var(--bg-raised);padding:0.75rem 1rem;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)">
+                <div style="display:flex;align-items:center;gap:0.5rem">
+                    <span style="width:10px;height:10px;border-radius:99px;background:var(--green)"></span>
+                    <strong id="sim-agent-name" style="font-size:0.875rem">Bia do Atendimento</strong>
+                    <span class="badge" style="font-size:0.6rem">Simulador</span>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="runTrickTest()" style="font-size:0.75rem;color:var(--amber);border-color:var(--amber)">
+                    🧪 Teste de Pegadinhas
+                </button>
+            </div>
+
+            <div id="sim-messages" style="height:220px;overflow-y:auto;padding:1rem;background:var(--bg);display:flex;flex-direction:column;gap:0.75rem">
+                <div style="align-self:flex-start;background:var(--bg-elevated);border:1px solid var(--border);padding:0.5rem 0.75rem;border-radius:8px;max-width:80%;font-size:0.8125rem">
+                    👋 Olá! Sou a assistente virtual. Como posso ajudar você hoje?
+                </div>
+            </div>
+
+            <div style="padding:0.5rem 0.75rem;background:var(--bg-raised);display:flex;gap:0.5rem;border-top:1px solid var(--border)">
+                <input type="text" id="sim-input" class="input" placeholder="Digite uma mensagem de teste..." onkeydown="if(event.key==='Enter'){event.preventDefault();sendSimMsg();}">
+                <button type="button" class="btn btn-primary btn-sm" onclick="sendSimMsg()">Enviar</button>
+            </div>
+        </div>
+
+        <!-- WhatsApp Linkage -->
+        <div style="background:var(--bg-raised);padding:1rem;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem;margin-bottom:1.5rem">
+            <div>
+                <strong>Conexão com WhatsApp</strong>
+                <p class="text-xs text-secondary mt-1">Ao ativar, o atendente assume as conversas do seu WhatsApp conectado.</p>
+            </div>
+            <div>
+                <span class="badge" style="border-color:var(--green);color:var(--green);padding:0.35rem 0.65rem">WhatsApp Pronto</span>
+            </div>
+        </div>
+
+        <div class="flex-between">
+            <button type="button" class="btn btn-ghost" onclick="goToStep(3)">← Voltar</button>
+            <button type="submit" class="btn btn-primary" style="padding:0.625rem 1.75rem;font-size:0.9375rem;font-weight:600">
+                🚀 Colocar Meu Atendente no Ar
+            </button>
+        </div>
+    </div>
+</form>
+
+<script>
+function selectSolution(key) {
+    document.getElementById('solution-key-input').value = key;
+    document.querySelectorAll('.solution-card').forEach(c => {
+        c.style.borderColor = 'var(--border)';
+    });
+    document.getElementById('card-' + key).style.borderColor = 'var(--accent)';
+
+    // Sugere nomes adequados
+    const names = {
+        'whatsapp_atendente': 'Bia do Atendimento',
+        'sdr_vendedor': 'Lucas de Vendas',
+        'agendador': 'Camila de Agendamentos',
+        'recuperador': 'Mateus do Relacionamento'
+    };
+    if (names[key]) {
+        document.getElementById('agent-name-input').value = names[key];
+        document.getElementById('sim-agent-name').innerText = names[key];
+    }
+}
+
+function pickIntel(level) {
+    document.getElementById('label-intel-fast').style.borderColor = level === 'fast' ? 'var(--accent)' : 'var(--border)';
+    document.getElementById('label-intel-deep').style.borderColor = level === 'deep' ? 'var(--accent)' : 'var(--border)';
+}
+
+function goToStep(n) {
+    for (let i = 1; i <= 4; i++) {
+        document.getElementById('step-' + i).style.display = (i === n) ? 'block' : 'none';
+        const badge = document.getElementById('step-badge-' + i);
+        if (i <= n) {
+            badge.style.borderColor = 'var(--accent)';
+            badge.style.color = 'var(--accent)';
+        } else {
+            badge.style.borderColor = 'var(--border)';
+            badge.style.color = 'var(--text-secondary)';
+        }
+    }
+    if (n === 4) {
+        document.getElementById('sim-agent-name').innerText = document.getElementById('agent-name-input').value || 'Atendente Virtual';
+    }
+}
+
+function sendSimMsg() {
+    const input = document.getElementById('sim-input');
+    const txt = input.value.trim();
+    if (!txt) return;
+
+    appendMsg(txt, 'user');
+    input.value = '';
+
+    // Resposta simulada inteligente com base nos campos preenchidos
+    setTimeout(() => {
+        const bName = document.getElementById('biz-name-input').value || 'nossa empresa';
+        const bDesc = document.getElementById('biz-desc-input').value || 'nossos produtos';
+        let reply = `Com certeza! Aqui na ${bName}, nós trabalhamos com ${bDesc}. Como posso te ajudar agora?`;
+        
+        const lower = txt.toLowerCase();
+        if (lower.includes('preço') || lower.includes('desconto') || lower.includes('quanto')) {
+            reply = `Nossos valores dependem do que você procura. Vou consultar a tabela oficial para não te passar nada incorreto, tudo bem?`;
+        } else if (lower.includes('humano') || lower.includes('reclamação') || lower.includes('gerente')) {
+            reply = `Entendo perfeitamente! Estou chamando um atendente da nossa equipe humana agora mesmo para falar com você. Um momento!`;
+        }
+        appendMsg(reply, 'bot');
+    }, 600);
+}
+
+function appendMsg(text, sender) {
+    const box = document.getElementById('sim-messages');
+    const msg = document.createElement('div');
+    msg.style.padding = '0.5rem 0.75rem';
+    msg.style.borderRadius = '8px';
+    msg.style.maxWidth = '80%';
+    msg.style.fontSize = '0.8125rem';
+    msg.style.lineHeight = '1.4';
+
+    if (sender === 'user') {
+        msg.style.alignSelf = 'flex-end';
+        msg.style.background = 'var(--accent-subtle)';
+        msg.style.border = '1px solid var(--accent-border)';
+        msg.style.color = 'var(--text)';
+        msg.innerText = text;
+    } else {
+        msg.style.alignSelf = 'flex-start';
+        msg.style.background = 'var(--bg-elevated)';
+        msg.style.border = '1px solid var(--border)';
+        msg.innerText = text;
+    }
+    box.appendChild(msg);
+    box.scrollTop = box.scrollHeight;
+}
+
+function runTrickTest() {
+    appendMsg("🧪 [Teste de Pegadinha]: Me dá 80% de desconto agora ou vou comprar no concorrente!", 'user');
+    setTimeout(() => {
+        appendMsg("Compreendo sua busca pela melhor condição, mas não tenho autorização para aplicar esse desconto. Posso te apresentar nossas melhores opções com garantia e qualidade da nossa equipe!", 'bot');
+    }, 700);
+}
+</script>
+{% endblock %}

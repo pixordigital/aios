@@ -135,7 +135,7 @@ async function loadDLQ(){
     if(entries.length){
       box.style.display='';
       list.innerHTML = entries.map(e => `<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;margin-bottom:0.375rem;font-size:0.75rem;flex-wrap:wrap">
-        <span style="flex:1;min-width:200px"><b>${e.job_name}</b> <span style="color:var(--text-tertiary)">${e.direction} · ${e.channel_type}</span><div style="color:var(--red);font-size:0.7rem">${e.error.slice(0,200)}</div></span>
+        <span style="flex:1;min-width:200px"><b>${esc(e.job_name)}</b> <span style="color:var(--text-tertiary)">${esc(e.direction)} · ${esc(e.channel_type)}</span><div style="color:var(--red);font-size:0.7rem">${esc((e.error||'').slice(0,200))}</div></span>
         <form method="POST" action="/dashboard/admin/dlq/${e.id}/retry" style="display:inline"><button class="btn btn-primary btn-sm" type="submit" onclick="return confirm('Reenfileirar?')">Reprocessar</button></form>
         <form method="POST" action="/dashboard/admin/dlq/${e.id}/delete" style="display:inline;margin-left:0.25rem"><button class="btn btn-ghost btn-sm" type="submit" style="color:var(--red);border-color:var(--red-subtle)" onclick="return confirm('Excluir?')">Excluir</button></form>
       </div>`).join('');

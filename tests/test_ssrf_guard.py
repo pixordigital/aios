@@ -45,7 +45,8 @@ def test_non_http_schemes_blocked(url):
     assert check_url(url) is not None
 
 
-def test_public_url_allowed():
+def test_public_url_allowed(monkeypatch):
+    monkeypatch.setattr("aios.tools.ssrf.is_private_host", lambda _host: False)
     assert check_url("https://example.com/") is None
 
 

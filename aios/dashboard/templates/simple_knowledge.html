@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div>
+        <h1 style="font-size:1.5rem">📚 Treinar Atendentes (Conhecimento da Empresa)</h1>
+        <p class="text-sm text-secondary mt-1">Ensine seus atendentes sobre preços, cardápios, políticas de troca e perguntas frequentes.</p>
+    </div>
+</div>
+
+<!-- Upload de Catálogo / Arquivos -->
+<div class="card mb-4">
+    <h2 style="font-size:1.125rem;margin-bottom:0.25rem">📄 Documentos do Negócio (PDF, Word ou Texto)</h2>
+    <p class="text-sm text-secondary mb-3">Envie arquivos com catálogo, lista de preços, cardápio ou regulamentos. A IA lê e aprende automaticamente.</p>
+
+    <form method="POST" action="/dashboard/simple/knowledge/upload" enctype="multipart/form-data" style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">
+        <input type="file" name="file" class="input" style="max-width:350px" accept=".pdf,.doc,.docx,.txt" required>
+        <button type="submit" class="btn btn-primary">📤 Enviar e Treinar IA</button>
+    </form>
+
+    {% if files %}
+    <div style="margin-top:1.25rem" class="flex-col gap-2">
+        {% for f in files %}
+        <div style="background:var(--bg-raised);padding:0.65rem 1rem;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:0.5rem">
+                <span>📄</span>
+                <strong>{{ f.filename }}</strong>
+                <span class="text-xs text-secondary">({{ (f.size / 1024)|round(1) }} KB)</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.5rem">
+                <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.65rem">✅ Aprendido pela IA</span>
+                <form method="POST" action="/dashboard/files/{{ f.id }}/delete" style="margin:0" onsubmit="return confirm('Remover este arquivo?')">
+                    <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red-subtle);font-size:0.65rem">Excluir</button>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Perguntas Frequentes (FAQ Rápido) -->
+<div class="card mb-4">
+    <div class="flex-between mb-2">
+        <div>
+            <h2 style="font-size:1.125rem;margin:0">❓ Perguntas Frequentes da Empresa (FAQ)</h2>
+            <p class="text-sm text-secondary mt-1">Ensine respostas diretas para as dúvidas mais comuns dos seus clientes.</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('faq-modal').showModal()">+ Adicionar Dúvida</button>
+    </div>
+
+    {% if faqs %}
+    <div class="flex-col gap-2 mt-3">
+        {% for item in faqs %}
+        <div style="background:var(--bg-raised);padding:0.75rem 1rem;border-radius:var(--radius-sm);border:1px solid var(--border)">
+            <strong style="color:var(--accent);font-size:0.875rem">P: {{ item.question }}</strong>
+            <p style="margin:0.25rem 0 0;font-size:0.8125rem;color:var(--text-secondary)">R: {{ item.answer }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div style="background:var(--bg-raised);padding:1.5rem;border-radius:var(--radius-sm);text-align:center;color:var(--text-secondary);font-size:0.8125rem;margin-top:0.75rem">
+        Nenhuma pergunta cadastrada ainda. Adicione perguntas como horários de entrega, formas de pagamento e localização.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Modal para Nova Pergunta -->
+<dialog id="faq-modal" class="card" style="max-width:500px;width:90%;border:1px solid var(--border);padding:1.5rem;border-radius:var(--radius);background:var(--bg-elevated);color:var(--text)">
+    <h3 style="margin-bottom:0.5rem">Nova Pergunta Frequente</h3>
+    <form method="POST" action="/dashboard/simple/knowledge/faq">
+        <label>Pergunta que o cliente faz:</label>
+        <input type="text" name="question" class="input mb-3" placeholder="Ex.: Vocês entregam aos domingos?" required>
+        
+        <label>Resposta oficial que a IA deve dar:</label>
+        <textarea name="answer" rows="4" class="input mb-3" placeholder="Ex.: Sim! Entregamos aos domingos das 11h às 22h para toda a região central." required></textarea>
+        
+        <div class="flex-between">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('faq-modal').close()">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Salvar Pergunta</button>
+        </div>
+    </form>
+</dialog>
+{% endblock %}

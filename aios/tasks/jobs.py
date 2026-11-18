@@ -1333,7 +1333,57 @@ async def weekly_report_job(ctx):
 
     if date.today().weekday() != 0:
         return {"skipped": True, "reason": "not-monday"}
-    return await _post_team_reports("weekly")
+    from aios.core.weekly_sales_report import completed_week, collect_week, _recommendations, render_pdf, send_pdf, smtp_configured
+    from aios.config import settings
+    from aios.db.backend import db_session
+    from aios.db.models import Organization, User, WeeklySalesReport, WeeklySalesRecommendation
+    from sqlalchemy import select
+    start, end = completed_week()
+    # Deliver the established Slack report independently before PDF work so
+    # an SMTP/PDF problem cannot suppress the existing Slack delivery.
+    slack = await _post_team_reports("weekly")
+    created = sent = failed = unavailable = 0
+    async with db_session() as db:
+        orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
+        for org in orgs:
+            report = (await db.execute(select(WeeklySalesReport).where(
+                WeeklySalesReport.org_id == org.id, WeeklySalesReport.week_start == start))).scalar_one_or_none()
+            if report is None:
+                payload = await collect_week(db, org.id, start, end)
+                prior = (await db.execute(select(WeeklySalesReport).where(
+                    WeeklySalesReport.org_id == org.id, WeeklySalesReport.week_start < start
+                ).order_by(WeeklySalesReport.week_start.desc()).limit(1))).scalar_one_or_none()
+                if prior:
+                    prior_recs = (await db.execute(select(WeeklySalesRecommendation).where(
+                        WeeklySalesRecommendation.org_id == org.id, WeeklySalesRecommendation.report_id == prior.id
+                    ))).scalars().all()
+                    payload["follow_up"] = [{"title": r.title, "tried": r.tried, "outcome": r.outcome,
+                        "report_id": prior.id} for r in prior_recs]
+                report = WeeklySalesReport(org_id=org.id, week_start=start, week_end=end, payload=payload)
+                db.add(report); await db.flush()
+                for rec in _recommendations(payload):
+                    db.add(WeeklySalesRecommendation(org_id=org.id, report_id=report.id, **rec))
+                await db.commit(); created += 1
+            recipient = (org.extra_data or {}).get("weekly_report_email", "") if isinstance(org.extra_data, dict) else ""
+            if not recipient:
+                recipient = (await db.execute(select(User.email).where(User.org_id == org.id, User.role == "admin").order_by(User.created_at).limit(1))).scalar_one_or_none() or ""
+            recs = (await db.execute(select(WeeklySalesRecommendation).where(
+                WeeklySalesRecommendation.org_id == org.id, WeeklySalesRecommendation.report_id == report.id))).scalars().all()
+            url = f"{settings.app_url.rstrip('/')}/dashboard/sales-reports/{report.id}"
+            pdf = render_pdf(report.payload, [r.__dict__ for r in recs], url)
+            if not recipient:
+                report.email_status = "no-recipient"; unavailable += 1
+            elif report.email_status == "sent":
+                continue
+            elif not await smtp_configured(org.id):
+                report.email_status = "unavailable"; unavailable += 1
+            elif await send_pdf(org.id, recipient, "Relatório semanal de vendas — AIOS", pdf, url):
+                report.email_status = "sent"; sent += 1
+            else:
+                report.email_status = "failed"; failed += 1
+            await db.commit()
+    return {"kind": "weekly", "created": created, "email_sent": sent,
+            "email_failed": failed, "email_unavailable": unavailable, "slack": slack}
 
 
 async def monthly_report_job(ctx):

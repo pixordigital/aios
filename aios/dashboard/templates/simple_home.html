@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+    <div>
+        <h1 style="font-size:1.5rem;display:flex;align-items:center;gap:0.5rem">
+            👋 Painel da Empresa
+            <span class="badge" style="background:var(--accent-subtle);color:var(--accent);border-color:var(--accent-border);font-size:0.75rem">Modo Simples</span>
+        </h1>
+        <p class="text-sm text-secondary mt-1">Visão geral dos seus funcionários virtuais, conversas de WhatsApp e alertas.</p>
+    </div>
+    <div class="flex-center gap-2">
+        <a href="/dashboard/simple/wizard" class="btn btn-primary" style="font-weight:600">
+            + Criar Atendente em 1 Minuto
+        </a>
+    </div>
+</div>
+
+<!-- Métricas de Negócio em Destaque -->
+<div class="grid-4 mb-4">
+    <div class="stat-card">
+        <p class="stat-label">Conversas no WhatsApp</p>
+        <p class="stat-value">{{ stats.conversations }}</p>
+        <span class="text-xs text-secondary">{{ stats.messages }} mensagens trocadas</span>
+        <a href="/dashboard/simple/inbox" class="stat-link">Ver conversas →</a>
+    </div>
+    <div class="stat-card" style="{% if stats.handover_pending > 0 %}border-color:var(--amber);background:var(--amber-subtle){% endif %}">
+        <p class="stat-label">Precisam de Atendente Humano</p>
+        <p class="stat-value" style="color:{% if stats.handover_pending > 0 %}var(--amber){% else %}var(--text){% endif %}">{{ stats.handover_pending }}</p>
+        <span class="text-xs text-secondary">Clientes que pediram ajuda humana</span>
+        <a href="/dashboard/simple/inbox?filter=human" class="stat-link">Atender agora →</a>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Atendentes Virtuais</p>
+        <p class="stat-value">{{ stats.active_agents }} <span style="font-size:0.875rem;color:var(--text-tertiary)">/ {{ stats.total_agents }}</span></p>
+        <span class="text-xs text-secondary">Prontos para responder</span>
+        <a href="/dashboard/simple/assistants" class="stat-link">Gerenciar atendentes →</a>
+    </div>
+    <div class="stat-card">
+        <p class="stat-label">Custo Estimado no Mês</p>
+        <p class="stat-value" style="font-size:1.25rem;color:var(--accent)">R$ {{ "%.2f"|format(stats.cost_reais) }}</p>
+        <span class="text-xs text-secondary">Teto limite seguro: R$ 50,00</span>
+        <a href="/dashboard/simple/alerts" class="stat-link">Ajustar limite →</a>
+    </div>
+</div>
+
+<!-- WhatsApp Status Banner -->
+<div class="card mb-4" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;border-left:4px solid {% if whatsapp_connected %}var(--accent){% else %}var(--amber){% endif %}">
+    <div style="display:flex;align-items:center;gap:0.75rem">
+        <div style="font-size:1.5rem">📱</div>
+        <div>
+            <div style="font-weight:600;font-size:0.9375rem">
+                WhatsApp: {% if whatsapp_connected %}<span style="color:var(--accent)">Conectado e Ativo</span>{% else %}<span style="color:var(--amber)">Aguardando Leitura de QR Code</span>{% endif %}
+            </div>
+            <div class="text-sm text-secondary">
+                {% if whatsapp_connected %}
+                Seu número está recebendo mensagens e os atendentes virtuais respondem automaticamente.
+                {% else %}
+                Escaneie o QR Code com o aplicativo do WhatsApp no celular para começar a atender clientes.
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div>
+        {% if whatsapp_connected %}
+        <a href="/dashboard/whatsapp" class="btn btn-ghost btn-sm">Ver Conexão</a>
+        {% else %}
+        <a href="/dashboard/whatsapp" class="btn btn-primary btn-sm">📲 Ler QR Code Agora</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Radar de Perguntas Não Respondidas (Aprendizado em 1 Clique) -->
+<div class="card mb-4" style="border-left:4px solid #3b82f6">
+    <div class="flex-between mb-2">
+        <div style="display:flex;align-items:center;gap:0.5rem">
+            <span style="font-size:1.125rem">💡</span>
+            <h2 style="font-size:0.9375rem;margin:0">Dúvidas que a IA não soube responder (Oportunidades de Aprendizado)</h2>
+        </div>
+        <a href="/dashboard/simple/knowledge" class="btn btn-ghost btn-sm">Base de Conhecimento</a>
+    </div>
+    <p class="text-sm text-secondary" style="margin-bottom:0.75rem">
+        Quando um cliente pergunta algo que não está cadastrado, o AIOS registra aqui. Ensine a resposta uma única vez e todos os atendentes aprendem na hora!
+    </p>
+
+    {% if unanswered_questions %}
+    <div class="flex-col gap-2">
+        {% for q in unanswered_questions %}
+        <div style="background:var(--bg-raised);padding:0.75rem 1rem;border-radius:var(--radius-sm);display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px">
+                <span class="text-xs text-secondary">{{ q.asked_at }} • Cliente perguntou:</span>
+                <div style="font-weight:500;margin-top:0.2rem">"{{ q.question }}"</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openTeachModal('{{ q.question | replace("'", "\\'") }}')">
+                + Ensinar Resposta
+            </button>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div style="background:var(--bg-raised);padding:0.75rem 1rem;border-radius:var(--radius-sm);text-align:center;color:var(--text-secondary);font-size:0.8125rem">
+        🎉 Nenhum cliente com dúvida sem resposta nas últimas 24h! Sua base de conhecimento está cobrindo todas as perguntas.
+    </div>
+    {% endif %}
+</div>
+
+<!-- Meus Atendentes Virtuais (Cards de Negócio) -->
+<div class="mb-4">
+    <div class="flex-between mb-3">
+        <div>
+            <h2 style="font-size:1.125rem;margin:0">Meus Atendentes</h2>
+            <p class="text-sm text-secondary mt-1">Controle quem está atendendo seus clientes no WhatsApp.</p>
+        </div>
+        <a href="/dashboard/simple/assistants" class="btn btn-ghost btn-sm">Ver todos ({{ assistants|length }})</a>
+    </div>
+
+    {% if assistants %}
+    <div class="grid-2 gap-3">
+        {% for a in assistants %}
+        <div class="card" style="display:flex;flex-direction:column;justify-content:space-between">
+            <div>
+                <div class="flex-between mb-2">
+                    <div style="display:flex;align-items:center;gap:0.5rem">
+                        <span style="font-size:1.25rem">
+                            {% if a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.solution_key == 'sdr_vendedor' %}🎯
+                            {% elif a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.solution_key == 'agendador' %}🗓️
+                            {% elif a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.solution_key == 'recuperador' %}🔄
+                            {% else %}🛍️{% endif %}
+                        </span>
+                        <div>
+                            <div style="font-weight:600;font-size:0.9375rem">{{ a.name }}</div>
+                            <span class="text-xs text-secondary">{{ a.agent_type | capitalize }}</span>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="badge" style="{% if a.status == 'active' %}border-color:var(--green);color:var(--green){% else %}border-color:var(--text-tertiary);color:var(--text-tertiary){% endif %}">
+                            {{ 'Ativo 🟢' if a.status == 'active' else 'Pausado ⏸️' }}
+                        </span>
+                    </div>
+                </div>
+
+                <p class="text-sm text-secondary" style="margin:0.5rem 0;line-height:1.4">
+                    {% if a.extra_data and a.extra_data.simple_config and a.extra_data.simple_config.business_description %}
+                    {{ a.extra_data.simple_config.business_description[:120] }}...
+                    {% else %}
+                    Atendente configurado para suporte e atendimento rápido.
+                    {% endif %}
+                </p>
+
+                <div class="flex gap-2 mb-3" style="flex-wrap:wrap">
+                    <span class="badge" style="font-size:0.6875rem">
+                        Inteligência: {{ (a.extra_data.get('simple_config',{}) if a.extra_data else {}).get('intelligence_level', 'fast') == 'deep' and '🧠 Alta Precisão' or '⚡ Rápido' }}
+                    </span>
+                    {% if a.extra_data and a.extra_data.get('customized_in_pro') %}
+                    <span class="badge" style="border-color:var(--accent);color:var(--accent);font-size:0.6875rem">
+                        ⚡ Personalizado no Modo Avançado
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="flex-between" style="border-top:1px solid var(--border);padding-top:0.75rem;margin-top:0.5rem">
+                <form method="POST" action="/dashboard/simple/assistants/{{ a.id }}/toggle" style="margin:0">
+                    <button type="submit" class="btn btn-ghost btn-sm">
+                        {{ '⏸️ Pausar' if a.status == 'active' else '▶️ Ligar' }}
+                    </button>
+                </form>
+                <div class="flex-center gap-2">
+                    <a href="/dashboard/simple/wizard?edit_id={{ a.id }}" class="btn btn-ghost btn-sm">✏️ Ajustar</a>
+                    <a href="/dashboard/agents/{{ a.id }}" class="btn btn-ghost btn-sm" title="Abrir configurações de engenharia" style="font-size:0.7rem;color:var(--text-tertiary)">
+                        🛠️ Modo Avançado
+                    </a>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card" style="text-align:center;padding:2.5rem 1.5rem">
+        <div style="font-size:2rem;margin-bottom:0.5rem">🤖</div>
+        <h3 style="margin-bottom:0.25rem">Você ainda não tem nenhum atendente virtual</h3>
+        <p class="text-sm text-secondary" style="max-width:400px;margin:0 auto 1.25rem">
+            Coloque seu primeiro funcionário de IA para atender clientes no WhatsApp em menos de 1 minuto!
+        </p>
+        <a href="/dashboard/simple/wizard" class="btn btn-primary">
+            + Criar Atendente em 1 Minuto
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Modal para Ensinar Resposta Rápida -->
+<dialog id="teach-modal" class="card" style="max-width:500px;width:90%;border:1px solid var(--border);padding:1.5rem;border-radius:var(--radius);background:var(--bg-elevated);color:var(--text)">
+    <h3 style="margin-bottom:0.5rem">Ensinar Resposta ao Atendente</h3>
+    <p class="text-xs text-secondary" style="margin-bottom:1rem">
+        Ao salvar, todos os seus atendentes de WhatsApp saberão exatamente o que responder para esta dúvida.
+    </p>
+    <form method="POST" action="/dashboard/simple/knowledge/quick-teach">
+        <label>Pergunta do Cliente</label>
+        <input type="text" id="teach-question" name="question" class="input mb-3" required readonly style="background:var(--bg-raised)">
+        
+        <label>Qual deve ser a resposta oficial?</label>
+        <textarea name="answer" rows="4" class="input mb-3" required placeholder="Ex.: Sim, aceitamos cartões de crédito em até 3x sem juros e Pix com 5% de desconto."></textarea>
+        
+        <div class="flex-between">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('teach-modal').close()">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Salvar e Ensinar</button>
+        </div>
+    </form>
+</dialog>
+
+<script>
+function openTeachModal(question) {
+    document.getElementById('teach-question').value = question;
+    document.getElementById('teach-modal').showModal();
+}
+</script>
+{% endblock %}

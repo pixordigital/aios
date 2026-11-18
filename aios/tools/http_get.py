@@ -39,7 +39,7 @@ class HttpGetTool(BaseTool):
                         nxt = resp.headers.get("location")
                         if not nxt:
                             break
-                        url_to_fetch = str(httpx.URL(nxt).join(httpx.URL(url_to_fetch)))
+                        url_to_fetch = str(httpx.URL(url_to_fetch).join(httpx.URL(nxt)))
                         parsed = urlparse(url_to_fetch)
                         if parsed.scheme not in ("https",) or _is_private(parsed.hostname or ""):
                             return {"error": "Redirect target is not HTTPS or is private", "content": ""}

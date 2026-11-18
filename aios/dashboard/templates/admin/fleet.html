@@ -35,16 +35,17 @@
 </dialog>
 
 <script>
+function shellQuote(value) { return "'" + String(value).replace(/'/g, "'\\''") + "'"; }
 function updateCmd() {
     var name = document.getElementById('client-name-input').value || 'ClientName';
     var email = document.getElementById('client-email-input').value || 'admin@client.com';
-    document.getElementById('deploy-cmd').innerHTML = 'curl -sL https://raw.githubusercontent.com/pixordigital/aios/main/deploy/client-deploy-simple.sh \\<br>  | bash -s -- "' + name + '" "' + email + '"';
+    document.getElementById('deploy-cmd').textContent = 'curl -sL https://raw.githubusercontent.com/pixordigital/aios/main/deploy/client-deploy-simple.sh | bash -s -- ' + shellQuote(name) + ' ' + shellQuote(email);
 }
 function copyCmd() { copyDeployCmd(); }
 function copyDeployCmd() {
     var name = document.getElementById('client-name-input').value || 'ClientName';
     var email = document.getElementById('client-email-input').value || 'admin@client.com';
-    var cmd = 'curl -sL https://raw.githubusercontent.com/pixordigital/aios/main/deploy/client-deploy-simple.sh | bash -s -- "' + name + '" "' + email + '"';
+    var cmd = 'curl -sL https://raw.githubusercontent.com/pixordigital/aios/main/deploy/client-deploy-simple.sh | bash -s -- ' + shellQuote(name) + ' ' + shellQuote(email);
     navigator.clipboard.writeText(cmd);
     document.getElementById('copy-msg').style.display = 'block';
     setTimeout(function(){ document.getElementById('copy-msg').style.display = 'none'; }, 3000);

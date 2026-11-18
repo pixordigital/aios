@@ -43,7 +43,7 @@ services:
   app:
     build: .
     ports:
-      - "8777:8777"
+      - "127.0.0.1:8777:8777"
     environment:
       # ─── Core ───
       AIOS_DEBUG: "false"
@@ -151,6 +151,12 @@ volumes:
   caddy-data:
   caddy-config:
 ```
+
+Production requirements: `AIOS_APP_URL` must be the public `https://` origin.
+The app host port is bound to loopback, so public traffic must enter through
+Coolify's TLS proxy (or the host Caddy reverse proxy). For the host Caddy
+configuration in `deploy/Caddyfile`, set `AIOS_DOMAIN` to the same DNS name
+and point that name at the server. Do not publish port 8777 directly.
 
 **Caddyfile:**
 ```

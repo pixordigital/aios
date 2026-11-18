@@ -688,6 +688,28 @@ class SalesGoal(Base, TimestampMixin, OrgScopedMixin):
     team = relationship("Team")
 
 
+class WeeklySalesReport(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "weekly_sales_reports"
+    __table_args__ = (UniqueConstraint("org_id", "week_start", name="uq_weekly_sales_report_org_week"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    week_start: Mapped[datetime] = mapped_column(index=True)
+    week_end: Mapped[datetime] = mapped_column()
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    email_status: Mapped[str] = mapped_column(String(30), default="pending")
+
+
+class WeeklySalesRecommendation(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "weekly_sales_recommendations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    report_id: Mapped[str] = mapped_column(ForeignKey("weekly_sales_reports.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    evidence: Mapped[str] = mapped_column(Text, default="")
+    action: Mapped[str] = mapped_column(Text, default="")
+    target_url: Mapped[str] = mapped_column(String(500), default="/dashboard/crm")
+    tried: Mapped[bool | None] = mapped_column(nullable=True)
+    outcome: Mapped[str] = mapped_column(Text, default="")
+
+
 class SalesFunnel(Base, TimestampMixin, OrgScopedMixin):
     """Named deal pipeline shared by the Sales and Data teams.
 

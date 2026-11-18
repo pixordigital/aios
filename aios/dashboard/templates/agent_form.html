@@ -601,7 +601,7 @@ async function verifyFromDetail(btn){
             if(!skills.length){ listEl.style.display='none'; statusEl.textContent='Nenhuma skill — importe uma URL acima'; return; }
             listEl.style.display='flex';
             listEl.innerHTML=skills.slice(0,20).map(function(s){
-                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px"><div><div style="font-weight:600;font-size:0.75rem">'+s.name+'</div><div style="font-size:0.65rem;color:var(--text-tertiary)">'+(s.description||'').slice(0,80)+'</div></div><span style="font-size:0.6rem;color:var(--text-tertiary)">'+s.skill_type+'</span></div>';
+                return '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.4rem 0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:4px"><div><div style="font-weight:600;font-size:0.75rem">'+esc(s.name)+'</div><div style="font-size:0.65rem;color:var(--text-tertiary)">'+esc((s.description||'').slice(0,80))+'</div></div><span style="font-size:0.6rem;color:var(--text-tertiary)">'+esc(s.skill_type)+'</span></div>';
             }).join('');
             statusEl.textContent=skills.length+' skills';
         }catch(e){ statusEl.textContent='Erro ao listar'; }
@@ -793,7 +793,7 @@ async function verifyFromDetail(btn){
         var known={"calculator":"Expressões matemáticas, avaliação segura","web_search":"Buscar na web","http_get":"Buscar URLs HTTPS","current_datetime":"Hora atual UTC/fuso","send_email":"Enviar mensagens de e-mail","read_file":"Ler arquivos enviados"};
         desc.innerHTML=names.map(function(n){
             var d=known[n]||'Ferramenta personalizada';
-            return '<div style="font-size:0.6875rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content"><span style="font-family:JetBrains Mono,monospace">'+n+'</span>: '+d+'</div>';
+            return '<div style="font-size:0.6875rem;color:var(--text-secondary);background:var(--bg-hover);border-radius:var(--radius-xs);padding:0.25rem 0.5rem;display:inline-block;width:fit-content"><span style="font-family:JetBrains Mono,monospace">'+esc(n)+'</span>: '+esc(d)+'</div>';
         }).join('');
     }
     function tokenEstimate(t){return Math.round((t.length/4)||0)}

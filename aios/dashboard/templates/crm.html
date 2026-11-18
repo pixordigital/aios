@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
+<section class="card mb-4" id="goals">
+  <h2>Meta de vendas — {{ current_month }}</h2>
+  <p class="text-sm text-secondary">Progresso registrado: R$ {{ "%.2f"|format(goal_progress.won_brl) }} de R$ {{ "%.2f"|format(goal_progress.target_brl) }} ({{ goal_progress.pct }}%).</p>
+  <form method="POST" action="/dashboard/crm/goals" style="display:flex;gap:.5rem;align-items:end;max-width:420px">
+    <div><label>Meta mensal (R$)</label><input class="input" type="number" name="target_brl" min="0" step="0.01" value="{{ goal_progress.target_brl }}" required></div>
+    <button class="btn btn-primary">Salvar meta</button>
+  </form>
+</section>
 <div class="flex-between mb-4">
   <div><h1>CRM IA — Monitoramento de Agentes</h1><p class="text-sm text-secondary">Pipeline operado 100% por agentes • você monitora e aprova (HITL) • upsell R$97</p></div>
   <div style="display:flex;gap:0.5rem">

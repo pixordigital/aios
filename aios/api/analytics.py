@@ -582,7 +582,10 @@ async def usage_models(db: DatabaseBackend = Depends(get_db_backend), org_id: st
 
 
 @router.get("/health/pgvector")
-async def pgvector_health(db: DatabaseBackend = Depends(get_db_backend)):
+async def pgvector_health(
+    db: DatabaseBackend = Depends(get_db_backend),
+    user=Depends(get_current_user),
+):
     try:
         from sqlalchemy import text
         r = await db.execute(text("SELECT 1 FROM pg_extension WHERE extname='vector'"))
@@ -592,7 +595,7 @@ async def pgvector_health(db: DatabaseBackend = Depends(get_db_backend)):
         return {"ok": False, "mode": "BOW fallback", "error": str(e)[:120]}
 
 @router.get("/health/evolution-rate/{instance}")
-async def evolution_rate(instance: str):
+async def evolution_rate(instance: str, user=Depends(get_current_user)):
     try:
         from aios.core.whatsapp_guard import _warmup_limits
         import time

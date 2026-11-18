@@ -4,7 +4,7 @@ services:
         command:
             - redis-server
             - '--requirepass'
-            - '${REDIS_PASSWORD:-changeme}'
+            - '${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}'
             - '--appendonly'
             - 'yes'
             - '--maxmemory'
@@ -18,7 +18,7 @@ services:
                 - CMD
                 - redis-cli
                 - '-a'
-                - '${REDIS_PASSWORD:-changeme}'
+                - '${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}'
                 - ping
             interval: 10s
             timeout: 5s
@@ -53,9 +53,6 @@ services:
             - '--config=/etc/otelcol.yaml'
         volumes:
             - '/data/coolify/applications/38908ddf-a875-4105-a93f-a4570513911f/deploy/otel-collector.yml:/etc/otelcol.yaml:ro'
-        ports:
-            - '4317:4317'
-            - '4318:4318'
         restart: unless-stopped
         container_name: otel-38908ddf-a875-4105-a93f-a4570513911f-222816167357
         labels:
@@ -102,7 +99,7 @@ services:
             COOLIFY_CONTAINER_NAME: litellm-38908ddf-a875-4105-a93f-a4570513911f-222816191603
             SERVICE_NAME_LITELLM: litellm
         ports:
-            - '4000:4000'
+            - '127.0.0.1:4000:4000'
         healthcheck:
             test:
                 - CMD-SHELL
@@ -142,7 +139,7 @@ services:
         environment:
             SERVER_URL: 'http://evolution:8080'
             AUTHENTICATION_TYPE: apikey
-            AUTHENTICATION_API_KEY: '${EVOLUTION_API_KEY:-evolution_secret_change_me}'
+            AUTHENTICATION_API_KEY: '${EVOLUTION_API_KEY:?set a strong EVOLUTION_API_KEY}'
             AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: 'true'
             QRCODE_LIMIT: '30'
             QRCODE_COLOR: '#00e5a0'
@@ -153,15 +150,15 @@ services:
             # org. Read from the environment instead — and rotate the old one.
             DATABASE_CONNECTION_URI: "postgresql://${EVOLUTION_DB_USER:-aios}:${EVOLUTION_DB_PASSWORD:?set EVOLUTION_DB_PASSWORD}@postgres:5432/${EVOLUTION_DB_NAME:-evolution}?schema=evolution"
             REDIS_ENABLED: 'true'
-            REDIS_URI: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6'
+            REDIS_URI: 'redis://:${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}@redis:6379/6'
             REDIS_PREFIX_KEY: evolution
             CACHE_REDIS_ENABLED: 'true'
-            CACHE_REDIS_URI: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/6'
+            CACHE_REDIS_URI: 'redis://:${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}@redis:6379/6'
             CACHE_REDIS_PREFIX_KEY: evolution-cache
             CACHE_LOCAL_ENABLED: 'true'
             S3_ENABLED: 'false'
             LANGUAGE: pt-BR
-            EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:-change-me-in-production}'
+            EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:?set a strong EVOLUTION_API_KEY}'
             COOLIFY_BRANCH: '"main"'
             COOLIFY_RESOURCE_UUID: 38908ddf-a875-4105-a93f-a4570513911f
             COOLIFY_CONTAINER_NAME: evolution-38908ddf-a875-4105-a93f-a4570513911f-222816239942
@@ -170,7 +167,7 @@ services:
             - '38908ddf-a875-4105-a93f-a4570513911f_evolution-data:/evolution/instances'
             - '38908ddf-a875-4105-a93f-a4570513911f_evolution-store:/evolution/store'
         ports:
-            - '8080:8080'
+            - '127.0.0.1:8080:8080'
         depends_on:
             redis:
                 condition: service_healthy
@@ -212,15 +209,15 @@ services:
     app:
         build: .
         ports:
-            - '8777:8777'
+            - '127.0.0.1:8777:8777'
         environment:
             REDIS_HOST: redis
             REDIS_PORT: '6379'
-            REDIS_PASSWORD: '${REDIS_PASSWORD:-changeme}'
+            REDIS_PASSWORD: '${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}'
             AIOS_DEBUG: 'false'
-            AIOS_APP_URL: '${AIOS_APP_URL}'
+            AIOS_APP_URL: '${AIOS_APP_URL:?set AIOS_APP_URL to an https:// origin}'
             AIOS_DATABASE_URL: '${AIOS_DATABASE_URL}'
-            AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0'
+            AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}@redis:6379/0'
             AIOS_JWT_SECRET: '${AIOS_JWT_SECRET}'
             AIOS_ADMIN_MASTER_KEY: '${AIOS_ADMIN_MASTER_KEY}'
             AIOS_LLM_PROVIDER: openrouter
@@ -228,7 +225,7 @@ services:
             AIOS_LITELLM_API_KEY: sk-litellm
             # AIOS_ prefix is required: Settings uses env_prefix="AIOS_".
             # Unprefixed, these were never read and evolution_api_key stayed "".
-            AIOS_EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:-change-me-in-production}'
+            AIOS_EVOLUTION_API_KEY: '${EVOLUTION_API_KEY:?set a strong EVOLUTION_API_KEY}'
             AIOS_EVOLUTION_SERVER_URL: 'http://evolution:8080'
             AIOS_OPENROUTER_API_KEY: ''
             AIOS_OPENAI_API_KEY: ''
@@ -320,13 +317,13 @@ services:
         environment:
             REDIS_HOST: redis
             REDIS_PORT: '6379'
-            REDIS_PASSWORD: '${REDIS_PASSWORD:-changeme}'
+            REDIS_PASSWORD: '${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}'
             AIOS_DEBUG: 'false'
             AIOS_LLM_PROVIDER: openrouter
             AIOS_LITELLM_BASE_URL: 'http://litellm:4000'
             AIOS_LITELLM_API_KEY: sk-litellm
             AIOS_DATABASE_URL: '${AIOS_DATABASE_URL}'
-            AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:-changeme}@redis:6379/0'
+            AIOS_REDIS_URL: 'redis://:${REDIS_PASSWORD:?set a strong REDIS_PASSWORD}@redis:6379/0'
             AIOS_JWT_SECRET: '${AIOS_JWT_SECRET}'
             AIOS_LOG_FORMAT: json
             OTEL_EXPORTER_OTLP_ENDPOINT: 'http://otel:4317'

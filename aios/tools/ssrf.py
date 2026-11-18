@@ -64,6 +64,12 @@ def check_url(url: str, *, allow_private: bool = False) -> str | None:
         return f"scheme not allowed: {parsed.scheme or '(none)'}"
     if not parsed.hostname:
         return "url has no host"
+    if parsed.username is not None or parsed.password is not None:
+        return "URL credentials are not allowed"
+    try:
+        parsed.port  # reject malformed or out-of-range ports before connecting
+    except ValueError:
+        return "invalid URL port"
     if not allow_private and is_private_host(parsed.hostname):
         return f"private/internal host blocked: {parsed.hostname}"
     return None

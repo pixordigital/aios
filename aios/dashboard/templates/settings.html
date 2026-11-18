@@ -50,6 +50,7 @@
 
     <div class="card">
       <h3>SMTP — E-mail</h3>
+      <p class="text-xs text-tertiary">Relatório semanal: <input class="input" type="email" name="weekly_report_email" value="{{ weekly_report_email or '' }}" placeholder="{{ user.email if user is defined else 'admin@empresa.com' }}"> Se vazio, usamos o primeiro administrador da organização. Se SMTP não estiver configurado, o envio aparece como indisponível no relatório; o Slack continua funcionando.</p>
       <div class="grid-2">
         <div><label>SMTP Host</label><input class="input" name="smtp_host" value="{{ secrets.smtp_host or '' }}" placeholder="smtp.resend.com"></div>
         <div><label>SMTP Port</label><input class="input" name="smtp_port" value="{{ secrets.smtp_port or '' }}" placeholder="587"></div>

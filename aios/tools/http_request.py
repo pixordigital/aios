@@ -1,4 +1,3 @@
-import ipaddress
 import json
 import logging
 from urllib.parse import urlparse
@@ -7,41 +6,13 @@ from pydantic import BaseModel, Field
 
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY
+from aios.tools.ssrf import check_url, is_private_host
 
 logger = logging.getLogger(__name__)
 
-_PRIVATE_BLOCKS = [
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("169.254.0.0/16"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-    # Gaps that used to be open: 0.0.0.0 routes to localhost on Linux, CGNAT
-    # space is operator-internal, and mapped IPv6 reaches the same v4 targets
-    # through a different spelling.
-    ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("100.64.0.0/10"),
-    ipaddress.ip_network("::ffff:0:0/96"),
-]
-
-
 def _is_private(host: str) -> bool:
-    try:
-        import socket
-        addr = socket.getaddrinfo(host, 80)[0][4][0]
-    except Exception:
-        return True
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return True
-    for block in _PRIVATE_BLOCKS:
-        if ip in block:
-            return True
-    return False
+    """Compatibility wrapper around the shared, all-address SSRF check."""
+    return is_private_host(host)
 
 
 def _operator_allows_private(requested) -> bool:
@@ -77,12 +48,9 @@ class HttpRequestTool(BaseTool):
         # which meant a prompt-injected agent could turn the SSRF guard off and
         # read cloud metadata (169.254.169.254). The operator opts in out-of-band.
         allow_private = _operator_allows_private(allow_private)
-        parsed = urlparse(url)
-        if parsed.scheme not in ("https", "http"):
-            return {"error": "Only http/https allowed", "status": 0}
-        host = parsed.hostname or ""
-        if not allow_private and _is_private(host):
-            return {"error": "private host blocked", "status": 0}
+        blocked = check_url(url, allow_private=allow_private)
+        if blocked:
+            return {"error": blocked, "status": 0}
         method = method.upper()
         if method not in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"):
             return {"error": f"invalid method {method}", "status": 0}
@@ -139,10 +107,19 @@ class HttpRequestTool(BaseTool):
                         nxt = resp.headers.get("location")
                         if not nxt:
                             break
-                        url_to_fetch = str(httpx.URL(nxt).join(httpx.URL(url_to_fetch)))
-                        parsed2 = urlparse(url_to_fetch)
-                        if not allow_private and _is_private(parsed2.hostname or ""):
-                            return {"error": "redirect to private blocked", "status": 0}
+                        next_url = str(httpx.URL(url_to_fetch).join(httpx.URL(nxt)))
+                        blocked = check_url(next_url, allow_private=allow_private)
+                        if blocked:
+                            return {"error": f"redirect blocked: {blocked}", "status": 0}
+                        old = urlparse(url_to_fetch)
+                        new = urlparse(next_url)
+                        old_origin = (old.scheme.lower(), (old.hostname or "").lower(), old.port or (443 if old.scheme == "https" else 80))
+                        new_origin = (new.scheme.lower(), (new.hostname or "").lower(), new.port or (443 if new.scheme == "https" else 80))
+                        if new_origin != old_origin:
+                            # Auth headers, API keys, and request bodies are supplied
+                            # by the caller. Never forward them to another origin.
+                            return {"error": "cross-origin redirects are blocked", "status": 0}
+                        url_to_fetch = next_url
                         if method == "POST" and resp.status_code in (301, 302, 303):
                             method = "GET"
                         continue

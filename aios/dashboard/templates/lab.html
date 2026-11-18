@@ -247,15 +247,23 @@ async function loadRecentTraces(){
   var res=await fetch('/dashboard/lab/traces/recent');
   var j=await res.json();
   if(j.recent && j.recent.length){
-    document.getElementById('trace-recent').innerHTML=j.recent.map(function(r){
-      return '<button onclick="document.getElementById(\'trace-input\').value=\''+r.trace_id+'\';loadTrace()" style="text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.5rem;cursor:pointer"><div style="font-family:monospace;font-size:0.75rem">'+r.trace_id+'</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">'+r.span_type+' • '+r.model+' • '+r.duration_ms+'ms</div></button>';
-    }).join('');
+    var recent=document.getElementById('trace-recent');
+    recent.replaceChildren(...j.recent.map(function(r){
+      var button=document.createElement('button');
+      button.type='button';
+      button.style.cssText='text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.5rem;cursor:pointer';
+      button.addEventListener('click',function(){ document.getElementById('trace-input').value=r.trace_id; loadTrace(); });
+      var id=document.createElement('div'); id.style.fontFamily='monospace'; id.style.fontSize='0.75rem'; id.textContent=r.trace_id||'';
+      var meta=document.createElement('div'); meta.style.fontSize='0.6875rem'; meta.style.color='var(--text-tertiary)'; meta.textContent=[r.span_type,r.model,(r.duration_ms||0)+'ms'].filter(Boolean).join(' • ');
+      button.append(id,meta);
+      return button;
+    }));
   }
 }
 function renderTimeline(j){
   var el=document.getElementById('trace-timeline'), raw=document.getElementById('trace-raw');
   if(!j.spans || !j.spans.length){
-    el.innerHTML='<div style="color:var(--text-tertiary);text-align:center;padding:1.5rem">Sem spans para '+j.trace_id+' — pode ter expirado (memória) ou ID inválido. Veja recentes abaixo.</div>';
+    el.innerHTML='<div style="color:var(--text-tertiary);text-align:center;padding:1.5rem">Sem spans para '+esc(j.trace_id)+' — pode ter expirado (memória) ou ID inválido. Veja recentes abaixo.</div>';
     raw.style.display='none';
     return;
   }
@@ -263,8 +271,8 @@ function renderTimeline(j){
     var w=Math.min(100, Math.max(4, (s.duration_ms||1)/2));
     return '<div style="display:flex;gap:0.75rem;align-items:center;padding:0.5rem 0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:0.375rem">'
       +'<div style="width:10px;height:10px;border-radius:99px;background:'+(s.error?'var(--red)':s.type==="llm"?"var(--accent)":"var(--amber)")+'"></div>'
-      +'<div style="flex:1"><div style="font-size:0.8125rem;font-weight:500">'+s.type+' '+(s.model?'<span style="color:var(--text-tertiary);font-weight:400">• '+s.model+'</span>':'')+'</div><div style="height:6px;background:var(--bg-hover);border-radius:99px;margin-top:0.25rem"><div style="height:6px;width:'+w+'%;background:'+(s.error?'var(--red)':'var(--accent)')+';border-radius:99px"></div></div></div>'
-      +'<div style="text-align:right"><div style="font-family:monospace;font-size:0.75rem">'+(s.duration_ms||0)+'ms</div>'+(s.error?'<div style="font-size:0.6875rem;color:var(--red)">'+s.error.slice(0,60)+'</div>':'')+'</div></div>';
+      +'<div style="flex:1"><div style="font-size:0.8125rem;font-weight:500">'+esc(s.type)+' '+(s.model?'<span style="color:var(--text-tertiary);font-weight:400">• '+esc(s.model)+'</span>':'')+'</div><div style="height:6px;background:var(--bg-hover);border-radius:99px;margin-top:0.25rem"><div style="height:6px;width:'+w+'%;background:'+(s.error?'var(--red)':'var(--accent)')+';border-radius:99px"></div></div></div>'
+      +'<div style="text-align:right"><div style="font-family:monospace;font-size:0.75rem">'+esc(s.duration_ms||0)+'ms</div>'+(s.error?'<div style="font-size:0.6875rem;color:var(--red)">'+esc(String(s.error).slice(0,60))+'</div>':'')+'</div></div>';
   }).join('');
   raw.textContent=JSON.stringify(j,null,2); raw.style.display='';
 }
@@ -289,7 +297,7 @@ async function loadWorkflows(){
   var r=await fetch('/dashboard/lab/workflows'); var j=await r.json();
   var el=document.getElementById('wf-list');
   if(!j.length){ el.innerHTML='<div style="color:var(--text-tertiary);padding:1rem">Nenhum workflow. Crie o primeiro.</div>'; return; }
-  el.innerHTML=j.map(function(w){ return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.625rem;display:flex;flex-direction:column;gap:0.25rem"><div style="font-weight:500;font-size:0.8125rem">'+w.name+'</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">'+w.status+' • '+w.timeout_seconds+'s</div><button class="btn btn-ghost btn-sm" onclick="openWorkflow(\''+w.id+'\')">Abrir</button></div>'; }).join('');
+  el.innerHTML=j.map(function(w){ return '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.625rem;display:flex;flex-direction:column;gap:0.25rem"><div style="font-weight:500;font-size:0.8125rem">'+esc(w.name)+'</div><div style="font-size:0.6875rem;color:var(--text-tertiary)">'+esc(w.status)+' • '+esc(w.timeout_seconds)+'s</div><button class="btn btn-ghost btn-sm" onclick="openWorkflow(\''+esc(w.id)+'\')">Abrir</button></div>'; }).join('');
 }
 async function createWorkflow(){
   var fd=new FormData(); fd.set('name',document.getElementById('wf-name').value||'Workflow'); fd.set('description',document.getElementById('wf-desc').value||'');
@@ -303,7 +311,7 @@ async function openWorkflow(id){
   document.getElementById('wf-detail').style.display=''; document.getElementById('wf-detail-title').textContent=j.name+' ('+j.nodes.length+' nós)';
   renderDAG(j.nodes);
   var nodesEl=document.getElementById('wf-nodes');
-  nodesEl.innerHTML=j.nodes.length? j.nodes.map(function(n){ return '<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:0.375rem 0.5rem;font-size:0.75rem"><span style="flex:1">'+(n.label||n.id.slice(0,8))+' '+(n.agent_id?'🤖':'🔧 '+(n.tool_name||''))+'</span><span style="color:var(--text-tertiary)">deps:'+(n.depends_on||[]).join(',')+'</span><button class="btn btn-ghost btn-sm" onclick="deleteNode(\''+n.id+'\')">×</button></div>'; }).join('') : '<div style="color:var(--text-tertiary);font-size:0.75rem">Sem nós. Adicione agente ou tool.</div>';
+  nodesEl.innerHTML=j.nodes.length? j.nodes.map(function(n){ return '<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:0.375rem 0.5rem;font-size:0.75rem"><span style="flex:1">'+esc(n.label||n.id.slice(0,8))+' '+(n.agent_id?'🤖':'🔧 '+esc(n.tool_name||''))+'</span><span style="color:var(--text-tertiary)">deps:'+esc((n.depends_on||[]).join(','))+'</span><button class="btn btn-ghost btn-sm" onclick="deleteNode(\''+esc(n.id)+'\')">×</button></div>'; }).join('') : '<div style="color:var(--text-tertiary);font-size:0.75rem">Sem nós. Adicione agente ou tool.</div>';
   validateDAG();
 }
 function renderDAG(nodes){
@@ -316,7 +324,7 @@ function renderDAG(nodes){
     var el=document.createElement('div');
     el.style.cssText='position:absolute;left:'+x+'px;top:'+y+'px;width:190px;background:var(--bg);border:1px solid '+(n.agent_id?'var(--accent)':'var(--amber)')+';border-radius:8px;padding:0.5rem;cursor:grab;font-size:0.75rem';
     el.draggable=true; el.id='node-'+n.id;
-    el.innerHTML='<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(n.label||n.id.slice(0,8))+'</div><div style="color:var(--text-tertiary);font-size:0.6875rem">'+(n.agent_id?'🤖 '+n.agent_id.slice(0,6):'🔧 '+(n.tool_name||'-'))+'</div><div style="font-family:monospace;font-size:0.6rem;color:var(--text-tertiary)">→ '+(n.output_key||'result')+'</div>';
+    el.innerHTML='<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n.label||n.id.slice(0,8))+'</div><div style="color:var(--text-tertiary);font-size:0.6875rem">'+(n.agent_id?'🤖 '+esc(n.agent_id.slice(0,6)):'🔧 '+esc(n.tool_name||'-'))+'</div><div style="font-family:monospace;font-size:0.6rem;color:var(--text-tertiary)">→ '+esc(n.output_key||'result')+'</div>';
     el.addEventListener('dragstart', function(e){ e.dataTransfer.setData('text/plain', n.id); });
     el.addEventListener('dragend', function(e){ var rect=canvas.getBoundingClientRect(); var nx=Math.max(0, e.clientX - rect.left - 95); var ny=Math.max(0, e.clientY - rect.top - 30); n.position={x:nx,y:ny}; renderDAG(nodes); });
     canvas.appendChild(el);
@@ -375,7 +383,7 @@ async function loadVersions(){
   var r=await fetch('/dashboard/lab/agents/'+id+'/versions'); var j=await r.json();
   var el=document.getElementById('ver-list');
   if(!j.length){ el.innerHTML='<div style="color:var(--text-tertiary);padding:0.5rem">Nenhuma versão publicada. Clique Publicar.</div>'; return; }
-  el.innerHTML=j.map(function(v){ return '<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem"><span style="font-family:monospace;font-size:0.75rem">v'+v.version+'</span><span style="flex:1;font-size:0.8125rem">'+v.change_note+'</span><span style="font-size:0.6875rem;color:var(--text-tertiary)">'+v.created_at.slice(0,16)+'</span><button class="btn btn-ghost btn-sm" onclick="rollbackVersion(\''+id+'\',\''+v.id+'\')">↩ Rollback</button></div>'; }).join('');
+  el.innerHTML=j.map(function(v){ return '<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem"><span style="font-family:monospace;font-size:0.75rem">v'+esc(v.version)+'</span><span style="flex:1;font-size:0.8125rem">'+esc(v.change_note)+'</span><span style="font-size:0.6875rem;color:var(--text-tertiary)">'+esc((v.created_at||'').slice(0,16))+'</span><button class="btn btn-ghost btn-sm" onclick="rollbackVersion(\''+esc(id)+'\',\''+esc(v.id)+'\')">↩ Rollback</button></div>'; }).join('');
 }
 async function publishVersion(){
   var id=document.getElementById('ver-agent').value; if(!id) return alert('Selecione agente');

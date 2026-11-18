@@ -1,6 +1,6 @@
 # Pending work
 
-Last updated: 2026-11-17
+Last updated: 2026-11-18
 
 ## Open
 
@@ -29,10 +29,6 @@ Last updated: 2026-11-17
   redeploy, then run the deploy/probe for each agent.
 - Telegram channel `agents-test-telegram-s9` still has an empty bot token and no
   agent/team assignment.
-- Uncommitted (2026-11-17): approvals dashboard, ICM contract viewer, unit-cost
-  endpoint + analytics card, outcomes baseline/delta, `tests/test_paid_workflow_e2e.py`.
-  Nothing deployed. Commit/push only on operator request; then redeploy and
-  verify `/dashboard/approvals` and `/dashboard/contracts` render in the container.
 
 
 ## Open — stateless migration
@@ -288,6 +284,23 @@ bookkeeping, tool cache. Doing the correctness half first.
   loadfile`, EXIT=0) — Phase 6's 1436 plus the 5 new tests, no regressions.
 
 ## Done
+
+- Non-technical abstraction layer (Modo Simples vs Modo Avançado) (2026-11-18):
+  Dual-tier UX architecture with progressive disclosure. Added global mode toggle
+  in sidebar and header (`[ 🟢 Modo Simples | ⚡ Modo Avançado ]`) backed by
+  `aios_view_mode` cookie (default: `simple`). Built plug-and-play compiler
+  `aios/core/simple_compiler.py` with 4 ready-to-run business solutions (WhatsApp
+  atendente, SDR vendedor, agendador de consultas, recuperador de vendas), friendly
+  intelligence toggle (`fast` -> `gpt-4o-mini`, `deep` -> `gpt-4o`), business hours
+  and night-shift logic, and gold guardrails. Created new business-friendly templates:
+  `simple_home.html` (executive metrics, unanswered questions radar with 1-click
+  teaching), `simple_assistant_wizard.html` (4-step wizard with chat simulator and
+  trick questions security audit), `simple_assistants.html` (visual card list with
+  ON/OFF switch and Pro mode eject link), `simple_inbox.html` (WhatsApp Web style
+  chat with 1-click human handover and release), `simple_knowledge.html` (catalog drag-and-drop
+  and quick FAQ builder), and `simple_alerts.html` (manager WhatsApp alerts and 19h
+  executive briefing). Unit & integration tests in `tests/test_simple_compiler.py`
+  passed (5 passed). `graphify update .` completed.
 
 - Tier 2 + Tier 3 of the differentiation plan (2026-11-17, uncommitted):
   - `GET /dashboard/approvals` (+ `POST /{id}/approve|reject`): the HITL queue the

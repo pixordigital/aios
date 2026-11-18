@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: aios
       POSTGRES_USER: aios
-      POSTGRES_PASSWORD: ${AIOS_COMPOSE_PG_PASSWORD:-aios}
+      POSTGRES_PASSWORD: ${AIOS_COMPOSE_PG_PASSWORD:?Set a strong AIOS_COMPOSE_PG_PASSWORD}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -25,11 +25,11 @@ services:
     # security: NOT exposed to host/network — app + worker reach it via the
     # internal docker network (redis://redis:6379). Requires password via
     # AIOS_REDIS_URL=redis://:password@redis:6379 in .env.
-    command: ["redis-server", "--requirepass", "${AIOS_REDIS_PASSWORD}"]
+    command: ["redis-server", "--requirepass", "${AIOS_REDIS_PASSWORD:?Set a strong AIOS_REDIS_PASSWORD}"]
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${AIOS_REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${AIOS_REDIS_PASSWORD:?Set AIOS_REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -40,10 +40,10 @@ services:
   app:
     build: .
     ports:
-      - "8777:8777"
+      - "127.0.0.1:8777:8777"
     env_file: .env
     environment:
-      AIOS_REDIS_URL: "redis://:${AIOS_REDIS_PASSWORD}@redis:6379/0"
+      AIOS_REDIS_URL: "redis://:${AIOS_REDIS_PASSWORD:?Set AIOS_REDIS_PASSWORD}@redis:6379/0"
     dns:
       - 8.8.8.8
       - 1.1.1.1
@@ -91,7 +91,7 @@ services:
     command: ["python", "-m", "aios.tasks.worker"]
     env_file: .env
     environment:
-      AIOS_REDIS_URL: "redis://:${AIOS_REDIS_PASSWORD}@redis:6379/0"
+      AIOS_REDIS_URL: "redis://:${AIOS_REDIS_PASSWORD:?Set AIOS_REDIS_PASSWORD}@redis:6379/0"
     dns:
       - 8.8.8.8
       - 1.1.1.1

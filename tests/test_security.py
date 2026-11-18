@@ -161,3 +161,97 @@ class TestTemplateXSS:
         # tojson escapes quotes/backslashes for JS; forceescape protects attribute context
         assert '"' not in out.split("confirm(")[1].split(")")[0].replace("&#34;", "")
         assert "O&#92;u0027Brien" in out or "O\\u0027Brien" in out
+
+    def test_lab_escapes_persisted_workflow_and_version_values(self):
+        from pathlib import Path
+
+        template = (Path(__file__).resolve().parents[1] / "aios/dashboard/templates/lab.html").read_text()
+        for expression in (
+            "esc(w.name)", "esc(w.status)", "esc(n.label", "esc(n.tool_name",
+            "esc(n.output_key", "esc(v.change_note)", "esc(j.trace_id)",
+            "esc(s.type)", "esc(s.model)", "esc(String(s.error)",
+        ):
+            assert expression in template
+        assert "+w.name+" not in template
+        assert "+v.change_note+" not in template
+        assert "innerHTML=j.recent.map" not in template
+
+
+class TestHTTPSOnly:
+    async def test_cleartext_public_request_redirects_to_canonical_https(self, monkeypatch):
+        from httpx import ASGITransport, AsyncClient
+        from aios.config import settings
+        from aios.main import app
+
+        monkeypatch.setattr(settings, "debug", False)
+        monkeypatch.setattr(settings, "https_only", True)
+        monkeypatch.setattr(settings, "app_url", "https://aios.example.test")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://client.test") as client:
+            response = await client.get("/dashboard/login?next=%2Fdashboard", follow_redirects=False)
+            spoofed = await client.get(
+                "/dashboard/login", headers={"X-Forwarded-Proto": "https"}, follow_redirects=False
+            )
+        assert response.status_code == 308
+        assert response.headers["location"] == "https://aios.example.test/dashboard/login?next=%2Fdashboard"
+        assert spoofed.status_code == 308
+
+    async def test_production_requires_https_canonical_origin(self, monkeypatch):
+        from aios.config import settings
+        from aios.main import _validate_security_config
+
+        monkeypatch.setattr(settings, "debug", False)
+        monkeypatch.setattr(settings, "https_only", True)
+        monkeypatch.setattr(settings, "app_url", "http://aios.example.test")
+        with pytest.raises(RuntimeError, match="AIOS_APP_URL must be an absolute https"):
+            _validate_security_config()
+
+
+class TestProductionSurface:
+    async def test_docs_metrics_and_diagnostic_routes_are_not_public(self, monkeypatch):
+        import importlib
+        from httpx import ASGITransport, AsyncClient
+        from aios.config import settings
+
+        monkeypatch.setattr(settings, "debug", False)
+        main = importlib.reload(importlib.import_module("aios.main"))
+        app = main.app
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="https://aios.example.test") as client:
+            for path in ("/api/docs", "/api/redoc", "/openapi.json"):
+                response = await client.get(path)
+                assert response.status_code == 404, (path, response.status_code)
+            for path in (
+                "/metrics",
+                "/api/analytics/health/pgvector",
+                "/api/analytics/health/evolution-rate/example",
+            ):
+                response = await client.get(path)
+                assert response.status_code == 401, (path, response.status_code)
+
+
+class TestDeploymentHardening:
+    def test_production_compose_requires_secrets_and_keeps_ports_private(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        for name in ("docker-compose.coolify.yml", "docker-compose.coolify.one-click.yml", "docker-compose.yaml"):
+            compose = (root / name).read_text()
+            assert "127.0.0.1:8777:8777" in compose
+            assert "4317:4317" not in compose
+            assert "4318:4318" not in compose
+            assert "changeme" not in compose
+            assert "evolution_secret_change_me" not in compose
+        for name in ("docker-compose.coolify.yml", "docker-compose.coolify.one-click.yml"):
+            compose = (root / name).read_text()
+            for variable in ("POSTGRES_PASSWORD:?", "REDIS_PASSWORD:?", "EVOLUTION_API_KEY:?"):
+                assert variable in compose
+
+    def test_proxy_trust_and_tls_proxy_are_explicit(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        dockerfile = (root / "Dockerfile").read_text()
+        caddyfile = (root / "deploy/Caddyfile").read_text()
+        assert '"--forwarded-allow-ips", "*"' not in dockerfile
+        assert "{$AIOS_DOMAIN}" in caddyfile
+        assert "tls internal" not in caddyfile

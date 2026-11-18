@@ -55,4 +55,4 @@ CMD ["gunicorn", "aios.main:app", \
      "--keep-alive", "5", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
-     "--forwarded-allow-ips", "*"]
+     "--forwarded-allow-ips", "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"]

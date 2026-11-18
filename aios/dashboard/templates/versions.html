@@ -52,7 +52,7 @@
 
 <script>
 var agentId = "{{ agent.id }}";
-var versionsCache = {{ versions_json|safe }};
+var versionsCache = {{ versions_json|tojson }};
 function esc(s){ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 function simpleLineDiff(a,b){
   var al=(a||'').split('\n'), bl=(b||'').split('\n');

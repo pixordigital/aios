@@ -14,9 +14,7 @@
 	redir https://{host}{uri} 308
 }
 
-178.105.181.38:443 {
-	tls internal
-
+{$AIOS_DOMAIN} {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 		X-Content-Type-Options "nosniff"

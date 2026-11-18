@@ -20,6 +20,7 @@ dependencies = [
     "alembic>=1.13.0",
     "duckduckgo_search>=8.1.0",
     "aiosmtplib>=5.0.0",
+    "reportlab>=4.4.0",
     "stripe>=15.0.0",
     "redis>=5.0.0",
     "arq>=0.25",
@@ -102,4 +103,3 @@ disable_error_code = ["override"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["."]
-

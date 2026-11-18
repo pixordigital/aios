@@ -28,7 +28,9 @@ class WhatsAppTemplateTool(BaseTool):
         # Build Evolution API payload for template
         # Evolution expects: number, text, template params via components
         base_url = (settings.evolution_server_url or "http://evolution:8080").rstrip("/")
-        api_key = settings.evolution_api_key or "evolution_secret_change_me"
+        api_key = settings.evolution_api_key
+        if not api_key:
+            return {"ok": False, "error": "Evolution API key is not configured"}
         # Try to find instance from channel or use provided
         if not instance:
             # fallback to env or first part of number
