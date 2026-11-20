@@ -112,13 +112,13 @@ async def test_agent_cannot_disable_ssrf_guard(monkeypatch):
     """Passing allow_private=True from the model is ignored without the env opt-in."""
     monkeypatch.delenv("AIOS_ALLOW_PRIVATE_HTTP", raising=False)
     res = await HttpRequestTool().run(url="http://169.254.169.254/latest/meta-data/", allow_private=True)
-    assert res.get("error") == "private host blocked"
+    assert res.get("error") == "private/internal host blocked: 169.254.169.254"
 
 
 @pytest.mark.asyncio
 async def test_cloud_metadata_blocked_by_default():
     res = await HttpRequestTool().run(url="http://169.254.169.254/latest/meta-data/")
-    assert res.get("error") == "private host blocked"
+    assert res.get("error") == "private/internal host blocked: 169.254.169.254"
 
 
 @pytest.mark.asyncio

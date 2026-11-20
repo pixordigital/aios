@@ -93,10 +93,12 @@ class TestPipelineAdvisor:
         a = (await test_session.execute(select(SalesPipelineAssessment))).scalars().first()
         assert a.org_id == test_org.id
         for field, _ in __import__("aios.dashboard.app", fromlist=["_ADVISOR_QUESTIONS"])._ADVISOR_QUESTIONS:
-            await async_client.post(f"/dashboard/funnels/advisor/{a.id}/answer", data={"field": field, "answer": "Resposta para " + field})
+            # stages must be one per line — a single line yields no proposal
+            answer = "conversa\nproposta" if field == "stages" else "Resposta para " + field
+            await async_client.post(f"/dashboard/funnels/advisor/{a.id}/answer", headers=REF, data={"field": field, "answer": answer})
         await test_session.refresh(a)
         assert a.proposal == {}
-        await async_client.post(f"/dashboard/funnels/advisor/{a.id}/confirm", data={"correction": ""})
+        await async_client.post(f"/dashboard/funnels/advisor/{a.id}/confirm", headers=REF, data={"correction": ""})
         await test_session.refresh(a)
         assert a.status == "confirmed"
         assert a.proposal["stages"][-2:] == ["ganho", "perdido"]
@@ -113,7 +115,7 @@ class TestPipelineAdvisor:
         test_session.add(a)
         await test_session.commit()
         await test_session.refresh(a)
-        r = await async_client.post(f"/dashboard/funnels/advisor/{a.id}/approve", follow_redirects=False)
+        r = await async_client.post(f"/dashboard/funnels/advisor/{a.id}/approve", headers=REF, follow_redirects=False)
         assert r.status_code == 303
         await test_session.refresh(a)
         assert a.status == "implemented"
@@ -130,7 +132,7 @@ class TestPipelineAdvisor:
         await test_session.commit()
         await test_session.refresh(a)
         async_client.cookies.set("aios_token", _cookie(test_user))
-        r = await async_client.post(f"/dashboard/funnels/advisor/{a.id}/approve")
+        r = await async_client.post(f"/dashboard/funnels/advisor/{a.id}/approve", headers=REF)
         assert r.status_code == 404
 
 
