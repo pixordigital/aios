@@ -184,6 +184,7 @@
         .g2 > *, .g3 > *, .g4 > *, .g6 > *, .g-auto > * { min-width: 0; }
 
         @media (max-width: 900px) {
+            nav .links { display: none; }
             .hero-inner { grid-template-columns: 1fr; }
             .terminal { display: none; }
             .feature-grid { grid-template-columns: 1fr; }
@@ -199,6 +200,9 @@
         }
         @media (max-width: 600px) {
             nav .links { display: none; }
+            nav .inner { padding: 0 16px; }
+            nav .cta-group { gap: 8px; }
+            .btn-primary, .btn-ghost { padding: 8px 12px; font-size: 13px; }
             .channel-grid { grid-template-columns: repeat(2, 1fr); }
             .channel-card[style*="grid-column:span 2"] { grid-column: span 2 !important; }
             .voice-diff { grid-template-columns: 1fr; }
