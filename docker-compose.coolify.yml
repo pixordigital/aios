@@ -121,7 +121,7 @@ services:
   app:
     build: .
     ports:
-      - "127.0.0.1:8777:8777"
+      - "8777:8777"
     environment:
       PGHOST: postgres
       PGPORT: "5432"
@@ -131,7 +131,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in Coolify}
       AIOS_DEBUG: "false"
-      AIOS_APP_URL: ${AIOS_APP_URL:?Set AIOS_APP_URL to an https:// origin}
+      AIOS_APP_URL: ${AIOS_APP_URL:-http://178.105.181.38:8777}
       AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}@postgres:5432/${POSTGRES_DB:-aios}"
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in Coolify}@redis:6379/0"
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}

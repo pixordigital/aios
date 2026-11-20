@@ -711,14 +711,11 @@ def _validate_security_config():
             "AIOS_JWT_SECRET is still the default value 'change-me-in-production'. "
             "Generate a new secret with: openssl rand -hex 32"
         )
-    if not settings.debug:
-        from urllib.parse import urlsplit
-
-        if not settings.https_only:
-            raise RuntimeError("AIOS_HTTPS_ONLY must be true in production.")
-        app_origin = urlsplit(settings.app_url)
-        if app_origin.scheme != "https" or not app_origin.netloc:
-            raise RuntimeError("AIOS_APP_URL must be an absolute https:// origin in production.")
+    # No TLS endpoint exists on this server yet (no domain, host Caddy
+    # inactive); enforcing https at boot crash-looped production since
+    # ebcc8eb. Warn until a real TLS entry point is configured.
+    if not settings.https_only and not settings.debug:
+        logger.warning("HTTPS is not enforced. Set AIOS_HTTPS_ONLY=true in production.")
     # Fail-open when unset is a footgun: any registered user can log in until
     # the operator sets it. Loud at every boot so the gap cannot go unnoticed.
     if not (settings.login_allowlist or "").strip():

@@ -195,15 +195,16 @@ class TestHTTPSOnly:
         assert response.headers["location"] == "https://aios.example.test/dashboard/login?next=%2Fdashboard"
         assert spoofed.status_code == 308
 
-    async def test_production_requires_https_canonical_origin(self, monkeypatch):
+    async def test_http_app_url_does_not_block_boot(self, monkeypatch):
+        """No TLS entry point exists yet; boot must not depend on https."""
         from aios.config import settings
         from aios.main import _validate_security_config
 
         monkeypatch.setattr(settings, "debug", False)
         monkeypatch.setattr(settings, "https_only", True)
         monkeypatch.setattr(settings, "app_url", "http://aios.example.test")
-        with pytest.raises(RuntimeError, match="AIOS_APP_URL must be an absolute https"):
-            _validate_security_config()
+        monkeypatch.setattr(settings, "jwt_secret", "unit-test-secret")
+        _validate_security_config()  # must not raise on http app_url
 
 
 class TestProductionSurface:
@@ -230,13 +231,15 @@ class TestProductionSurface:
 
 
 class TestDeploymentHardening:
-    def test_production_compose_requires_secrets_and_keeps_ports_private(self):
+    def test_production_compose_requires_secrets(self):
         from pathlib import Path
 
         root = Path(__file__).resolve().parents[1]
         for name in ("docker-compose.coolify.yml", "docker-compose.coolify.one-click.yml", "docker-compose.yaml"):
             compose = (root / name).read_text()
-            assert "127.0.0.1:8777:8777" in compose
+            # 8777 is public plaintext until a TLS entry point exists
+            # (operator decision 2026-11-20: no domain, host Caddy inactive);
+            # telemetry ports must never be exposed.
             assert "4317:4317" not in compose
             assert "4318:4318" not in compose
             assert "changeme" not in compose
