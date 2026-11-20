@@ -292,7 +292,7 @@ async def _render(name: str, request: Request, **kw) -> str:
     active_org_id = getattr(state, "org_id", None) if state else None
     if "agent_templates" not in kw:
         kw["agent_templates"] = TEMPLATES
-    view_mode = request.cookies.get(VIEW_MODE_COOKIE, "simple")
+    view_mode = getattr(request, "cookies", {}).get(VIEW_MODE_COOKIE, "simple")
     return t.render({
         "request": request,
         "view_mode": view_mode,
@@ -588,7 +588,6 @@ async def dashboard_home(request: Request):
                 },
                 whatsapp_connected=whatsapp_connected,
                 assistants=agents,
-                unanswered_questions=unanswered[:5],
             )
 
     return await _render("dashboard.html", request, title="Dashboard",
@@ -1012,7 +1011,47 @@ async def agent_save(
     max_trials: int = Form(3),
     hitl_threshold: int = Form(5000),
     hitl_discount_threshold: int = Form(10),
+    mode: str = Form("advanced"),
+    solution_key: str = Form("whatsapp_atendente"),
+    business_name: str = Form(""),
+    business_description: str = Form(""),
+    intelligence_level: str = Form("fast"),
+    tone: str = Form("amigavel"),
+    business_hours: str = Form(""),
+    off_hours_behavior: str = Form("take_note"),
+    faq_text: str = Form(""),
 ):
+    # Simple Mode: compile via plug-and-play compiler
+    extra_data: dict = {}
+    if mode == "simple":
+        from aios.core.simple_compiler import compile_plug_and_play_agent
+        form_data = await request.form()
+        rules_list = list(form_data.getlist("rules")) if hasattr(form_data, "getlist") else []
+        compiled = compile_plug_and_play_agent(
+            solution_key=solution_key,
+            name=name,
+            business_name=business_name,
+            business_description=business_description,
+            intelligence_level=intelligence_level,
+            tone=tone,
+            business_hours=business_hours,
+            off_hours_behavior=off_hours_behavior,
+            rules=rules_list,
+            faq_text=faq_text,
+        )
+        name = compiled["name"]
+        agent_type = compiled["agent_type"]
+        system_prompt = compiled["system_prompt"]
+        model = compiled["llm_config"]["model"]
+        temperature = compiled["llm_config"]["temperature"]
+        max_tokens = compiled["llm_config"]["max_tokens"]
+        tools = " ".join(compiled["tools"])
+        short_term_buffer = compiled["memory_config"]["short_term"]["max_messages"]
+        long_term_enabled = compiled["memory_config"]["long_term"]["enabled"]
+        episodic_enabled = compiled["memory_config"]["episodic"]["enabled"]
+        autonomous = compiled["governance_config"]["autonomy"]
+        extra_data = compiled.get("extra_data", {})
+
     if agent_type not in AGENT_TYPES:
         return HTMLResponse(f"<h2>Tipo inválido: {agent_type}</h2><a href='/dashboard/agents'>Voltar</a>", status_code=422)
     if not (0 <= temperature <= 2):
@@ -1037,9 +1076,8 @@ async def agent_save(
             "long_term": {"enabled": long_term_enabled, "top_k": 5},
             "episodic": {"enabled": episodic_enabled, "summarize_after": 10},
         }
-        # autonomous governance
-        is_autonomous = autonomous is not None and autonomous in ("1", "on", "true", "True")
-        governance_config: dict[str, object] = {
+        is_autonomous = autonomous is not None and autonomous in ("1", "on", "true", "True", "autonomous")
+        governance_config: dict = {
             "autonomous": is_autonomous,
             "autonomy": "autonomous" if is_autonomous else "draft",
             "max_trials": max(1, min(5, int(max_trials or 3))),
@@ -1062,14 +1100,13 @@ async def agent_save(
                 agent.system_prompt = system_prompt; agent.llm_config = llm_config
                 agent.tools = tools_list; agent.memory_config = memory_config
                 agent.governance_config = governance_config
+                if extra_data:
+                    agent.extra_data = {**(agent.extra_data or {}), **extra_data}
                 await db.flush()
-                # pós-edit snapshot (P0-3)
                 db.add(AgentVersion(agent_id=agent.id, org_id=agent.org_id, version=max_v+2, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note="post-edit"))
         else:
-            # per-field template fallback (desacoplado de system_prompt)
             tpl = apply_template(agent_type) if agent_type != "custom" else None
             final_prompt = system_prompt.strip() if system_prompt.strip() else (tpl.get("system_prompt", "") if tpl else "")
-            # llm: if form left at defaults, use template
             _is_default_llm = (model == "openai/gpt-4o" and temperature == 0.7 and max_tokens == 4096)
             final_llm = llm_config if not tpl or not _is_default_llm else tpl.get("llm_config", llm_config)
             final_tools = tools_list if tools_list else (tpl.get("tools", []) if tpl else [])
@@ -1083,6 +1120,7 @@ async def agent_save(
                 tools=final_tools,
                 memory_config=final_mem,
                 governance_config=governance_config,
+                extra_data=extra_data or None,
             )
             db.add(agent)
             await db.flush()
@@ -5387,11 +5425,21 @@ from aios.core.simple_compiler import PLUG_AND_PLAY_SOLUTIONS, compile_plug_and_
 @router.get("/simple/wizard", response_class=HTMLResponse)
 async def simple_wizard_page(request: Request):
     """Wizard plug-and-play de 1 minuto para criação de atendentes."""
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        wa_ch = (await db.execute(
+            select(ChannelConnection).where(
+                ChannelConnection.org_id == org_id,
+                ChannelConnection.channel_type.in_(["evolution", "whatsapp"]),
+                ChannelConnection.is_active == True,
+            )
+        )).scalars().first()
     return await _render(
         "simple_assistant_wizard.html",
         request,
         title="Criar Atendente em 1 Minuto",
         solutions=PLUG_AND_PLAY_SOLUTIONS,
+        wa_connected=wa_ch is not None,
     )
 
 
@@ -5432,7 +5480,7 @@ async def simple_create_agent(
             memory_config=compiled["memory_config"],
             governance_config=compiled["governance_config"],
             extra_data=compiled["extra_data"],
-            status="active",
+            status="draft",
         )
         db.add(agent)
         await db.commit()
@@ -5448,7 +5496,18 @@ async def simple_create_agent(
             wa_ch.agent_id = agent.id
             await db.commit()
 
-    return RedirectResponse("/dashboard/simple/assistants", status_code=303)
+        # Ativa somente depois de o provedor responder; sem prova, fica draft.
+        from aios.core.deployment import DeploymentError, deploy_and_verify
+        user_id = getattr(request.state, "user_id", None)
+        try:
+            await deploy_and_verify(db, agent, org_id, user_id=user_id)
+        except DeploymentError as exc:
+            return RedirectResponse(
+                f"/dashboard/simple/assistants?deploy=failed&reason={quote(str(exc))}",
+                status_code=303,
+            )
+
+    return RedirectResponse("/dashboard/simple/assistants?deploy=ok", status_code=303)
 
 
 @router.get("/simple/assistants", response_class=HTMLResponse)
@@ -5474,7 +5533,7 @@ async def simple_toggle_assistant(request: Request, agent_id: str):
         ag = (await db.execute(
             select(Agent).where(Agent.id == agent_id, Agent.org_id == org_id)
         )).scalars().first()
-        if ag:
+        if ag and ag.status in ("active", "paused"):
             ag.status = "paused" if ag.status == "active" else "active"
             await db.commit()
     referer = request.headers.get("referer") or "/dashboard/simple/assistants"
@@ -5541,14 +5600,9 @@ async def simple_knowledge_page(request: Request):
     """Página de base de conhecimento descomplicada para o gestor."""
     org_id = await _org_filter(request)
     async with db_session() as db:
-        docs = []
-        try:
-            from aios.db.models import FileUpload
-            docs = (await db.execute(
-                select(FileUpload).where(FileUpload.org_id == org_id).order_by(FileUpload.created_at.desc())
-            )).scalars().all()
-        except Exception:
-            pass
+        from aios.core.storage import list_artifacts
+
+        docs = await list_artifacts(db, org_id)
 
         org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
         org_faqs = (org.extra_data or {}).get("faqs", []) if org else []
@@ -5577,62 +5631,42 @@ async def simple_add_faq(request: Request, question: str = Form(...), answer: st
     return RedirectResponse("/dashboard/simple/knowledge", status_code=303)
 
 
-@router.post("/simple/knowledge/quick-teach")
-async def simple_quick_teach(request: Request, question: str = Form(...), answer: str = Form(...)):
-    """Ensina uma dúvida não respondida direto do card do dashboard inicial."""
+@router.post("/simple/knowledge/upload")
+async def simple_knowledge_upload(request: Request):
+    """Envia arquivo de conhecimento reutilizando o pipeline real de artefatos."""
+    from aios.core.file_validation import validate_file
+    from aios.core.storage import save_artifact
+
+    org_id = await _org_filter(request)
+    form = await request.form()
+    file_field = ffile(form, "file")
+    if not file_field:
+        return RedirectResponse("/dashboard/simple/knowledge", status_code=303)
+    content = await file_field.read()
+    valid, content_type = validate_file(file_field.filename or "file", bytes(content))
+    if not valid:
+        return HTMLResponse(
+            f"<h2>Arquivo inválido</h2><p>{content_type}</p><a href='/dashboard/simple/knowledge'>Voltar</a>",
+            status_code=400,
+        )
+    async with db_session() as db:
+        await save_artifact(
+            db=db,
+            org_id=org_id,
+            filename=file_field.filename or "file",
+            content=bytes(content),
+            content_type=content_type,
+        )
+    return RedirectResponse("/dashboard/simple/knowledge", status_code=303)
+
+
+@router.post("/simple/knowledge/{art_id}/delete")
+async def simple_knowledge_delete(request: Request, art_id: str):
     org_id = await _org_filter(request)
     async with db_session() as db:
-        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
-        if org:
-            ed = dict(org.extra_data or {})
-            faqs = list(ed.get("faqs", []))
-            faqs.append({"question": question.strip(), "answer": answer.strip()})
-            ed["faqs"] = faqs
-            org.extra_data = ed
+        from aios.db.models import Artifact
+        art = await db.get(Artifact, art_id)
+        if art and art.org_id == org_id:
+            await db.delete(art)
             await db.commit()
-    return RedirectResponse("/dashboard", status_code=303)
-
-
-@router.get("/simple/alerts", response_class=HTMLResponse)
-async def simple_alerts_page(request: Request):
-    """Configuração de notificações de WhatsApp do gestor e resumo diário."""
-    org_id = await _org_filter(request)
-    async with db_session() as db:
-        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
-        settings_data = (org.extra_data or {}).get("manager_alerts", {}) if org else {}
-    return await _render(
-        "simple_alerts.html",
-        request,
-        title="Plantão & Notificações",
-        settings_data=settings_data,
-    )
-
-
-@router.post("/simple/alerts")
-async def simple_alerts_save(
-    request: Request,
-    manager_phone: str = Form(""),
-    alert_handover: str = Form(default=""),
-    alert_sales: str = Form(default=""),
-    alert_complaints: str = Form(default=""),
-    daily_summary_enabled: str = Form(default=""),
-    daily_summary_time: str = Form("19:00"),
-    budget_limit_reais: float = Form(50.0),
-):
-    org_id = await _org_filter(request)
-    async with db_session() as db:
-        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
-        if org:
-            ed = dict(org.extra_data or {})
-            ed["manager_alerts"] = {
-                "manager_phone": manager_phone.strip(),
-                "alert_handover": alert_handover == "1",
-                "alert_sales": alert_sales == "1",
-                "alert_complaints": alert_complaints == "1",
-                "daily_summary_enabled": daily_summary_enabled == "1",
-                "daily_summary_time": daily_summary_time,
-                "budget_limit_reais": budget_limit_reais,
-            }
-            org.extra_data = ed
-            await db.commit()
-    return RedirectResponse("/dashboard/simple/alerts", status_code=303)
+    return RedirectResponse("/dashboard/simple/knowledge", status_code=303)

@@ -104,7 +104,27 @@ def test_templates_load_cleanly():
         "simple_assistants.html",
         "simple_inbox.html",
         "simple_knowledge.html",
-        "simple_alerts.html",
     ]:
         tpl = env.get_template(tpl_name)
         assert tpl is not None
+
+
+def test_every_solution_tool_exists_in_registry():
+    """A compiled agent must only reference tools the runtime can resolve."""
+    from aios.tools.registry import TOOL_REGISTRY
+
+    for key in PLUG_AND_PLAY_SOLUTIONS:
+        res = compile_plug_and_play_agent(solution_key=key)
+        missing = [t for t in res["tools"] if t not in TOOL_REGISTRY]
+        assert not missing, f"{key}: unknown tools {missing}"
+
+
+def test_removed_surfaces_have_no_route():
+    """The pilot-gated surfaces must not exist: no handler may claim them."""
+    from aios.dashboard.app import router
+
+    paths = {getattr(r, "path", "") for r in router.routes}
+    assert "/dashboard/simple/alerts" not in paths
+    assert "/dashboard/simple/knowledge/quick-teach" not in paths
+    assert "/dashboard/simple/knowledge/upload" in paths
+    assert "/dashboard/simple/knowledge/{art_id}/delete" in paths

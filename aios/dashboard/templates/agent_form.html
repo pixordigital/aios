@@ -78,6 +78,94 @@ async function verifyFromDetail(btn){
 
 <form method="POST" action="/dashboard/agents/save">
     <input type="hidden" name="agent_id" value="{{ agent.id if agent else '' }}">
+
+    {% if not agent %}
+    <!-- ── Seletor de Modo (apenas ao criar novo agente) ── -->
+    <div class="card mb-4" id="mode-selector-card">
+      <h2 class="mb-3">Como você quer configurar?</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+
+        <label id="mode-simple-card" style="cursor:pointer;border:2px solid var(--accent);border-radius:var(--radius);padding:1rem 1.25rem;display:flex;gap:0.75rem;align-items:flex-start;background:var(--accent-subtle)" onclick="setMode('simple')">
+          <input type="radio" name="mode" value="simple" checked style="margin-top:3px">
+          <div>
+            <div style="font-weight:600;font-size:0.9375rem">🟢 Modo Simples</div>
+            <div class="text-sm text-secondary mt-1">Preencha nome da empresa e tipo de atendente — o AIOS configura tudo automaticamente em segundos.</div>
+          </div>
+        </label>
+
+        <label id="mode-advanced-card" style="cursor:pointer;border:2px solid var(--border);border-radius:var(--radius);padding:1rem 1.25rem;display:flex;gap:0.75rem;align-items:flex-start" onclick="setMode('advanced')">
+          <input type="radio" name="mode" value="advanced" style="margin-top:3px">
+          <div>
+            <div style="font-weight:600;font-size:0.9375rem">⚡ Modo Avançado</div>
+            <div class="text-sm text-secondary mt-1">Acesso total ao prompt do sistema, modelos, ferramentas, memória e governança.</div>
+          </div>
+        </label>
+
+      </div>
+    </div>
+
+    <!-- ── Painel Modo Simples ── -->
+    <div id="simple-panel" class="card mb-4">
+      <h2 class="mb-3">Configuração Rápida</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div>
+          <label>Tipo de Atendente</label>
+          <select name="solution_key" class="input" onchange="updateSolutionDesc(this.value)">
+            <option value="whatsapp_atendente">🛍️ Atendente WhatsApp &amp; Loja</option>
+            <option value="sdr_vendedor">🎯 Vendedor &amp; Qualificador de Clientes</option>
+            <option value="agendador">🗓️ Agendador de Horários &amp; Consultas</option>
+            <option value="recuperador">🔄 Recuperador de Vendas &amp; Pós-Venda</option>
+          </select>
+        </div>
+        <div>
+          <label>Inteligência</label>
+          <select name="intelligence_level" class="input">
+            <option value="fast">⚡ Rápido &amp; Econômico (GPT-4o Mini)</option>
+            <option value="deep">🧠 Alta Precisão (GPT-4o)</option>
+          </select>
+        </div>
+        <div>
+          <label>Nome da Empresa</label>
+          <input type="text" name="business_name" class="input" placeholder="Ex: Loja da Maria">
+        </div>
+        <div>
+          <label>Tom de Voz</label>
+          <select name="tone" class="input">
+            <option value="amigavel">😊 Amigável &amp; Acolhedor</option>
+            <option value="profissional">👔 Profissional &amp; Elegante</option>
+            <option value="direto">⚡ Direto ao Ponto</option>
+          </select>
+        </div>
+        <div style="grid-column:1/-1">
+          <label>O que sua empresa faz / vende?</label>
+          <textarea name="business_description" class="input" rows="2" placeholder="Ex: Loja de roupas femininas com entrega em toda cidade..."></textarea>
+        </div>
+        <div>
+          <label>Horário Comercial</label>
+          <input type="text" name="business_hours" class="input" value="Segunda a Sexta, das 08h às 18h">
+        </div>
+        <div>
+          <label>Fora do horário</label>
+          <select name="off_hours_behavior" class="input">
+            <option value="take_note">📝 Anotar e retornar no próximo dia útil</option>
+            <option value="bot_only">🤖 Bot responde 24h (sem humano)</option>
+          </select>
+        </div>
+        <div style="grid-column:1/-1">
+          <label>FAQ Rápido (opcional)</label>
+          <textarea name="faq_text" class="input" rows="3" placeholder="Pergunta: Qual o prazo de entrega?&#10;Resposta: 3 a 5 dias úteis..."></textarea>
+        </div>
+        <div style="grid-column:1/-1">
+          <label>Regras de ouro</label>
+          <div style="display:flex;gap:1rem;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:0.4rem"><input type="checkbox" name="rules" value="no_invent_price"> Nunca inventar preços</label>
+            <label style="display:flex;align-items:center;gap:0.4rem"><input type="checkbox" name="rules" value="human_handover"> Transferir se cliente pedir humano</label>
+            <label style="display:flex;align-items:center;gap:0.4rem"><input type="checkbox" name="rules" value="confirm_data"> Confirmar dados antes de registrar</label>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;height:calc(100vh - 120px);min-height:700px">
 
         <div class="flex-col gap-4" style="flex:1;display:flex;flex-direction:column;height:100%">
@@ -1045,3 +1133,44 @@ document.addEventListener('DOMContentLoaded', function() { setTimeout(syncPills.
 </script>
 {% endif %}
 {% endblock %}
+
+<script>
+// ── Modo Simples / Avançado toggle ──
+(function() {
+  var currentMode = 'simple';
+
+  function setMode(mode) {
+    currentMode = mode;
+    var simplePanel  = document.getElementById('simple-panel');
+    var advancedGrid = document.getElementById('advanced-grid');
+    var simpleModeCard   = document.getElementById('mode-simple-card');
+    var advancedModeCard = document.getElementById('mode-advanced-card');
+    // update card borders
+    if (simpleModeCard) {
+      simpleModeCard.style.borderColor   = mode === 'simple'   ? 'var(--accent)' : 'var(--border)';
+      simpleModeCard.style.background    = mode === 'simple'   ? 'var(--accent-subtle)' : '';
+      advancedModeCard.style.borderColor = mode === 'advanced' ? 'var(--accent)' : 'var(--border)';
+      advancedModeCard.style.background  = mode === 'advanced' ? 'var(--accent-subtle)' : '';
+    }
+    if (simplePanel)  simplePanel.style.display  = mode === 'simple'   ? '' : 'none';
+    if (advancedGrid) advancedGrid.style.display  = mode === 'advanced' ? '' : 'none';
+    // update radio buttons
+    document.querySelectorAll('input[name="mode"]').forEach(function(r) {
+      r.checked = (r.value === mode);
+    });
+  }
+
+  // expose globally so onclick= works
+  window.setMode = setMode;
+
+  // init on load – default is simple for new agents
+  document.addEventListener('DOMContentLoaded', function() {
+    var modeSelector = document.getElementById('mode-selector-card');
+    if (!modeSelector) return; // editing existing agent – skip
+    // wrap the existing advanced section
+    var advancedGrid = document.querySelector('div[style*="grid-template-columns:2fr 1fr"]');
+    if (advancedGrid) advancedGrid.id = 'advanced-grid';
+    setMode('simple');
+  });
+})();
+</script>

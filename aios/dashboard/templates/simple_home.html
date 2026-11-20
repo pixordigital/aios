@@ -38,8 +38,7 @@
     <div class="stat-card">
         <p class="stat-label">Custo Estimado no Mês</p>
         <p class="stat-value" style="font-size:1.25rem;color:var(--accent)">R$ {{ "%.2f"|format(stats.cost_reais) }}</p>
-        <span class="text-xs text-secondary">Teto limite seguro: R$ 50,00</span>
-        <a href="/dashboard/simple/alerts" class="stat-link">Ajustar limite →</a>
+        <span class="text-xs text-secondary">Consumo real do mês</span>
     </div>
 </div>
 
@@ -67,40 +66,6 @@
         <a href="/dashboard/whatsapp" class="btn btn-primary btn-sm">📲 Ler QR Code Agora</a>
         {% endif %}
     </div>
-</div>
-
-<!-- Radar de Perguntas Não Respondidas (Aprendizado em 1 Clique) -->
-<div class="card mb-4" style="border-left:4px solid #3b82f6">
-    <div class="flex-between mb-2">
-        <div style="display:flex;align-items:center;gap:0.5rem">
-            <span style="font-size:1.125rem">💡</span>
-            <h2 style="font-size:0.9375rem;margin:0">Dúvidas que a IA não soube responder (Oportunidades de Aprendizado)</h2>
-        </div>
-        <a href="/dashboard/simple/knowledge" class="btn btn-ghost btn-sm">Base de Conhecimento</a>
-    </div>
-    <p class="text-sm text-secondary" style="margin-bottom:0.75rem">
-        Quando um cliente pergunta algo que não está cadastrado, o AIOS registra aqui. Ensine a resposta uma única vez e todos os atendentes aprendem na hora!
-    </p>
-
-    {% if unanswered_questions %}
-    <div class="flex-col gap-2">
-        {% for q in unanswered_questions %}
-        <div style="background:var(--bg-raised);padding:0.75rem 1rem;border-radius:var(--radius-sm);display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
-            <div style="flex:1;min-width:200px">
-                <span class="text-xs text-secondary">{{ q.asked_at }} • Cliente perguntou:</span>
-                <div style="font-weight:500;margin-top:0.2rem">"{{ q.question }}"</div>
-            </div>
-            <button class="btn btn-primary btn-sm" onclick="openTeachModal('{{ q.question | replace("'", "\\'") }}')">
-                + Ensinar Resposta
-            </button>
-        </div>
-        {% endfor %}
-    </div>
-    {% else %}
-    <div style="background:var(--bg-raised);padding:0.75rem 1rem;border-radius:var(--radius-sm);text-align:center;color:var(--text-secondary);font-size:0.8125rem">
-        🎉 Nenhum cliente com dúvida sem resposta nas últimas 24h! Sua base de conhecimento está cobrindo todas as perguntas.
-    </div>
-    {% endif %}
 </div>
 
 <!-- Meus Atendentes Virtuais (Cards de Negócio) -->
@@ -187,31 +152,4 @@
     </div>
     {% endif %}
 </div>
-
-<!-- Modal para Ensinar Resposta Rápida -->
-<dialog id="teach-modal" class="card" style="max-width:500px;width:90%;border:1px solid var(--border);padding:1.5rem;border-radius:var(--radius);background:var(--bg-elevated);color:var(--text)">
-    <h3 style="margin-bottom:0.5rem">Ensinar Resposta ao Atendente</h3>
-    <p class="text-xs text-secondary" style="margin-bottom:1rem">
-        Ao salvar, todos os seus atendentes de WhatsApp saberão exatamente o que responder para esta dúvida.
-    </p>
-    <form method="POST" action="/dashboard/simple/knowledge/quick-teach">
-        <label>Pergunta do Cliente</label>
-        <input type="text" id="teach-question" name="question" class="input mb-3" required readonly style="background:var(--bg-raised)">
-        
-        <label>Qual deve ser a resposta oficial?</label>
-        <textarea name="answer" rows="4" class="input mb-3" required placeholder="Ex.: Sim, aceitamos cartões de crédito em até 3x sem juros e Pix com 5% de desconto."></textarea>
-        
-        <div class="flex-between">
-            <button type="button" class="btn btn-ghost" onclick="document.getElementById('teach-modal').close()">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Salvar e Ensinar</button>
-        </div>
-    </form>
-</dialog>
-
-<script>
-function openTeachModal(question) {
-    document.getElementById('teach-question').value = question;
-    document.getElementById('teach-modal').showModal();
-}
-</script>
 {% endblock %}

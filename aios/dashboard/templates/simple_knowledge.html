@@ -2,7 +2,7 @@
 {% block content %}
 <div class="flex-between mb-4">
     <div>
-        <h1 style="font-size:1.5rem">📚 Treinar Atendentes (Conhecimento da Empresa)</h1>
+        <h1 style="font-size:1.5rem">📚 Conhecimento da Empresa</h1>
         <p class="text-sm text-secondary mt-1">Ensine seus atendentes sobre preços, cardápios, políticas de troca e perguntas frequentes.</p>
     </div>
 </div>
@@ -10,11 +10,11 @@
 <!-- Upload de Catálogo / Arquivos -->
 <div class="card mb-4">
     <h2 style="font-size:1.125rem;margin-bottom:0.25rem">📄 Documentos do Negócio (PDF, Word ou Texto)</h2>
-    <p class="text-sm text-secondary mb-3">Envie arquivos com catálogo, lista de preços, cardápio ou regulamentos. A IA lê e aprende automaticamente.</p>
+    <p class="text-sm text-secondary mb-3">Envie arquivos com catálogo, lista de preços, cardápio ou regulamentos. Os arquivos ficam guardados na base do seu negócio.</p>
 
     <form method="POST" action="/dashboard/simple/knowledge/upload" enctype="multipart/form-data" style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap">
         <input type="file" name="file" class="input" style="max-width:350px" accept=".pdf,.doc,.docx,.txt" required>
-        <button type="submit" class="btn btn-primary">📤 Enviar e Treinar IA</button>
+        <button type="submit" class="btn btn-primary">📤 Enviar arquivo</button>
     </form>
 
     {% if files %}
@@ -24,11 +24,10 @@
             <div style="display:flex;align-items:center;gap:0.5rem">
                 <span>📄</span>
                 <strong>{{ f.filename }}</strong>
-                <span class="text-xs text-secondary">({{ (f.size / 1024)|round(1) }} KB)</span>
+                <span class="text-xs text-secondary">({{ (f.size_bytes / 1024)|round(1) }} KB)</span>
             </div>
             <div style="display:flex;align-items:center;gap:0.5rem">
-                <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.65rem">✅ Aprendido pela IA</span>
-                <form method="POST" action="/dashboard/files/{{ f.id }}/delete" style="margin:0" onsubmit="return confirm('Remover este arquivo?')">
+                <form method="POST" action="/dashboard/simple/knowledge/{{ f.id }}/delete" style="margin:0" onsubmit="return confirm('Remover este arquivo?')">
                     <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red-subtle);font-size:0.65rem">Excluir</button>
                 </form>
             </div>
@@ -42,8 +41,8 @@
 <div class="card mb-4">
     <div class="flex-between mb-2">
         <div>
-            <h2 style="font-size:1.125rem;margin:0">❓ Perguntas Frequentes da Empresa (FAQ)</h2>
-            <p class="text-sm text-secondary mt-1">Ensine respostas diretas para as dúvidas mais comuns dos seus clientes.</p>
+            <h2 style="font-size:1.125rem;margin:0">📝 Respostas Padrão (anotações)</h2>
+            <p class="text-sm text-secondary mt-1">Anote respostas oficiais para as dúvidas mais comuns. Ainda não são usadas automaticamente pelo atendente.</p>
         </div>
         <button class="btn btn-primary btn-sm" onclick="document.getElementById('faq-modal').showModal()">+ Adicionar Dúvida</button>
     </div>

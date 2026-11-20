@@ -13,7 +13,7 @@ PLUG_AND_PLAY_SOLUTIONS: Dict[str, Dict[str, Any]] = {
         "desc": "Responde 24/7 sobre catálogo, produtos, horários, localização e pedidos.",
         "icon": "🛍️",
         "agent_type": "support",
-        "tools": ["transcribe", "retrieval", "crm_list_deals", "crm_update_deal"],
+        "tools": ["transcribe", "rag_search", "crm_list_deals", "crm_update_deal"],
         "base_prompt": (
             "Você é o atendente virtual oficial da empresa {business_name}.\n"
             "Atividade da empresa: {business_description}\n"
@@ -36,7 +36,7 @@ PLUG_AND_PLAY_SOLUTIONS: Dict[str, Dict[str, Any]] = {
         "desc": "Recebe leads, qualifica o interesse, descobre orçamento e agenda reuniões ou encaminha para venda.",
         "icon": "🎯",
         "agent_type": "sdr",
-        "tools": ["transcribe", "retrieval", "crm_create_deal", "crm_update_deal", "crm_set_follow_up"],
+        "tools": ["transcribe", "rag_search", "crm_create_deal", "crm_update_deal", "crm_set_follow_up"],
         "base_prompt": (
             "Você é o consultor comercial da empresa {business_name}.\n"
             "O que vendemos: {business_description}\n"
@@ -56,7 +56,7 @@ PLUG_AND_PLAY_SOLUTIONS: Dict[str, Dict[str, Any]] = {
         "desc": "Apresenta serviços e ajuda clientes a escolherem o melhor dia e horário para agendar.",
         "icon": "🗓️",
         "agent_type": "support",
-        "tools": ["transcribe", "retrieval", "crm_create_deal", "crm_list_deals"],
+        "tools": ["transcribe", "rag_search", "crm_create_deal", "crm_list_deals"],
         "base_prompt": (
             "Você é o assistente de agendamentos da empresa {business_name}.\n"
             "Serviços oferecidos: {business_description}\n"
@@ -75,7 +75,7 @@ PLUG_AND_PLAY_SOLUTIONS: Dict[str, Dict[str, Any]] = {
         "desc": "Manda mensagem amigável para quem parou de responder propostas ou abandonou compras.",
         "icon": "🔄",
         "agent_type": "sdr",
-        "tools": ["transcribe", "retrieval", "crm_update_deal"],
+        "tools": ["transcribe", "rag_search", "crm_update_deal"],
         "base_prompt": (
             "Você é o especialista de relacionamento e pós-venda da empresa {business_name}.\n"
             "Negócio: {business_description}\n"
@@ -94,7 +94,7 @@ MODEL_KEYS: Dict[str, Dict[str, Any]] = {
         "temperature": 0.5,
         "max_tokens": 1024,
         "label": "Rápido & Econômico",
-        "description": "Respostas rápidas no WhatsApp em menos de 2 segundos. Ideal para atendimento ágil e baixo custo.",
+        "description": "Modelo econômico para atendimento ágil de alto volume. Ideal para respostas simples e baixo custo.",
     },
     "deep": {
         "model": "openai/gpt-4o",

@@ -10,6 +10,21 @@
     </a>
 </div>
 
+{% if request.query_params.get('deploy') == 'failed' %}
+<div class="card mb-4" style="border-left:4px solid var(--amber);background:var(--amber-subtle)">
+    <strong style="font-size:0.875rem">Atendente criado, mas ainda não ativado</strong>
+    <p class="text-sm text-secondary" style="margin:0.25rem 0 0">
+        Motivo: {{ request.query_params.get('reason', 'o provedor de IA não respondeu ao teste') }}
+    </p>
+    <p class="text-xs text-secondary" style="margin:0.5rem 0 0">
+        Verifique a chave do provedor de IA nas configurações e tente ativar novamente.
+    </p>
+</div>
+{% elif request.query_params.get('deploy') == 'ok' %}
+<div class="card mb-4" style="border-left:4px solid var(--green)">
+    <strong style="font-size:0.875rem">Atendente ativado e verificado ✅</strong>
+</div>
+{% endif %}
 {% if assistants %}
 <div class="grid-2 gap-3">
     {% for a in assistants %}
@@ -29,11 +44,17 @@
                     </div>
                 </div>
 
+                {% if a.status == 'draft' %}
+                <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.6875rem" title="Aguardando ativação: o provedor de IA precisa responder ao teste">
+                    ⚠️ Aguardando ativação
+                </span>
+                {% else %}
                 <form method="POST" action="/dashboard/simple/assistants/{{ a.id }}/toggle" style="margin:0">
                     <button type="submit" class="btn btn-sm {% if a.status == 'active' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-weight:600">
                         {{ '🟢 Ligado' if a.status == 'active' else '⏸️ Pausado' }}
                     </button>
                 </form>
+                {% endif %}
             </div>
 
             <p class="text-sm text-secondary mb-3" style="line-height:1.4">
