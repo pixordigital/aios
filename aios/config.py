@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AIOS_", extra="ignore")
-    app_name: str = "AIOS"
+    app_name: str = "AIOS"  # provisional — update after brand name decision
     # Secure by default. This used to default to True, and that single flag
     # disabled the rate-limit middleware, switched CORS to allow_origins=["*"]
     # WITH allow_credentials=True, and skipped the production DB check -- so any

@@ -445,3 +445,43 @@ async def ingest_event(
         if not side_effect_started:
             await _db_release_event(idempotency_key)
         raise
+
+@router.post("/sso-ticket", dependencies=[Depends(_require_auth)])
+async def sso_ticket():
+    """Generate SSO ticket for identity sharing between AIOS and ARVO.
+    
+    Uses the existing HMAC peer channel for authentication.
+    Returns a signed ticket that ARVO can verify to identify the AIOS user.
+    """
+    import json
+    import hmac
+    import hashlib
+    import time
+    import secrets
+    
+    key_id = settings.arvo_service_key_id
+    key = settings.arvo_service_key
+    
+    if not key or not key_id:
+        raise HTTPException(503, "ARVO integration not configured")
+    
+    # Generate ticket with HMAC-signed payload
+    ts = str(int(time.time()))
+    nonce = secrets.token_hex(32)
+    payload = {
+        "iss": "aios",
+        "iat": int(ts),
+        "jti": nonce,
+        "aud": "arvo",
+    }
+    body_bytes = json.dumps(payload).encode()
+    bhash = hashlib.sha256(body_bytes).hexdigest()
+    canonical = f"{key_id}.{ts}.{nonce}.POST.{_PATH}.{bhash}"
+    sig = hmac.new(key.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+    
+    return {
+        "ticket": jwt.encode(payload, key, algorithm="HS256"),
+        "key_id": key_id,
+        "timestamp": ts,
+        "nonce": nonce,
+    }
