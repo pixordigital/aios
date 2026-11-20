@@ -171,3 +171,110 @@ async def test_deals_endpoint_auth_and_org_scoping(test_session):
         settings.arvo_service_key = orig_key
         _clear_nonces()
         _clear_events()
+
+
+async def test_action_executed_event_audits(test_session):
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db.models import AuditLog, Organization
+    from aios.integrations.arvo.auth import _clear_nonces
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    org = Organization(name="Exec Org", slug="exec-org", extra_data={})
+    test_session.add(org)
+    await test_session.commit()
+
+    orig_enabled, orig_id, orig_key = (
+        settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key,
+    )
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        from aios.integrations.arvo.auth import sign_request
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            path = "/api/integrations/arvo/v1/events"
+            body = {"type": "action.executed", "payload": {"org_id": org.id, "action_id": "act-1", "finding_id": "f-1"}}
+            import json
+            raw = json.dumps(body, separators=(",", ":")).encode()
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1")
+            hdr["Idempotency-Key"] = "idem-exec-1"
+            hdr["Content-Type"] = "application/json"
+            r = await c.post(path, content=raw, headers=hdr)
+            assert r.status_code == 200
+            assert r.json()["handled"] == "action.executed"
+
+        # audit row created
+        rows = (await test_session.execute(
+            select(AuditLog).where(AuditLog.org_id == org.id, AuditLog.action == "action.executed")
+        )).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].resource_id == "act-1"
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
+
+
+async def test_action_verified_updates_deal(test_session):
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db.models import CrmDeal, Organization
+    from aios.integrations.arvo.auth import _clear_nonces
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    org = Organization(name="Ver Org", slug="ver-org", extra_data={})
+    test_session.add(org)
+    await test_session.flush()
+    deal = CrmDeal(org_id=org.id, lead_name="Ver Deal", stage="prospection", value=500.0)
+    test_session.add(deal)
+    await test_session.commit()
+
+    orig_enabled, orig_id, orig_key = (
+        settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key,
+    )
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        from aios.integrations.arvo.auth import sign_request
+        import json
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            path = "/api/integrations/arvo/v1/events"
+            body = {"type": "action.verified", "payload": {
+                "org_id": org.id, "action_id": "act-v", "finding_id": "f-v",
+                "verified_amount": "300.00", "deal_id": deal.id,
+            }}
+            raw = json.dumps(body, separators=(",", ":")).encode()
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1")
+            hdr["Idempotency-Key"] = "idem-ver-1"
+            hdr["Content-Type"] = "application/json"
+            r = await c.post(path, content=raw, headers=hdr)
+            assert r.status_code == 200
+            assert r.json()["handled"] == "action.verified"
+            assert r.json()["deal_updated"] is True
+
+        # deal updated
+        await test_session.refresh(deal)
+        assert deal.stage == "closed_won"
+        assert deal.extra_data.get("recovered_brl") == "300.00"
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
