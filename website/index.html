@@ -60,10 +60,9 @@
         .nav-burger { display: none; width: 32px; height: 32px; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
         .nav-burger span { display: block; width: 20px; height: 2px; background: var(--text); margin: 6px 0; transition: background 0.15s; }
         @media (max-width: 768px) {
-            .nav-burger { display: block; }
-            nav .links { position: absolute; top: 100%; left: 0; right: 0; background: rgba(10,10,10,0.9); flex-direction: column; padding: 16px; gap: 0; display: none; width: 100%; }
-            nav .links.open { display: flex; }
-            nav .links a { width: 100%; text-align: center; padding: 12px 0; }
+            nav .links { display: none; }
+            nav .cta-group { width: 100%; flex-direction: column; align-items: stretch; gap: 8px; }
+            nav .cta-group .btn-primary, nav .cta-group .btn-ghost { width: 100%; text-align: center; }
         }
         .btn-primary { background: var(--cyan); color: var(--bg); font-weight: 600; font-size: 14px; padding: 8px 20px; border-radius: 8px; text-decoration: none; transition: all 0.15s; border: none; cursor: pointer; }
         .btn-primary:hover { box-shadow: 0 0 20px rgba(0,229,160,0.3); }
