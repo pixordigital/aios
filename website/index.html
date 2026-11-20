@@ -175,6 +175,14 @@
         .voice-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-bottom:48px; }
         .voice-diff { display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:32px; }
         .data-grid { display:grid;grid-template-columns:repeat(2,1fr);gap:24px;margin-bottom:32px; }
+        .g2, .g3, .g4, .g6 { display: grid; gap: 16px; min-width: 0; }
+        .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .g6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        .g-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; min-width: 0; }
+        .g2 > *, .g3 > *, .g4 > *, .g6 > *, .g-auto > * { min-width: 0; }
+
         @media (max-width: 900px) {
             .hero-inner { grid-template-columns: 1fr; }
             .terminal { display: none; }
@@ -186,6 +194,8 @@
             .data-grid { grid-template-columns: 1fr; }
             .channel-card[style*="grid-column:span 2"] { grid-column: span 3 !important; }
             .advisor-feature { grid-template-columns: 1fr; gap: 24px; }
+            .g4, .g6 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         @media (max-width: 600px) {
             nav .links { display: none; }
@@ -198,6 +208,12 @@
             .advisor-teaser-action { grid-column: 2; }
             .advisor-section { padding: 40px 16px 48px; }
             footer .inner { grid-template-columns: 1fr; }
+            .g2, .g3, .g4, .g6 { grid-template-columns: 1fr; }
+        }
+
+        /* ── Large screens ── */
+        @media (min-width: 1440px) {
+            .hero-inner, section .inner, footer .inner, .advisor-feature { max-width: 1320px; }
         }
 
         /* ── Animations ── */
@@ -320,7 +336,7 @@
 
         <h3 style="font-size:15px;font-weight:700;margin:32px 0 16px">Modelos prontos para as tarefas mais comuns</h3>
 
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:24px">
+        <div class="g2" style="gap:16px;margin-bottom:24px">
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px">
                 <h4 style="font-size:14px;font-weight:700;margin-bottom:12px">🎙️ Vendas e atendimento</h4>
                 <ul style="font-size:14px;color:var(--text-dim);list-style:none;padding:0;line-height:2">
@@ -377,7 +393,7 @@
         <h2 class="section-title">Automatize tarefas sem abrir mão<br>das regras da <span style="color:var(--cyan)">sua empresa</span></h2>
         <p class="section-desc">Cada negócio tem seus limites, combinados e exceções. Configure o que pode seguir sozinho e o que precisa passar por alguém da equipe.</p>
 
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:32px">
+        <div class="g3" style="gap:16px;margin-bottom:32px">
             <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px">
                 <div style="font-size:24px;margin-bottom:8px">🎯</div>
                 <h4 style="font-weight:600;margin-bottom:8px">Defina o que pode ser aprovado</h4>
@@ -404,7 +420,7 @@
         <h2 class="section-title">Saiba o que aconteceu,<br>quem aprovou e <span style="color:var(--cyan)">qual foi o próximo passo</span></h2>
         <p class="section-desc">Quando uma negociação ou ação financeira exige cuidado, o AIOS pode encaminhar para aprovação e manter um registro do que foi analisado e decidido. O ARVO complementa esse fluxo com registros financeiros auditáveis.</p>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:32px">
+        <div class="g2" style="gap:24px;margin-bottom:32px">
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:32px">
                 <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
                     <span style="font-size:24px">⚡</span>
@@ -439,7 +455,7 @@
                 <h3 style="font-size:18px;font-weight:600">Como as informações circulam entre as equipes</h3>
                 <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">REGISTRO AUDITÁVEL</span>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:16px">
+            <div class="g-auto" style="gap:16px;margin-top:16px">
                 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px">
                     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
                         <span style="font-size:20px">1️⃣</span>
@@ -478,7 +494,7 @@
         <div class="section-label">04 / Informação fácil de encontrar</div>
         <h2 class="section-title">As respostas da empresa<br>sem procurar em <span style="color:var(--cyan)">várias pastas</span></h2>
         <p class="section-desc">Reúna tabelas de preço, procedimentos, catálogos e respostas frequentes. Os assistentes digitais consultam esses materiais para responder com base no que sua empresa já definiu.</p>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
+        <div class="g3" style="gap:16px;margin-bottom:24px">
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:24px;text-align:center">
                 <div style="font-size:24px;margin-bottom:8px">📄</div>
                 <h4 style="font-size:14px;font-weight:600;margin-bottom:4px">1. Adicione os materiais</h4>
@@ -569,7 +585,7 @@
                 </div>
                     <span class="mono" style="margin-left:auto;background:var(--cyan);color:var(--bg);padding:4px 10px;border-radius:99px;font-size:11px;font-weight:700">CANAL PRINCIPAL</span>
             </div>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:20px">
+            <div class="g3" style="gap:24px;margin-top:20px">
                 <div>
                     <h4 style="font-size:13px;font-weight:600;margin-bottom:8px">🔌 Conexão</h4>
                     <ul style="font-size:13px;color:var(--text-dim);list-style:none;padding:0;line-height:1.8">
@@ -655,7 +671,7 @@
             <p style="font-size:14px;color:var(--text-dim);line-height:1.7;margin-bottom:20px">
                 Defina quais descontos precisam ser revisados. Quando uma solicitação ultrapassar o limite, o AIOS avisa a equipe e aguarda a aprovação de um responsável. A decisão fica registrada para consulta posterior.
             </p>
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+            <div class="g3" style="gap:16px">
                 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px"><h4 style="font-size:13px;font-weight:600;margin-bottom:6px">🔔 Alertas</h4><p style="font-size:13px;color:var(--text-dim)">Receba avisos quando uma ação precisar de revisão.</p></div>
                 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px"><h4 style="font-size:13px;font-weight:600;margin-bottom:6px">💰 Custos sob controle</h4><p style="font-size:13px;color:var(--text-dim)">Acompanhe os gastos por equipe e por assistente digital.</p></div>
                 <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px"><h4 style="font-size:13px;font-weight:600;margin-bottom:6px">📊 Visão da operação</h4><p style="font-size:13px;color:var(--text-dim)">Consulte pendências, resultados e intervenções da equipe.</p></div>
