@@ -46,7 +46,7 @@
             background: rgba(10,10,10,0.72); backdrop-filter: blur(18px);
             border: 1px solid rgba(255,255,255,0.08); border-radius: 999px;
         }
-        nav .inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; }
+        nav .inner { max-width: 1200px; margin: 0 auto; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: relative; }
         .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); }
         .logo-mark { width: 28px; height: 28px; background: var(--cyan); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
         .logo-mark span { color: var(--bg); font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; }
@@ -57,6 +57,14 @@
         nav .cta-group { display: flex; align-items: center; gap: 16px; }
         nav .cta-group a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
         nav .cta-group a:hover { color: var(--text); }
+        .nav-burger { display: none; width: 32px; height: 32px; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
+        .nav-burger span { display: block; width: 20px; height: 2px; background: var(--text); margin: 6px 0; transition: background 0.15s; }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            nav .links { position: absolute; top: 100%; left: 0; right: 0; background: rgba(10,10,10,0.9); flex-direction: column; padding: 16px; gap: 0; display: none; width: 100%; }
+            nav .links.open { display: flex; }
+            nav .links a { width: 100%; text-align: center; padding: 12px 0; }
+        }
         .btn-primary { background: var(--cyan); color: var(--bg); font-weight: 600; font-size: 14px; padding: 8px 20px; border-radius: 8px; text-decoration: none; transition: all 0.15s; border: none; cursor: pointer; }
         .btn-primary:hover { box-shadow: 0 0 20px rgba(0,229,160,0.3); }
         .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); font-weight: 500; font-size: 14px; padding: 8px 20px; border-radius: 8px; text-decoration: none; transition: all 0.15s; cursor: pointer; }
