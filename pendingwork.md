@@ -5,10 +5,10 @@ Last updated: 2026-11-18
 ## Open
 
 - TLS/domain entry point undecided (2026-11-20): production runs plaintext
-  `http://178.105.181.38:8777` by operator decision (commit `2a2df58` reverted
-  ebcc8eb's https boot gate + loopback bind — no TLS path existed: no domain,
-  host Caddy inactive, Coolify `fqdn` null, `AIOS_APP_URL` never set, crash-loop
-  since 2026-11-18T23:33). Options when ready: real domain (DNS + Coolify fqdn +
+  `http://178.105.181.38:8777` by operator decision (commits `2a2df58` boot gate
+  + `4e79bb0` enforce_https middleware — ebcc8eb's two https gates reverted;
+  no TLS path existed: no domain, host Caddy inactive, Coolify `fqdn` null,
+  `AIOS_APP_URL` null, crash-loop since 2026-11-18T23:33 then 503s on login). Options when ready: real domain (DNS + Coolify fqdn +
   LE) or `https://aios.178.105.181.38.sslip.io`. Do not re-tighten the boot
   gate until one exists. Compose now defaults `AIOS_APP_URL` to the IP origin;
   the Coolify variable itself is still null.
@@ -313,6 +313,15 @@ bookkeeping, tool cache. Doing the correctness half first.
     `http://178.105.181.38:8777/health/live` → 200. Pre-existing failures
     found during the gate were ebcc8eb-era regressions (never ran green after
     push), not from these diffs.
+  - Follow-up same day: `4e79bb0` fixed ebcc8eb's *second* HTTPS gate —
+    `enforce_https` middleware 503'd every non-health path while
+    `AIOS_APP_URL` is null in Coolify (boot passed but login/root died).
+    Now passes through cleartext when `app_url` is not https; 308 canonical
+    redirect stays for a future https origin. Deploy `dtz30iav1efdo47mmp3iv72t`
+    verified: `/` and `/dashboard/login` → 200, `/dashboard` → 303 → login,
+    health all ok. Full suite `1479 passed, 19 skipped` EXIT=0 (skip delta vs
+    1487 = live-service integration modules: evolution/kokoro/suite, module
+    skipif on external reachability).
 
 - Non-technical abstraction layer (Modo Simples vs Modo Avançado) (2026-11-18):
   Dual-tier UX architecture with progressive disclosure. Added global mode toggle
