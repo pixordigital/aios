@@ -4202,6 +4202,19 @@ async def crm_create(request: Request, lead_name: str = Form(...), lead_email: s
         d = CrmDeal(org_id=org_id, lead_name=lead_name, lead_email=lead_email, lead_phone=lead_phone, value=value, stage="prospection", agent_id=agent_id or None, pipeline=pipeline or "default", score=score, extra_data=extra)
         db.add(d)
         await db.commit()
+        await db.refresh(d)
+        # Bridge to ARVO: new deal -> detection/audit peer.
+        try:
+            from aios.integrations.arvo.publisher import enqueue_outbox
+            await enqueue_outbox(
+                "deal.created",
+                {"org_id": org_id, "deal_id": d.id, "lead_name": lead_name,
+                 "value": value, "stage": "prospection", "pipeline": pipeline or "default"},
+                business_trace_id=d.id, idempotency_key=f"deal.created:{d.id}",
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug("arvo outbox enqueue skipped: %s", e)
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.post("/crm/{deal_id}/move")
@@ -4214,8 +4227,20 @@ async def crm_move(request: Request, deal_id: str, stage: str = Form(...)):
         # stages while showing nine columns made drops into qualification,
         # proposal and negotiation redirect with no change and no error.
         if d and d.org_id==org_id and stage in _CRM_BOARD_STAGES:
+            old_stage = d.stage
             d.stage = stage
             await db.commit()
+            try:
+                from aios.integrations.arvo.publisher import enqueue_outbox
+                await enqueue_outbox(
+                    "deal.stage_changed",
+                    {"org_id": org_id, "deal_id": d.id, "old_stage": old_stage,
+                     "new_stage": stage, "value": d.value},
+                    business_trace_id=d.id, idempotency_key=f"deal.stage:{d.id}:{stage}",
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("arvo outbox enqueue skipped: %s", e)
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.post("/crm/{deal_id}/delete")

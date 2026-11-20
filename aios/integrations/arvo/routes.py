@@ -220,6 +220,126 @@ async def get_context(body: ContextRequest):
     return {"org_id": body.org_id, "plan": plan, "agents": agents_info, "business_trace_id": body.business_trace_id, "event_version": "1"}
 
 
+@router.get("/deals", dependencies=[Depends(_require_auth)])
+async def list_deals(request: Request, org_id: str | None = None, limit: int = 100):
+    """Expose AIOS CRM deals to ARVO (single source of truth).
+
+    Service-to-service, org-scoped. ARVO consumes this to detect leaks
+    (stalled deals, discount exposure, overdue commitments) without owning
+    a parallel CRM. org_id is required for any data; without it returns [].
+    """
+    if not org_id:
+        return {"org_id": None, "deals": [], "count": 0}
+    cap = max(1, min(int(limit or 100), 500))
+    try:
+        from aios.db.engine import async_session
+        from aios.db.models import CrmDeal
+        from sqlalchemy import select
+
+        async with async_session() as s:
+            q = await s.execute(
+                select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.created_at.desc()).limit(cap)
+            )
+            rows = q.scalars().all()
+            deals = [
+                {
+                    "id": d.id,
+                    "org_id": d.org_id,
+                    "lead_name": d.lead_name,
+                    "lead_email": d.lead_email,
+                    "lead_phone": d.lead_phone,
+                    "stage": d.stage,
+                    "value": d.value,
+                    "currency": d.currency,
+                    "score": d.score,
+                    "source": d.source,
+                    "pipeline": d.pipeline,
+                    "close_date": d.close_date.isoformat() if d.close_date else None,
+                    "probability": d.probability,
+                    "agent_id": d.agent_id,
+                    "team_id": d.team_id,
+                    "extra_data": d.extra_data or {},
+                    "created_at": d.created_at.isoformat() if d.created_at else None,
+                    "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+                }
+                for d in rows
+            ]
+            return {"org_id": org_id, "deals": deals, "count": len(deals)}
+    except Exception as e:
+        logger.debug("list_deals DB fallback: %s", e)
+        return {"org_id": org_id, "deals": [], "count": 0, "error": str(e)[:200]}
+
+
+async def _handle_action_executed(payload: dict, trace_id: str | None, idempotency_key: str) -> dict:
+    """ARVO action executed -> audit + (optional) deal stage nudge."""
+    org_id = payload.get("org_id")
+    action_id = payload.get("action_id") or payload.get("id") or "unknown"
+    finding_id = payload.get("finding_id")
+    trace_id = trace_id or payload.get("business_trace_id") or str(action_id)
+    try:
+        if org_id:
+            from aios.db.engine import async_session
+            from aios.db.models import AuditLog
+
+            async with async_session() as s:
+                s.add(AuditLog(org_id=org_id, action="action.executed", resource_type="arvo_action",
+                               resource_id=str(action_id), details={"finding_id": finding_id, "payload": payload}))
+                await s.commit()
+    except Exception as e:
+        logger.debug("action.executed audit fallback: %s", e)
+    return {"handled": "action.executed", "action_id": str(action_id), "business_trace_id": trace_id}
+
+
+async def _handle_action_verified(payload: dict, trace_id: str | None, idempotency_key: str) -> dict:
+    """ARVO verified recovery -> audit + update CrmDeal if deal_id provided."""
+    org_id = payload.get("org_id")
+    action_id = payload.get("action_id") or "unknown"
+    finding_id = payload.get("finding_id")
+    verified = payload.get("verified_amount")
+    deal_id = payload.get("deal_id")
+    trace_id = trace_id or payload.get("business_trace_id") or str(action_id)
+    updated_deal = False
+    try:
+        if org_id:
+            from aios.db.engine import async_session
+            from aios.db.models import AuditLog, CrmDeal
+
+            async with async_session() as s:
+                s.add(AuditLog(org_id=org_id, action="action.verified", resource_type="arvo_action",
+                               resource_id=str(action_id),
+                               details={"finding_id": finding_id, "verified_amount": verified, "deal_id": deal_id}))
+                if deal_id:
+                    deal = await s.get(CrmDeal, deal_id)
+                    if deal and deal.org_id == org_id:
+                        deal.stage = "closed_won"
+                        deal.extra_data = {**(deal.extra_data or {}), "recovered_brl": verified}
+                        updated_deal = True
+                await s.commit()
+    except Exception as e:
+        logger.debug("action.verified audit/update fallback: %s", e)
+    return {"handled": "action.verified", "action_id": str(action_id),
+            "verified_amount": verified, "deal_updated": updated_deal,
+            "business_trace_id": trace_id}
+
+
+async def _handle_deal_event(payload: dict, trace_id: str | None, idempotency_key: str, action: str) -> dict:
+    org_id = payload.get("org_id")
+    deal_id = payload.get("deal_id") or payload.get("id") or "unknown"
+    trace_id = trace_id or payload.get("business_trace_id") or str(deal_id)
+    try:
+        if org_id:
+            from aios.db.engine import async_session
+            from aios.db.models import AuditLog
+
+            async with async_session() as s:
+                s.add(AuditLog(org_id=org_id, action=action, resource_type="crm_deal",
+                               resource_id=str(deal_id), details={"payload": payload}))
+                await s.commit()
+    except Exception as e:
+        logger.debug("%s audit fallback: %s", action, e)
+    return {"handled": action, "deal_id": str(deal_id), "business_trace_id": trace_id}
+
+
 async def _handle_commitment_at_risk(
     payload: dict,
     trace_id: str | None,
@@ -295,6 +415,18 @@ async def ingest_event(
             )
             if not extra_resp.get("enqueued"):
                 raise HTTPException(503, "ARVO integration queue unavailable")
+            side_effect_started = True
+        elif body.type == "action.executed":
+            extra_resp = await _handle_action_executed(body.payload, trace_id, idempotency_key)
+            side_effect_started = True
+        elif body.type == "action.verified":
+            extra_resp = await _handle_action_verified(body.payload, trace_id, idempotency_key)
+            side_effect_started = True
+        elif body.type == "deal.created":
+            extra_resp = await _handle_deal_event(body.payload, trace_id, idempotency_key, "deal.created")
+            side_effect_started = True
+        elif body.type == "deal.stage_changed":
+            extra_resp = await _handle_deal_event(body.payload, trace_id, idempotency_key, "deal.stage_changed")
             side_effect_started = True
         resp = {
             "status": "processed",

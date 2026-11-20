@@ -105,3 +105,69 @@ def test_events_idempotency():
         settings.arvo_service_key = orig_key
         _clear_nonces()
         _clear_events()
+
+
+async def test_deals_endpoint_auth_and_org_scoping(test_session):
+    """ARVO→AIOS CRM read: service-auth + org isolation + data shape."""
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db.models import CrmDeal, Organization
+    from aios.integrations.arvo.auth import _clear_nonces
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    org = Organization(name="Arvo Org", slug="arvo-org", extra_data={})
+    test_session.add(org)
+    await test_session.flush()
+    deal = CrmDeal(
+        org_id=org.id, lead_name="Lead X", lead_email="x@x.com",
+        stage="prospection", value=1000.0, source="whatsapp",
+    )
+    test_session.add(deal)
+    await test_session.commit()
+
+    orig_enabled, orig_id, orig_key = (
+        settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key,
+    )
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        from aios.integrations.arvo.auth import sign_request
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            # no auth → 401
+            r = await c.get(f"/api/integrations/arvo/v1/deals?org_id={org.id}")
+            assert r.status_code == 401
+
+            # auth, correct org → returns the deal
+            url = f"/api/integrations/arvo/v1/deals?org_id={org.id}"
+            hdr = sign_request("GET", "/api/integrations/arvo/v1/deals", None, "kid-1", "secret-1")
+            r = await c.get(url, headers=hdr)
+            assert r.status_code == 200
+            body = r.json()
+            assert body["org_id"] == org.id
+            assert body["count"] == 1
+            assert body["deals"][0]["lead_name"] == "Lead X"
+            assert body["deals"][0]["value"] == 1000.0
+
+            # replay → 401
+            r2 = await c.get(url, headers=hdr)
+            assert r2.status_code == 401
+
+            # different org → empty (no leak)
+            url2 = "/api/integrations/arvo/v1/deals?org_id=other-org"
+            hdr2 = sign_request("GET", "/api/integrations/arvo/v1/deals", None, "kid-1", "secret-1")
+            r3 = await c.get(url2, headers=hdr2)
+            assert r3.status_code == 200
+            assert r3.json()["count"] == 0
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
