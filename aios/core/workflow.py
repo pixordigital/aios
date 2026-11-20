@@ -131,8 +131,11 @@ class WorkflowEngine:
         resume_outputs: dict | None = None,
         resume_status: dict | None = None,
     ) -> WorkflowResult:
+        import time as _time
+
         result = WorkflowResult()
         shared = {"initial_input": initial_input}
+        _run_start = _time.time()
         if resume_outputs:
             result.outputs = dict(resume_outputs)
             shared.update(resume_outputs)
@@ -140,6 +143,10 @@ class WorkflowEngine:
             result.node_status = dict(resume_status)
         ready: asyncio.Queue[str] = asyncio.Queue()
         pending = set(workflow.nodes.keys())
+        dependents_map = {}
+        for nid, node in workflow.nodes.items():
+            for dep in getattr(node, "depends_on", []) or []:
+                dependents_map.setdefault(dep, []).append(nid)
         if resume_status:
             for nid, st in resume_status.items():
                 if st == "done" and nid in pending:
@@ -147,6 +154,16 @@ class WorkflowEngine:
                     node = workflow.nodes.get(nid)
                     if node and resume_outputs and nid in resume_outputs:
                         shared[node.output_key] = resume_outputs[nid]
+            try:
+                from aios.icm.checkpoint import invalidate_dependents
+
+                for nid, st in resume_status.items():
+                    if st != "done":
+                        for dep in invalidate_dependents(nid, dependents_map):
+                            if dep in pending:
+                                result.node_status[dep] = "pending"
+            except Exception:
+                pass
         running: dict[str, asyncio.Task] = {}
         run_id: str | None = None
         org_id_hint = ""
@@ -187,6 +204,14 @@ class WorkflowEngine:
                         await sess.commit()
             except Exception:
                 logger.debug("WorkflowRun persist failed", exc_info=True)
+
+        try:
+            from aios.icm.checkpoint import record_run_metrics
+
+            metrics = result.outputs.setdefault("_icm_run_metrics", {})
+            record_run_metrics(metrics, cost_usd=getattr(run, "cost_usd", None), tokens=getattr(run, "tokens", None), elapsed_ms=int((_time.time() - _run_start) * 1000))
+        except Exception:
+            pass
 
         try:
             from aios.db.engine import async_session
@@ -510,6 +535,10 @@ class WorkflowEngine:
                     try:
                         provenance = stage_adapter.post_execute(output=json.dumps(items), shared=shared)
                         result.outputs[f"{node.id}_icm_provenance"] = json.dumps(provenance)
+                        from aios.icm.checkpoint import record_stage_attempt
+
+                        attempts = result.outputs.setdefault("_icm_stage_attempts", {})
+                        record_stage_attempt(attempts, node.id, provenance, "done")
                     except Exception as e:
                         logger.warning("ICM-X stage post_execute warning for %s: %s", node.id, e)
                 return result
@@ -561,6 +590,13 @@ class WorkflowEngine:
                 out_val = result.outputs.get(node.id, "")
                 provenance = stage_adapter.post_execute(output=out_val, shared=shared)
                 result.outputs[f"{node.id}_icm_provenance"] = json.dumps(provenance)
+                from aios.icm.checkpoint import record_stage_attempt, bind_approval
+
+                attempts = result.outputs.setdefault("_icm_stage_attempts", {})
+                attempt = record_stage_attempt(attempts, node.id, provenance, "done")
+                approval_id = shared.get("approval_id")
+                if approval_id:
+                    attempts[node.id] = bind_approval(attempt, approval_id)
             except Exception as e:
                 logger.warning("ICM-X stage post_execute warning for %s: %s", node.id, e)
 
