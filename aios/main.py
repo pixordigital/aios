@@ -435,10 +435,9 @@ async def enforce_https(request: Request, call_next):
 
     canonical = urlsplit(settings.app_url)
     if canonical.scheme != "https" or not canonical.netloc:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "HTTPS is required; configure AIOS_APP_URL with the public HTTPS origin."},
-        )
+        # No TLS entry point configured (operator decision 2026-11-20): serve
+        # cleartext instead of 503. Enforcement resumes once app_url is https.
+        return await call_next(request)
     location = settings.app_url.rstrip("/") + request.url.path
     if request.url.query:
         location += "?" + request.url.query
