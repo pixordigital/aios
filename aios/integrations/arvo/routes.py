@@ -458,6 +458,8 @@ async def sso_ticket():
     import hashlib
     import time
     import secrets
+    import jwt
+    from .auth import _PATH
     
     key_id = settings.arvo_service_key_id
     key = settings.arvo_service_key
