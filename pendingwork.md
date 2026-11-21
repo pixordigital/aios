@@ -33,6 +33,14 @@
 - Note: earlier deploy `j2e0l5aijkk0ixbqzmaetbvq` (cf4d0cd) was stuck in_progress ~50 min (no-cache rebuild) and was cancelled by user action; it did not block site uptime.
 - Environment note (2026-11-21): shell tool output-write broke once (ENOSPC then harness temp ENOENT) — recovered after recreating `~/.local/share/opencode/shell` dir; coolify `deploy({wait:true})` times out on long builds, use `listAppDeployments` to poll.
 
+### Homepage mobile layout — nested sections fixed (2026-11-21)
+
+- User sent screenshot `/tmp/bfedeb02-280c-4b65-b6a8-64f029a3c2fa.jpg` (1080×2303, Android) asking to fix mobile layout; model cannot read images, so fixed from DOM audit.
+- Found real HTML bug: `<section id="agentes">` (website/index.html:373) and its `.inner` div were never closed before `<section id="customizacao">`. All later sections + footer were nested inside `#agentes` → double padding, inset backgrounds, `agentes` section 16778px tall, page 20261px.
+- Fix commit `240be03`: added `</div></section>` after the last `.g2` card. Tag stack now balanced.
+- Live deploy `manh6cj1yi6em3hdp5e8bxbz` (240be03) finished. Verified 390×844: all 10 sections full-width 390px, `agentes` 2416px (was 16778), page 18033px (was 20261), no horizontal overflow.
+- Caveat: could not visually confirm screenshot problem (no image input in model/subagents). Report to user that image can't be viewed; ask for description if other symptoms remain.
+
 ### Dashboard ARVO toggle — stale deploy (2026-11-21)
 - Source verified: `aios/dashboard/templates/dashboard.html:10` already points to `/dashboard/control-center`; only `/funnels/advisor` link in that template is line 47 (separate "Abrir orientador comercial" button).
 - Root cause of live hover URL `/funnels/advisor`: Coolify app `38908ddf-a875-4105-a93f-a4570513911f` last successful deploy was `dc111b2` (before fix `c298361`). Build `biou1fkheuidydmzzw0p5flv` (bfffcd5) stuck `in_progress` ~2h, two HEAD deploys queued behind it.
