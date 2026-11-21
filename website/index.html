@@ -59,9 +59,17 @@
         nav .cta-group a { color: var(--text-dim); text-decoration: none; font-size: 14px; transition: color 0.15s; }
         nav .cta-group a:hover { color: var(--text); }
         .nav-burger { display: none; width: 32px; height: 32px; position: absolute; right: 16px; top: 50%; transform: translateY(-50%); }
-        .nav-burger span { display: block; width: 20px; height: 2px; background: var(--text); margin: 6px 0; transition: background 0.15s; }
+        .nav-burger span { display: block; width: 20px; height: 2px; background: var(--text); margin: 6px 0; transition: background 0.15s, transform 0.2s ease, opacity 0.2s ease; }
+        .nav-burger.open span:nth-child(1) { transform: translateY(8px) rotate(45deg); }
+        .nav-burger.open span:nth-child(2) { opacity: 0; transform: translateX(-6px); }
+        .nav-burger.open span:nth-child(3) { transform: translateY(-8px) rotate(-45deg); }
         @media (max-width: 768px) {
+            nav .inner { padding: 0 12px; }
             nav .links { display: none; }
+            .nav-burger { display: flex; }
+            nav.open .links { display: flex; position: absolute; top: calc(100% + 8px); left: 0; right: 0; flex-direction: column; background: rgba(10,10,10,0.97); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 8px; backdrop-filter: blur(18px); }
+            nav.open .links a { display: block; padding: 12px 16px; border-radius: 10px; font-size: 15px; color: var(--text); }
+            nav.open .links a:hover { background: var(--surface); }
             nav .cta-group { width: 100%; flex-direction: column; align-items: stretch; gap: 8px; }
             nav .cta-group .btn-primary, nav .cta-group .btn-ghost { width: 100%; text-align: center; }
         }
@@ -886,6 +894,20 @@ const observer = new IntersectionObserver((entries) => {
     entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
 }, { threshold: 0.1 });
 document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+// ── Menu mobile (hamburger) ──
+const navEl = document.querySelector('nav');
+const burger = document.querySelector('.nav-burger');
+if (burger) {
+    burger.addEventListener('click', () => {
+        const open = navEl.classList.toggle('open');
+        burger.classList.toggle('open', open);
+    });
+    navEl.querySelectorAll('.links a').forEach(a => a.addEventListener('click', () => {
+        navEl.classList.remove('open');
+        burger.classList.remove('open');
+    }));
+}
 
 // ── Inicia o terminal ──
 typeTerminal();
