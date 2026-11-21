@@ -32,3 +32,10 @@
   - **Deploy pending for bfffcd5**: Coolify MCP returned 500 on list/deploy; live site still on dc111b2-era behavior until deploy completes. Verify after Coolify recovers: 390×844 portrait shows compact nav (56px), burger opens menu with links+CTA.
 - Note: earlier deploy `j2e0l5aijkk0ixbqzmaetbvq` (cf4d0cd) was stuck in_progress ~50 min (no-cache rebuild) and was cancelled by user action; it did not block site uptime.
 - Environment note (2026-11-21): shell tool output-write broke once (ENOSPC then harness temp ENOENT) — recovered after recreating `~/.local/share/opencode/shell` dir; coolify `deploy({wait:true})` times out on long builds, use `listAppDeployments` to poll.
+
+### Dashboard ARVO toggle — stale deploy (2026-11-21)
+- Source verified: `aios/dashboard/templates/dashboard.html:10` already points to `/dashboard/control-center`; only `/funnels/advisor` link in that template is line 47 (separate "Abrir orientador comercial" button).
+- Root cause of live hover URL `/funnels/advisor`: Coolify app `38908ddf-a875-4105-a93f-a4570513911f` last successful deploy was `dc111b2` (before fix `c298361`). Build `biou1fkheuidydmzzw0p5flv` (bfffcd5) stuck `in_progress` ~2h, two HEAD deploys queued behind it.
+- Action: cancelled stuck build `biou1fkheuidydmzzw0p5flv`; queued `2pnvysqsu00lxwmwlmo3rdhj` finished 14:09 with commit `e766c56` (includes `c298361`). Next queued deploy `1ubgtgavjg0ya4frmoasqvo9` finished 14:13 with `bdb86ad`.
+- Also fixed (commit `bdb86ad`, pushed): `aios/integrations/arvo/routes.py` SSO endpoint used undefined `jwt` and `_PATH` → NameError at runtime; added local imports. Deployed.
+- Remaining verification: live hover URL on `/dashboard` after hard refresh (auth-gated, not checked via curl). If still `/funnels/advisor`, check browser cache or proxy cache.
