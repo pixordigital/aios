@@ -11,20 +11,18 @@
 
 **All phases complete.** No further DB/schema changes needed; package is inert until explicitly called per architectural boundary docs.
 
-### AIOS homepage nav — IN PROGRESS (2026-11-21)
+### AIOS homepage nav — RESOLVED ✓ (2026-11-21, verified live)
 
-- Root cause hamburger invisible on mobile: `.nav-burger { display: none }` had no `@media` override; no JS toggle/open state existed.
-- Fixed in `website/index.html` (commit `cf4d0cd`):
-  - `.nav-burger { display: flex }` under `@media (max-width: 768px)`.
-  - `nav.open .links` → full-width column panel (absolute, below pill, column, rounded, blur bg).
-  - `.nav-burger.open span` X→open animation (rotate/translate/opacity).
-  - JS: burger click toggles `nav.open` + burger `open`; link click closes menu.
-- Prior fixes also committed: orphaned mobile CSS given `@media (max-width: 768px)` wrapper (`ab910ec`), `max-width: 100vw`→`100%` (`83b4664`), grid `min-width: 0` (`bdc73e7`), cache-bust comment (`c43d7e6`).
-- Deploy state: Coolify app `38908ddf-a875-4105-a93f-a4570513911f` (pixor-aios), latest deploy `j2e0l5aijkk0ixbqzmaetbvq` (commit `cf4d0cd`) was IN_PROGRESS at last check; `deploy({wait:true})` timed out.
-- Verification pending: after deploy finishes, check http://178.105.181.38:8777/ — burger visible ≤768px, tap opens full-width column menu, link tap closes.
-- Environment note (2026-11-21): shell tool output-write broke (ENOSPC then harness temp ENOENT); claude-code Bash MCP + coolify diagnose/deploy timing out. Retry later; do not assume deploy failures from these errors.
-
-### AIOS homepage nav — RESOLVED (verified via source + deployed HTML curl)
-
-- Deployed HTML at 178.105.181.38:8777 was stale then refreshed: after deploy of `c43d7e6` + `nlffhxd2`, curl showed fresh markup (`<!-- layout fixes -->`, `@media (max-width: 768px)/(max-width: 900px)` only, `max-width: 100%`, `min-width: 0`, `nav-burger` present, burger CSS `display: none` base only → burger never visible on mobile).
-- Additional fix in `cf4d0cd` (committed + pushed, awaiting Coolify deploy): burger `display:flex` at ≤768px, `nav.open .links` open panel, X animation, JS toggle.
+- Root causes:
+  1. Hamburger invisible on mobile: `.nav-burger { display: none }` had no `@media` override; no JS toggle/open state existed.
+  2. Desktop pill broken: `nav` lost explicit width (commit `a0aa949` dropped it); only `max-width: 1200px` + `left:50%/translateX` → shrink-to-fit, pill renders wrong on big screens.
+- Fixes in `website/index.html`:
+  - `nav { width: min(1200px, calc(100vw - 32px)); }` restored (commit `ccd2f79`).
+  - `.nav-burger { display: flex }` under `@media (max-width: 768px)`; `nav.open .links` full-width column panel; `.nav-burger.open` X animation; JS toggle (click burger → `nav.open`; click link → closes) — commit `cf4d0cd`.
+  - Orphaned mobile CSS given `@media (max-width: 768px)` wrapper (`ab910ec`); `max-width: 100vw`→`100%` (`83b4664`); grid `min-width: 0` (`bdc73e7`).
+- Live deploy: Coolify app `38908ddf-a875-4105-a93f-a4570513911f`, deploy `eu4uriwxlzsayukqeltbg7dt` (commit `ccd2f79`) finished 2026-11-21 ~11:55.
+- Verified live (agent-browser):
+  - 1440×900 & 1920×1080: nav width 1200px, radius 999px, links visible, burger hidden, no horizontal overflow.
+  - 375×667 & 320×568: burger `display:flex`, nav width 343px / 288px, tap opens menu (`flex-direction: column`, full-width, below pill), link tap closes menu, no overflow.
+- Note: earlier deploy `j2e0l5aijkk0ixbqzmaetbvq` (cf4d0cd) was stuck in_progress ~50 min (no-cache rebuild) and was cancelled by user action; it did not block site uptime.
+- Environment note (2026-11-21): shell tool output-write broke once (ENOSPC then harness temp ENOENT) — recovered after recreating `~/.local/share/opencode/shell` dir; coolify `deploy({wait:true})` times out on long builds, use `listAppDeployments` to poll.
