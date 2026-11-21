@@ -908,6 +908,12 @@ if (burger) {
         navEl.classList.remove('open');
         burger.classList.remove('open');
     }));
+    document.addEventListener('click', (e) => {
+        if (navEl.classList.contains('open') && !navEl.contains(e.target)) {
+            navEl.classList.remove('open');
+            burger.classList.remove('open');
+        }
+    });
 }
 
 // ── Inicia o terminal ──
