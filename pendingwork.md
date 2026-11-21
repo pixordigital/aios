@@ -24,5 +24,10 @@
 - Verified live (agent-browser):
   - 1440×900 & 1920×1080: nav width 1200px, radius 999px, links visible, burger hidden, no horizontal overflow.
   - 375×667 & 320×568: burger `display:flex`, nav width 343px / 288px, tap opens menu (`flex-direction: column`, full-width, below pill), link tap closes menu, no overflow.
+- Follow-up fixes (commits `779cccb`, `3f694bc`, `dc111b2`):
+  - Burger was `position:absolute; top:50%` overlapping the stacked CTA row on mobile → now in-flow top-right of logo row (`position: static; margin-left: auto`).
+  - Burger/menu now available ≤900px (was ≤768 only) — previously 769–900px had links hidden and no burger (menu inaccessible).
+  - Menu closes on outside tap (document click handler).
+  - Live deploy `cnxcpb1cmbhihpfrgodjxirh` (3f694bc) + `in6klmcmdqb4h3ihmsa79j4j` (dc111b2) finished; re-verified: 820px burger+menu OK, 375px open/close OK, desktop unchanged.
 - Note: earlier deploy `j2e0l5aijkk0ixbqzmaetbvq` (cf4d0cd) was stuck in_progress ~50 min (no-cache rebuild) and was cancelled by user action; it did not block site uptime.
 - Environment note (2026-11-21): shell tool output-write broke once (ENOSPC then harness temp ENOENT) — recovered after recreating `~/.local/share/opencode/shell` dir; coolify `deploy({wait:true})` times out on long builds, use `listAppDeployments` to poll.
