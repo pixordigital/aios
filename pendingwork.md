@@ -39,7 +39,8 @@
 - Found real HTML bug: `<section id="agentes">` (website/index.html:373) and its `.inner` div were never closed before `<section id="customizacao">`. All later sections + footer were nested inside `#agentes` → double padding, inset backgrounds, `agentes` section 16778px tall, page 20261px.
 - Fix commit `240be03`: added `</div></section>` after the last `.g2` card. Tag stack now balanced.
 - Live deploy `manh6cj1yi6em3hdp5e8bxbz` (240be03) finished. Verified 390×844: all 10 sections full-width 390px, `agentes` 2416px (was 16778), page 18033px (was 20261), no horizontal overflow.
-- Caveat: could not visually confirm screenshot problem (no image input in model/subagents). Report to user that image can't be viewed; ask for description if other symptoms remain.
+- Additional mobile compacting (commit `00a467d`, deployed `gvjttimznd2pnq9qjrgxjwia`): ≤768px section padding 96→48px, hero padding 80/60→64/40px + `min-height:auto`, `.section-desc` margin 48→24px. Page 19007→17677px @360px. Verified live.
+- Caveat: could not visually confirm screenshot problem (no image input in model/subagents, chafa/pixel analysis inconclusive). User resent image 4×; if specific symptom remains, need text description.
 
 ### Dashboard ARVO toggle — stale deploy (2026-11-21)
 - Source verified: `aios/dashboard/templates/dashboard.html:10` already points to `/dashboard/control-center`; only `/funnels/advisor` link in that template is line 47 (separate "Abrir orientador comercial" button).
