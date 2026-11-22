@@ -41,14 +41,14 @@ class SQLQueryTool(BaseTool):
         re.IGNORECASE
     )
 
-    # App tables carrying secrets or cross-org PII. The tool runs without an
-    # org context, so it cannot scope rows — these tables are off-limits
-    # entirely. An agent (or a prompt-injected inbound message) could otherwise
-    # SELECT api keys, tokens and other orgs' contacts with one query.
+    # App tables carrying secrets, cross-org PII, or global integration state
+    # with no org_id. The tool runs without org-scope guarantees for these, so
+    # they are off-limits entirely.
     _DENY_APP_TABLES = (
         "users", "credentials", "channel_connections", "oauth_accounts",
         "invitations", "organizations", "whatsapp_contacts", "pending_approvals",
         "refresh_tokens",
+        "integration_nonces", "integration_events", "integration_outbox",
     )
 
     _DENY_APP_PATTERN = re.compile(

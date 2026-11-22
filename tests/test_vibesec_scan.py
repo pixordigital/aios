@@ -92,3 +92,19 @@ async def test_sql_query_blocks_refresh_tokens_table():
     assert "error" in result
     assert "refresh_tokens" not in str(result).lower() or "bloqueada" in str(result.get("error", "")).lower()
     assert "bloqueada" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "table",
+    ["integration_nonces", "integration_events", "integration_outbox"],
+)
+async def test_sql_query_blocks_integration_tables_without_org_id(table):
+    """Integration tables have no org_id; sql_query cannot scope them, so deny."""
+    from aios.tools.sql_query import SQLQueryTool
+
+    tool = SQLQueryTool()
+    tool._org_id = "org-any"
+    result = await tool.run(f"SELECT * FROM {table}")
+    assert "error" in result, result
+    assert "bloqueada" in result["error"].lower(), result
