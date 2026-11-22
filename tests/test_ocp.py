@@ -18,6 +18,7 @@ from aios.governance.ocp import (
     decision_level,
     missing_decision_fields,
     task_budget_check,
+    track_c_autonomous_mutation_guard,
     transition_task,
 )
 
@@ -191,6 +192,31 @@ def test_task_budget_check():
 
     assert task_budget_check(task3, [_B()]) == ("allow", "task budget within limit")
     assert task_budget_check(task3, [_B()], spent_brl=101.0) == ("deny", "task budget exceeded")
+
+
+def test_track_c_autonomous_mutation_guard_fail_closed():
+    ok, _ = track_c_autonomous_mutation_guard({}, action="task:create")
+    assert ok
+    ok, reason = track_c_autonomous_mutation_guard(
+        {"track": "C", "autonomous": True}, action="task:create"
+    )
+    assert not ok
+    assert "requires evidence" in reason
+    ok, reason = track_c_autonomous_mutation_guard(
+        {"track": "C", "autonomous": True, "evidence": {"note": "ok"}}, action="task:create"
+    )
+    assert not ok
+    assert "Founder approval" in reason
+    ok, _ = track_c_autonomous_mutation_guard(
+        {"track": "C", "autonomous": True, "evidence": {"note": "ok"}, "founder_approved": True},
+        action="task:create",
+    )
+    assert ok
+    ok, reason = track_c_autonomous_mutation_guard(
+        {"track": "C", "mode": "track_c_autonomous"}, action="task:create"
+    )
+    assert not ok
+    assert "requires evidence" in reason
 
 
 async def test_department_and_task_roundtrip(test_session):

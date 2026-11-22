@@ -15,19 +15,49 @@ from aios.governance.capability_registry import (
     engineering_work_guard,
     solution_fit,
 )
+from aios.governance.innovation import TRACK_AUTONOMOUS_MODES
 
 router = APIRouter(prefix="/api/capabilities", tags=["capabilities"])
 
 
+def _cap_track_c_autonomous(body: dict) -> tuple[str | None, bool]:
+    perms = body.get("permissions") if isinstance(body.get("permissions"), dict) else {}
+    track = body.get("track", perms.get("track"))
+    track_norm = str(track).strip().upper() if track is not None else None
+    mode = str(body.get("optimization_mode", perms.get("optimization_mode", body.get("mode", perms.get("mode", "")))) or "").strip().lower()
+    autonomous = bool(
+        body.get("autonomous") is True
+        or perms.get("autonomous") is True
+        or mode in TRACK_AUTONOMOUS_MODES
+    )
+    return track_norm, autonomous
+
+
+def _cap_has_evidence(body: dict) -> bool:
+    perms = body.get("permissions") if isinstance(body.get("permissions"), dict) else {}
+    for src in (body, perms):
+        evidence = src.get("evidence", src.get("evidence_refs", src.get("track_c_evidence")))
+        if isinstance(evidence, str):
+            if evidence.strip():
+                return True
+        elif isinstance(evidence, (list, tuple, set, dict)):
+            if len(evidence) > 0:
+                return True
+        elif bool(evidence):
+            return True
+        if src.get("evidence_before_track_c") is True:
+            return True
+    return False
+
+
 def _cap_guard(body: dict, action: str) -> None:
-    track = (body.get("permissions") or {}).get("track") if isinstance(body.get("permissions"), dict) else body.get("track")
-    autonomous = bool(body.get("autonomous") or (isinstance(body.get("permissions"), dict) and body.get("permissions", {}).get("autonomous")))
-    has_evidence = bool(body.get("evidence") or body.get("track_c_evidence") or (isinstance(body.get("permissions"), dict) and (body.get("permissions", {}).get("evidence") or body.get("permissions", {}).get("evidence_refs"))))
-    founder_approved = bool(body.get("founder_approved"))
+    track_norm, autonomous = _cap_track_c_autonomous(body)
+    perms = body.get("permissions") if isinstance(body.get("permissions"), dict) else {}
+    founder_approved = bool(body.get("founder_approved") is True or perms.get("founder_approved") is True)
     ok, reason = capability_lifecycle_guard(
-        track=str(track) if track is not None else None,
+        track=track_norm,
         autonomous=autonomous,
-        has_evidence=has_evidence,
+        has_evidence=_cap_has_evidence(body),
         founder_approved=founder_approved,
         action=action,
     )

@@ -14,6 +14,7 @@ from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aios.db.engine import Base
+from aios.governance.innovation import TRACK_AUTONOMOUS_MODES, autonomous_action_guard
 
 
 def _uuid() -> str:
@@ -340,6 +341,49 @@ def ocp_strict_default_deny(org_extra_data: dict | None) -> bool:
     changes: `{"ocp": {"strict_default_deny": true}}`.
     """
     return bool(ocp_policy(org_extra_data).get("strict_default_deny"))
+
+
+def _has_track_c_evidence(payload: dict | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    evidence = payload.get("evidence")
+    if isinstance(evidence, str):
+        return bool(evidence.strip())
+    if isinstance(evidence, (list, tuple, set, dict)):
+        return len(evidence) > 0
+    refs = payload.get("evidence_refs") or payload.get("track_c_evidence")
+    if isinstance(refs, str):
+        return bool(refs.strip())
+    if isinstance(refs, (list, tuple, set, dict)):
+        return len(refs) > 0
+    return bool(payload.get("evidence_before_track_c") is True)
+
+
+def track_c_autonomous_mutation_guard(
+    payload: dict | None, *, action: str
+) -> tuple[bool, str]:
+    """Narrow fail-closed guard for Track C/autonomous markers in OCP payloads.
+
+    Latent fail-open risk: mutating endpoints previously ignored these markers.
+    Only triggers when payload explicitly signals Track C/autonomous mutation.
+    Does not claim full OCP↔innovation/runtime unification.
+    """
+    if not isinstance(payload, dict):
+        return True, "no Track C autonomous guard triggered"
+    track = str(payload.get("track") or "").strip().upper()
+    mode = str(payload.get("mode") or payload.get("optimization_mode") or "").strip().lower()
+    autonomous = bool(payload.get("autonomous") is True or mode in TRACK_AUTONOMOUS_MODES)
+    if not (track == "C" and autonomous):
+        return True, "no Track C autonomous guard triggered"
+    has_evidence = _has_track_c_evidence(payload)
+    founder_approved = bool(payload.get("founder_approved") is True)
+    return autonomous_action_guard(
+        track="C",
+        autonomous=True,
+        has_evidence=has_evidence,
+        founder_approved=founder_approved,
+        action=action,
+    )
 
 
 def ocp_policy(org_extra_data: dict | None) -> dict:

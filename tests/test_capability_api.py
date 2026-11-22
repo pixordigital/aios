@@ -143,3 +143,41 @@ async def test_capability_mutating_track_c_autonomous_guard(auth_client):
     good_eval = {**bad_eval, "evidence": ["log"], "founder_approved": True}
     resp = await auth_client.post("/api/capabilities/evaluate", json=good_eval)
     assert resp.status_code == 200, resp.text
+
+
+async def test_capability_track_c_mode_markers_and_evidence_keys_fail_closed(auth_client):
+    base = {
+        "capability_key": "mode-cap",
+        "name": "Mode",
+        "maturity": "pilot",
+        "is_commercially_available": True,
+        "track": "C",
+        "optimization_mode": "track_c_autonomous",
+    }
+    resp = await auth_client.post("/api/capabilities", json=base)
+    assert resp.status_code == 403
+
+    resp = await auth_client.post(
+        "/api/capabilities",
+        json={**base, "track_c_evidence": ["ev-1"], "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    eval_base = {"subject_id": "acct-mode", "track": "C", "mode": "auto_optimize", **_HIGH}
+    resp = await auth_client.post("/api/capabilities/evaluate", json=eval_base)
+    assert resp.status_code == 403
+
+    resp = await auth_client.post(
+        "/api/capabilities/evaluate",
+        json={
+            **eval_base,
+            "permissions": {"evidence_refs": ["ref-1"], "founder_approved": True},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await auth_client.post(
+        "/api/capabilities/evaluate",
+        json={**eval_base, "evidence": "   ", "founder_approved": True},
+    )
+    assert resp.status_code == 403

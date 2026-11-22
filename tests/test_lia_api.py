@@ -202,3 +202,80 @@ async def test_lia_mutating_track_c_autonomous_guard(auth_client, test_db_sessio
     assert resp.status_code == 403
     resp = await auth_client.post(f"/api/lia/members/{mid}/handoff", json={"campaign_approved": True, "campaign_legal_reviewed": True, "track": "C", "autonomous": True, "evidence": ["ok"], "founder_approved": True})
     assert resp.status_code == 200, resp.text
+
+
+async def test_lia_track_c_mode_markers_and_evidence_keys_fail_closed(auth_client, test_db_session, test_org):
+    base = {
+        "name": "Mode src",
+        "source_type": "receita_cnpj",
+        "allowed_for_outreach": False,
+        "track": "C",
+        "optimization_mode": "track_c_autonomous",
+    }
+    resp = await auth_client.post("/api/lia/sources", json=base)
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        "/api/lia/sources",
+        json={**base, "track_c_evidence": ["ev"], "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await auth_client.post(
+        "/api/lia/campaigns",
+        json={
+            "name": "Mode campaign",
+            "channel": "email",
+            "track": "C",
+            "permissions": {"mode": "auto_optimize"},
+        },
+    )
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        "/api/lia/campaigns",
+        json={
+            "name": "Mode campaign",
+            "channel": "email",
+            "track": "C",
+            "permissions": {"mode": "auto_optimize", "evidence_refs": ["ref"], "founder_approved": True},
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    cid = resp.json()["id"]
+
+    contact = Contact(org_id=test_org.id, name="Lead3", email="lead3@example.com", email_verified=True, contact_allowed=True)
+    test_db_session.add(contact)
+    await test_db_session.flush()
+    member_payload = {
+        "campaign_id": cid,
+        "contact_id": contact.id,
+        "disposition": "qualified",
+        "icp_fit": 0.9,
+        "track": "C",
+        "permissions": {"optimization_mode": "autonomous"},
+    }
+    resp = await auth_client.post("/api/lia/members", json=member_payload)
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        "/api/lia/members",
+        json={**member_payload, "track_c_evidence": ["ev2"], "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+    mid = resp.json()["id"]
+
+    resp = await auth_client.post(
+        f"/api/lia/members/{mid}/handoff",
+        json={"campaign_approved": True, "campaign_legal_reviewed": True, "track": "C", "mode": "track_c_autonomous"},
+    )
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        f"/api/lia/members/{mid}/handoff",
+        json={
+            "campaign_approved": True,
+            "campaign_legal_reviewed": True,
+            "track": "C",
+            "mode": "track_c_autonomous",
+            "permissions": {"track_c_evidence": ["ev3"]},
+            "founder_approved": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text

@@ -32,6 +32,7 @@ from aios.governance.ocp import (
     ocp_strict_default_deny,
     record_org_event,
     set_ocp_policy,
+    track_c_autonomous_mutation_guard,
     transition_task,
 )
 
@@ -158,7 +159,7 @@ async def _require_grant_if_policy(
         org = await db.get(Organization, org_id)
     strict = ocp_strict_default_deny(getattr(org, "extra_data", None))
     if founder_bypass and _is_founder(user, org):
-        return
+        return org
     rows = (await db.execute(
         select(AuthorityGrant).where(
             AuthorityGrant.org_id == org_id,
@@ -172,10 +173,28 @@ async def _require_grant_if_policy(
     if not relevant:
         if strict:
             raise HTTPException(403, f"no valid grant for action (ocp.strict_default_deny): {action}")
-        return
+        return org
     ok, reason = authorize(active, action, resource_type=resource_type, resource_id=resource_id, now=_now())
     if not ok:
         raise HTTPException(403, reason)
+    return org
+
+
+def _require_track_c_autonomous_guard(payload: dict | None, *, action: str, org=None, user=None) -> None:
+    """Narrow fail-closed guard for latent Track C/autonomous marker fail-open.
+
+    Triggers only on explicit markers in mutating payloads. Requires evidence and
+    founder approval; non-founders denied even with evidence. Does not unify all
+    OCP/core approval paths.
+    """
+    ok, reason = track_c_autonomous_mutation_guard(payload, action=action)
+    if ok:
+        return
+    if "requires evidence" in reason:
+        raise HTTPException(403, reason)
+    if not _is_founder(user, org):
+        raise HTTPException(403, f"{reason}; founder approval required")
+    raise HTTPException(403, reason)
 
 
 @router.get("/policy")
@@ -253,8 +272,10 @@ async def create_department(
     slug = (body.get("slug") or "").strip()
     if not name or not slug:
         raise HTTPException(400, "name and slug are required")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="department:create", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
-                                   action="department:create", resource_type="department")
+                                   action="department:create", resource_type="department", user=user, org=org)
     dept = Department(org_id=org_id, name=name, slug=slug, mission=body.get("mission", ""), parent_id=body.get("parent_id"))
     db.add(dept)
     await db.flush()
@@ -267,6 +288,7 @@ async def create_department(
 
 @router.post("/departments/bootstrap-defaults")
 async def bootstrap_default_departments(
+    body: dict | None = None,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
@@ -275,6 +297,7 @@ async def bootstrap_default_departments(
     org = await db.get(Organization, org_id)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder approval required")
+    _require_track_c_autonomous_guard(body, action="department:bootstrap", org=org, user=user)
     await _require_grant_if_policy(
         db, org_id=org_id, subject_type="human", subject_id=user.id,
         action="department:bootstrap", resource_type="organization", resource_id=org_id,
@@ -330,8 +353,11 @@ async def create_member(
         raise HTTPException(400, "user_id required for human member")
     if member_type == "agent" and not agent_id:
         raise HTTPException(400, "agent_id required for agent member")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="department:member_add", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
-                                   action="department:member_add", resource_type="department", resource_id=department_id)
+                                   action="department:member_add", resource_type="department", resource_id=department_id,
+                                   user=user, org=org)
     m = DepartmentMember(
         org_id=org_id, department_id=department_id, member_type=member_type,
         user_id=user_id if member_type == "human" else None,
@@ -352,6 +378,7 @@ async def create_member(
 async def delete_member(
     department_id: str,
     member_id: str,
+    body: dict | None = None,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
@@ -359,8 +386,11 @@ async def delete_member(
     m = await db.get(DepartmentMember, member_id)
     if m is None or m.org_id != org_id or m.department_id != department_id:
         raise HTTPException(404, "member not found")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="department:member_remove", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
-                                   action="department:member_remove", resource_type="department", resource_id=department_id)
+                                   action="department:member_remove", resource_type="department", resource_id=department_id,
+                                   user=user, org=org)
     await db.delete(m)
     record_org_event(db, org_id=org_id, event_type="department.member_removed", actor_type="human", actor_id=user.id,
                      entity_type="department_member", entity_id=member_id, payload={"department_id": department_id})
@@ -403,6 +433,7 @@ async def create_grant(
     if subject_type not in {"human", "agent"} or not subject_id or not role or not actions:
         raise HTTPException(400, "subject_type, subject_id, role, actions required")
     org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="authority:grant", org=org, user=user)
     await _require_grant_if_policy(
         db, org_id=org_id, subject_type="human", subject_id=user.id,
         action="authority:grant", resource_type="organization", resource_id=org_id,
@@ -427,6 +458,7 @@ async def create_grant(
 @router.post("/authority-grants/{grant_id}/revoke")
 async def revoke_grant(
     grant_id: str,
+    body: dict | None = None,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
@@ -435,6 +467,7 @@ async def revoke_grant(
     if g is None or g.org_id != org_id:
         raise HTTPException(404, "grant not found")
     org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="authority:revoke", org=org, user=user)
     await _require_grant_if_policy(
         db, org_id=org_id, subject_type="human", subject_id=user.id,
         action="authority:revoke", resource_type="authority_grant", resource_id=grant_id,
@@ -496,12 +529,14 @@ async def create_task(
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "title is required")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="task:create", org=org, user=user)
     actor_type = (body.get("actor_type") or "human").strip()
     actor_id = (body.get("actor_id") or user.id).strip()
     if actor_type in {"human", "agent"}:
         await _require_grant_if_policy(db, org_id=org_id, subject_type=actor_type, subject_id=actor_id,
                                        action="task:create", resource_type="department",
-                                       resource_id=body.get("responsible_department_id"))
+                                       resource_id=body.get("responsible_department_id"), user=user, org=org)
     task = SharedTask(
         org_id=org_id,
         title=title,
@@ -533,11 +568,14 @@ async def transition(
     task = await db.get(SharedTask, task_id)
     if task is None or task.org_id != org_id:
         raise HTTPException(404, "task not found")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="task:transition", org=org, user=user)
     actor_type = (body.get("actor_type") or "human").strip()
     actor_id = (body.get("actor_id") or user.id).strip()
     if actor_type in {"human", "agent"}:
         await _require_grant_if_policy(db, org_id=org_id, subject_type=actor_type, subject_id=actor_id,
-                                       action="task:transition", resource_type="task", resource_id=task.id)
+                                       action="task:transition", resource_type="task", resource_id=task.id,
+                                       user=user, org=org)
     target = (body.get("target") or "").strip()
     try:
         transition_task(task, target, actor_type, actor_id, body.get("reason", ""))
@@ -620,9 +658,11 @@ async def create_goal(
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "title is required")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="goal:create", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
                                    action="goal:create", resource_type="department",
-                                   resource_id=body.get("department_id"))
+                                   resource_id=body.get("department_id"), user=user, org=org)
     g = OrgGoal(
         org_id=org_id, department_id=body.get("department_id"), title=title,
         description=body.get("description", ""), metric_name=body.get("metric_name", ""),
@@ -650,8 +690,11 @@ async def update_goal(
     g = await db.get(OrgGoal, goal_id)
     if g is None or g.org_id != org_id:
         raise HTTPException(404, "goal not found")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="goal:update", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
-                                   action="goal:update", resource_type="org_goal", resource_id=goal_id)
+                                   action="goal:update", resource_type="org_goal", resource_id=goal_id,
+                                   user=user, org=org)
     for field in ("title", "description", "metric_name", "status", "owner_type", "owner_id", "department_id"):
         if field in body:
             setattr(g, field, body[field])
@@ -707,8 +750,11 @@ async def propose_decision(
     user=Depends(get_current_user),
 ):
     change_type = (body.get("change_type") or "").strip()
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="decision:propose", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
-                                   action="decision:propose", resource_type="organization", resource_id=org_id)
+                                   action="decision:propose", resource_type="organization", resource_id=org_id,
+                                   user=user, org=org)
     record = DecisionRecord(
         org_id=org_id,
         level=decision_level(change_type),
@@ -748,6 +794,7 @@ async def decide_record(
     org = await db.get(Organization, org_id)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder approval required")
+    _require_track_c_autonomous_guard(body, action="decision:decide", org=org, user=user)
     await _require_grant_if_policy(
         db, org_id=org_id, subject_type="human", subject_id=user.id,
         action="decision:decide", resource_type="decision", resource_id=decision_id,
@@ -781,8 +828,11 @@ async def link_decision_approval(
     record = await db.get(DecisionRecord, decision_id)
     if record is None or record.org_id != org_id:
         raise HTTPException(404, "decision not found")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="decision:link_approval", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
-                                   action="decision:link_approval", resource_type="decision", resource_id=decision_id)
+                                   action="decision:link_approval", resource_type="decision", resource_id=decision_id,
+                                   user=user, org=org)
     ref_type = (body.get("ref_type") or "").strip()
     ref_id = (body.get("ref_id") or "").strip()
     if not ref_type or not ref_id:
@@ -841,11 +891,14 @@ async def execute_decision_route(
     record = await db.get(DecisionRecord, decision_id)
     if record is None or record.org_id != org_id:
         raise HTTPException(404, "decision not found")
+    org = await db.get(Organization, org_id)
+    _require_track_c_autonomous_guard(body, action="decision:execute", org=org, user=user)
     actor_type = (body.get("actor_type") or "human").strip()
     actor_id = (body.get("actor_id") or user.id).strip()
     if actor_type in {"human", "agent"}:
         await _require_grant_if_policy(db, org_id=org_id, subject_type=actor_type, subject_id=actor_id,
-                                       action="decision:execute", resource_type="decision", resource_id=record.id)
+                                       action="decision:execute", resource_type="decision", resource_id=record.id,
+                                       user=user, org=org)
     task_ids = list(body.get("task_ids") or record.linked_task_ids or [])
     tasks = []
     for task_id in task_ids:

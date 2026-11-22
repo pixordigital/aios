@@ -277,3 +277,38 @@ async def test_ocp_policy_get_put_founder_only(auth_client, test_db_session, tes
     assert grant_resp.status_code == 200, grant_resp.text
     ok = await auth_client.post("/api/ocp/goals", json={"title": "G"})
     assert ok.status_code == 200, ok.text
+
+
+async def test_ocp_track_c_autonomous_mutation_fail_closed(auth_client, test_db_session, test_org, test_user):
+    """Narrow latent-fail-open guard: Track C/autonomous markers in mutating OCP payloads."""
+    base = {"title": "Auto task", "track": "C", "autonomous": True}
+
+    resp = await auth_client.post("/api/ocp/tasks", json=base)
+    assert resp.status_code == 403
+    assert "requires evidence" in resp.json()["detail"]
+
+    resp = await auth_client.post("/api/ocp/tasks", json={**base, "evidence": {"source": "test"}})
+    assert resp.status_code == 403
+    assert "Founder approval" in resp.json()["detail"]
+
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    resp = await auth_client.post(
+        "/api/ocp/tasks",
+        json={**base, "evidence": {"source": "test"}, "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # mode marker also guarded
+    resp = await auth_client.post(
+        "/api/ocp/goals",
+        json={"title": "G2", "track": "C", "mode": "track_c_autonomous", "evidence": {"x": 1}},
+    )
+    # founder is set, but evidence+founder_approved required in payload
+    assert resp.status_code == 403
+    assert "Founder approval" in resp.json()["detail"]
+    resp = await auth_client.post(
+        "/api/ocp/goals",
+        json={"title": "G2", "track": "C", "mode": "track_c_autonomous", "evidence": {"x": 1}, "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
