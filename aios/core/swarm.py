@@ -23,9 +23,22 @@ class SwarmCoordinator:
 
     # ── Config ──
 
-    async def ensure_config(self, team_id: str, org_id: str) -> TeamSwarmConfig:
+    async def ensure_config(self, team_id: str, org_id: str = "") -> TeamSwarmConfig | None:
+        if not org_id:
+            return None
         async with db_session() as db:
-            cfg = (await db.execute(select(TeamSwarmConfig).where(TeamSwarmConfig.team_id == team_id))).scalar_one_or_none()
+            team = (
+                await db.execute(select(Team.id).where(Team.id == team_id, Team.org_id == org_id))
+            ).scalar_one_or_none()
+            if not team:
+                return None
+            cfg = (
+                await db.execute(
+                    select(TeamSwarmConfig).where(
+                        TeamSwarmConfig.team_id == team_id, TeamSwarmConfig.org_id == org_id
+                    )
+                )
+            ).scalar_one_or_none()
             if cfg:
                 return cfg
             cfg = TeamSwarmConfig(team_id=team_id, org_id=org_id)
@@ -34,13 +47,29 @@ class SwarmCoordinator:
             await db.refresh(cfg)
             return cfg
 
-    async def get_config(self, team_id: str) -> TeamSwarmConfig | None:
+    async def get_config(self, team_id: str, org_id: str = "") -> TeamSwarmConfig | None:
+        if not org_id:
+            return None
         async with db_session() as db:
-            return (await db.execute(select(TeamSwarmConfig).where(TeamSwarmConfig.team_id == team_id))).scalar_one_or_none()
+            return (
+                await db.execute(
+                    select(TeamSwarmConfig).where(
+                        TeamSwarmConfig.team_id == team_id, TeamSwarmConfig.org_id == org_id
+                    )
+                )
+            ).scalar_one_or_none()
 
-    async def update_config(self, team_id: str, **fields) -> TeamSwarmConfig | None:
+    async def update_config(self, team_id: str, *, org_id: str = "", **fields) -> TeamSwarmConfig | None:
+        if not org_id:
+            return None
         async with db_session() as db:
-            cfg = (await db.execute(select(TeamSwarmConfig).where(TeamSwarmConfig.team_id == team_id))).scalar_one_or_none()
+            cfg = (
+                await db.execute(
+                    select(TeamSwarmConfig).where(
+                        TeamSwarmConfig.team_id == team_id, TeamSwarmConfig.org_id == org_id
+                    )
+                )
+            ).scalar_one_or_none()
             if not cfg:
                 return None
             for k, v in fields.items():

@@ -106,3 +106,29 @@ async def test_list_messages_scoped_to_org(two_org_messages) -> None:
     assert [m.id for m in rows] == ["msg-a1"]
     assert await coord.list_messages(team_id="team-a", org_id="org-b") == []
     assert await coord.list_messages(team_id="team-a", org_id="") == []
+
+
+@pytest.mark.asyncio
+async def test_config_scoped_to_org(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    # ensure/get/create own org
+    cfg = await coord.ensure_config("team-a", "org-a")
+    assert cfg is not None
+    assert cfg.team_id == "team-a"
+    assert cfg.org_id == "org-a"
+    got = await coord.get_config("team-a", org_id="org-a")
+    assert got is not None and got.id == cfg.id
+    # foreign org / missing org fail closed
+    assert await coord.get_config("team-a", org_id="org-b") is None
+    assert await coord.get_config("team-a", org_id="") is None
+    assert await coord.ensure_config("team-a", "org-b") is None
+    assert await coord.ensure_config("team-a", "") is None
+    # update scoped
+    upd = await coord.update_config("team-a", org_id="org-a", swarm_mode="mesh")
+    assert upd is not None and upd.swarm_mode == "mesh"
+    assert await coord.update_config("team-a", org_id="org-b", swarm_mode="pipeline") is None
+    assert await coord.update_config("team-a", org_id="", swarm_mode="pipeline") is None
+    # foreign org cannot read mutated value
+    assert await coord.get_config("team-a", org_id="org-b") is None
+    got2 = await coord.get_config("team-a", org_id="org-a")
+    assert got2 is not None and got2.swarm_mode == "mesh"

@@ -27,9 +27,11 @@ async def get_swarm_config(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    cfg = await swarm.get_config(team_id)
+    cfg = await swarm.get_config(team_id, org_id=org_id)
     if not cfg:
         cfg = await swarm.ensure_config(team_id, org_id)
+    if not cfg:
+        raise HTTPException(404, "team not found")
     return cfg
 
 
@@ -41,10 +43,14 @@ async def update_swarm_config(
     user: User = Depends(get_current_user),
 ):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
-    cfg = await swarm.update_config(team_id, **fields)
+    cfg = await swarm.update_config(team_id, org_id=org_id, **fields)
     if not cfg:
         cfg = await swarm.ensure_config(team_id, org_id)
-        cfg = await swarm.update_config(team_id, **fields)
+        if not cfg:
+            raise HTTPException(404, "team not found")
+        cfg = await swarm.update_config(team_id, org_id=org_id, **fields)
+    if not cfg:
+        raise HTTPException(404, "team not found")
     return cfg
 
 
