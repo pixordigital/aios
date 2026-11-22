@@ -637,17 +637,38 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
     row = await db.get(RefreshToken, jti) if jti else None
     if row is None or row.user_id != user_id:
         logger.warning("refresh rejected: unknown or missing jti for user %s", user_id)
+        user = await db.get(User, user_id)
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(user, "org_id", None),
+            actor_id=user_id,
+            payload={"reason": "refresh_unknown_jti", "source": "auth.refresh"},
+        )
         raise HTTPException(401, "Token de atualização inválido ou expirado")
     now = datetime.now(timezone.utc)
     # A row with no expires_at is corrupt; treat it as expired rather than
     # letting None through the comparison.
     expires = _as_utc(row.expires_at)
     if expires is None or expires <= now:
+        user = await db.get(User, user_id)
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(user, "org_id", None),
+            actor_id=user_id,
+            payload={"reason": "refresh_expired", "source": "auth.refresh"},
+        )
         raise HTTPException(401, "Token de atualização inválido ou expirado")
     if row.revoked_at is not None or row.replaced_by is not None:
         # A consumed token being replayed means it was captured. Revoke the
         # whole family: the legitimate client may still be holding the newest.
         logger.warning("refresh replay detected for user %s; revoking all tokens", user_id)
+        user = await db.get(User, user_id)
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(user, "org_id", None),
+            actor_id=user_id,
+            payload={"reason": "refresh_replay", "source": "auth.refresh"},
+        )
         await _revoke_all_for_user(db, user_id)
         raise HTTPException(401, "Token de atualização inválido ou expirado")
 
@@ -658,6 +679,12 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
     # the row) kills existing sessions immediately instead of at token expiry.
     if not _is_login_allowed(user.email):
         logger.warning("refresh rejected for non-allowlisted account: %s", user.email)
+        await _record_auth_failure_metric(
+            db,
+            org_id=user.org_id,
+            actor_id=user.id,
+            payload={"reason": "allowlist_denied", "source": "auth.refresh"},
+        )
         raise HTTPException(401, "Token de atualização inválido ou expirado")
 
     token = _create_access_token(user.id, user.org_id)

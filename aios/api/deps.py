@@ -13,6 +13,22 @@ from aios.db.models import User
 logger = logging.getLogger(__name__)
 
 
+async def _record_auth_failure_best_effort(db, *, org_id: str | None, actor_id: str | None = None, payload: dict | None = None) -> None:
+    if not org_id or db is None:
+        return
+    try:
+        from aios.governance.security import record_auth_failure
+
+        await record_auth_failure(
+            db,
+            org_id=str(org_id),
+            actor_id=str(actor_id) if actor_id else None,
+            payload=payload or {},
+        )
+    except Exception:
+        pass
+
+
 async def get_current_user(
     # FastAPI injects Request by annotation and rejects `Request | None` as a
     # Pydantic field, so the default stays None and only the type is relaxed.
@@ -38,6 +54,12 @@ async def get_current_user(
         # the allowlist (or was never on it), instead of at token expiry.
         if not _is_login_allowed(user.email):
             logger.warning("rejected authenticated request for non-allowlisted account")
+            await _record_auth_failure_best_effort(
+                db,
+                org_id=getattr(user, "org_id", None),
+                actor_id=getattr(user, "id", None),
+                payload={"reason": "allowlist_denied", "source": "api.deps.get_current_user"},
+            )
             raise HTTPException(401, "Token inválido")
         return user
 
@@ -149,6 +171,12 @@ async def get_dashboard_user(request: FastAPIRequest) -> User | None:
         user = await db.get(User, payload["sub"])
         if user and not _is_login_allowed(user.email):
             logger.warning("rejected dashboard session for non-allowlisted account")
+            await _record_auth_failure_best_effort(
+                db,
+                org_id=getattr(user, "org_id", None),
+                actor_id=getattr(user, "id", None),
+                payload={"reason": "allowlist_denied", "source": "api.deps.get_dashboard_user"},
+            )
             return None
         return user
     return None

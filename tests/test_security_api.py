@@ -254,3 +254,103 @@ async def test_login_failure_records_auth_metric(async_client, auth_client, test
     metrics = await auth_client.get("/api/security/metrics")
     assert metrics.status_code == 200, metrics.text
     assert metrics.json()["unauthorized_attempts"] >= 1
+
+
+async def test_bearer_allowlist_reject_records_auth_metric(auth_client, test_user, test_db_session, monkeypatch):
+    from aios.config import settings
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    monkeypatch.setattr(settings, "login_allowlist", "someone-else@example.com")
+    resp = await auth_client.get("/api/agents")
+    assert resp.status_code == 401, resp.text
+
+    rows = (await test_db_session.execute(
+        select(SecurityEvent).where(SecurityEvent.event_type == "security.auth.failure")
+    )).scalars().all()
+    assert any(
+        e.actor_id == test_user.id
+        and e.org_id == test_user.org_id
+        and (e.payload or {}).get("reason") == "allowlist_denied"
+        and (e.payload or {}).get("source") == "api.deps.get_current_user"
+        for e in rows
+    )
+
+
+async def test_dashboard_cookie_allowlist_reject_records_auth_metric(async_client, test_user, test_db_session, monkeypatch):
+    from aios.api.deps import COOKIE_NAME, create_jwt_token
+    from aios.config import settings
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    token = create_jwt_token(test_user.id, test_user.org_id)
+    async_client.cookies.set(COOKIE_NAME, token)
+    monkeypatch.setattr(settings, "login_allowlist", "someone-else@example.com")
+    resp = await async_client.get("/api/agents")
+    assert resp.status_code == 401, resp.text
+
+    rows = (await test_db_session.execute(
+        select(SecurityEvent).where(SecurityEvent.event_type == "security.auth.failure")
+    )).scalars().all()
+    assert any(
+        e.actor_id == test_user.id
+        and e.org_id == test_user.org_id
+        and (e.payload or {}).get("reason") == "allowlist_denied"
+        and (e.payload or {}).get("source") == "api.deps.get_dashboard_user"
+        for e in rows
+    )
+
+
+async def test_refresh_allowlist_reject_records_auth_metric(async_client, test_user, test_db_session, monkeypatch):
+    from aios.config import settings
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    login = await async_client.post("/api/auth/login", json={"email": test_user.email, "password": "testpass123"})
+    assert login.status_code == 200, login.text
+    refresh_token = login.json()["refresh_token"]
+
+    monkeypatch.setattr(settings, "login_allowlist", "someone-else@example.com")
+    resp = await async_client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    assert resp.status_code == 401, resp.text
+
+    rows = (await test_db_session.execute(
+        select(SecurityEvent).where(SecurityEvent.event_type == "security.auth.failure")
+    )).scalars().all()
+    assert any(
+        e.actor_id == test_user.id
+        and e.org_id == test_user.org_id
+        and (e.payload or {}).get("reason") == "allowlist_denied"
+        and (e.payload or {}).get("source") == "auth.refresh"
+        for e in rows
+    )
+
+
+async def test_refresh_unknown_jti_records_auth_metric(async_client, test_user, test_db_session):
+    from aios.api.auth import _create_jwt_token
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    token, _ = _create_jwt_token(
+        {
+            "sub": test_user.id,
+            "jti": "missing-jti",
+            "iat": datetime.now(timezone.utc),
+            "exp": datetime.now(timezone.utc) + timedelta(days=1),
+        },
+        token_type="refresh",
+    )
+    resp = await async_client.post("/api/auth/refresh", json={"refresh_token": token})
+    assert resp.status_code == 401, resp.text
+
+    rows = (await test_db_session.execute(
+        select(SecurityEvent).where(SecurityEvent.event_type == "security.auth.failure")
+    )).scalars().all()
+    assert any(
+        e.actor_id == test_user.id
+        and e.org_id == test_user.org_id
+        and (e.payload or {}).get("reason") == "refresh_unknown_jti"
+        and (e.payload or {}).get("source") == "auth.refresh"
+        for e in rows
+    )
