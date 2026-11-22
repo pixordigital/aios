@@ -309,7 +309,7 @@ def _registry_entries_for_org(org_id: str | None, org_extra: dict | None) -> lis
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(_load())
-        # In async context, avoid blocking; agent path loads explicitly.
+        # In async context, avoid blocking; caller must pass preloaded entries.
         return None
     except Exception:
         return None
@@ -320,16 +320,58 @@ def enforce_model_runtime_policy(
     *,
     org_extra: dict | None = None,
     registry_entries: list | None = None,
+    defer_registry: bool = False,
 ) -> dict:
     """Pre-call guard: org allow/deny + registry eligibility when enforced.
 
     Backward-compatible: no policy and no registry entries => allow.
+    Async running loop with no preloaded entries: enforce policy allow/deny;
+    registry DB load deferred. Fail closed only when require_registry_approval
+    and caller did not explicitly defer (runtime must check before LLM call).
     """
     org_id, extra = _runtime_org_context(org_extra)
     entries = registry_entries
+    async_deferred = False
     if entries is None:
-        entries = _registry_entries_for_org(org_id, extra)
-    from aios.core.router import model_runtime_eligible
+        try:
+            import asyncio
+
+            asyncio.get_running_loop()
+            in_loop = True
+        except RuntimeError:
+            in_loop = False
+        if in_loop:
+            async_deferred = True
+            entries = None
+        else:
+            entries = _registry_entries_for_org(org_id, extra)
+
+    from aios.core.router import model_runtime_eligible, _org_model_policy
+
+    if async_deferred:
+        policy = _org_model_policy(extra)
+        if model in policy["denied_models"]:
+            raise LLMError(f"Model policy denied: model denied by org policy ({model})")
+        allowed = policy["allowed_models"]
+        if allowed and model not in allowed:
+            raise LLMError(f"Model policy denied: model not in org allowlist ({model})")
+        if policy["require_registry_approval"] and not defer_registry:
+            raise LLMError(
+                "Model policy denied: registry approval required but registry entries unavailable in async context; pass registry_entries"
+            )
+        logger.warning(
+            "model policy registry check deferred model=%s org=%s required=%s explicit=%s",
+            model, org_id, bool(policy["require_registry_approval"]), defer_registry,
+        )
+        return {
+            "org_id": org_id,
+            "model": model,
+            "registry_check": "deferred_async",
+            "registry_enforced": bool(policy["require_registry_approval"]) and not defer_registry,
+            "registry_warning": "registry_entries_required_async" if policy["require_registry_approval"] else "registry_unavailable_fallback",
+            "defer_registry": defer_registry,
+            "policy": policy,
+        }
 
     ok, reason, meta = model_runtime_eligible(model, org_extra=extra, registry_entries=entries)
     if not ok:
@@ -341,9 +383,18 @@ def enforce_model_runtime_policy(
     return meta
 
 
-def get_provider(model: str, api_key: str | None = None) -> LLMProvider:
+def get_provider(
+    model: str,
+    api_key: str | None = None,
+    *,
+    org_extra: dict | None = None,
+    registry_entries: list | None = None,
+    defer_registry: bool = False,
+) -> LLMProvider:
     """Route to correct provider based on model name prefix."""
-    enforce_model_runtime_policy(model)
+    enforce_model_runtime_policy(
+        model, org_extra=org_extra, registry_entries=registry_entries, defer_registry=defer_registry
+    )
     if model.startswith("ollama/"):
         return OllamaProvider()
     elif model.startswith("opencode/"):

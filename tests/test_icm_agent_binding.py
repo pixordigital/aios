@@ -87,3 +87,70 @@ def test_agent_without_icm_config_has_no_stage():
     assert runtime.stage is None
     assert runtime._allowed_tools == "__all__"
     assert runtime._icm_budget.max_llm_calls == runtime.MAX_ITERATIONS
+
+
+def _approval_manifest():
+    from aios.icm.contracts import StageManifest
+
+    return StageManifest.model_validate({
+        "id": "approval_stage",
+        "version": "1.0.0",
+        "mode": "deterministic",
+        "approval_required": True,
+        "allowed_tools": ["lead_score"],
+    })
+
+
+def test_agent_binding_injects_explicit_icm_preapproved(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    agent = _agent(extra_data={
+        "icm": {
+            "workspace_id": "sales_ops",
+            "stage_manifest": _approval_manifest().model_dump(mode="json"),
+            "preapproved": {"approved": True, "actions": ["approval_stage"]},
+        }
+    })
+
+    runtime = AgentRuntime(agent)
+
+    assert runtime.stage is not None
+    assert runtime.stage.approval_bound is not None
+    assert runtime.stage.approval_bound["source"] == "icm_preapproved"
+    # execution gate should pass for allowed tool
+    runtime._icm_enforce_tool("lead_score", conversation_id="conv-1")
+
+
+def test_agent_binding_fails_closed_without_explicit_preapproved(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    agent = _agent(extra_data={
+        "icm": {
+            "workspace_id": "sales_ops",
+            "stage_manifest": _approval_manifest().model_dump(mode="json"),
+        }
+    })
+
+    try:
+        AgentRuntime(agent)
+        assert False, "expected PermissionError"
+    except PermissionError as e:
+        assert "requires approval" in str(e)
+
+
+def test_agent_binding_rejects_nonexplicit_governance_markers(tmp_path: Path, monkeypatch):
+    # Governance preapproved actions are not ICM founder approval; must not fabricate.
+    monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    agent = _agent(
+        governance_config={"preapproved_actions": ["lead_score"]},
+        extra_data={
+            "icm": {
+                "workspace_id": "sales_ops",
+                "stage_manifest": _approval_manifest().model_dump(mode="json"),
+            }
+        },
+    )
+
+    try:
+        AgentRuntime(agent)
+        assert False, "expected PermissionError"
+    except PermissionError:
+        pass

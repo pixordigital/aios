@@ -1,5 +1,7 @@
 """Model intelligence: least-cost eligible selection and evidence-backed proposals."""
 
+import pytest
+
 from aios.core.router import model_runtime_eligible, route
 from aios.governance.model_intelligence import (
     ModelRegistryEntry,
@@ -132,3 +134,42 @@ def test_route_blocks_policy_denied_model():
     assert d.changed is False
     assert d.policy.get("eligible") is False
     assert "denied by org policy" in d.reason
+
+
+def test_runtime_registry_unavailable_fallback_warns_when_not_required():
+    ok, reason, meta = model_runtime_eligible("openai/gpt-4o", registry_entries=None)
+    assert ok
+    assert meta["registry_enforced"] is False
+    assert meta.get("registry_warning") == "registry_unavailable_fallback"
+
+
+def test_runtime_registry_required_fails_closed_without_entries():
+    ok, reason, meta = model_runtime_eligible(
+        "openai/gpt-4o",
+        org_extra={"model_policy": {"require_registry_approval": True}},
+        registry_entries=[],
+    )
+    assert not ok
+    assert meta["registry_enforced"] is True
+    assert "no approved registry entries" in reason
+
+
+@pytest.mark.asyncio
+async def test_enforce_runtime_policy_async_requires_entries_when_approval_required():
+    from aios.core.providers import LLMError, enforce_model_runtime_policy
+
+    with pytest.raises(LLMError) as exc:
+        enforce_model_runtime_policy(
+            "openai/gpt-4o",
+            org_extra={"model_policy": {"require_registry_approval": True}},
+            registry_entries=None,
+        )
+    assert "registry approval required" in str(exc.value)
+
+    meta = enforce_model_runtime_policy(
+        "openai/gpt-4o",
+        org_extra={"model_policy": {"require_registry_approval": True}},
+        registry_entries=None,
+        defer_registry=True,
+    )
+    assert meta["registry_check"] == "deferred_async"

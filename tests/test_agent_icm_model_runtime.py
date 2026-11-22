@@ -81,3 +81,58 @@ async def test_registry_policy_blocks_runtime_model(tmp_path, monkeypatch):
     )
     with pytest.raises(Exception):
         rt._assert_model_eligible("openai/gpt-4o", agent.extra_data, [bad])
+
+
+@pytest.mark.asyncio
+async def test_runtime_registry_load_cached_for_run(tmp_path, monkeypatch):
+    from aios.config import settings
+    from aios.icm.team_workspaces import seed_team_workspaces
+
+    seed_team_workspaces(tmp_path, "org-1", workspaces=["sales_ops"])
+    monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    agent = _agent(extra_data={"icm": {"workspace_id": "sales_ops", "stage_id": "sdr_prospecting"}})
+    rt = AgentRuntime(agent)
+
+    calls = {"n": 0}
+
+    class _Res:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [ModelRegistryEntry(org_id="org-1", model_key="openai/gpt-4o", provider="openai", tier=2, approved=True)]
+
+    class _DB:
+        async def execute(self, _q):
+            calls["n"] += 1
+            return _Res()
+
+    first = await rt._load_runtime_registry(_DB())
+    second = await rt._load_runtime_registry(_DB())
+    assert calls["n"] == 1
+    assert first is second
+    assert first and first[0].model_key == "openai/gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_runtime_registry_required_fail_closed_on_load_failure(tmp_path, monkeypatch):
+    from aios.config import settings
+    from aios.icm.team_workspaces import seed_team_workspaces
+
+    seed_team_workspaces(tmp_path, "org-1", workspaces=["sales_ops"])
+    monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    agent = _agent(extra_data={
+        "icm": {"workspace_id": "sales_ops", "stage_id": "sdr_prospecting"},
+        "model_policy": {"require_registry_approval": True},
+    })
+    rt = AgentRuntime(agent)
+
+    class _BadDB:
+        async def execute(self, _q):
+            raise RuntimeError("db down")
+
+    entries = await rt._load_runtime_registry(_BadDB())
+    assert entries == []
+    with pytest.raises(Exception) as exc:
+        rt._assert_model_eligible("openai/gpt-4o", agent.extra_data, entries)
+    assert "Model policy blocked" in str(exc.value)

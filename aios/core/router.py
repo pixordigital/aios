@@ -157,7 +157,10 @@ def _registry_allows_model(model: str, entries: list | None, org_extra: dict | N
     if not rows:
         if policy["require_registry_approval"]:
             return False, "no approved registry entries for org policy", {"registry_enforced": True}
-        return True, "no registry entries — backward-compatible fallback", {"registry_enforced": False}
+        return True, "no registry entries — backward-compatible fallback", {
+            "registry_enforced": False,
+            "registry_warning": "registry_unavailable_fallback",
+        }
     match = None
     for e in rows:
         key = getattr(e, "model_key", None)

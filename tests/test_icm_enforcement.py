@@ -94,3 +94,62 @@ def test_adapter_charges_against_declared_budget(tmp_path):
     assert adapter.budget.calls == 1
     prov = adapter.post_execute(output="ok", shared={})
     assert prov["llm_calls"] == 1
+
+
+def test_adapter_approval_required_fails_closed():
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    adapter = ICMStageAdapter(node=node, storage_root="data", org_id="o", run_id="r")
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter.enforce_execution({}, action="company_lookup")
+
+
+def test_adapter_injects_explicit_preapproved_marker():
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+    from aios.icm.contracts import manifest_fingerprint
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root="data",
+        org_id="o",
+        run_id="r",
+        preapproved={"approved": True, "actions": ["company_lookup"]},
+    )
+    shared = {}
+    adapter.enforce_execution(shared, action="company_lookup")
+    assert shared["icm_approval"]["source"] == "icm_preapproved"
+    assert shared["icm_approval"]["approved_fingerprint"] == manifest_fingerprint(manifest)
+    assert adapter.approval_bound["approval_id"].startswith("preapproved:")
+
+
+def test_adapter_rejects_preapproved_wrong_action_or_fingerprint():
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root="data",
+        org_id="o",
+        run_id="r",
+        preapproved={"approved": True, "actions": ["other_tool"]},
+    )
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter.enforce_execution({}, action="company_lookup")
+
+    adapter2 = ICMStageAdapter(
+        node=node,
+        storage_root="data",
+        org_id="o",
+        run_id="r",
+        preapproved={"approved": True, "actions": ["company_lookup"], "approved_fingerprint": "bad"},
+    )
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter2.enforce_execution({}, action="company_lookup")

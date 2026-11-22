@@ -79,6 +79,25 @@ def assert_paid_workflow_contract(agent) -> None:
         )
 
 
+def _resolve_icm_preapproved(agent, cfg: dict) -> dict | None:
+    """Resolve explicit preapproval marker for ICM stage execution.
+
+    Fail-closed: only explicit ICM markers count. No fabricated founder approval,
+    no inference from broad governance/security policies.
+    """
+    extra = getattr(agent, "extra_data", None) or {}
+    gov = getattr(agent, "governance_config", None) or {}
+    candidates = [
+        cfg.get("preapproved"),
+        extra.get("icm_preapproved"),
+        gov.get("icm_preapproved"),
+    ]
+    for src in candidates:
+        if isinstance(src, dict) and src.get("approved") is True:
+            return src
+    return None
+
+
 def bind_agent_stage(agent, storage_root: str | None = None, run_id: str | None = None):
     """Return the agent's ICM-X adapter, or ``None`` when not opted in."""
     cfg = (agent.extra_data or {}).get("icm") or {}
@@ -87,6 +106,7 @@ def bind_agent_stage(agent, storage_root: str | None = None, run_id: str | None 
     ):
         return None
 
+    preapproved = _resolve_icm_preapproved(agent, cfg)
     node = SimpleNamespace(
         id=cfg.get("stage_id") or "agent_run",
         workspace_id=cfg.get("workspace_id") or "default",
@@ -103,10 +123,16 @@ def bind_agent_stage(agent, storage_root: str | None = None, run_id: str | None 
         org_id=agent.org_id or "default",
         run_id=rid,
         workspace_id=node.workspace_id,
+        preapproved=preapproved,
     )
     # Loads bounded layered context and caps the node timeout to the manifest.
-    adapter.pre_execute({}, {"icm_input": "", "run_id": rid, "task_id": rid})
-    adapter.enforce_execution({"run_id": rid, "task_id": rid, "icm_approval": cfg.get("approval")}, action="agent_run")
+    shared = {"icm_input": "", "run_id": rid, "task_id": rid}
+    if cfg.get("approval") is not None:
+        shared["icm_approval"] = cfg.get("approval")
+    if preapproved is not None:
+        shared["icm_preapproved"] = preapproved
+    adapter.pre_execute({}, shared)
+    adapter.enforce_execution(shared, action="agent_run")
     adapter.timeout_seconds = int(node.timeout)
     logger.info(
         "ICM-X bound agent=%s stage=%s workspace=%s v%s",

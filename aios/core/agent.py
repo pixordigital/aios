@@ -170,7 +170,27 @@ class AgentRuntime:
         """
         self.agent = agent
         model = agent.llm_config.get("model", "openai/gpt-4o")
-        self.llm = get_provider(model)
+        # Resolve provider class only; runtime enforces org/registry policy before LLM calls.
+        if model.startswith("ollama/"):
+            from aios.core.providers import OllamaProvider
+
+            self.llm = OllamaProvider()
+        elif model.startswith("opencode/"):
+            from aios.core.providers import OpenRouterProvider
+
+            self.llm = OpenRouterProvider()
+        elif model.startswith("openai-direct/"):
+            from aios.core.providers import OpenAIProvider
+
+            self.llm = OpenAIProvider()
+        elif model.startswith("anthropic-direct/"):
+            from aios.core.providers import AnthropicProvider
+
+            self.llm = AnthropicProvider()
+        else:
+            from aios.core.providers import OpenRouterProvider
+
+            self.llm = OpenRouterProvider()
         self.tool_engine = ToolEngine(
             agent.tools or [],
             org_id=getattr(agent, "org_id", "") or "",
@@ -709,10 +729,34 @@ class AgentRuntime:
                                 logger.info("Approval denied for tool '%s' on agent %s", fn_name, self.agent.id)
                             else:
                                 try:
+                                    self._icm_enforce_tool(fn_name, conversation_id)
                                     self._icm_budget.charge_tool()
+                                except PermissionError as exc:
+                                    result = f"ICM approval required: {exc}"
                                 except BudgetExceeded as exc:
                                     yield {"type": STREAM_ERROR, "error": f"ICM stage budget exceeded: {exc}"}
                                     return
+                                else:
+                                    cached_result = tool_cache.get(fn_name, fn_args, self.agent.org_id)
+                                    if cached_result is not None:
+                                        result = cached_result
+                                    else:
+                                        try:
+                                            result = await self.tool_engine.execute(fn_name, fn_args)
+                                            tool_cache.set(fn_name, fn_args, result, self.agent.org_id)
+                                        except Exception as e:
+                                            logger.exception("Tool execution failed: %s", fn_name)
+                                            result = f"Tool error: {e}"
+                        else:
+                            try:
+                                self._icm_enforce_tool(fn_name, conversation_id)
+                                self._icm_budget.charge_tool()
+                            except PermissionError as exc:
+                                result = f"ICM approval required: {exc}"
+                            except BudgetExceeded as exc:
+                                yield {"type": STREAM_ERROR, "error": f"ICM stage budget exceeded: {exc}"}
+                                return
+                            else:
                                 cached_result = tool_cache.get(fn_name, fn_args, self.agent.org_id)
                                 if cached_result is not None:
                                     result = cached_result
@@ -723,22 +767,6 @@ class AgentRuntime:
                                     except Exception as e:
                                         logger.exception("Tool execution failed: %s", fn_name)
                                         result = f"Tool error: {e}"
-                        else:
-                            try:
-                                self._icm_budget.charge_tool()
-                            except BudgetExceeded as exc:
-                                yield {"type": STREAM_ERROR, "error": f"ICM stage budget exceeded: {exc}"}
-                                return
-                            cached_result = tool_cache.get(fn_name, fn_args, self.agent.org_id)
-                            if cached_result is not None:
-                                result = cached_result
-                            else:
-                                try:
-                                    result = await self.tool_engine.execute(fn_name, fn_args)
-                                    tool_cache.set(fn_name, fn_args, result, self.agent.org_id)
-                                except Exception as e:
-                                    logger.exception("Tool execution failed: %s", fn_name)
-                                    result = f"Tool error: {e}"
                         context.append({
                             "role": "tool",
                             "tool_call_id": tc.get("id"),
@@ -927,6 +955,40 @@ class AgentRuntime:
     ) -> list[dict]:
         return await self._build_context(conversation_id, user_message, db)
 
+    def _icm_execution_shared(self, conversation_id: str = "") -> dict:
+        shared = {
+            "run_id": conversation_id or f"agent-{self.agent.id}",
+            "task_id": conversation_id or f"agent-{self.agent.id}",
+            "conversation_id": conversation_id,
+        }
+        extra = getattr(self.agent, "extra_data", None) or {}
+        cfg = extra.get("icm") if isinstance(extra.get("icm"), dict) else {}
+        gov = getattr(self.agent, "governance_config", None) or {}
+        for src in (
+            cfg.get("approval"),
+            extra.get("icm_approval"),
+            gov.get("icm_approval"),
+        ):
+            if isinstance(src, dict):
+                shared["icm_approval"] = src
+                break
+        for src in (
+            cfg.get("preapproved"),
+            extra.get("icm_preapproved"),
+            gov.get("icm_preapproved"),
+        ):
+            if isinstance(src, dict) and src.get("approved") is True:
+                shared["icm_preapproved"] = src
+                break
+        return shared
+
+    def _icm_enforce_tool(self, fn_name: str, conversation_id: str = "") -> None:
+        stage = self.stage
+        if stage is None or not stage.requires_approval:
+            return
+        shared = self._icm_execution_shared(conversation_id)
+        stage.enforce_execution(shared, action=fn_name)
+
     async def _spawn_subagent(self, task_prompt: str, timeout: float = 120.0) -> str:
         """Spawn an isolated subprocess agent. Returns result output."""
         from aios.core.subagent import subagent_pool
@@ -956,12 +1018,15 @@ class AgentRuntime:
         return extra if isinstance(extra, dict) else None
 
     async def _load_runtime_registry(self, db) -> list | None:
-        """Best-effort load of org-visible approved registry entries.
+        """Load org-visible registry entries; cache per runtime for deterministic fallback.
 
-        No schema change; returns None on any failure to keep runtime available.
+        Async-safe: awaits DB load when possible. On load failure, returns cached
+        entries if present. Missing entries fail closed only when registry approval
+        is explicitly required by org policy.
         """
-        if db is None:
-            return None
+        cache_attr = "_runtime_registry_entries"
+        if hasattr(self, cache_attr):
+            return getattr(self, cache_attr)
         try:
             from sqlalchemy import or_, select
             from aios.governance.model_intelligence import ModelRegistryEntry
@@ -970,10 +1035,26 @@ class AgentRuntime:
             q = select(ModelRegistryEntry)
             if org_id:
                 q = q.where(or_(ModelRegistryEntry.org_id == org_id, ModelRegistryEntry.org_id.is_(None)))
-            rows = (await db.execute(q)).scalars().all()
-            return list(rows)
+
+            if db is not None:
+                rows = (await db.execute(q)).scalars().all()
+            else:
+                from aios.db.backend import db_session
+
+                async with db_session() as session:
+                    rows = (await session.execute(q)).scalars().all()
+            entries = list(rows)
+            setattr(self, cache_attr, entries)
+            return entries
         except Exception:
             logger.debug("registry load failed for agent %s", self.agent.id, exc_info=True)
+            policy = (self._org_extra() or {}).get("model_policy") or {}
+            if policy.get("require_registry_approval"):
+                # Fail closed: mark as loaded-but-unavailable empty set.
+                setattr(self, cache_attr, [])
+                return []
+            # No enforcement: allow configured path with warning metadata via None sentinel? 
+            # Keep unavailable as empty cache marker absent; return None so router applies compat fallback.
             return None
 
     def _assert_model_eligible(self, model: str, org_extra: dict | None, registry_entries: list | None) -> None:

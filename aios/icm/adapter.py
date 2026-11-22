@@ -29,6 +29,7 @@ class ICMStageAdapter:
         org_id: str = "default",
         run_id: str = "run_default",
         workspace_id: str | None = None,
+        preapproved: Any = None,
     ):
         self.node = node
         self.paths = WorkspacePaths(Path(storage_root))
@@ -48,6 +49,7 @@ class ICMStageAdapter:
         self.output_validated = False
         self.approval_bound: dict[str, Any] | None = None
         self.side_effect_recorded = False
+        self._preapproved = preapproved
         from aios.icm.enforcement import StageBudget
 
         self.budget = StageBudget.from_manifest(self.manifest)
@@ -116,11 +118,56 @@ class ICMStageAdapter:
             raise ValueError(f"ICM output schema validation failed: {e}") from e
         self.output_validated = True
 
+    def _explicit_preapproved(self, shared: dict | None = None) -> dict[str, Any] | None:
+        """Return deterministic approval from explicit runtime marker, else None.
+
+        Fail-closed: only explicit markers count. Never fabricate founder/human approval.
+        """
+        candidates = [self._preapproved]
+        if isinstance(shared, dict):
+            candidates.append(shared.get("icm_preapproved"))
+        src = next((c for c in candidates if isinstance(c, dict)), None)
+        if not isinstance(src, dict):
+            return None
+        if src.get("approved") is not True:
+            return None
+        actions = src.get("actions")
+        if actions is not None:
+            if not isinstance(actions, list):
+                return None
+            wanted = {
+                str(self.manifest.id),
+                str(getattr(self.node, "tool_name", "") or ""),
+                str(getattr(self.node, "id", "") or ""),
+                "agent_run",
+            }
+            if not any(str(a) in wanted for a in actions if str(a).strip()):
+                return None
+        if src.get("stage_id") not in (None, self.manifest.id):
+            return None
+        if src.get("node_id") not in (None, getattr(self.node, "id", None)):
+            return None
+        fp = manifest_fingerprint(self.manifest)
+        approval_fp = src.get("approved_fingerprint") or src.get("manifest_fingerprint")
+        if approval_fp not in (None, fp):
+            return None
+        return {
+            "approval_id": str(src.get("approval_id") or f"preapproved:{self.manifest.id}:{fp[:12]}"),
+            "approved_fingerprint": fp,
+            "stage_id": self.manifest.id,
+            "node_id": getattr(self.node, "id", None),
+            "source": "icm_preapproved",
+        }
+
     def check_approval(self, shared: dict) -> None:
         """Fail closed when manifest requires approval for this execution."""
         if not self.requires_approval:
             return
         approval = shared.get("icm_approval")
+        if not isinstance(approval, dict):
+            approval = self._explicit_preapproved(shared)
+            if isinstance(approval, dict):
+                shared["icm_approval"] = approval
         if not isinstance(approval, dict):
             raise PermissionError(
                 f"Stage '{self.manifest.id}' requires approval before execution"
@@ -140,6 +187,8 @@ class ICMStageAdapter:
             "stage_id": self.manifest.id,
             "node_id": getattr(self.node, "id", None),
         }
+        if approval.get("source"):
+            self.approval_bound["source"] = str(approval["source"])
 
     def pre_execute(self, ctx: dict, shared: dict) -> None:
         """Validate governance boundaries and load layered context before execution."""
