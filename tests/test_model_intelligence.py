@@ -1,5 +1,6 @@
 """Model intelligence: least-cost eligible selection and evidence-backed proposals."""
 
+from aios.core.router import model_runtime_eligible, route
 from aios.governance.model_intelligence import (
     ModelRegistryEntry,
     cost_per_successful_task,
@@ -94,3 +95,40 @@ def test_rollback_only_to_approved_previous():
     entries = [_m("a"), _m("b", approved=False)]
     assert rollback_target(entries, agent_default_key="a", previous_key="b") == "a"
     assert rollback_target(entries, agent_default_key="c", previous_key="a") == "a"
+
+
+def test_runtime_policy_allowlist_blocks_model():
+    ok, reason, _ = model_runtime_eligible(
+        "openai/gpt-4o",
+        org_extra={"model_policy": {"allowed_models": ["openai/gpt-4o-mini"]}},
+    )
+    assert not ok
+    assert "allowlist" in reason
+
+
+def test_runtime_registry_enforced_when_entries_present():
+    entries = [_m("openai/gpt-4o-mini", approved=True)]
+    ok, reason, meta = model_runtime_eligible(
+        "openai/gpt-4o",
+        registry_entries=entries,
+    )
+    assert not ok
+    assert meta["registry_enforced"] is True
+    assert "not in approved registry" in reason
+
+
+def test_runtime_registry_backward_compat_no_entries():
+    ok, reason, meta = model_runtime_eligible("openai/gpt-4o", registry_entries=[])
+    assert ok
+    assert meta["registry_enforced"] is False
+
+
+def test_route_blocks_policy_denied_model():
+    d = route(
+        "openai/gpt-4o",
+        context_tokens=100,
+        org_extra={"model_policy": {"denied_models": ["openai/gpt-4o"]}},
+    )
+    assert d.changed is False
+    assert d.policy.get("eligible") is False
+    assert "denied by org policy" in d.reason

@@ -52,7 +52,7 @@ Migrations: `alembic/versions/o7p8q9r0s1t2` … `w5x6y7z8a9b0`.
 | 7 Founder authority | Done: deterministic level mapping + 12-field protocol + Founder-only approval. |
 | 8 Skills | Done: deterministic lifecycle state machine + persisted `skills.status` + Founder-gated API transition; publish/deprecate require Founder. |
 | 9 Process intelligence | Done: deterministic conformance checks wired into workflow runs (`_process_conformance` output); task lifecycle deterministic. |
-| 10 Performance | SQL/Python authoritative KPI calculations (`aios/governance/kpi.py`) + tenant-scoped CRM KPI API (`GET /api/analytics/kpi/sales`); deterministic interpretation over supplied baseline; no invented targets. |
+| 10 Performance | Partial: deterministic KPI taxonomy/catalog by level/category (`/api/analytics/kpi/catalog`), governance KPI snapshot (`/api/analytics/kpi/governance`) with explicit unknown/not_instrumented, anti-Goodhart guardrails/denominators, target proposal validation requiring baseline+evidence (`/api/analytics/kpi/targets/validate`, no persistence - schema/migration blocker). Sales KPIs remain deterministic/tenant-scoped. |
 | 11 Lean Startup | Done: hypotheses/experiments/scoreboard + tenant-scoped API with declared-field gate, deterministic evaluation and Founder-only decisions. |
 | 12 LIA | Done: tenant-scoped API over sources/campaigns/suppression/members; fail-closed contact gate and deterministic LIA→CRM handoff; actual outreach execution still external. |
 | 13 CRM/customer intelligence | Done: accounts/contacts/timeline/health implemented. |
@@ -74,7 +74,7 @@ Migrations: `alembic/versions/o7p8q9r0s1t2` … `w5x6y7z8a9b0`.
 
 - Skills lifecycle (Draft→Under review→Testing→Approved→Published) enforcement: deterministic state machine with Founder gates; persisted `skills.status` and `POST /api/skills/{id}/transition` enforce the ladder.
 - Process conformance supervision (skipped steps, wrong tools, missing approvals, invalid outputs, exceeded limits, un-escalated exceptions): deterministic checks wired into workflow execution; findings in `_process_conformance` run output (`aios/governance/process_conformance.py`).
-- Performance authoritative KPI calculations (SQL/Python, not LLM): implemented as deterministic Python functions; deterministic narrative interpretation added.
+- Performance authoritative KPI calculations (SQL/Python, not LLM): deterministic functions + measurement-level taxonomy/catalog + governance snapshot with unknown/not_instrumented states. Target governance workflow validated in API contract only; durable target persistence blocked on schema/migration.
 - Jev controlled evaluation (Python-only vs Jev vs hybrid): harness implemented; adoption open (needs controlled decision dataset and founder decision).
 - Provider cost integration: adapters return input/output/cached usage; agent + workflow runtime record actual tokens/cost; provider health checks and median-based spend anomaly detection implemented.
 

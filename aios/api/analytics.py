@@ -9,8 +9,16 @@ from aios.schemas import BaseModel
 from aios.core.cache import cache
 from aios.core.tracing import METRICS
 from aios.core.agent_health import health_tracker
-from aios.governance.kpi import average_deal_size, conversion_rate, interpret_kpis, win_rate
-from .deps import get_current_user, get_org_id
+from aios.governance.kpi import (
+    average_deal_size,
+    conversion_rate,
+    governance_kpis_snapshot,
+    interpret_kpis,
+    kpi_catalog,
+    validate_target_proposal,
+    win_rate,
+)
+from .deps import get_current_user, get_org_id, get_superadmin
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -67,10 +75,20 @@ async def get_trace_api(
 
 
 @router.get("/metrics")
-async def get_metrics(user=Depends(get_current_user)):
-    """Return in-memory metrics counters."""
+async def get_metrics(user=Depends(get_superadmin)):
+    """Return in-memory process-global metrics counters.
+
+    Superadmin-only: counters aggregate across processes/tenants and have no
+    org scope. Do not treat as tenant KPI.
+    """
     from aios.core.tools import ToolEngine
     return {
+        "scope": "process_global",
+        "tenant_scoped": False,
+        "caveats": [
+            "Process-global counters; not org-scoped and not a tenant KPI.",
+            "Values may include multiple tenants/workers and reset on process restart.",
+        ],
         "llm": dict(METRICS),
         "cache": cache.stats(),
         "tools": ToolEngine.audit_summary(),
@@ -715,10 +733,155 @@ async def sales_kpis(
 
     current = _metrics(rows)
     previous = _metrics([r for r in rows if r.created_at and r.created_at < cutoff])
+    catalog = kpi_catalog(category="commercial")
     return {
         "pipeline": pipeline or "all",
         "baseline_days": max(1, min(baseline_days, 365)),
         "current": current,
         "previous": previous,
         "interpretation": interpret_kpis(current, previous),
+        "measurement": {
+            "level": "business/process",
+            "category": "commercial",
+            "scope": "org",
+            "org_id": org_id,
+            "catalog_metrics": [m["key"] for m in catalog["metrics"] if m["key"].startswith("crm.")],
+            "guardrails": {
+                "no_fake_metrics": True,
+                "not_a_target_by_itself": "Not a target by itself; use with denominator/context and balancing metrics.",
+                "baseline_required_for_target": True,
+            },
+        },
     }
+
+
+@router.get("/kpi/catalog")
+async def kpi_catalog_endpoint(
+    level: str | None = None,
+    category: str | None = None,
+    user=Depends(get_current_user),
+):
+    """Measurement taxonomy by level/category. Unknown/not_instrumented explicit."""
+    return kpi_catalog(level=level, category=category)
+
+
+def _safe_count(result) -> int | None:
+    try:
+        value = result.scalar()
+        return int(value or 0)
+    except Exception:
+        return None
+
+
+async def _governance_snapshot(db: DatabaseBackend, org_id: str) -> dict:
+    from aios.db.models import AuditLog, PendingAction
+
+    audit_count = _safe_count(
+        await db.execute(select(func.count(AuditLog.id)).where(AuditLog.org_id == org_id))
+    )
+
+    pa_rows = (
+        await db.execute(
+            select(PendingAction.status, PendingAction.created_at, PendingAction.decided_at)
+            .where(PendingAction.org_id == org_id)
+        )
+    ).all()
+    decided = [r for r in pa_rows if r.status in {"approved", "rejected"} and r.created_at and r.decided_at]
+    rejected = [r for r in pa_rows if r.status == "rejected"]
+    latencies = []
+    for r in decided:
+        delta = (r.decided_at - r.created_at).total_seconds() / 3600
+        if delta >= 0:
+            latencies.append(delta)
+    approval_latency_hours = round(sum(latencies) / len(latencies), 4) if latencies else (0.0 if decided == [] and any(r.status in {"approved", "rejected"} for r in pa_rows) else None)
+    # If there are decided rows but no valid timestamps, keep unknown.
+    if decided == [] and any(r.status in {"approved", "rejected"} for r in pa_rows):
+        approval_latency_hours = None
+
+    open_incidents = None
+    mttr_hours = None
+    try:
+        from aios.governance.security import SecurityIncident
+
+        inc_rows = (
+            await db.execute(
+                select(SecurityIncident.status, SecurityIncident.detected_at, SecurityIncident.recovered_at, SecurityIncident.closed_at)
+                .where(SecurityIncident.org_id == org_id)
+            )
+        ).all()
+        open_incidents = sum(1 for r in inc_rows if r.status not in {"closed", "recovered"})
+        resolved = []
+        for r in inc_rows:
+            end = r.recovered_at or r.closed_at
+            if r.detected_at and end:
+                delta = (end - r.detected_at).total_seconds() / 3600
+                if delta >= 0:
+                    resolved.append(delta)
+        mttr_hours = round(sum(resolved) / len(resolved), 4) if resolved else None
+    except Exception:
+        open_incidents = None
+        mttr_hours = None
+
+    open_privacy_requests = None
+    privacy_completion_rate = None
+    try:
+        from aios.governance.privacy import PrivacyRequest
+
+        pr_rows = (
+            await db.execute(
+                select(PrivacyRequest.status).where(PrivacyRequest.org_id == org_id)
+            )
+        ).all()
+        total = len(pr_rows)
+        completed = sum(1 for r in pr_rows if r.status == "completed")
+        open_privacy_requests = sum(1 for r in pr_rows if r.status not in {"completed", "rejected"})
+        privacy_completion_rate = round(completed / total, 4) if total else None
+    except Exception:
+        open_privacy_requests = None
+        privacy_completion_rate = None
+
+    snapshot = governance_kpis_snapshot(
+        audit_count=audit_count,
+        decided_approvals=len([r for r in pa_rows if r.status in {"approved", "rejected"}]) if pa_rows is not None else None,
+        rejected_approvals=len(rejected),
+        approval_latency_hours=approval_latency_hours,
+        open_incidents=open_incidents,
+        mttr_hours=mttr_hours,
+        open_privacy_requests=open_privacy_requests,
+        privacy_completion_rate=privacy_completion_rate,
+    )
+    snapshot["scope"] = "org"
+    snapshot["org_id"] = org_id
+    snapshot["sources"] = {
+        "audit_logs": "available" if audit_count is not None else "unknown",
+        "pending_actions": "available",
+        "security_incidents": "available" if open_incidents is not None else "unknown",
+        "privacy_requests": "available" if open_privacy_requests is not None else "unknown",
+    }
+    return snapshot
+
+
+@router.get("/kpi/governance")
+async def governance_kpis(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Governance KPI category. Missing/unwired metrics reported as unknown/partial."""
+    return await _governance_snapshot(db, org_id)
+
+
+@router.post("/kpi/targets/validate")
+async def validate_kpi_target(
+    payload: dict,
+    user=Depends(get_current_user),
+):
+    """Validate target proposal. No persistence: baseline+evidence required; no fake targets."""
+    return validate_target_proposal(
+        metric_key=str(payload.get("metric_key") or ""),
+        target_value=payload.get("target_value"),
+        baseline_value=payload.get("baseline_value"),
+        baseline_window_days=payload.get("baseline_window_days"),
+        evidence=payload.get("evidence"),
+        owner=payload.get("owner"),
+        balancing_metrics=payload.get("balancing_metrics") or [],
+    )

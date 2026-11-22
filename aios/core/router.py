@@ -31,6 +31,7 @@ across model versions, and a stale weight table is worse than none.
 """
 
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Lock
 
@@ -40,6 +41,11 @@ from aios.config import MODEL_ROLE_MIN_TIER, MODEL_TIERS
 TIERS = MODEL_TIERS
 
 ROLE_MIN_TIER = MODEL_ROLE_MIN_TIER
+
+# Per-request org context for runtime registry enforcement. Set by API/middleware
+# when available; absent in background jobs -> backward-compatible fallback.
+current_org_id: ContextVar[str | None] = ContextVar("router_org_id", default=None)
+current_org_extra: ContextVar[dict | None] = ContextVar("router_org_extra", default=None)
 
 
 # Tools whose effects are irreversible or externally visible. Routing one of
@@ -81,6 +87,7 @@ class RouteDecision:
     kind: str = "hold"
     escalated_from: str | None = None
     signals: dict = field(default_factory=dict)
+    policy: dict = field(default_factory=dict)
 
 
 def _tier_index(model: str) -> int:
@@ -109,6 +116,87 @@ def is_routable(model: str | None) -> bool:
     return model in TIERS
 
 
+def _org_model_policy(org_extra: dict | None) -> dict:
+    extra = org_extra or {}
+    policy = extra.get("model_policy") or {}
+    if not isinstance(policy, dict):
+        policy = {}
+    # explicit allow/deny lists; empty means no restriction
+    allow = policy.get("allowed_models") or extra.get("allowed_models") or []
+    deny = policy.get("denied_models") or extra.get("denied_models") or []
+    if isinstance(allow, str):
+        allow = [allow]
+    if isinstance(deny, str):
+        deny = [deny]
+    return {
+        "allowed_models": [m for m in allow if isinstance(m, str) and m],
+        "denied_models": [m for m in deny if isinstance(m, str) and m],
+        "require_registry_approval": bool(policy.get("require_registry_approval", False)),
+        "privacy_required": bool(policy.get("privacy_required", True)),
+        "contract_required": bool(policy.get("contract_required", True)),
+    }
+
+
+def _policy_allows_model(model: str, org_extra: dict | None) -> tuple[bool, str]:
+    policy = _org_model_policy(org_extra)
+    if model in policy["denied_models"]:
+        return False, f"model denied by org policy ({model})"
+    allowed = policy["allowed_models"]
+    if allowed and model not in allowed:
+        return False, f"model not in org allowlist ({model})"
+    return True, ""
+
+
+def _registry_allows_model(model: str, entries: list | None, org_extra: dict | None) -> tuple[bool, str, dict]:
+    """Fail-closed only when registry is being enforced/has entries.
+
+    Backward compat: no entries and no require_registry_approval => allow.
+    """
+    policy = _org_model_policy(org_extra)
+    rows = list(entries or [])
+    if not rows:
+        if policy["require_registry_approval"]:
+            return False, "no approved registry entries for org policy", {"registry_enforced": True}
+        return True, "no registry entries — backward-compatible fallback", {"registry_enforced": False}
+    match = None
+    for e in rows:
+        key = getattr(e, "model_key", None)
+        if key == model:
+            match = e
+            break
+    if match is None:
+        # Registry exists but model not registered: treat as not eligible when enforcement active.
+        return False, f"model not in approved registry ({model})", {"registry_enforced": True}
+    if not getattr(match, "approved", False):
+        return False, f"registry model not approved ({model})", {"registry_enforced": True}
+    if policy["privacy_required"] and not getattr(match, "privacy_ok", True):
+        return False, f"registry model fails privacy ({model})", {"registry_enforced": True}
+    if policy["contract_required"] and not getattr(match, "contract_ok", True):
+        return False, f"registry model fails contract ({model})", {"registry_enforced": True}
+    return True, "registry approved", {
+        "registry_enforced": True,
+        "registry_model_key": getattr(match, "model_key", None),
+        "registry_tier": getattr(match, "tier", None),
+    }
+
+
+def model_runtime_eligible(
+    model: str | None,
+    *,
+    org_extra: dict | None = None,
+    registry_entries: list | None = None,
+) -> tuple[bool, str, dict]:
+    if not model:
+        return False, "model missing", {}
+    ok, reason = _policy_allows_model(model, org_extra)
+    if not ok:
+        return False, reason, {"policy": _org_model_policy(org_extra)}
+    ok, reason, meta = _registry_allows_model(model, registry_entries, org_extra)
+    if not ok:
+        return False, reason, meta
+    return True, reason, meta
+
+
 def route(
     model: str | None,
     *,
@@ -118,6 +206,8 @@ def route(
     autonomy: str = "autonomous",
     max_tokens: int = 4096,
     min_tier: str | None = None,
+    org_extra: dict | None = None,
+    registry_entries: list | None = None,
 ) -> RouteDecision:
     """Choose the model for one call, now considering the caller's role.
 
@@ -141,18 +231,29 @@ def route(
         "max_tokens": max_tokens,
     }
 
-    def _hold(reason: str) -> RouteDecision:
+    def _hold(reason: str, policy: dict | None = None) -> RouteDecision:
         return RouteDecision(model, model, reason, changed=False, kind="hold",
-                             signals=signals)
+                             signals=signals, policy=policy or {})
+
+    eligible, ineligible_reason, policy_meta = model_runtime_eligible(
+        model, org_extra=org_extra, registry_entries=registry_entries
+    )
+    if not eligible:
+        # Fail closed when org policy/registry explicitly blocks model.
+        return RouteDecision(
+            model, model, ineligible_reason, changed=False, kind="hold",
+            signals=signals, policy={"eligible": False, **policy_meta},
+        )
 
     if not is_routable(model):
-        return _hold("model is not on the ladder — operator's choice respected")
+        return _hold("model is not on the ladder — operator's choice respected", {"eligible": True, **policy_meta})
 
+    policy_info = {"eligible": True, **policy_meta}
     # A count of zero means "the caller did not measure", not "this is a tiny
     # request". Treating a sentinel as a measurement is how a caller that forgot
     # to pass the context size ends up silently on the cheapest model.
     if context_tokens <= 0:
-        return _hold("context size unknown — not routing on a sentinel")
+        return _hold("context size unknown — not routing on a sentinel", policy_info)
 
     idx = _tier_index(model)
     # Determine the minimum tier based on explicit min_tier or role mapping
@@ -180,13 +281,13 @@ def route(
         if _tier_index(target) < idx:
             return RouteDecision(
                 target, target, "draft mode, no tools, short context",
-                changed=True, kind="down", signals=signals,
+                changed=True, kind="down", signals=signals, policy=policy_info,
             )
-        return _hold("draft mode, but already at the cheapest allowed tier")
+            return _hold("draft mode, but already at the cheapest allowed tier", policy_info)
 
     # Any tool use at all is multi-step reasoning, not a lookup. Leave it alone.
     if tool_names:
-        return _hold(f"{len(tool_names)} tool(s) attached — multi-step")
+        return _hold(f"{len(tool_names)} tool(s) attached — multi-step", policy_info)
 
     # Long context: the cheap model starts losing the instruction before it
     # starts losing the facts.
@@ -197,15 +298,15 @@ def route(
     # tokens pays for 200. Holding its tier on the cap would have made this
     # router a no-op for almost every agent in the fleet.
     if context_tokens > CHEAP_CTX_TOKENS:
-        return _hold(f"context {context_tokens} tokens > {CHEAP_CTX_TOKENS}")
+        return _hold(f"context {context_tokens} tokens > {CHEAP_CTX_TOKENS}", policy_info)
 
     target = TIERS[floor]
     if _tier_index(target) >= idx:
-        return _hold("already at or below the cheapest allowed tier")
+        return _hold("already at or below the cheapest allowed tier", policy_info)
 
     return RouteDecision(
         target, target, "no tools, short context",
-        changed=True, kind="down", signals=signals,
+        changed=True, kind="down", signals=signals, policy=policy_info,
     )
 
 

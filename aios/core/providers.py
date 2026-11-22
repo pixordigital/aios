@@ -98,15 +98,50 @@ async def _retry(fn, provider_cls: type, model: str, *args, **kw):
     raise LLMError(f"All {_MAX_RETRIES+1} retries failed for {model}: {last_err}")
 
 
-# Fallback chain: model name → list of fallback models
+# Deterministic static fallback chain. Used only when no registry/health config
+# provides a better candidate. Kept explicit for backward compat.
 _FALLBACK_CHAIN = {
     "openai/gpt-4o": ["openai/gpt-4o-mini", "anthropic-direct/claude-sonnet-4-20250514"],
     "anthropic-direct/claude-sonnet-4-20250514": ["openai/gpt-4o", "openai/gpt-4o-mini"],
 }
 
 
-def _fallback_models(model: str) -> list[str]:
-    return _FALLBACK_CHAIN.get(model, [])
+def _fallback_models(model: str, *, registry_entries: list | None = None, org_extra: dict | None = None) -> list[str]:
+    """Fallback candidates, registry/health-aware when possible.
+
+    Deterministic order: approved+healthy registry candidates in same capability
+    class/tier, then static chain. Static chain is marked fallback reason.
+    """
+    candidates: list[str] = []
+    if registry_entries:
+        try:
+            current = next((e for e in registry_entries if getattr(e, "model_key", "") == model), None)
+            cur_tier = getattr(current, "tier", None)
+            cur_caps = set(getattr(current, "capabilities", []) or [])
+            for e in registry_entries:
+                key = getattr(e, "model_key", None)
+                if not key or key == model or not getattr(e, "approved", False):
+                    continue
+                if cur_tier is not None and getattr(e, "tier", None) != cur_tier:
+                    continue
+                caps = set(getattr(e, "capabilities", []) or [])
+                if cur_caps and not cur_caps.issubset(caps):
+                    continue
+                try:
+                    enforce_model_runtime_policy(key, org_extra=org_extra, registry_entries=registry_entries)
+                except LLMError:
+                    continue
+                health = provider_health(key)
+                if not health.get("available", False):
+                    continue
+                candidates.append(key)
+        except Exception:
+            candidates = []
+    # deterministic static fallback after registry candidates
+    for m in _FALLBACK_CHAIN.get(model, []):
+        if m not in candidates:
+            candidates.append(m)
+    return candidates
 
 
 def _usage_from_openai(data: dict) -> dict:
@@ -242,8 +277,73 @@ class LLMProvider(ABC):
                 return
 
 
+def _runtime_org_context(org_extra: dict | None = None) -> tuple[str | None, dict | None]:
+    try:
+        from aios.core.router import current_org_extra, current_org_id
+
+        org_id = current_org_id.get()
+        extra = org_extra if org_extra is not None else current_org_extra.get()
+        return org_id, extra if isinstance(extra, dict) else None
+    except Exception:
+        return None, org_extra if isinstance(org_extra, dict) else None
+
+
+def _registry_entries_for_org(org_id: str | None, org_extra: dict | None) -> list | None:
+    if not org_id and not (org_extra or {}).get("model_policy"):
+        # No org context and no explicit policy: keep legacy behavior cheap.
+        return None
+    try:
+        import asyncio
+        from sqlalchemy import or_, select
+        from aios.db.backend import db_session
+        from aios.governance.model_intelligence import ModelRegistryEntry
+
+        async def _load():
+            async with db_session() as db:
+                q = select(ModelRegistryEntry)
+                if org_id:
+                    q = q.where(or_(ModelRegistryEntry.org_id == org_id, ModelRegistryEntry.org_id.is_(None)))
+                return list((await db.execute(q)).scalars().all())
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(_load())
+        # In async context, avoid blocking; agent path loads explicitly.
+        return None
+    except Exception:
+        return None
+
+
+def enforce_model_runtime_policy(
+    model: str,
+    *,
+    org_extra: dict | None = None,
+    registry_entries: list | None = None,
+) -> dict:
+    """Pre-call guard: org allow/deny + registry eligibility when enforced.
+
+    Backward-compatible: no policy and no registry entries => allow.
+    """
+    org_id, extra = _runtime_org_context(org_extra)
+    entries = registry_entries
+    if entries is None:
+        entries = _registry_entries_for_org(org_id, extra)
+    from aios.core.router import model_runtime_eligible
+
+    ok, reason, meta = model_runtime_eligible(model, org_extra=extra, registry_entries=entries)
+    if not ok:
+        logger.warning("model policy denied model=%s org=%s reason=%s meta=%s", model, org_id, reason, meta)
+        raise LLMError(f"Model policy denied: {reason}")
+    meta = dict(meta or {})
+    meta["org_id"] = org_id
+    meta["model"] = model
+    return meta
+
+
 def get_provider(model: str, api_key: str | None = None) -> LLMProvider:
     """Route to correct provider based on model name prefix."""
+    enforce_model_runtime_policy(model)
     if model.startswith("ollama/"):
         return OllamaProvider()
     elif model.startswith("opencode/"):

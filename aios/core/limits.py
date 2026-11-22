@@ -287,8 +287,26 @@ async def _send_budget_alert(org_id: str, budget_id: str, pct: float, spent_brl:
         pass
 
 
-async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_calls: int = 1, cost_usd: float = 0.0):
-    """Atomically increment usage counters — prevents double-counting on concurrent runs."""
+async def track_usage(
+    org_id: str,
+    db,
+    messages: int = 1,
+    tokens: int = 0,
+    llm_calls: int = 1,
+    cost_usd: float = 0.0,
+    *,
+    model: str | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    provider: str | None = None,
+    cost_kind: str = "internal",
+    attribution: dict | None = None,
+):
+    """Atomically increment usage counters — prevents double-counting on concurrent runs.
+
+    UsageRecord schema is fixed; cost attribution detail is logged/audited only.
+    cost_kind: internal|customer|shared — explicit separation flag for downstream billing.
+    """
     today = date.today().isoformat()
 
     # Atomic upsert with increment (PostgreSQL/SQLite compatible)
@@ -312,9 +330,30 @@ async def track_usage(org_id: str, db, messages: int = 1, tokens: int = 0, llm_c
     await db.commit()
 
     try:
+        logger.info(
+            "usage_attribution org=%s model=%s provider=%s cost_usd=%.6f kind=%s input=%s output=%s total=%s attr=%s",
+            org_id,
+            model,
+            provider,
+            float(cost_usd or 0),
+            cost_kind,
+            input_tokens,
+            output_tokens,
+            tokens,
+            attribution or {},
+        )
+    except Exception:
+        pass
+
+    try:
         if cost_usd:
             from prometheus_client import Counter as _PC
-            _PC("aios_cost_usd_total", "cost").inc(cost_usd)
+
+            c = _PC("aios_cost_usd_total", "cost", ["kind"])
+            try:
+                c.labels(kind=cost_kind).inc(cost_usd)
+            except Exception:
+                c.inc(cost_usd)
     except Exception:
         pass
 
