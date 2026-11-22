@@ -32,9 +32,10 @@ HYPOTHESIS_STATUSES = ("draft", "testing", "validated", "invalidated", "paused")
 MVP_TYPES = ("architectural_foundation", "commercial_mvp", "experimental_prototype")
 EXPERIMENT_RESULTS = ("pending", "success", "failure", "inconclusive", "stopped")
 DECISIONS = ("persevere", "pivot", "stop", "iterate")
+EXPERIMENT_TRACKS = ("A", "B", "C")
+TRACK_AUTONOMOUS_MODES = {"track_c_autonomous", "autonomous", "auto_optimize"}
 
 EXPERIMENT_REQUIRED_FIELDS = (
-    "hypothesis_id",
     "riskiest_assumption",
     "metric_name",
     "baseline",
@@ -91,12 +92,48 @@ class Experiment(Base, TimestampMixin):
 # --- Deterministic rules ------------------------------------------------------
 
 
+def experiment_track(exp: Experiment) -> str | None:
+    perms = exp.permissions or {}
+    track = perms.get("track")
+    if track is None:
+        return None
+    track = str(track).strip().upper()
+    return track if track in EXPERIMENT_TRACKS else None
+
+
+def is_track_c_autonomous(exp: Experiment) -> bool:
+    if experiment_track(exp) != "C":
+        return False
+    perms = exp.permissions or {}
+    mode = str(perms.get("optimization_mode") or perms.get("mode") or "").strip().lower()
+    return bool(perms.get("autonomous") is True or mode in TRACK_AUTONOMOUS_MODES)
+
+
+def has_track_c_evidence(exp: Experiment) -> bool:
+    perms = exp.permissions or {}
+    evidence = perms.get("evidence") or perms.get("evidence_refs") or perms.get("track_c_evidence")
+    if isinstance(evidence, str):
+        return bool(evidence.strip())
+    if isinstance(evidence, (list, tuple, set, dict)):
+        return len(evidence) > 0
+    return bool(perms.get("evidence_before_track_c") is True)
+
+
 def missing_experiment_fields(exp: Experiment) -> list[str]:
     missing = []
     for field in EXPERIMENT_REQUIRED_FIELDS:
         value = getattr(exp, field, None)
         if value is None or (isinstance(value, str) and not value.strip()):
             missing.append(field)
+    if not (exp.hypothesis_id or "").strip():
+        justified = bool((exp.permissions or {}).get("orphan_justification") or (exp.permissions or {}).get("orphan_reason"))
+        if not justified:
+            missing.append("hypothesis_id_or_orphan_justification")
+    track = (exp.permissions or {}).get("track")
+    if track is not None and experiment_track(exp) is None:
+        missing.append("track_invalid")
+    if is_track_c_autonomous(exp) and not has_track_c_evidence(exp):
+        missing.append("track_c_evidence")
     return missing
 
 
@@ -106,6 +143,8 @@ def over_budget(exp: Experiment) -> bool:
 
 def evaluate_experiment(exp: Experiment) -> str:
     """Pass/fail from the declared threshold. Stops on budget breach."""
+    if missing_experiment_fields(exp):
+        return "pending"
     if over_budget(exp):
         return "stopped"
     if exp.observed is None or exp.success_threshold is None:
@@ -124,6 +163,17 @@ def decide_from_result(result: str) -> str:
         "stopped": "stop",
         "inconclusive": "iterate",
     }.get(result, "iterate")
+
+
+def production_promotion_allowed(exp: Experiment) -> tuple[bool, str]:
+    """MVP type behavior guard: experimental prototypes need explicit review before production."""
+    if exp.mvp_type == "experimental_prototype":
+        return False, "experimental_prototype requires Product/Founder review before production promotion"
+    if exp.mvp_type == "commercial_mvp" and exp.result != "success":
+        return False, "commercial_mvp requires successful evaluation before production promotion"
+    if exp.mvp_type == "architectural_foundation" and exp.result == "pending":
+        return False, "architectural_foundation requires evaluation before production promotion"
+    return True, "promotion allowed"
 
 
 def innovation_scoreboard(experiments: list[Experiment]) -> dict:

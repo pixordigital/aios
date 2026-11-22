@@ -3,6 +3,7 @@
 from aios.governance.capability_registry import (
     Capability,
     capability_fit_score,
+    engineering_work_guard,
     next_stage,
     solution_fit,
 )
@@ -70,3 +71,10 @@ def test_pipeline_stage_order():
     assert next_stage("company_discovery") == "prospect_intelligence"
     assert next_stage("outcome_feedback") is None
     assert next_stage("bogus") is None
+
+
+def test_unmet_need_cannot_auto_create_engineering_work():
+    allowed, reason = engineering_work_guard("future_opportunity")
+    assert not allowed
+    assert "review" in reason.lower()
+    assert engineering_work_guard("qualified")[0] is True

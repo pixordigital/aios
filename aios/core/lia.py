@@ -11,6 +11,7 @@ from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aios.db.engine import Base
+from aios.governance.capability_registry import WORKFLOW_STAGES
 
 
 def _uuid() -> str:
@@ -150,10 +151,13 @@ def can_contact(
     campaign_legal_reviewed: bool,
     whatsapp_authorized: bool = False,
     email_verified: bool = True,
+    source_allowed_for_outreach: bool = True,
 ) -> tuple[bool, str]:
     """Single gate before any outreach. Unknown channels fail closed."""
     if channel not in CHANNELS:
         return False, "unsupported channel"
+    if not source_allowed_for_outreach:
+        return False, "source not allowed for outreach"
     if opt_out or suppressed:
         return False, "suppressed or opted out"
     if not contact_allowed:
@@ -182,6 +186,20 @@ def channel_priority(channel: str) -> int:
     return CHANNEL_PRIORITY.get(channel, 99)
 
 
+def can_transition_stage(current: str, target: str) -> tuple[bool, str]:
+    if current not in WORKFLOW_STAGES or target not in WORKFLOW_STAGES:
+        return False, "unknown stage"
+    if current == target:
+        return True, "no-op"
+    cur = WORKFLOW_STAGES.index(current)
+    tgt = WORKFLOW_STAGES.index(target)
+    if tgt == cur + 1:
+        return True, "allowed"
+    if tgt < cur:
+        return True, "rollback allowed"
+    return False, f"invalid stage transition: {current} -> {target}"
+
+
 _LIA_NEXT_ACTION = {
     "qualified": "create_or_update_deal",
     "research_required": "enrich_account",
@@ -201,6 +219,7 @@ def crm_handoff_decision(
     campaign_approved: bool = False,
     campaign_legal_reviewed: bool = False,
     whatsapp_authorized: bool = False,
+    source_allowed_for_outreach: bool = True,
 ) -> dict:
     """Deterministic LIA → CRM handoff. Never bypasses the contact gate."""
     from aios.core.crm_intelligence import sales_priority
@@ -218,6 +237,7 @@ def crm_handoff_decision(
         campaign_legal_reviewed=campaign_legal_reviewed,
         whatsapp_authorized=whatsapp_authorized,
         email_verified=bool(getattr(contact, "email_verified", False)),
+        source_allowed_for_outreach=source_allowed_for_outreach,
     )
     if not allowed and reason in {"suppressed or opted out", "contact not allowed"}:
         disposition = "restricted"
@@ -233,6 +253,7 @@ def crm_handoff_decision(
             stage_weight=1.0 if disposition == "qualified" else 0.5,
         )
 
+    eng_blocked = disposition in {"future_opportunity", "research_required"}
     return {
         "handoff": handoff,
         "reason": reason,
@@ -242,10 +263,16 @@ def crm_handoff_decision(
         "score": score,
         "account_id": getattr(member, "account_id", None),
         "contact_id": getattr(contact, "id", None),
+        "engineering_work_allowed": not eng_blocked,
+        "engineering_work_reason": (
+            "Product/Founder review required before engineering work"
+            if eng_blocked
+            else "no engineering review gate"
+        ),
         "provenance": {
             "source": "lia",
             "campaign_id": getattr(member, "campaign_id", None),
             "member_id": getattr(member, "id", None),
-            "rules": ["can_contact", "sales_priority"],
+            "rules": ["can_contact", "sales_priority", "engineering_work_guard"],
         },
     }

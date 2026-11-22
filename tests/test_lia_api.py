@@ -54,6 +54,15 @@ async def test_contact_check_fail_closed(auth_client):
     )
     assert resp.json()["reason"] == "unsupported channel"
 
+    src = await auth_client.post(
+        "/api/lia/sources",
+        json={"name": "Directory", "source_type": "industry_directory", "allowed_for_outreach": False},
+    )
+    sid = src.json()["id"]
+    resp = await auth_client.post("/api/lia/contact-check", json={**base, "source_id": sid})
+    assert resp.json()["allowed"] is False
+    assert resp.json()["reason"] == "source not allowed for outreach"
+
 
 async def test_campaign_approval_requires_legal_and_founder(
     auth_client, test_db_session, test_org, test_user
@@ -81,7 +90,9 @@ async def test_campaign_approval_requires_legal_and_founder(
     assert resp.json()["status"] == "approved"
 
 
-async def test_member_handoff_respects_suppression(auth_client, test_db_session, test_org):
+async def test_member_handoff_respects_suppression_and_stage_transitions(
+    auth_client, test_db_session, test_org
+):
     resp = await auth_client.post(
         "/api/lia/campaigns", json={"name": "Outbound", "channel": "email", "legal_reviewed": True}
     )
@@ -96,6 +107,12 @@ async def test_member_handoff_respects_suppression(auth_client, test_db_session,
     )
     assert resp.status_code == 200, resp.text
     mid = resp.json()["id"]
+
+    bad_stage = await auth_client.post(f"/api/lia/members/{mid}/stage", json={"stage": "meeting_booking"})
+    assert bad_stage.status_code == 400
+    ok_stage = await auth_client.post(f"/api/lia/members/{mid}/stage", json={"stage": "prospect_intelligence"})
+    assert ok_stage.status_code == 200
+    assert ok_stage.json()["stage"] == "prospect_intelligence"
 
     flags = {"campaign_approved": True, "campaign_legal_reviewed": True}
     resp = await auth_client.post(f"/api/lia/members/{mid}/handoff", json=flags)

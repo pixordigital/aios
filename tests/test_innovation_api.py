@@ -90,6 +90,54 @@ async def test_incomplete_declaration_rejected(auth_client):
     assert "stop_conditions" in resp.text
 
 
+async def test_hypothesis_linkage_track_c_and_mvp_promotion_guards(
+    auth_client, test_db_session, test_org, test_user
+):
+    decl = _decl(None)
+    decl["hypothesis_id"] = None
+    resp = await auth_client.post("/api/innovation/experiments", json=decl)
+    assert resp.status_code == 400
+    assert "hypothesis_id_or_orphan_justification" in resp.text
+
+    decl["permissions"] = {"orphan_justification": "founder exploratory request"}
+    resp = await auth_client.post("/api/innovation/experiments", json=decl)
+    assert resp.status_code == 200
+
+    h_id = await _hypothesis(auth_client)
+    track_c = _decl(h_id)
+    track_c["mvp_type"] = "commercial_mvp"
+    track_c["permissions"] = {"track": "C", "autonomous": True}
+    resp = await auth_client.post("/api/innovation/experiments", json=track_c)
+    assert resp.status_code == 400
+    assert "track_c_evidence" in resp.text
+
+    track_c["permissions"] = {"track": "C", "autonomous": True, "evidence": ["pilot-log"]}
+    resp = await auth_client.post("/api/innovation/experiments", json=track_c)
+    assert resp.status_code == 200
+    exp_id = resp.json()["id"]
+    await auth_client.post(f"/api/innovation/experiments/{exp_id}/evaluate", json={"observed": 0.3})
+
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    resp = await auth_client.post(
+        f"/api/innovation/experiments/{exp_id}/decide",
+        json={"decision": "persevere", "promote_to_production": True},
+    )
+    assert resp.status_code == 200
+
+    proto = _decl(h_id)
+    proto["mvp_type"] = "experimental_prototype"
+    resp = await auth_client.post("/api/innovation/experiments", json=proto)
+    exp_id = resp.json()["id"]
+    await auth_client.post(f"/api/innovation/experiments/{exp_id}/evaluate", json={"observed": 0.3})
+    resp = await auth_client.post(
+        f"/api/innovation/experiments/{exp_id}/decide",
+        json={"decision": "persevere", "promote_to_production": True},
+    )
+    assert resp.status_code == 403
+    assert "review" in resp.text.lower()
+
+
 async def test_experiments_are_tenant_scoped(auth_client, test_db_session):
     other = Organization(name="Other", slug="other-innov-org")
     test_db_session.add(other)

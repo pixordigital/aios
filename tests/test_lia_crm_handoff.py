@@ -77,3 +77,9 @@ def test_unknown_channel_fails_closed():
     d = crm_handoff_decision(_member(), _contact(), channel="telegram", **APPROVED)
     assert d["handoff"] is False
     assert d["reason"] == "unsupported channel"
+
+
+def test_source_not_allowed_blocks_handoff():
+    d = crm_handoff_decision(_member(), _contact(), source_allowed_for_outreach=False, **APPROVED)
+    assert d["handoff"] is False
+    assert d["reason"] == "source not allowed for outreach"

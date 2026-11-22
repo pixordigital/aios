@@ -7,8 +7,10 @@ from aios.governance.innovation import (
     decide_from_result,
     evaluate_experiment,
     innovation_scoreboard,
+    is_track_c_autonomous,
     missing_experiment_fields,
     over_budget,
+    production_promotion_allowed,
 )
 
 
@@ -28,6 +30,31 @@ def test_missing_fields_are_detected():
     exp = _exp(stop_conditions="")
     assert "stop_conditions" in missing_experiment_fields(exp)
     assert missing_experiment_fields(_exp()) == []
+
+
+def test_hypothesis_linkage_or_justified_orphan_required():
+    assert "hypothesis_id_or_orphan_justification" in missing_experiment_fields(_exp(hypothesis_id=None))
+    justified = _exp(hypothesis_id=None, permissions={"orphan_justification": "founder-directed exploratory signal"})
+    assert missing_experiment_fields(justified) == []
+
+
+def test_track_c_autonomous_requires_evidence_before_approval():
+    exp = _exp(permissions={"track": "C", "autonomous": True})
+    assert is_track_c_autonomous(exp)
+    assert "track_c_evidence" in missing_experiment_fields(exp)
+    evidenced = _exp(permissions={"track": "C", "autonomous": True, "evidence": ["pilot-log"]})
+    assert missing_experiment_fields(evidenced) == []
+
+
+def test_mvp_type_promotion_guard():
+    proto = _exp(mvp_type="experimental_prototype", result="success")
+    allowed, reason = production_promotion_allowed(proto)
+    assert not allowed
+    assert "review" in reason
+    mvp = _exp(mvp_type="commercial_mvp", result="failure")
+    assert production_promotion_allowed(mvp)[0] is False
+    ok = _exp(mvp_type="commercial_mvp", result="success")
+    assert production_promotion_allowed(ok)[0] is True
 
 
 def test_threshold_pass_fail_is_deterministic():

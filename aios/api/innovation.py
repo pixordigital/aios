@@ -10,14 +10,18 @@ from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization, User
 from aios.governance.innovation import (
     DECISIONS,
+    EXPERIMENT_TRACKS,
     HYPOTHESIS_KINDS,
     MVP_TYPES,
     Experiment,
     Hypothesis,
     decide_from_result,
     evaluate_experiment,
+    has_track_c_evidence,
     innovation_scoreboard,
+    is_track_c_autonomous,
     missing_experiment_fields,
+    production_promotion_allowed,
 )
 
 router = APIRouter(prefix="/api/innovation", tags=["innovation"])
@@ -108,6 +112,14 @@ async def create_experiment(
     if direction not in ("increase", "decrease"):
         raise HTTPException(400, "invalid direction")
 
+    permissions = dict(body.get("permissions") or {})
+    track = permissions.get("track")
+    if track is not None:
+        track_norm = str(track).strip().upper()
+        if track_norm not in EXPERIMENT_TRACKS:
+            raise HTTPException(400, "invalid track")
+        permissions["track"] = track_norm
+
     exp = Experiment(
         org_id=org_id,
         hypothesis_id=str(hypothesis_id) if hypothesis_id else None,
@@ -123,7 +135,7 @@ async def create_experiment(
         time_cap_days=int(body.get("time_cap_days") or 0),
         owner_id=body.get("owner_id"),
         stop_conditions=str(body.get("stop_conditions") or ""),
-        permissions=dict(body.get("permissions") or {}),
+        permissions=permissions,
         privacy_reviewed=bool(body.get("privacy_reviewed", False)),
     )
     missing = missing_experiment_fields(exp)
@@ -132,7 +144,7 @@ async def create_experiment(
     db.add(exp)
     await db.commit()
     await db.refresh(exp)
-    return {"id": exp.id, "result": exp.result}
+    return {"id": exp.id, "result": exp.result, "track": permissions.get("track")}
 
 
 async def _experiment(exp_id: str, org_id: str, db: DatabaseBackend) -> Experiment:
@@ -158,6 +170,9 @@ async def evaluate(
         exp.observed = float(body["observed"])
     if "spent_brl" in body:
         exp.spent_brl = float(body["spent_brl"])
+    missing = missing_experiment_fields(exp)
+    if missing:
+        raise HTTPException(400, f"missing experiment declaration: {', '.join(missing)}")
     exp.result = evaluate_experiment(exp)
     if exp.started_at is None:
         exp.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -185,6 +200,13 @@ async def decide(
     decision = str(body.get("decision") or decide_from_result(exp.result))
     if decision not in DECISIONS:
         raise HTTPException(400, "invalid decision")
+    promote_to_production = bool(body.get("promote_to_production", False))
+    if promote_to_production or decision == "persevere" and str(body.get("target") or "") == "production":
+        allowed, reason = production_promotion_allowed(exp)
+        if not allowed:
+            raise HTTPException(403, reason)
+    if is_track_c_autonomous(exp) and decision == "persevere" and not has_track_c_evidence(exp):
+        raise HTTPException(403, "Track C autonomous optimization requires evidence before approval")
     exp.decision = decision
     await db.commit()
     return {"id": exp.id, "decision": decision}

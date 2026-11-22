@@ -22,12 +22,16 @@ async def test_create_list_and_evaluate(auth_client):
             "supported_use_cases": ["lead_qualification"],
             "deployment_evidence": ["pilot-1"],
             "is_commercially_available": True,
+            "owner_id": "owner-1",
+            "review_status": "approved",
         },
     )
     assert resp.status_code == 200, resp.text
     cap = resp.json()
     assert cap["maturity"] == "production"
     assert cap["is_commercially_available"] is True
+    assert cap["owner_id"] == "owner-1"
+    assert cap["review_status"] == "approved"
 
     listed = await auth_client.get("/api/capabilities")
     assert any(c["id"] == cap["id"] for c in listed.json()["items"])
@@ -45,6 +49,7 @@ async def test_create_list_and_evaluate(auth_client):
     body = fit.json()
     assert body["disposition"] == "qualified"
     assert body["capability_fit"] >= 0.9
+    assert body["engineering_work_allowed"] is True
 
     assessments = await auth_client.get("/api/capabilities/assessments")
     assert any(a["id"] == body["id"] for a in assessments.json()["items"])
@@ -66,7 +71,10 @@ async def test_fit_gates_contact_legal_and_maturity(auth_client):
         "/api/capabilities/evaluate",
         json={"capability_id": cap["id"], "subject_id": "acct-3", **_HIGH},
     )
-    assert resp.json()["disposition"] == "future_opportunity"
+    body = resp.json()
+    assert body["disposition"] == "future_opportunity"
+    assert body["engineering_work_allowed"] is False
+    assert "review" in body["engineering_work_reason"].lower()
 
 
 async def test_capabilities_and_assessments_are_tenant_scoped(auth_client, test_db_session):

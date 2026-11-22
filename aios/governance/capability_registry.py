@@ -41,6 +41,9 @@ DISPOSITIONS = (
     "restricted",
 )
 
+# Dispositions that represent unmet/uncertain need: never auto-create engineering work.
+ENGINEERING_REVIEW_DISPOSITIONS = {"future_opportunity", "research_required"}
+
 
 class Capability(Base, TimestampMixin):
     """Actual maturity, limits and evidence — not the marketing claim."""
@@ -117,6 +120,13 @@ def solution_fit(
     return "qualified", "all dimensions above qualification bar"
 
 
+def engineering_work_guard(disposition: str) -> tuple[bool, str]:
+    """Unmet need must not auto-create engineering work without review."""
+    if disposition in ENGINEERING_REVIEW_DISPOSITIONS:
+        return False, "Product/Founder review required before engineering work"
+    return True, "no engineering review gate"
+
+
 def capability_fit_score(capability: Capability, required_use_case: str | None) -> float:
     """Deterministic 0..1 signal from declared support and evidence."""
     if required_use_case and required_use_case not in (capability.supported_use_cases or []):
@@ -124,7 +134,8 @@ def capability_fit_score(capability: Capability, required_use_case: str | None) 
     base = {"concept": 0.2, "prototype": 0.45, "pilot": 0.7, "production": 0.9, "deprecated": 0.0}.get(
         capability.maturity, 0.0
     )
-    if capability.deployment_evidence:
+    evidence = [e for e in (capability.deployment_evidence or []) if not (isinstance(e, dict) and "_governance" in e)]
+    if evidence:
         base = min(1.0, base + 0.1)
     return base
 

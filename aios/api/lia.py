@@ -7,6 +7,7 @@ from aios.api.deps import get_current_user, get_org_id
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization, User
 from aios.core.crm_intelligence import Contact
+from aios.governance.capability_registry import WORKFLOW_STAGES
 from aios.core.lia import (
     CHANNELS,
     DISPOSITIONS,
@@ -16,6 +17,7 @@ from aios.core.lia import (
     LeadSource,
     SuppressionEntry,
     can_contact,
+    can_transition_stage,
     crm_handoff_decision,
 )
 
@@ -207,6 +209,17 @@ async def contact_check(
                 )
             )).scalars().first()
         )
+    source_allowed = bool(body.get("source_allowed_for_outreach", True))
+    source_id = body.get("source_id")
+    if source_id:
+        src = (
+            await db.execute(
+                select(LeadSource).where(LeadSource.id == str(source_id), LeadSource.org_id == org_id)
+            )
+        ).scalars().first()
+        if src is None:
+            raise HTTPException(404, "source not found")
+        source_allowed = bool(src.allowed_for_outreach)
     allowed, reason = can_contact(
         channel=str(body.get("channel") or "email"),
         contact_allowed=bool(body.get("contact_allowed", False)),
@@ -216,8 +229,9 @@ async def contact_check(
         campaign_legal_reviewed=bool(body.get("campaign_legal_reviewed", False)),
         whatsapp_authorized=bool(body.get("whatsapp_authorized", False)),
         email_verified=bool(body.get("email_verified", False)),
+        source_allowed_for_outreach=source_allowed,
     )
-    return {"allowed": allowed, "reason": reason, "suppressed": suppressed}
+    return {"allowed": allowed, "reason": reason, "suppressed": suppressed, "source_allowed_for_outreach": source_allowed}
 
 
 @router.post("/members")
@@ -237,12 +251,15 @@ async def create_member(
     disposition = str(body.get("disposition") or "research_required")
     if disposition not in DISPOSITIONS:
         raise HTTPException(400, "invalid disposition")
+    stage = str(body.get("stage") or "company_discovery")
+    if stage not in WORKFLOW_STAGES:
+        raise HTTPException(400, "invalid stage")
     member = CampaignMember(
         org_id=org_id,
         campaign_id=campaign.id,
         account_id=body.get("account_id"),
         contact_id=body.get("contact_id"),
-        stage=str(body.get("stage") or "company_discovery"),
+        stage=stage,
         disposition=disposition,
         icp_fit=float(body.get("icp_fit") or 0.0),
         solution_fit=float(body.get("solution_fit") or 0.0),
@@ -252,7 +269,32 @@ async def create_member(
     db.add(member)
     await db.commit()
     await db.refresh(member)
-    return {"id": member.id, "disposition": member.disposition}
+    return {"id": member.id, "disposition": member.disposition, "stage": member.stage}
+
+
+@router.post("/members/{member_id}/stage")
+async def advance_stage(
+    member_id: str,
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    member = (
+        await db.execute(
+            select(CampaignMember).where(
+                CampaignMember.id == member_id, CampaignMember.org_id == org_id
+            )
+        )
+    ).scalars().first()
+    if member is None:
+        raise HTTPException(404, "member not found")
+    target = str(body.get("stage") or "").strip()
+    allowed, reason = can_transition_stage(member.stage or "company_discovery", target)
+    if not allowed:
+        raise HTTPException(400, reason)
+    member.stage = target
+    await db.commit()
+    return {"id": member.id, "stage": member.stage, "transition": reason}
 
 
 @router.post("/members/{member_id}/handoff")
@@ -278,6 +320,17 @@ async def handoff(
                 select(Contact).where(Contact.id == member.contact_id, Contact.org_id == org_id)
             )
         ).scalars().first()
+    source_allowed = bool(body.get("source_allowed_for_outreach", True))
+    source_id = body.get("source_id")
+    if source_id:
+        src = (
+            await db.execute(
+                select(LeadSource).where(LeadSource.id == str(source_id), LeadSource.org_id == org_id)
+            )
+        ).scalars().first()
+        if src is None:
+            raise HTTPException(404, "source not found")
+        source_allowed = bool(src.allowed_for_outreach)
     return crm_handoff_decision(
         member,
         contact,
@@ -286,4 +339,5 @@ async def handoff(
         campaign_approved=bool(body.get("campaign_approved", False)),
         campaign_legal_reviewed=bool(body.get("campaign_legal_reviewed", False)),
         whatsapp_authorized=bool(body.get("whatsapp_authorized", False)),
+        source_allowed_for_outreach=source_allowed,
     )

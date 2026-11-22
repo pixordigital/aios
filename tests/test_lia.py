@@ -2,6 +2,7 @@
 
 from aios.core.lia import (
     can_contact,
+    can_transition_stage,
     channel_priority,
     human_approval_required,
     stop_sequence,
@@ -21,6 +22,12 @@ def test_email_requires_review_and_approval():
     assert can_contact(channel="email", **GOOD)[0]
     bad = dict(GOOD, campaign_legal_reviewed=False)
     assert not can_contact(channel="email", **bad)[0]
+
+
+def test_source_eligibility_blocks_outreach():
+    allowed, reason = can_contact(channel="email", source_allowed_for_outreach=False, **GOOD)
+    assert not allowed
+    assert reason == "source not allowed for outreach"
 
 
 def test_suppression_and_opt_out_always_block():
@@ -55,3 +62,9 @@ def test_channel_priority_p0_first():
     assert channel_priority("whatsapp_business") == 1
     assert channel_priority("linkedin_human") == 2
     assert channel_priority("sms") == 99
+
+
+def test_stage_transitions_are_deterministic():
+    assert can_transition_stage("company_discovery", "prospect_intelligence")[0] is True
+    assert can_transition_stage("company_discovery", "meeting_booking")[0] is False
+    assert can_transition_stage("outreach", "qualification")[0] is True  # rollback allowed

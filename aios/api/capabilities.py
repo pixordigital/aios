@@ -6,10 +6,12 @@ from sqlalchemy import or_, select
 from aios.api.deps import get_org_id
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.governance.capability_registry import (
+    ENGINEERING_REVIEW_DISPOSITIONS,
     MATURITY_LEVELS,
     Capability,
     SolutionFitAssessment,
     capability_fit_score,
+    engineering_work_guard,
     solution_fit,
 )
 
@@ -31,6 +33,11 @@ def _visible(org_id: str):
 @router.get("")
 async def list_capabilities(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     rows = (await db.execute(select(Capability).where(_visible(org_id)))).scalars().all()
+    def _gov(c: Capability) -> dict:
+        for ev in reversed(c.deployment_evidence or []):
+            if isinstance(ev, dict) and isinstance(ev.get("_governance"), dict):
+                return ev["_governance"]
+        return {}
     return {
         "items": [
             {
@@ -41,6 +48,8 @@ async def list_capabilities(db: DatabaseBackend = Depends(get_db_backend), org_i
                 "supported_use_cases": c.supported_use_cases or [],
                 "limitations": c.limitations or [],
                 "is_commercially_available": c.is_commercially_available,
+                "owner_id": _gov(c).get("owner_id"),
+                "review_status": _gov(c).get("review_status", "pending_review"),
             }
             for c in rows
         ]
@@ -63,6 +72,12 @@ async def create_capability(
     complexity = str(body.get("complexity") or "medium")
     if complexity not in ("low", "medium", "high"):
         raise HTTPException(400, "invalid complexity")
+    owner_id = str(body.get("owner_id") or "").strip() or None
+    review_status = str(body.get("review_status") or "pending_review").strip()
+    if review_status not in {"pending_review", "reviewed", "approved", "rejected"}:
+        raise HTTPException(400, "invalid review_status")
+    deployment_evidence = list(body.get("deployment_evidence") or [])
+    deployment_evidence.append({"_governance": {"owner_id": owner_id, "review_status": review_status}})
     capability = Capability(
         org_id=org_id,
         capability_key=key,
@@ -74,7 +89,7 @@ async def create_capability(
         limitations=list(body.get("limitations") or []),
         dependencies=list(body.get("dependencies") or []),
         pricing_notes=str(body.get("pricing_notes") or ""),
-        deployment_evidence=list(body.get("deployment_evidence") or []),
+        deployment_evidence=deployment_evidence,
         is_commercially_available=bool(body.get("is_commercially_available", False)),
     )
     db.add(capability)
@@ -85,6 +100,8 @@ async def create_capability(
         "capability_key": capability.capability_key,
         "maturity": capability.maturity,
         "is_commercially_available": capability.is_commercially_available,
+        "owner_id": owner_id,
+        "review_status": review_status,
     }
 
 
@@ -137,11 +154,14 @@ async def evaluate_fit(
     db.add(assessment)
     await db.commit()
     await db.refresh(assessment)
+    eng_allowed, eng_reason = engineering_work_guard(disposition)
     return {
         "id": assessment.id,
         "disposition": disposition,
         "rationale": rationale,
         "capability_fit": fit,
+        "engineering_work_allowed": eng_allowed,
+        "engineering_work_reason": eng_reason,
     }
 
 
@@ -161,6 +181,7 @@ async def list_assessments(db: DatabaseBackend = Depends(get_db_backend), org_id
                 "disposition": a.disposition,
                 "rationale": a.rationale,
                 "capability_fit": a.capability_fit,
+                "engineering_work_allowed": engineering_work_guard(a.disposition)[0],
             }
             for a in rows
         ]
