@@ -501,6 +501,42 @@ async def _resolve_org_id(request: Request) -> str:
     return fallback
 
 
+async def _dashboard_tool_actor_context(request: Request) -> dict:
+    """Best-effort actor context for dashboard tool execution. Fail closed if unresolved."""
+    from aios.api.deps import get_dashboard_user
+
+    user = await get_dashboard_user(request)
+    if not user:
+        return {"_unresolved": True}
+    actor_departments: set[str] = set()
+    is_founder = False
+    try:
+        from aios.governance.ocp import DepartmentMember
+
+        async with db_session() as db:
+            rows = (
+                await db.execute(
+                    select(DepartmentMember.department_id).where(
+                        DepartmentMember.org_id == user.org_id,
+                        DepartmentMember.user_id == user.id,
+                    )
+                )
+            ).scalars().all()
+            actor_departments = {d for d in rows if d}
+            org = await db.get(Organization, user.org_id)
+            extra = (org.extra_data or {}) if org else {}
+            is_founder = bool(extra.get("founder_user_id") == user.id or getattr(user, "role", "") == "owner")
+    except Exception:
+        logger.debug("dashboard tool actor context lookup failed; failing closed", exc_info=True)
+        return {"_unresolved": True}
+    return {
+        "actor_user_id": str(user.id or ""),
+        "actor_departments": actor_departments,
+        "is_founder": is_founder,
+        "granted_record_ids": set(),
+    }
+
+
 async def _default_org_id() -> str:
     async with db_session() as db:
         org = (await db.execute(select(Organization).where(Organization.slug == "pixor"))).scalar_one_or_none()
@@ -2842,7 +2878,14 @@ async def lab_tool_run(request: Request):
     from aios.tools.registry import TOOL_REGISTRY
     if tool_name not in TOOL_REGISTRY:
         return JSONResponse({"error": f"tool '{tool_name}' not registered"}, status_code=404)
-    eng = ToolEngine([tool_name], org_id=await _resolve_org_id(request))
+    actor = await _dashboard_tool_actor_context(request)
+    if actor.get("_unresolved"):
+        return JSONResponse(
+            {"ok": False, "tool": tool_name, "error": "actor identity unresolved; tool execution fail-closed", "fail_closed": True},
+            status_code=403,
+        )
+    actor.pop("_unresolved", None)
+    eng = ToolEngine([tool_name], org_id=await _resolve_org_id(request), **actor)
     try:
         out = await eng.execute(tool_name, raw_args if isinstance(raw_args, str) else _json.dumps(raw_args))
         return JSONResponse({"ok": True, "tool": tool_name, "output": out})

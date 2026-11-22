@@ -165,11 +165,14 @@ class SwarmCoordinator:
             return msg
 
     async def get_shared(
-        self, *, team_id: str, key: str,
+        self, *, team_id: str, key: str, org_id: str = "",
     ) -> SwarmMessage | None:
         async with db_session() as db:
+            if not org_id:
+                return None
             stmt = select(SwarmMessage).where(
                 SwarmMessage.team_id == team_id,
+                SwarmMessage.org_id == org_id,
                 SwarmMessage.memory_key == key,
             ).order_by(desc(SwarmMessage.created_at)).limit(1)
             result = await db.execute(stmt)
@@ -184,11 +187,16 @@ class SwarmCoordinator:
             return msg
 
     async def list_messages(
-        self, *, team_id: str, limit: int = 20,
+        self, *, team_id: str, limit: int = 20, org_id: str = "",
     ) -> list[SwarmMessage]:
         async with db_session() as db:
+            if not org_id:
+                return []
             result = await db.execute(
-                select(SwarmMessage).where(SwarmMessage.team_id == team_id)
+                select(SwarmMessage).where(
+                    SwarmMessage.team_id == team_id,
+                    SwarmMessage.org_id == org_id,
+                )
                 .order_by(desc(SwarmMessage.created_at)).limit(limit)
             )
             return list(result.scalars().all())

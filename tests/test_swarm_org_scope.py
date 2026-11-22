@@ -1,9 +1,9 @@
-"""Tenant isolation for swarm tasks.
+"""Tenant isolation for swarm tasks and shared memory.
 
-list_tasks/stats/claim/complete/vote used to filter by team_id or task_id
-alone. Any authenticated user could read another tenant's task payloads by
-team_id, and claim/complete/vote cross-tenant tasks. All five paths now
-require the caller's org_id and fail closed (missing => not found).
+list_tasks/stats/claim/complete/vote/list_messages/get_shared used to filter
+by team_id or task_id alone. Any authenticated user could read another
+tenant's payloads. Paths now require caller org_id and fail closed
+(missing => not found/empty).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import pytest
 
 from aios.core.swarm import SwarmCoordinator
 from aios.db.backend import db_session
-from aios.db.models import Organization, SwarmTask, Team
+from aios.db.models import Organization, SwarmMessage, SwarmTask, Team
 
 
 @pytest.fixture
@@ -67,3 +67,42 @@ async def test_claim_complete_vote_reject_foreign_org(two_org_tasks) -> None:
     assert await coord.vote("task-a1", "agent-x", "approve", org_id="org-b") is None
     # own org still works
     assert await coord.vote("task-a1", "agent-x", "approve", org_id="org-a") is not None
+
+
+@pytest.fixture
+async def two_org_messages(two_org_tasks):
+    async with db_session() as db:
+        db.add(SwarmMessage(
+            id="msg-a1", team_id="team-a", org_id="org-a",
+            message_type="memory", content={"secret": "a"}, memory_key="k1",
+        ))
+        db.add(SwarmMessage(
+            id="msg-b1", team_id="team-b", org_id="org-b",
+            message_type="memory", content={"secret": "b"}, memory_key="k1",
+        ))
+        await db.commit()
+    yield
+    async with db_session() as db:
+        for mid in ("msg-a1", "msg-b1"):
+            m = await db.get(SwarmMessage, mid)
+            if m:
+                await db.delete(m)
+        await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_get_shared_scoped_to_org(two_org_messages) -> None:
+    coord = SwarmCoordinator()
+    msg = await coord.get_shared(team_id="team-a", key="k1", org_id="org-a")
+    assert msg and msg.id == "msg-a1"
+    assert await coord.get_shared(team_id="team-a", key="k1", org_id="org-b") is None
+    assert await coord.get_shared(team_id="team-a", key="k1", org_id="") is None
+
+
+@pytest.mark.asyncio
+async def test_list_messages_scoped_to_org(two_org_messages) -> None:
+    coord = SwarmCoordinator()
+    rows = await coord.list_messages(team_id="team-a", org_id="org-a")
+    assert [m.id for m in rows] == ["msg-a1"]
+    assert await coord.list_messages(team_id="team-a", org_id="org-b") == []
+    assert await coord.list_messages(team_id="team-a", org_id="") == []

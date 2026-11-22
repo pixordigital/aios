@@ -168,5 +168,48 @@ async def test_tool_actor_context_fail_closed_shape_on_error():
     assert ctx["granted_record_ids"] == set()
 
 
+@pytest.mark.asyncio
+async def test_dashboard_tool_actor_context_fail_closed_without_user(monkeypatch):
+    from aios.dashboard import app as dashboard_app
+
+    async def _no_user(_request):
+        return None
+
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _no_user)
+    ctx = await dashboard_app._dashboard_tool_actor_context(object())
+    assert ctx == {"_unresolved": True}
+
+
+@pytest.mark.asyncio
+async def test_dashboard_tool_actor_context_wires_user(monkeypatch):
+    from aios.dashboard import app as dashboard_app
+
+    class _Req:
+        pass
+
+    async def _user(_request):
+        return _FakeUser()
+
+    org = _FakeOrg()
+    org.extra_data = {"founder_user_id": "u1"}
+    fake_db = _FakeDB(org=org, depts=["d1"])
+
+    class _DBCtx:
+        async def __aenter__(self):
+            return fake_db
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _user)
+    monkeypatch.setattr(dashboard_app, "db_session", lambda: _DBCtx())
+    ctx = await dashboard_app._dashboard_tool_actor_context(_Req())
+    assert ctx["actor_user_id"] == "u1"
+    assert ctx["actor_departments"] == {"d1"}
+    assert ctx["is_founder"] is True
+    assert ctx["granted_record_ids"] == set()
+    assert "_unresolved" not in ctx
+
+
 async def _coro(val):
     return val

@@ -164,7 +164,7 @@ async def get_shared_memory(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    msg = await swarm.get_shared(team_id=team_id, key=key)
+    msg = await swarm.get_shared(team_id=team_id, key=key, org_id=org_id)
     if not msg:
         raise HTTPException(404, "memory key not found or expired")
     return msg
