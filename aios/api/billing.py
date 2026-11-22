@@ -20,7 +20,7 @@ from aios.core.limits import get_monthly_usage, get_usage_summary
 from aios.core.whatsapp_pricing import estimate_creation_cost, get_rates
 from aios.db.backend import db_session, get_db_backend, DatabaseBackend
 from aios.db.models import Budget, Organization
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +100,19 @@ async def create_budget(body: BudgetCreate, db: DatabaseBackend = Depends(get_db
 @router.put("/budget/{bid}")
 async def update_budget(bid: str, body: BudgetCreate, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     b = await db.get(Budget, bid)
-    if not b or b.org_id != org_id:
-        raise HTTPException(404)
+    try:
+        await verify_org_access_async(
+            org_id,
+            b,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            source="billing.api.update_budget",
+            payload={"budget_id": str(bid)},
+        )
+    except HTTPException:
+        if b is not None and str(getattr(b, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
     if body.amount_brl <= 0:
         raise HTTPException(400, "amount_brl deve ser >0")
     b.name = body.name
@@ -119,8 +130,19 @@ async def update_budget(bid: str, body: BudgetCreate, db: DatabaseBackend = Depe
 @router.patch("/budget/{bid}")
 async def patch_budget(bid: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     b = await db.get(Budget, bid)
-    if not b or b.org_id != org_id:
-        raise HTTPException(404)
+    try:
+        await verify_org_access_async(
+            org_id,
+            b,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            source="billing.api.patch_budget",
+            payload={"budget_id": str(bid)},
+        )
+    except HTTPException:
+        if b is not None and str(getattr(b, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
     for k in ("name", "amount_brl", "type", "period", "scope", "country", "block_on_exceed"):
         if k in body:
             setattr(b, k, body[k])
@@ -134,8 +156,19 @@ async def patch_budget(bid: str, body: dict, db: DatabaseBackend = Depends(get_d
 @router.delete("/budget/{bid}")
 async def delete_budget(bid: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     b = await db.get(Budget, bid)
-    if not b or b.org_id != org_id:
-        raise HTTPException(404)
+    try:
+        await verify_org_access_async(
+            org_id,
+            b,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            source="billing.api.delete_budget",
+            payload={"budget_id": str(bid)},
+        )
+    except HTTPException:
+        if b is not None and str(getattr(b, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
     await db.delete(b)
     await db.commit()
     return {"ok": True}

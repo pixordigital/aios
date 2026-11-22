@@ -9,7 +9,7 @@ from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Organization, Tool
 from aios.governance.ocp import DepartmentMember
 from aios.schemas import BaseModel, PageResponse
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
@@ -204,8 +204,7 @@ async def test_tool(
     user=Depends(get_current_user),
 ):
     tool = await db.get(Tool, tool_id)
-    if not tool or tool.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.test_tool")
     args = body.get("args") or body.get("arguments") or {}
     import json
     from aios.core.tools import ToolEngine
@@ -226,8 +225,8 @@ async def get_tool(
     tool_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     tool = await db.get(Tool, tool_id)
-    if not tool or tool.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.get_tool")
     return tool

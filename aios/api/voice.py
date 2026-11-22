@@ -11,7 +11,7 @@ from aios.core.voice import place_call, synthesize, transcribe_audio
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Agent, ChannelConnection, Conversation, Message, Team
 
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +32,33 @@ class CallRequest(BaseModel):
     channel_id: str = ""
 
 
-async def _channel_config(db: DatabaseBackend, org_id: str, channel_id: str) -> dict:
+async def _channel_config(
+    db: DatabaseBackend,
+    org_id: str,
+    channel_id: str,
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "voice.api.channel_config",
+) -> dict:
     if not channel_id:
         return {}
     ch = await db.get(ChannelConnection, channel_id)
-    if not ch or ch.org_id != org_id or ch.channel_type != "voice":
+    try:
+        await verify_org_access_async(
+            org_id,
+            ch,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"channel_id": str(channel_id), "expected_channel_type": "voice"},
+        )
+    except HTTPException:
+        if ch is not None and str(getattr(ch, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
+    if ch.channel_type != "voice":
         return {}
     try:
         from aios.core.secrets import decrypt_channel_config
@@ -66,7 +88,7 @@ async def say(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    cfg = await _channel_config(db, org_id, body.channel_id)
+    cfg = await _channel_config(db, org_id, body.channel_id, actor_id=user.id, source="voice.api.say")
     res = await synthesize(body.text, cfg, body.voice)
     if not res.get("ok"):
         raise HTTPException(502, res.get("error", "tts falhou"))
@@ -94,7 +116,7 @@ async def call(
         t = await db.get(Team, body.team_id)
         if not t or t.org_id != org_id:
             raise HTTPException(400, "team_id inválido")
-    cfg = await _channel_config(db, org_id, body.channel_id)
+    cfg = await _channel_config(db, org_id, body.channel_id, actor_id=user.id, source="voice.api.call")
     res = await place_call(body.to, body.script, cfg, {"agent_id": body.agent_id, "team_id": body.team_id})
     conv = Conversation(
         org_id=org_id, channel="voice", external_id=body.to,

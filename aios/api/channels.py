@@ -12,9 +12,36 @@ from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import ChannelConnection, Conversation, Message
 from aios.schemas import ChannelCreate, ChannelOut, ChannelUpdate, PageResponse
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
+
+
+async def _get_channel_or_404(
+    db: DatabaseBackend,
+    channel_id: str,
+    org_id: str,
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "channels.api.channel_lookup",
+) -> ChannelConnection:
+    channel = await db.get(ChannelConnection, channel_id)
+    try:
+        await verify_org_access_async(
+            org_id,
+            channel,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"channel_id": str(channel_id)},
+        )
+    except HTTPException:
+        if channel is not None and str(getattr(channel, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
+    return channel
 
 
 @router.post("", response_model=ChannelOut)
@@ -85,11 +112,11 @@ async def get_channel(
     channel_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id:
-        raise HTTPException(404)
-    return channel
+    return await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.get_channel"
+    )
 
 
 @router.delete("/{channel_id}")
@@ -99,9 +126,9 @@ async def delete_channel(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id:
-        raise HTTPException(404)
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.delete_channel"
+    )
     await log_audit(db, org_id, "channel.delete", "channel", user_id=user.id, resource_id=channel_id, details={"label": channel.label})
     await _sync_channel(channel, False, db)
     await db.delete(channel)
@@ -115,10 +142,11 @@ async def update_channel(
     body: ChannelUpdate,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id:
-        raise HTTPException(404)
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.update_channel"
+    )
     update_data = body.model_dump(exclude_unset=True)
     for key, val in update_data.items():
         if key == "config" and val:
@@ -136,10 +164,11 @@ async def toggle_channel(
     channel_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id:
-        raise HTTPException(404)
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.toggle_channel"
+    )
     channel.is_active = not channel.is_active
     await db.commit()
     # Start/stop the live adapter. Flipping the flag alone left the poller
@@ -193,10 +222,11 @@ async def start_channel(
     channel_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id:
-        raise HTTPException(404)
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.start_channel"
+    )
     channel.is_active = True
     await db.commit()
     started = await _sync_channel(channel, True, db)
@@ -258,8 +288,10 @@ async def create_evolution_instance(
     if not channel_id:
         return {"ok": False, "message": "channel_id required"}
 
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.evolution_create_instance"
+    )
+    if channel.channel_type != "evolution":
         return {"ok": False, "message": "Invalid Evolution channel"}
 
     # Instance names are resolved globally by the inbound webhook (it has no org
@@ -323,8 +355,10 @@ async def delete_evolution_instance(
     if not instance_name or not channel_id:
         return {"ok": False, "message": "instance_name and channel_id required"}
 
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.evolution_delete_instance"
+    )
+    if channel.channel_type != "evolution":
         return {"ok": False, "message": "Invalid Evolution channel"}
 
     from aios.channels.manager import manager as channel_mgr
@@ -345,10 +379,13 @@ async def list_evolution_instances(
     channel_id: str = Query(...),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """List all Evolution instances for a channel."""
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.evolution_list_instances"
+    )
+    if channel.channel_type != "evolution":
         return {"ok": False, "message": "Invalid Evolution channel"}
 
     from aios.channels.manager import manager as channel_mgr

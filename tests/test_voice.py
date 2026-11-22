@@ -82,3 +82,44 @@ class TestVoice:
         t = VoiceCallTool()
         r = await t.run(to="", script="")
         assert "error" in r
+
+
+class TestVoiceTenantScope:
+    async def test_cross_tenant_voice_channel_access_records_metric(self, auth_client, test_db_session, second_org):
+        from sqlalchemy import select
+
+        from aios.db.models import ChannelConnection
+        from aios.governance.security import SecurityEvent
+
+        other = ChannelConnection(
+            org_id=second_org.id,
+            channel_type="voice",
+            label="Other Org Voice",
+            config={"provider": "selfhosted"},
+        )
+        test_db_session.add(other)
+        await test_db_session.commit()
+        await test_db_session.refresh(other)
+
+        cases = [
+            ("post", "/api/voice/say", {"text": "ola", "channel_id": other.id}, "voice.api.say"),
+            ("post", "/api/voice/call", {"to": "+5511999999999", "script": "oi", "channel_id": other.id}, "voice.api.call"),
+        ]
+        for method, path, body, source in cases:
+            resp = await getattr(auth_client, method)(path, json=body)
+            assert resp.status_code == 404, (path, resp.text)
+
+        rows = (
+            await test_db_session.execute(
+                select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+            )
+        ).scalars().all()
+        for _, _, _, source in cases:
+            assert any(
+                e.payload.get("metric") == "cross_tenant_block"
+                and e.payload.get("resource_type") == "ChannelConnection"
+                and e.payload.get("resource_org_id") == second_org.id
+                and e.payload.get("channel_id") == other.id
+                and e.source == source
+                for e in rows
+            ), source

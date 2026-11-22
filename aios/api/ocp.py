@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
-from aios.api.deps import get_current_user, get_org_id
+from aios.api.deps import get_current_user, get_org_id, verify_org_access_async
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization
 from aios.governance.ocp import (
@@ -201,8 +201,10 @@ def _require_track_c_autonomous_guard(payload: dict | None, *, action: str, org=
 async def get_ocp_policy(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     org = await db.get(Organization, org_id)
+    await verify_org_access_async(org_id, org, db=db, actor_id=user.id, source="api.ocp.get_policy")
     if org is None:
         raise HTTPException(404, "organization not found")
     policy = ocp_policy(getattr(org, "extra_data", None))
@@ -230,8 +232,7 @@ async def put_ocp_policy(
     user=Depends(get_current_user),
 ):
     org = await db.get(Organization, org_id)
-    if org is None:
-        raise HTTPException(404, "organization not found")
+    await verify_org_access_async(org_id, org, db=db, actor_id=user.id, source="api.ocp.put_policy")
     _require_track_c_autonomous_guard(body, action="policy:update", org=org, user=user)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder/owner required")
@@ -324,8 +325,9 @@ async def bootstrap_default_departments(
 # --- Members -----------------------------------------------------------------
 
 @router.get("/departments/{department_id}/members")
-async def list_members(department_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+async def list_members(department_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     dept = await db.get(Department, department_id)
+    await verify_org_access_async(org_id, dept, db=db, actor_id=user.id, source="api.ocp.list_members")
     if dept is None or dept.org_id != org_id:
         raise HTTPException(404, "department not found")
     rows = (await db.execute(select(DepartmentMember).where(
@@ -343,8 +345,7 @@ async def create_member(
     user=Depends(get_current_user),
 ):
     dept = await db.get(Department, department_id)
-    if dept is None or dept.org_id != org_id:
-        raise HTTPException(404, "department not found")
+    await verify_org_access_async(org_id, dept, db=db, actor_id=user.id, source="api.ocp.create_member")
     member_type = (body.get("member_type") or "").strip()
     if member_type not in {"human", "agent"}:
         raise HTTPException(400, "member_type must be human|agent")
@@ -385,7 +386,8 @@ async def delete_member(
     user=Depends(get_current_user),
 ):
     m = await db.get(DepartmentMember, member_id)
-    if m is None or m.org_id != org_id or m.department_id != department_id:
+    await verify_org_access_async(org_id, m, db=db, actor_id=user.id, source="api.ocp.delete_member")
+    if m is None or m.department_id != department_id:
         raise HTTPException(404, "member not found")
     org = await db.get(Organization, org_id)
     _require_track_c_autonomous_guard(body, action="department:member_remove", org=org, user=user)
@@ -465,8 +467,7 @@ async def revoke_grant(
     user=Depends(get_current_user),
 ):
     g = await db.get(AuthorityGrant, grant_id)
-    if g is None or g.org_id != org_id:
-        raise HTTPException(404, "grant not found")
+    await verify_org_access_async(org_id, g, db=db, actor_id=user.id, source="api.ocp.revoke_grant")
     org = await db.get(Organization, org_id)
     _require_track_c_autonomous_guard(body, action="authority:revoke", org=org, user=user)
     await _require_grant_if_policy(
@@ -567,8 +568,7 @@ async def transition(
     user=Depends(get_current_user),
 ):
     task = await db.get(SharedTask, task_id)
-    if task is None or task.org_id != org_id:
-        raise HTTPException(404, "task not found")
+    await verify_org_access_async(org_id, task, db=db, actor_id=user.id, source="api.ocp.transition_task")
     org = await db.get(Organization, org_id)
     _require_track_c_autonomous_guard(body, action="task:transition", org=org, user=user)
     actor_type = (body.get("actor_type") or "human").strip()
@@ -595,11 +595,11 @@ async def task_approval_links(
     task_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Read-only bridge: external approval refs from decisions linked to task."""
     task = await db.get(SharedTask, task_id)
-    if task is None or task.org_id != org_id:
-        raise HTTPException(404, "task not found")
+    await verify_org_access_async(org_id, task, db=db, actor_id=user.id, source="api.ocp.task_approval_links")
     rows = (await db.execute(
         select(DecisionRecord).where(DecisionRecord.org_id == org_id)
     )).scalars().all()
@@ -689,8 +689,7 @@ async def update_goal(
     user=Depends(get_current_user),
 ):
     g = await db.get(OrgGoal, goal_id)
-    if g is None or g.org_id != org_id:
-        raise HTTPException(404, "goal not found")
+    await verify_org_access_async(org_id, g, db=db, actor_id=user.id, source="api.ocp.update_goal")
     org = await db.get(Organization, org_id)
     _require_track_c_autonomous_guard(body, action="goal:update", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
@@ -736,10 +735,10 @@ async def get_decision(
     decision_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     record = await db.get(DecisionRecord, decision_id)
-    if record is None or record.org_id != org_id:
-        raise HTTPException(404, "decision not found")
+    await verify_org_access_async(org_id, record, db=db, actor_id=user.id, source="api.ocp.get_decision")
     return _decision(record)
 
 
@@ -790,8 +789,7 @@ async def decide_record(
     user=Depends(get_current_user),
 ):
     record = await db.get(DecisionRecord, decision_id)
-    if record is None or record.org_id != org_id:
-        raise HTTPException(404, "decision not found")
+    await verify_org_access_async(org_id, record, db=db, actor_id=user.id, source="api.ocp.decide_record")
     org = await db.get(Organization, org_id)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder approval required")
@@ -827,8 +825,7 @@ async def link_decision_approval(
     pending_action, approval_manager, external_ticket, manual.
     """
     record = await db.get(DecisionRecord, decision_id)
-    if record is None or record.org_id != org_id:
-        raise HTTPException(404, "decision not found")
+    await verify_org_access_async(org_id, record, db=db, actor_id=user.id, source="api.ocp.link_decision_approval")
     org = await db.get(Organization, org_id)
     _require_track_c_autonomous_guard(body, action="decision:link_approval", org=org, user=user)
     await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
@@ -864,14 +861,14 @@ async def get_decision_approval_bridge(
     decision_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Read-only observability for decision approval bridge refs.
 
     Explicitly not PendingAction/ApprovalManager↔DecisionRecord unification.
     """
     record = await db.get(DecisionRecord, decision_id)
-    if record is None or record.org_id != org_id:
-        raise HTTPException(404, "decision not found")
+    await verify_org_access_async(org_id, record, db=db, actor_id=user.id, source="api.ocp.get_decision_approval_bridge")
     external_approvals = list((record.justification or {}).get("_external_approvals") or [])
     return {
         "decision_id": record.id,
@@ -890,8 +887,7 @@ async def execute_decision_route(
     user=Depends(get_current_user),
 ):
     record = await db.get(DecisionRecord, decision_id)
-    if record is None or record.org_id != org_id:
-        raise HTTPException(404, "decision not found")
+    await verify_org_access_async(org_id, record, db=db, actor_id=user.id, source="api.ocp.execute_decision")
     org = await db.get(Organization, org_id)
     _require_track_c_autonomous_guard(body, action="decision:execute", org=org, user=user)
     actor_type = (body.get("actor_type") or "human").strip()

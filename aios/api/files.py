@@ -12,7 +12,7 @@ from aios.core.file_validation import validate_file
 from aios.core.storage import list_artifacts, read_artifact_text, save_artifact
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Artifact
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,18 @@ async def read_file(
 ):
     """Read artifact content as text for agent use."""
     art = await db.get(Artifact, artifact_id)
-    if not art or art.org_id != org_id:
-        raise HTTPException(404)
+    try:
+        await verify_org_access_async(
+            org_id,
+            art,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            source="files.api.read_file",
+            payload={"artifact_id": str(artifact_id)},
+        )
+    except HTTPException:
+        if art is not None and str(getattr(art, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
     text = await read_artifact_text(artifact_id, db)
     return {"filename": art.filename, "content": text, "size_bytes": art.size_bytes}

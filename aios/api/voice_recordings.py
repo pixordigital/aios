@@ -11,11 +11,38 @@ from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import VoiceRecording
 from aios.schemas import PageResponse
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/voice/recordings", tags=["voice-recordings"])
+
+
+async def _get_recording_or_404(
+    db: DatabaseBackend,
+    recording_id: str,
+    org_id: str,
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "voice_recordings.api.recording_lookup",
+) -> VoiceRecording:
+    recording = await db.get(VoiceRecording, recording_id)
+    try:
+        await verify_org_access_async(
+            org_id,
+            recording,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"recording_id": str(recording_id)},
+        )
+    except HTTPException:
+        if recording is not None and str(getattr(recording, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
+    return recording
 
 
 @router.get("", response_model=PageResponse[dict])
@@ -176,9 +203,9 @@ async def get_recording(
     user=Depends(get_current_user),
 ):
     """Get recording details with full transcript."""
-    recording = await db.get(VoiceRecording, recording_id)
-    if not recording or recording.org_id != org_id:
-        raise HTTPException(404)
+    recording = await _get_recording_or_404(
+        db, recording_id, org_id, actor_id=user.id, source="voice_recordings.api.get"
+    )
     
     return {
         "id": recording.id,
@@ -210,10 +237,10 @@ async def download_recording_audio(
     """Download recording audio file."""
     from fastapi.responses import StreamingResponse
     from aios.core.storage import backend
-    
-    recording = await db.get(VoiceRecording, recording_id)
-    if not recording or recording.org_id != org_id:
-        raise HTTPException(404)
+
+    recording = await _get_recording_or_404(
+        db, recording_id, org_id, actor_id=user.id, source="voice_recordings.api.audio"
+    )
     
     if not recording.recording_storage_path:
         raise HTTPException(404, "Audio file not available")
@@ -238,9 +265,9 @@ async def transcribe_recording(
     user=Depends(get_current_user),
 ):
     """Trigger transcription for a recording using Whisper."""
-    recording = await db.get(VoiceRecording, recording_id)
-    if not recording or recording.org_id != org_id:
-        raise HTTPException(404)
+    recording = await _get_recording_or_404(
+        db, recording_id, org_id, actor_id=user.id, source="voice_recordings.api.transcribe"
+    )
     
     if not recording.recording_storage_path:
         raise HTTPException(400, "No audio file to transcribe")

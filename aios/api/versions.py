@@ -3,7 +3,7 @@ from sqlalchemy import select, func
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, AgentVersion
 from aios.schemas import BaseModel
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 router = APIRouter(prefix="/api/agents", tags=["agent-versions"])
 
@@ -22,8 +22,7 @@ class VersionOut(BaseModel):
 @router.post("/{agent_id}/publish")
 async def publish_version(agent_id: str, body: dict = {}, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, agent, db=db, actor_id=user.id, source="api.versions.publish")
     max_v = (await db.execute(select(func.max(AgentVersion.version)).where(AgentVersion.agent_id == agent_id))).scalar() or 0
     v = AgentVersion(agent_id=agent.id, org_id=org_id, version=max_v + 1, name=agent.name, system_prompt=agent.system_prompt, llm_config=dict(agent.llm_config or {}), tools=list(agent.tools or []), memory_config=dict(agent.memory_config or {}), governance_config=dict(agent.governance_config or {}), agent_type=agent.agent_type, change_note=body.get("note") or body.get("change_note") or "")
     db.add(v)
@@ -32,19 +31,18 @@ async def publish_version(agent_id: str, body: dict = {}, db: DatabaseBackend = 
     return v
 
 @router.get("/{agent_id}/versions", response_model=list[VersionOut])
-async def list_versions(agent_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), limit: int = Query(20, ge=1, le=100)):
+async def list_versions(agent_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user), limit: int = Query(20, ge=1, le=100)):
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, agent, db=db, actor_id=user.id, source="api.versions.list")
     res = await db.execute(select(AgentVersion).where(AgentVersion.agent_id == agent_id).order_by(AgentVersion.version.desc()).limit(limit))
     return res.scalars().all()
 
 @router.post("/{agent_id}/versions/{version_id}/rollback")
 async def rollback_version(agent_id: str, version_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, agent, db=db, actor_id=user.id, source="api.versions.rollback_agent")
     ver = await db.get(AgentVersion, version_id)
+    await verify_org_access_async(org_id, ver, db=db, actor_id=user.id, source="api.versions.rollback_version")
     if not ver or ver.agent_id != agent_id:
         raise HTTPException(404)
     agent.name = ver.name
@@ -63,9 +61,10 @@ async def rollback_version(agent_id: str, version_id: str, db: DatabaseBackend =
     return {"ok": True, "agent": {"id": agent.id, "name": agent.name}, "rolled_back_to": ver.version, "new_version": new_v.version}
 
 @router.get("/{agent_id}/versions/{version_id}")
-async def get_version(agent_id: str, version_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+async def get_version(agent_id: str, version_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     ver = await db.get(AgentVersion, version_id)
-    if not ver or ver.agent_id != agent_id or ver.org_id != org_id:
+    await verify_org_access_async(org_id, ver, db=db, actor_id=user.id, source="api.versions.get")
+    if not ver or ver.agent_id != agent_id:
         raise HTTPException(404)
     return ver
 
@@ -77,11 +76,13 @@ async def diff_version(
     compare: str | None = Query(None, description="compare to version id, default previous"),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     import difflib
 
     ver = await db.get(AgentVersion, version_id)
-    if not ver or ver.agent_id != agent_id or ver.org_id != org_id:
+    await verify_org_access_async(org_id, ver, db=db, actor_id=user.id, source="api.versions.diff")
+    if not ver or ver.agent_id != agent_id:
         raise HTTPException(404)
     other = None
     if compare:
@@ -94,8 +95,7 @@ async def diff_version(
                 AgentVersion.id == compare, AgentVersion.org_id == org_id
             )
         )).scalar_one_or_none()
-        if not other:
-            raise HTTPException(404)
+        await verify_org_access_async(org_id, other, db=db, actor_id=user.id, source="api.versions.diff_compare")
     else:
         res = await db.execute(
             select(AgentVersion)

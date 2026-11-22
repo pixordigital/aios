@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
@@ -22,7 +22,7 @@ from aios.governance.kpi import (
     validate_target_proposal,
     win_rate,
 )
-from .deps import get_current_user, get_org_id, get_superadmin
+from .deps import get_current_user, get_org_id, get_superadmin, verify_org_access_async
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -527,14 +527,25 @@ async def telemetry_agent(
     hours: int = 24,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Hourly metrics for a specific agent."""
     from aios.core.telemetry import telemetry
 
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        from fastapi import HTTPException
-        raise HTTPException(404)
+    try:
+        await verify_org_access_async(
+            org_id,
+            agent,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            source="analytics.api.telemetry_agent",
+            payload={"agent_id": str(agent_id)},
+        )
+    except HTTPException:
+        if agent is not None and str(getattr(agent, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
 
     metrics = telemetry.get_metrics_for_agent(agent_id, hours)
     health = health_tracker.get_status(agent_id)

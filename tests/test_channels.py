@@ -134,3 +134,48 @@ class TestChannels:
         )
         assert response.status_code == 200
         assert response.json()["ok"] is False
+
+
+class TestChannelTenantScope:
+    async def test_cross_tenant_channel_access_records_metric(self, auth_client, test_db_session, second_org):
+        from sqlalchemy import select
+
+        from aios.db.models import ChannelConnection
+        from aios.governance.security import SecurityEvent
+
+        other = ChannelConnection(
+            org_id=second_org.id,
+            channel_type="web",
+            label="Other Org Channel",
+            config={},
+        )
+        test_db_session.add(other)
+        await test_db_session.commit()
+        await test_db_session.refresh(other)
+
+        cases = [
+            ("get", f"/api/channels/{other.id}", None, "channels.api.get_channel"),
+            ("put", f"/api/channels/{other.id}", {"label": "x"}, "channels.api.update_channel"),
+            ("post", f"/api/channels/{other.id}/toggle", None, "channels.api.toggle_channel"),
+            ("post", f"/api/channels/{other.id}/start", None, "channels.api.start_channel"),
+            ("delete", f"/api/channels/{other.id}", None, "channels.api.delete_channel"),
+        ]
+        for method, path, body, source in cases:
+            req = getattr(auth_client, method)
+            resp = await req(path, json=body) if body is not None else await req(path)
+            assert resp.status_code == 404, (path, resp.text)
+
+        rows = (
+            await test_db_session.execute(
+                select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+            )
+        ).scalars().all()
+        for _, _, _, source in cases:
+            assert any(
+                e.payload.get("metric") == "cross_tenant_block"
+                and e.payload.get("resource_type") == "ChannelConnection"
+                and e.payload.get("resource_org_id") == second_org.id
+                and e.payload.get("channel_id") == other.id
+                and e.source == source
+                for e in rows
+            ), source

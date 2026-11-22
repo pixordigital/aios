@@ -12,11 +12,38 @@ from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Conversation, Message, ChannelConnection, User
 from aios.schemas import PageResponse
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
+
+
+async def _get_conversation_or_404(
+    db: DatabaseBackend,
+    conversation_id: str,
+    org_id: str,
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "inbox.api.conversation_lookup",
+) -> Conversation:
+    conv = await db.get(Conversation, conversation_id)
+    try:
+        await verify_org_access_async(
+            org_id,
+            conv,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"conversation_id": str(conversation_id)},
+        )
+    except HTTPException:
+        if conv is not None and str(getattr(conv, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
+    return conv
 
 
 def _json_str(model, key: str):
@@ -195,9 +222,9 @@ async def get_inbox_conversation(
     user=Depends(get_current_user),
 ):
     """Get full conversation with messages for inbox detail view."""
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation_or_404(
+        db, conversation_id, org_id, actor_id=user.id, source="inbox.api.get_conversation"
+    )
     
     # Get channel info
     channel = None
@@ -266,9 +293,9 @@ async def assign_conversation(
     user=Depends(get_current_user),
 ):
     """Assign conversation to a team member."""
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation_or_404(
+        db, conversation_id, org_id, actor_id=user.id, source="inbox.api.assign"
+    )
     
     # Verify assignee is in same org
     assignee = await db.get(User, assignee_id)
@@ -297,9 +324,9 @@ async def unassign_conversation(
     user=Depends(get_current_user),
 ):
     """Unassign conversation."""
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation_or_404(
+        db, conversation_id, org_id, actor_id=user.id, source="inbox.api.unassign"
+    )
     
     extra = dict(conv.extra_data or {})
     extra["assigned_to"] = None
@@ -322,9 +349,9 @@ async def close_conversation(
     user=Depends(get_current_user),
 ):
     """Mark conversation as closed."""
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation_or_404(
+        db, conversation_id, org_id, actor_id=user.id, source="inbox.api.close"
+    )
     
     extra = dict(conv.extra_data or {})
     extra["status"] = "closed"
@@ -347,9 +374,9 @@ async def reopen_conversation(
     user=Depends(get_current_user),
 ):
     """Reopen a closed conversation."""
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation_or_404(
+        db, conversation_id, org_id, actor_id=user.id, source="inbox.api.reopen"
+    )
     
     extra = dict(conv.extra_data or {})
     extra["status"] = "open"
@@ -373,9 +400,9 @@ async def send_inbox_message(
     user=Depends(get_current_user),
 ):
     """Send a message from the inbox (human reply)."""
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation_or_404(
+        db, conversation_id, org_id, actor_id=user.id, source="inbox.api.send"
+    )
     
     # Save human message
     msg = Message(
