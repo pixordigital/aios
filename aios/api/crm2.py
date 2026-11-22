@@ -22,7 +22,7 @@ from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import CrmDeal
 from aios.schemas import PageResponse
 
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
@@ -41,24 +41,21 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
-async def _deal_or_404(db, deal_id: str, org_id: str) -> CrmDeal:
+async def _deal_or_404(db, deal_id: str, org_id: str, *, actor_id: str | None = None, source: str = "api.crm2.deal") -> CrmDeal:
     deal = await db.get(CrmDeal, deal_id)
-    if not deal or deal.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, deal, db=db, actor_id=actor_id, source=source)
     return deal
 
 
-async def _account_or_404(db, account_id: str, org_id: str) -> Account:
+async def _account_or_404(db, account_id: str, org_id: str, *, actor_id: str | None = None, source: str = "api.crm2.account") -> Account:
     row = await db.get(Account, account_id)
-    if not row or row.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, row, db=db, actor_id=actor_id, source=source)
     return row
 
 
-async def _contact_or_404(db, contact_id: str, org_id: str) -> Contact:
+async def _contact_or_404(db, contact_id: str, org_id: str, *, actor_id: str | None = None, source: str = "api.crm2.contact") -> Contact:
     row = await db.get(Contact, contact_id)
-    if not row or row.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, row, db=db, actor_id=actor_id, source=source)
     return row
 
 def _crm_enabled(org):
@@ -145,8 +142,7 @@ async def create_deal(body: dict, db: DatabaseBackend = Depends(get_db_backend),
 @router.patch("/deals/{deal_id}")
 async def update_deal(deal_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     deal = await db.get(CrmDeal, deal_id)
-    if not deal or deal.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, deal, db=db, actor_id=user.id, source="api.crm2.update_deal")
     # Deal Desk Governado — wedge (PLANS + HITL alert)
     try:
         from aios.governance.deal_desk import audit_deal_change, check_human_deviation
@@ -211,7 +207,7 @@ async def update_deal(deal_id: str, body: dict, db: DatabaseBackend = Depends(ge
 
 @router.get("/deals/{deal_id}")
 async def get_deal(deal_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
-    deal = await _deal_or_404(db, deal_id, org_id)
+    deal = await _deal_or_404(db, deal_id, org_id, source="api.crm2.get_deal")
     account, account_link = await find_account_for_deal_with_meta(db, deal)
     contact, contact_link = await find_contact_for_deal_with_meta(db, deal)
     payload = deal_360_payload(deal, account=account, contact=contact, account_link=account_link, contact_link=contact_link)
@@ -231,8 +227,7 @@ async def get_deal(deal_id: str, db: DatabaseBackend = Depends(get_db_backend), 
 @router.delete("/deals/{deal_id}")
 async def delete_deal(deal_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     deal = await db.get(CrmDeal, deal_id)
-    if not deal or deal.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, deal, db=db, source="api.crm2.delete_deal")
     await db.delete(deal)
     await db.commit()
     return {"ok": True}

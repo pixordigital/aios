@@ -9,7 +9,7 @@ from sqlalchemy import select
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Workflow, WorkflowRun, Credential
 from aios.core.secrets import encrypt_secret
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +97,7 @@ def _require_role(user, allowed: list[str]):
 async def list_triggers(wf_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     from aios.db.models import AutomationTrigger
     wf = await db.get(Workflow, wf_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "workflow not found")
+    await verify_org_access_async(org_id, wf, db=db, source="api.automations.list_triggers")
     res = await db.execute(select(AutomationTrigger).where(AutomationTrigger.workflow_id == wf_id))
     return res.scalars().all()
 
@@ -107,8 +106,7 @@ async def create_trigger(wf_id: str, body: dict, db: DatabaseBackend = Depends(g
     _require_role(user, ["admin","org_admin"])
     from aios.db.models import AutomationTrigger
     wf = await db.get(Workflow, wf_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "workflow not found")
+    await verify_org_access_async(org_id, wf, db=db, actor_id=user.id, source="api.automations.create_trigger")
     ttype = body.get("type")
     if ttype not in ("webhook","cron","event","manual","schedule"):
         raise HTTPException(400, "type must be webhook|cron|event|manual|schedule")
@@ -148,8 +146,9 @@ async def create_trigger(wf_id: str, body: dict, db: DatabaseBackend = Depends(g
 async def delete_trigger(wf_id: str, trig_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     from aios.db.models import AutomationTrigger
     trig = await db.get(AutomationTrigger, trig_id)
-    if not trig or trig.workflow_id != wf_id or trig.org_id != org_id:
+    if not trig or trig.workflow_id != wf_id:
         raise HTTPException(404)
+    await verify_org_access_async(org_id, trig, db=db, actor_id=user.id, source="api.automations.delete_trigger")
     await db.delete(trig)
     await db.commit()
     return {"ok": True}
@@ -158,8 +157,9 @@ async def delete_trigger(wf_id: str, trig_id: str, db: DatabaseBackend = Depends
 async def update_trigger(wf_id: str, trig_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     from aios.db.models import AutomationTrigger
     trig = await db.get(AutomationTrigger, trig_id)
-    if not trig or trig.workflow_id != wf_id or trig.org_id != org_id:
+    if not trig or trig.workflow_id != wf_id:
         raise HTTPException(404)
+    await verify_org_access_async(org_id, trig, db=db, actor_id=user.id, source="api.automations.update_trigger")
     for k in ("name","is_active","config","cron_expr","event_type"):
         if k in body:
             setattr(trig, k, body[k])
@@ -263,8 +263,7 @@ async def create_credential(body: dict, db: DatabaseBackend = Depends(get_db_bac
 @router.delete("/credentials/{cred_id}")
 async def delete_credential(cred_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     cred = await db.get(Credential, cred_id)
-    if not cred or cred.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(org_id, cred, db=db, actor_id=user.id, source="api.automations.delete_credential")
     await db.delete(cred)
     await db.commit()
     return {"ok": True}
