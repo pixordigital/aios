@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import cast
+from typing import Any, cast
 import json
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,11 +9,73 @@ from sqlalchemy import select
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Workflow, WorkflowRun, Credential
 from aios.core.secrets import encrypt_secret
+from aios.governance.security import record_security_event
 from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/automations", tags=["automations"])
+
+_WEBHOOK_SIGNATURE_HEADERS = (
+    "x-hub-signature-256",
+    "x-slack-signature",
+    "x-twilio-signature",
+    "x-mailgun-signature",
+)
+_SENSITIVE_WEBHOOK_HEADERS = {"authorization", "cookie", *_WEBHOOK_SIGNATURE_HEADERS}
+
+
+def _webhook_header_anomalies(headers: Any) -> list[str]:
+    anomalies: list[str] = []
+    for name in _WEBHOOK_SIGNATURE_HEADERS:
+        val = headers.get(name)
+        if val is None:
+            continue
+        sval = str(val).strip()
+        if not sval:
+            anomalies.append(f"{name}:empty")
+        elif len(sval) > 512:
+            anomalies.append(f"{name}:oversized")
+    ct = str(headers.get("content-type") or "").strip().lower()
+    if headers.get("content-length") in ("", "0") and ct.startswith("application/json"):
+        # body may still arrive; only flag obvious empty+json mismatch when no body handled later
+        pass
+    return anomalies
+
+
+async def _record_webhook_security_event(
+    *,
+    org_id: str | None,
+    workflow_id: str | None,
+    trigger_id: str | None,
+    reason: str,
+    severity: str = "medium",
+    payload: dict[str, Any] | None = None,
+) -> None:
+    if not org_id:
+        return
+    data = {
+        "reason": reason,
+        "workflow_id": str(workflow_id) if workflow_id else None,
+        "trigger_id": str(trigger_id) if trigger_id else None,
+        **(payload or {}),
+    }
+    try:
+        from aios.db.engine import async_session
+
+        async with async_session() as sec_sess:
+            await record_security_event(
+                sec_sess,
+                org_id=str(org_id),
+                source="api.automations.webhook_dispatch",
+                event_type="security.webhook.anomaly",
+                severity=severity,
+                actor_type="system",
+                payload=data,
+            )
+            await sec_sess.commit()
+    except Exception:
+        logger.debug("webhook security event skipped", exc_info=True)
 
 # Heterogeneous template config (names, descriptions, node lists, triggers).
 # Annotated once here so every consumer sees dicts instead of mypy inferring
@@ -190,13 +252,53 @@ async def webhook_dispatch(path: str, request: Request):
         wf = await sess.get(Workflow, trig.workflow_id, options=[selectinload(Workflow.nodes)])
         if not wf:
             raise HTTPException(404, "workflow not found")
+
+        header_anomalies = _webhook_header_anomalies(request.headers)
+        if header_anomalies:
+            await _record_webhook_security_event(
+                org_id=trig.org_id,
+                workflow_id=wf.id,
+                trigger_id=trig.id,
+                reason="signature_header_anomaly",
+                payload={"anomalies": header_anomalies, "webhook_path": path, "method": request.method},
+            )
+
         try:
             body = await request.body()
-            j = None
+        except Exception:
+            body = b""
+            await _record_webhook_security_event(
+                org_id=trig.org_id,
+                workflow_id=wf.id,
+                trigger_id=trig.id,
+                reason="body_read_failed",
+                payload={"webhook_path": path, "method": request.method},
+            )
+
+        j = None
+        ct = str(request.headers.get("content-type") or "").lower()
+        body_text = body.decode(errors="replace") if body else ""
+        looks_json = "json" in ct or body_text.lstrip().startswith(("{", "["))
+        if body:
             try:
-                j = await request.json()
+                j = json.loads(body_text)
             except Exception:
                 j = None
+                if looks_json:
+                    await _record_webhook_security_event(
+                        org_id=trig.org_id,
+                        workflow_id=wf.id,
+                        trigger_id=trig.id,
+                        reason="malformed_json_payload",
+                        payload={
+                            "webhook_path": path,
+                            "method": request.method,
+                            "content_type": ct[:120],
+                            "body_len": len(body),
+                        },
+                    )
+
+        try:
             headers = {
                 k: v
                 for k, v in request.headers.items()
@@ -204,35 +306,84 @@ async def webhook_dispatch(path: str, request: Request):
                 # the event. Persisting them writes one tenant's (or an
                 # attacker's) secrets into a workflow run row that other code
                 # paths read back out.
-                if k.lower() not in ("authorization", "cookie", "x-hub-signature-256",
-                                     "x-slack-signature", "x-twilio-signature", "x-mailgun-signature")
+                if k.lower() not in _SENSITIVE_WEBHOOK_HEADERS
             }
             query = dict(request.query_params)
         except Exception:
-            body, j, headers, query = b"", None, {}, {}
-        payload = {"webhook_path": path, "method": request.method, "headers": headers, "query": query, "body": body.decode()[:5000] if body else "", "json": j}
+            headers, query = {}, {}
+
+        payload = {
+            "webhook_path": path,
+            "method": request.method,
+            "headers": headers,
+            "query": query,
+            "body": body_text[:5000] if body_text else "",
+            "json": j,
+        }
         # enqueue workflow run
         from aios.db.models import WorkflowRun
-        run = WorkflowRun(workflow_id=wf.id, org_id=trig.org_id, status="pending", inputs={"input": json.dumps(payload)[:8000], "webhook": payload, "trigger_id": trig.id}, conversation_id=None)
-        sess.add(run)
-        await sess.commit()
-        await sess.refresh(run)
+        try:
+            run = WorkflowRun(
+                workflow_id=wf.id,
+                org_id=trig.org_id,
+                status="pending",
+                inputs={"input": json.dumps(payload)[:8000], "webhook": payload, "trigger_id": trig.id},
+                conversation_id=None,
+            )
+            sess.add(run)
+            await sess.commit()
+            await sess.refresh(run)
+        except Exception:
+            await _record_webhook_security_event(
+                org_id=trig.org_id,
+                workflow_id=wf.id,
+                trigger_id=trig.id,
+                reason="dispatch_persist_failed",
+                severity="high",
+                payload={"webhook_path": path, "method": request.method},
+            )
+            raise
+
         try:
             from aios.tasks.queue import enqueue_job
             await enqueue_job("aios.tasks.jobs.workflow_run_job", {"workflow_id": wf.id, "run_id": run.id})
             run.status = "running"
             await sess.commit()
         except Exception:
-            from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
-            wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id)
-            for n in wf.nodes:
-                wdef.nodes[n.id] = WNode(id=n.id, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=n.tool_args or {}, depends_on=n.depends_on or [], condition=n.condition, output_key=n.output_key, timeout=n.timeout_seconds)
-            eng = WorkflowEngine()
-            res = await eng.run(wdef, run.id, json.dumps(payload))
-            run.status = "done" if res.ok() else "failed"
-            run.outputs = res.outputs
-            run.node_status = res.node_status
-            await sess.commit()
+            try:
+                from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
+                wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id)
+                for n in wf.nodes:
+                    wdef.nodes[n.id] = WNode(
+                        id=n.id,
+                        agent_id=n.agent_id,
+                        tool_name=n.tool_name,
+                        tool_args=n.tool_args or {},
+                        depends_on=n.depends_on or [],
+                        condition=n.condition,
+                        output_key=n.output_key,
+                        timeout=n.timeout_seconds,
+                    )
+                eng = WorkflowEngine()
+                res = await eng.run(wdef, run.id, json.dumps(payload))
+                run.status = "done" if res.ok() else "failed"
+                run.outputs = res.outputs
+                run.node_status = res.node_status
+                await sess.commit()
+            except Exception:
+                run.status = "failed"
+                run.error = "webhook dispatch failed; see server log"
+                await sess.commit()
+                await _record_webhook_security_event(
+                    org_id=trig.org_id,
+                    workflow_id=wf.id,
+                    trigger_id=trig.id,
+                    reason="dispatch_execution_failed",
+                    severity="high",
+                    payload={"webhook_path": path, "method": request.method, "run_id": str(run.id)},
+                )
+                raise
+
         return {"ok": True, "run_id": run.id, "workflow_id": wf.id}
 
 # --- Credentials ---
