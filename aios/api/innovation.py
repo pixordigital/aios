@@ -26,6 +26,42 @@ from aios.governance.innovation import (
     track_b_hypothesis_required,
 )
 
+
+def _innovation_guard(
+    body: dict,
+    action: str,
+    *,
+    track: str | None = None,
+    autonomous: bool | None = None,
+    has_evidence: bool | None = None,
+) -> None:
+    """Fail-closed Track C autonomous guard for mutating innovation endpoints.
+
+    Narrow/explicit: only triggers when payload/experiment marks Track C autonomous.
+    Does not claim coverage for all execution systems.
+    """
+    perms = body.get("permissions") if isinstance(body.get("permissions"), dict) else {}
+    t = track if track is not None else body.get("track", perms.get("track"))
+    if autonomous is None:
+        mode = str(body.get("optimization_mode") or perms.get("optimization_mode") or perms.get("mode") or "").strip().lower()
+        auto = bool(body.get("autonomous", perms.get("autonomous", False))) or mode in {"track_c_autonomous", "autonomous", "auto_optimize"}
+    else:
+        auto = autonomous
+    evidence = body.get("evidence", perms.get("evidence", perms.get("evidence_refs", perms.get("track_c_evidence"))))
+    ev = bool(evidence) if not isinstance(evidence, (str, list, tuple, set, dict)) else bool(evidence)
+    if has_evidence is not None:
+        ev = ev or has_evidence
+    founder_approved = bool(body.get("founder_approved", perms.get("founder_approved", False)))
+    ok, reason = autonomous_action_guard(
+        track=str(t) if t is not None else None,
+        autonomous=auto,
+        has_evidence=ev,
+        founder_approved=founder_approved,
+        action=action,
+    )
+    if not ok:
+        raise HTTPException(403, reason)
+
 router = APIRouter(prefix="/api/innovation", tags=["innovation"])
 
 
@@ -55,6 +91,7 @@ async def create_hypothesis(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _innovation_guard(body, "innovation hypothesis create")
     title = str(body.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "title required")
@@ -146,6 +183,13 @@ async def create_experiment(
     ok, reason = track_b_hypothesis_required(exp)
     if not ok:
         raise HTTPException(400, reason)
+    _innovation_guard(
+        body,
+        "innovation experiment create",
+        track=permissions.get("track"),
+        autonomous=is_track_c_autonomous(exp),
+        has_evidence=has_track_c_evidence(exp),
+    )
     db.add(exp)
     await db.commit()
     await db.refresh(exp)
@@ -171,6 +215,13 @@ async def evaluate(
     org_id: str = Depends(get_org_id),
 ):
     exp = await _experiment(exp_id, org_id, db)
+    _innovation_guard(
+        body,
+        "innovation experiment evaluate",
+        track=(exp.permissions or {}).get("track"),
+        autonomous=is_track_c_autonomous(exp),
+        has_evidence=has_track_c_evidence(exp),
+    )
     if "observed" in body:
         exp.observed = float(body["observed"])
     if "spent_brl" in body:

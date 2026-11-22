@@ -113,9 +113,18 @@ async def test_hypothesis_linkage_track_c_and_mvp_promotion_guards(
 
     track_c["permissions"] = {"track": "C", "autonomous": True, "evidence": ["pilot-log"]}
     resp = await auth_client.post("/api/innovation/experiments", json=track_c)
-    assert resp.status_code == 200
+    assert resp.status_code == 403
+    track_c["founder_approved"] = True
+    resp = await auth_client.post("/api/innovation/experiments", json=track_c)
+    assert resp.status_code == 200, resp.text
     exp_id = resp.json()["id"]
-    await auth_client.post(f"/api/innovation/experiments/{exp_id}/evaluate", json={"observed": 0.3})
+    resp = await auth_client.post(f"/api/innovation/experiments/{exp_id}/evaluate", json={"observed": 0.3})
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        f"/api/innovation/experiments/{exp_id}/evaluate",
+        json={"observed": 0.3, "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
 
     test_org.extra_data = {"founder_user_id": test_user.id}
     await test_db_session.commit()

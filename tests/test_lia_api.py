@@ -90,6 +90,22 @@ async def test_campaign_approval_requires_legal_and_founder(
     assert resp.json()["status"] == "approved"
 
 
+async def test_campaign_approve_track_c_autonomous_guard(auth_client, test_db_session, test_org, test_user):
+    resp = await auth_client.post(
+        "/api/lia/campaigns", json={"name": "Guarded", "channel": "email", "legal_reviewed": True}
+    )
+    cid = resp.json()["id"]
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    resp = await auth_client.post(f"/api/lia/campaigns/{cid}/approve", json={"track": "C", "autonomous": True})
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        f"/api/lia/campaigns/{cid}/approve",
+        json={"track": "C", "autonomous": True, "evidence": ["ok"], "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+
 async def test_member_handoff_respects_suppression_and_stage_transitions(
     auth_client, test_db_session, test_org
 ):

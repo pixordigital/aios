@@ -139,9 +139,12 @@ async def create_campaign(
 @router.post("/campaigns/{campaign_id}/approve")
 async def approve_campaign(
     campaign_id: str,
+    body: dict | None = None,
     user: User = Depends(get_current_user),
     db: DatabaseBackend = Depends(get_db_backend),
 ):
+    payload = body or {}
+    _lia_guard(payload, "lia campaign approve")
     campaign = (
         await db.execute(
             select(Campaign).where(Campaign.id == campaign_id, Campaign.org_id == user.org_id)
