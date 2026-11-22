@@ -154,9 +154,15 @@ async def test_decision_list_get_and_external_approval_link(auth_client):
         json={"ref_type": "pending_action", "ref_id": "pa-1", "status": "approved", "note": "bridge"},
     )
     assert resp.status_code == 200, resp.text
-    refs = resp.json()["external_approvals"]
+    body = resp.json()
+    refs = body["external_approvals"]
     assert refs and refs[0]["ref_type"] == "pending_action"
     assert refs[0]["ref_id"] == "pa-1"
+    bridge = body["approval_bridge"]
+    assert bridge["unified"] is False
+    assert bridge["mode"] == "external_refs_only"
+    assert bridge["external_approval_count"] == 1
+    assert "PendingAction/ApprovalManager" in bridge["limitation"]
 
 
 async def test_task_approval_links_read_only_bridge(auth_client, test_db_session):
@@ -183,7 +189,9 @@ async def test_task_approval_links_read_only_bridge(auth_client, test_db_session
 async def test_ocp_strict_default_deny_blocks_ungranted_action(
     auth_client, test_db_session, test_org, test_user
 ):
-    test_org.extra_data = {"ocp": {"strict_default_deny": True}}
+    # Founder needed to bootstrap grants under strict mode; founder_bypass allows
+    # authority:grant/authority:revoke for explicit Founder/owner.
+    test_org.extra_data = {"ocp": {"strict_default_deny": True}, "founder_user_id": test_user.id}
     await test_db_session.commit()
     resp = await auth_client.post("/api/ocp/tasks", json={"title": "Needs grant"})
     assert resp.status_code == 403
@@ -202,3 +210,38 @@ async def test_ocp_strict_default_deny_blocks_ungranted_action(
     assert grant_resp.status_code == 200, grant_resp.text
     resp = await auth_client.post("/api/ocp/tasks", json={"title": "Granted"})
     assert resp.status_code == 200, resp.text
+
+
+async def test_ocp_policy_get_put_founder_only(auth_client, test_db_session, test_org, test_user):
+    resp = await auth_client.get("/api/ocp/policy")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["strict_default_deny"] is False
+    assert resp.json()["mode"] == "policy_if_configured"
+    assert resp.json()["approval_bridge"]["unified"] is False
+
+    resp = await auth_client.put("/api/ocp/policy", json={"strict_default_deny": True})
+    assert resp.status_code == 403
+
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    resp = await auth_client.put("/api/ocp/policy", json={"strict_default_deny": True})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["strict_default_deny"] is True
+    assert resp.json()["mode"] == "strict_default_deny"
+
+    resp = await auth_client.get("/api/ocp/policy")
+    assert resp.status_code == 200
+    assert resp.json()["strict_default_deny"] is True
+
+    # strict mode now blocks mutating endpoint without grant
+    blocked = await auth_client.post("/api/ocp/goals", json={"title": "G"})
+    assert blocked.status_code == 403
+    assert "strict_default_deny" in blocked.json()["detail"]
+
+    grant_resp = await auth_client.post(
+        "/api/ocp/authority-grants",
+        json={"subject_type": "human", "subject_id": test_user.id, "role": "op", "actions": ["goal:create"]},
+    )
+    assert grant_resp.status_code == 200, grant_resp.text
+    ok = await auth_client.post("/api/ocp/goals", json={"title": "G"})
+    assert ok.status_code == 200, ok.text

@@ -335,11 +335,25 @@ def ocp_strict_default_deny(org_extra_data: dict | None) -> bool:
     Default off for compatibility. Flag lives in org extra_data to avoid schema
     changes: `{"ocp": {"strict_default_deny": true}}`.
     """
+    return bool(ocp_policy(org_extra_data).get("strict_default_deny"))
+
+
+def ocp_policy(org_extra_data: dict | None) -> dict:
+    """Normalized OCP policy view over org.extra_data (no schema change)."""
     extra = org_extra_data or {}
     ocp_cfg = extra.get("ocp") if isinstance(extra, dict) else None
     if not isinstance(ocp_cfg, dict):
-        return False
-    return bool(ocp_cfg.get("strict_default_deny"))
+        ocp_cfg = {}
+    return {"strict_default_deny": bool(ocp_cfg.get("strict_default_deny"))}
+
+
+def set_ocp_policy(org_extra_data: dict | None, *, strict_default_deny: bool) -> dict:
+    """Return new extra_data with OCP policy merged; caller persists."""
+    extra = dict(org_extra_data or {})
+    ocp_cfg = dict(extra.get("ocp") if isinstance(extra.get("ocp"), dict) else {})
+    ocp_cfg["strict_default_deny"] = bool(strict_default_deny)
+    extra["ocp"] = ocp_cfg
+    return extra
 
 
 def authorize(

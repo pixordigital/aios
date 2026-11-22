@@ -6,9 +6,10 @@ OCP owns shared organizational primitives: departments, department members, auth
 ## Boundaries
 - **OCP vs Workflow/ICM**: OCP tracks org state and decision/task lifecycle; workflow engines execute process steps. A workflow may create/update OCP tasks, but OCP is not a BPM runtime.
 - **OCP vs Governance/Agent Runtime**: Governance/runtime enforce tool/model/runtime policy. OCP authority grants are organizational delegation records; runtime policy remains authoritative for execution safety.
-- **OCP vs Approvals (`PendingAction/ApprovalManager`)**: `PendingAction` is the human-in-the-loop queue for tool-call approvals. `DecisionRecord` is the Founder/organizational decision protocol. They are related but not unified yet.
+- **OCP vs Approvals (`PendingAction/ApprovalManager`)**: `PendingAction` is the human-in-the-loop queue for tool-call approvals. `DecisionRecord` is the Founder/organizational decision protocol. They are related but **not unified**.
   - Bridge: OCP emits `OrgEvent` on decision propose/decide/execute with decision id/status/level. `POST /api/ocp/decisions/{id}/link-approval` stores external approval refs in `DecisionRecord.justification["_external_approvals"]` (no schema change, no core approval ownership change). `GET /api/ocp/tasks/{id}/approval-links` returns refs from decisions linked to a task.
-  - Full unification deferred: requires core approval/runtime schema and behavior changes outside this track.
+  - Decision payload includes `approval_bridge`: `{mode:"external_refs_only", unified:false, external_approval_count, limitation}`. This is status/metadata only.
+  - **Limitation (explicit, not done)**: full PendingAction/ApprovalManager↔DecisionRecord unification deferred; requires core approval/runtime schema and behavior changes outside this track. Do not claim unified approval.
 - **OCP vs Adapters/Observability**: adapters emit domain events; OCP stores org-control events in `org_events` for tenant-scoped audit/read API. External observability may ingest these events.
 
 ## Event Model
@@ -30,7 +31,9 @@ Read: `GET /api/ocp/events?event_type=&entity_type=&entity_id=&limit=`
 
 Optional strict mode (OCP domain, default off, no schema change): `Organization.extra_data.ocp.strict_default_deny = true` denies when no relevant grant is configured.
 
-Sensitive actions wired: `task:create`, `task:transition`, `decision:execute` (when actor_type/actor_id supplied; defaults to authenticated human).
+Policy endpoints (Founder/owner for PUT): `GET /api/ocp/policy`, `PUT /api/ocp/policy` with `{"strict_default_deny": bool}`. Persisted in `org.extra_data.ocp`.
+
+Mutating actions wired through OCP policy: `department:create`, `department:bootstrap`, `department:member_add`, `department:member_remove`, `authority:grant`, `authority:revoke`, `task:create`, `task:transition`, `goal:create`, `goal:update`, `decision:propose`, `decision:decide`, `decision:link_approval`, `decision:execute`. Founder-gated endpoints (`department:bootstrap`, `decision:decide`) keep Founder bypass but still evaluate policy for non-founders.
 
 ## Task Views/Filters
 `GET /api/ocp/tasks` filters: `status`, `department_id`/`responsible_department_id`, `requesting_department_id`, `owner_type`, `owner_id`, `overdue=true`, `my_dept=<dept_id>`.

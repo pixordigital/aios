@@ -74,12 +74,19 @@ def test_authorize_respects_validity_scope_and_revocation():
 
 
 def test_ocp_strict_default_deny_flag():
-    from aios.governance.ocp import ocp_strict_default_deny
+    from aios.governance.ocp import ocp_policy, ocp_strict_default_deny, set_ocp_policy
 
     assert ocp_strict_default_deny(None) is False
     assert ocp_strict_default_deny({}) is False
     assert ocp_strict_default_deny({"ocp": {"strict_default_deny": True}}) is True
     assert ocp_strict_default_deny({"ocp": {"strict_default_deny": False}}) is False
+
+    assert ocp_policy(None) == {"strict_default_deny": False}
+    assert ocp_policy({"ocp": {"strict_default_deny": True}}) == {"strict_default_deny": True}
+    merged = set_ocp_policy({"other": 1, "ocp": {"x": "keep"}}, strict_default_deny=True)
+    assert merged["other"] == 1
+    assert merged["ocp"]["strict_default_deny"] is True
+    assert merged["ocp"]["x"] == "keep"
 
 
 def test_link_external_approval_bridge():

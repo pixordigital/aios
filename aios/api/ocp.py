@@ -25,8 +25,10 @@ from aios.governance.ocp import (
     grant_is_valid,
     link_external_approval,
     missing_decision_fields,
+    ocp_policy,
     ocp_strict_default_deny,
     record_org_event,
+    set_ocp_policy,
     transition_task,
 )
 
@@ -105,6 +107,7 @@ def _event(e: OrgEvent) -> dict:
 
 def _decision(r: DecisionRecord) -> dict:
     justification = r.justification or {}
+    external_approvals = list(justification.get("_external_approvals") or [])
     return {
         "id": r.id,
         "level": r.level,
@@ -118,7 +121,14 @@ def _decision(r: DecisionRecord) -> dict:
         "decided_by": r.decided_by,
         "decided_at": r.decided_at.isoformat() if r.decided_at else None,
         "linked_task_ids": list(r.linked_task_ids or []),
-        "external_approvals": list(justification.get("_external_approvals") or []),
+        "external_approvals": external_approvals,
+        # Pragmatic bridge status only; NOT full PendingAction/ApprovalManager unification.
+        "approval_bridge": {
+            "mode": "external_refs_only",
+            "unified": False,
+            "external_approval_count": len(external_approvals),
+            "limitation": "PendingAction/ApprovalManager↔DecisionRecord unification deferred; refs stored in justification._external_approvals",
+        },
         "confidentiality": r.confidentiality,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
@@ -133,15 +143,24 @@ async def _require_grant_if_policy(
     action: str,
     resource_type: str | None = None,
     resource_id: str | None = None,
+    founder_bypass: bool = False,
+    user=None,
+    org=None,
 ) -> None:
     """Deterministic OCP authorize wiring.
 
     If subject has active grants in the action domain, a matching grant is required.
     If no relevant grants are configured, behavior depends on org policy:
     `extra_data.ocp.strict_default_deny` (default false for compat).
+
+    `founder_bypass` preserves explicit Founder-gated endpoints: Founder may pass
+    without an OCP grant, but policy is still evaluated for non-founders.
     """
-    org = await db.get(Organization, org_id)
+    if org is None:
+        org = await db.get(Organization, org_id)
     strict = ocp_strict_default_deny(getattr(org, "extra_data", None))
+    if founder_bypass and _is_founder(user, org):
+        return
     rows = (await db.execute(
         select(AuthorityGrant).where(
             AuthorityGrant.org_id == org_id,
@@ -161,6 +180,58 @@ async def _require_grant_if_policy(
         raise HTTPException(403, reason)
 
 
+@router.get("/policy")
+async def get_ocp_policy(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(404, "organization not found")
+    policy = ocp_policy(getattr(org, "extra_data", None))
+    return {
+        **policy,
+        "mode": "strict_default_deny" if policy["strict_default_deny"] else "policy_if_configured",
+        "approval_bridge": {
+            "unified": False,
+            "limitation": "PendingAction/ApprovalManager↔DecisionRecord unification deferred; external refs only",
+        },
+    }
+
+
+@router.put("/policy")
+async def put_ocp_policy(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(404, "organization not found")
+    if not _is_founder(user, org):
+        raise HTTPException(403, "Founder/owner required")
+    strict = bool(body.get("strict_default_deny", False))
+    org.extra_data = set_ocp_policy(getattr(org, "extra_data", None), strict_default_deny=strict)
+    record_org_event(
+        db,
+        org_id=org_id,
+        event_type="ocp.policy_updated",
+        actor_type="human",
+        actor_id=user.id,
+        entity_type="organization",
+        entity_id=org_id,
+        payload={"strict_default_deny": strict},
+    )
+    await db.commit()
+    await db.refresh(org)
+    policy = ocp_policy(getattr(org, "extra_data", None))
+    return {
+        **policy,
+        "mode": "strict_default_deny" if policy["strict_default_deny"] else "policy_if_configured",
+    }
+
+
 @router.get("/departments")
 async def list_departments(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     rows = (await db.execute(select(Department).where(Department.org_id == org_id))).scalars().all()
@@ -178,6 +249,8 @@ async def create_department(
     slug = (body.get("slug") or "").strip()
     if not name or not slug:
         raise HTTPException(400, "name and slug are required")
+    await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
+                                   action="department:create", resource_type="department")
     dept = Department(org_id=org_id, name=name, slug=slug, mission=body.get("mission", ""), parent_id=body.get("parent_id"))
     db.add(dept)
     await db.flush()
@@ -198,6 +271,11 @@ async def bootstrap_default_departments(
     org = await db.get(Organization, org_id)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder approval required")
+    await _require_grant_if_policy(
+        db, org_id=org_id, subject_type="human", subject_id=user.id,
+        action="department:bootstrap", resource_type="organization", resource_id=org_id,
+        founder_bypass=True, user=user, org=org,
+    )
     existing = {d.slug for d in (await db.execute(
         select(Department).where(Department.org_id == org_id)
     )).scalars().all()}
@@ -248,6 +326,8 @@ async def create_member(
         raise HTTPException(400, "user_id required for human member")
     if member_type == "agent" and not agent_id:
         raise HTTPException(400, "agent_id required for agent member")
+    await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
+                                   action="department:member_add", resource_type="department", resource_id=department_id)
     m = DepartmentMember(
         org_id=org_id, department_id=department_id, member_type=member_type,
         user_id=user_id if member_type == "human" else None,
@@ -275,6 +355,8 @@ async def delete_member(
     m = await db.get(DepartmentMember, member_id)
     if m is None or m.org_id != org_id or m.department_id != department_id:
         raise HTTPException(404, "member not found")
+    await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
+                                   action="department:member_remove", resource_type="department", resource_id=department_id)
     await db.delete(m)
     record_org_event(db, org_id=org_id, event_type="department.member_removed", actor_type="human", actor_id=user.id,
                      entity_type="department_member", entity_id=member_id, payload={"department_id": department_id})
@@ -316,6 +398,12 @@ async def create_grant(
     actions = body.get("actions") or []
     if subject_type not in {"human", "agent"} or not subject_id or not role or not actions:
         raise HTTPException(400, "subject_type, subject_id, role, actions required")
+    org = await db.get(Organization, org_id)
+    await _require_grant_if_policy(
+        db, org_id=org_id, subject_type="human", subject_id=user.id,
+        action="authority:grant", resource_type="organization", resource_id=org_id,
+        founder_bypass=True, user=user, org=org,
+    )
     g = AuthorityGrant(
         org_id=org_id, department_id=body.get("department_id"), subject_type=subject_type,
         subject_id=subject_id, role=role, actions=list(actions), resources=body.get("resources") or {},
@@ -342,6 +430,12 @@ async def revoke_grant(
     g = await db.get(AuthorityGrant, grant_id)
     if g is None or g.org_id != org_id:
         raise HTTPException(404, "grant not found")
+    org = await db.get(Organization, org_id)
+    await _require_grant_if_policy(
+        db, org_id=org_id, subject_type="human", subject_id=user.id,
+        action="authority:revoke", resource_type="authority_grant", resource_id=grant_id,
+        founder_bypass=True, user=user, org=org,
+    )
     if g.revoked_at is None:
         g.revoked_at = _now()
         record_org_event(db, org_id=org_id, event_type="authority.revoked", actor_type="human", actor_id=user.id,
@@ -507,6 +601,9 @@ async def create_goal(
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(400, "title is required")
+    await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
+                                   action="goal:create", resource_type="department",
+                                   resource_id=body.get("department_id"))
     g = OrgGoal(
         org_id=org_id, department_id=body.get("department_id"), title=title,
         description=body.get("description", ""), metric_name=body.get("metric_name", ""),
@@ -534,6 +631,8 @@ async def update_goal(
     g = await db.get(OrgGoal, goal_id)
     if g is None or g.org_id != org_id:
         raise HTTPException(404, "goal not found")
+    await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
+                                   action="goal:update", resource_type="org_goal", resource_id=goal_id)
     for field in ("title", "description", "metric_name", "status", "owner_type", "owner_id", "department_id"):
         if field in body:
             setattr(g, field, body[field])
@@ -589,6 +688,8 @@ async def propose_decision(
     user=Depends(get_current_user),
 ):
     change_type = (body.get("change_type") or "").strip()
+    await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
+                                   action="decision:propose", resource_type="organization", resource_id=org_id)
     record = DecisionRecord(
         org_id=org_id,
         level=decision_level(change_type),
@@ -628,6 +729,11 @@ async def decide_record(
     org = await db.get(Organization, org_id)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder approval required")
+    await _require_grant_if_policy(
+        db, org_id=org_id, subject_type="human", subject_id=user.id,
+        action="decision:decide", resource_type="decision", resource_id=decision_id,
+        founder_bypass=True, user=user, org=org,
+    )
     approve = bool(body.get("approve"))
     try:
         decide(record, approve=approve, founder_id=user.id)
@@ -656,6 +762,8 @@ async def link_decision_approval(
     record = await db.get(DecisionRecord, decision_id)
     if record is None or record.org_id != org_id:
         raise HTTPException(404, "decision not found")
+    await _require_grant_if_policy(db, org_id=org_id, subject_type="human", subject_id=user.id,
+                                   action="decision:link_approval", resource_type="decision", resource_id=decision_id)
     ref_type = (body.get("ref_type") or "").strip()
     ref_id = (body.get("ref_id") or "").strip()
     if not ref_type or not ref_id:
