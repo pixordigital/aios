@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
-from aios.api.deps import get_current_user, get_org_id
+from aios.api.deps import get_current_user, get_org_id, verify_org_access_async
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization
 from aios.governance.security import (
@@ -19,7 +19,6 @@ from aios.governance.security import (
     emit_security_metric_event,
     incident_metrics,
     is_founder_authority,
-    record_cross_tenant_block_if_mismatch,
     record_security_event,
     require_privacy_handoff,
 )
@@ -45,19 +44,20 @@ async def _get_incident(
     source: str = "security.api.incident_lookup",
 ) -> SecurityIncident:
     incident = await db.get(SecurityIncident, incident_id)
-    if incident is None or incident.org_id != org_id:
-        evt = await record_cross_tenant_block_if_mismatch(
-            db,
-            org_id=org_id,
-            resource=incident,
-            source=source,
-            actor_type=actor_type,
+    try:
+        await verify_org_access_async(
+            org_id,
+            incident,
+            db=db,
             actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
             payload={"incident_id": str(incident_id)},
         )
-        if evt is not None:
+    except HTTPException:
+        if incident is not None and incident.org_id != org_id:
             await db.commit()
-        raise HTTPException(404, "incident not found")
+        raise
     return incident
 
 
@@ -374,19 +374,20 @@ async def ingest_event(
     incident_id = body.get("incident_id")
     if incident_id:
         incident = await db.get(SecurityIncident, str(incident_id))
-        if incident is None or incident.org_id != org_id:
-            evt = await record_cross_tenant_block_if_mismatch(
-                db,
-                org_id=org_id,
-                resource=incident,
-                source="security.api.event_ingest",
-                actor_type="human",
+        try:
+            await verify_org_access_async(
+                org_id,
+                incident,
+                db=db,
                 actor_id=str(getattr(user, "id", "") or "") or None,
+                actor_type="human",
+                source="security.api.event_ingest",
                 payload={"incident_id": str(incident_id)},
             )
-            if evt is not None:
+        except HTTPException:
+            if incident is not None and incident.org_id != org_id:
                 await db.commit()
-            raise HTTPException(404, "incident not found")
+            raise
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     metric = str(body.get("metric") or "").strip()
     if metric:

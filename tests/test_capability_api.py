@@ -77,31 +77,45 @@ async def test_fit_gates_contact_legal_and_maturity(auth_client):
     assert "review" in body["engineering_work_reason"].lower()
 
 
-async def test_capabilities_and_assessments_are_tenant_scoped(auth_client, test_db_session):
-    other = Organization(name="Other", slug="other-cap-org")
-    test_db_session.add(other)
-    await test_db_session.flush()
-    test_db_session.add(
-        Capability(
-            org_id=other.id,
-            capability_key="secret-cap",
-            name="Secret",
-            maturity="production",
-            is_commercially_available=True,
-        )
+async def test_capabilities_and_assessments_are_tenant_scoped(auth_client, test_db_session, second_org):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    cap = Capability(
+        org_id=second_org.id,
+        capability_key="secret-cap",
+        name="Secret",
+        maturity="production",
+        is_commercially_available=True,
     )
+    test_db_session.add(cap)
     await test_db_session.commit()
+    await test_db_session.refresh(cap)
 
     resp = await auth_client.get("/api/capabilities")
     assert all(c["capability_key"] != "secret-cap" for c in resp.json()["items"])
 
     resp = await auth_client.post(
         "/api/capabilities/evaluate",
-        json={"subject_id": "acct-4", **_HIGH},
+        json={"capability_id": cap.id, "subject_id": "acct-4", **_HIGH},
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 404, resp.text
     assessments = await auth_client.get("/api/capabilities/assessments")
     assert all(a["subject_id"] != "secret-cap" for a in assessments.json()["items"])
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    assert any(
+        e.payload.get("metric") == "cross_tenant_block"
+        and e.payload.get("resource_type") == "Capability"
+        and e.payload.get("resource_org_id") == second_org.id
+        and e.payload.get("capability_id") == cap.id
+        and e.source == "capabilities.api.evaluate"
+        for e in rows
+    )
 
 
 async def test_invalid_maturity_and_score_rejected(auth_client):

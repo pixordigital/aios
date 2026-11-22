@@ -361,3 +361,45 @@ async def test_knowledge_search_limit_bounded(auth_client):
     assert resp.status_code == 422
     resp = await auth_client.get("/api/knowledge/search", params={"q": "x", "top_k": 0})
     assert resp.status_code == 422
+
+
+async def test_cross_tenant_knowledge_record_access_records_metric(auth_client, test_db_session, second_org):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    other = KnowledgeRecord(
+        org_id=second_org.id,
+        title="Other org secret",
+        kind="statement",
+        classification="internal",
+        source_type="test",
+        source_id="s1",
+    )
+    test_db_session.add(other)
+    await test_db_session.commit()
+    await test_db_session.refresh(other)
+
+    cases = [
+        ("post", f"/api/knowledge/records/{other.id}/promote", {"human_confirmed": True}, "knowledge.api.promote"),
+        ("post", f"/api/knowledge/records/{other.id}/soft-delete", None, "knowledge.api.soft_delete"),
+        ("get", f"/api/knowledge/records/{other.id}/delete-eligibility", None, "knowledge.api.delete_eligibility"),
+    ]
+    for method, path, body, source in cases:
+        req = getattr(auth_client, method)
+        resp = await req(path, json=body) if body is not None else await req(path)
+        assert resp.status_code == 404, (path, resp.text)
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    for _, _, _, source in cases:
+        assert any(
+            e.payload.get("metric") == "cross_tenant_block"
+            and e.payload.get("resource_type") == "KnowledgeRecord"
+            and e.payload.get("resource_org_id") == second_org.id
+            and e.payload.get("record_id") == other.id
+            and e.source == source
+            for e in rows
+        ), source

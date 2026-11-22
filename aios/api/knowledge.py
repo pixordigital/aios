@@ -16,7 +16,7 @@ from aios.governance.knowledge import (
     validate_provenance,
 )
 from aios.governance.ocp import DepartmentMember
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +40,30 @@ async def _actor_deps(db: DatabaseBackend, user: User) -> set[str]:
     return {d for d in rows if d}
 
 
-async def _record(record_id: str, org_id: str, db: DatabaseBackend) -> KnowledgeRecord:
-    record = (
-        await db.execute(
-            select(KnowledgeRecord).where(
-                KnowledgeRecord.id == record_id, KnowledgeRecord.org_id == org_id
-            )
+async def _record(
+    record_id: str,
+    org_id: str,
+    db: DatabaseBackend,
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "knowledge.api.record_lookup",
+) -> KnowledgeRecord:
+    record = await db.get(KnowledgeRecord, record_id)
+    try:
+        await verify_org_access_async(
+            org_id,
+            record,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"record_id": str(record_id)},
         )
-    ).scalars().first()
-    if record is None:
-        raise HTTPException(404, "knowledge record not found")
+    except HTTPException:
+        if record is not None and record.org_id != org_id:
+            await db.commit()
+        raise
     return record
 
 
@@ -135,7 +149,7 @@ async def promote_record(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    record = await _record(record_id, org_id, db)
+    record = await _record(record_id, org_id, db, source="knowledge.api.promote")
     if not fact_promotion_allowed(record, human_confirmed=bool(body.get("human_confirmed", False))):
         raise HTTPException(400, "human confirmation required for non-fact promotion")
     record.kind = "fact"
@@ -149,7 +163,9 @@ async def soft_delete_record(
     user: User = Depends(get_current_user),
     db: DatabaseBackend = Depends(get_db_backend),
 ):
-    record = await _record(record_id, user.org_id, db)
+    record = await _record(
+        record_id, user.org_id, db, actor_id=user.id, source="knowledge.api.soft_delete"
+    )
     org = await db.get(Organization, user.org_id)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder approval required")
@@ -165,7 +181,7 @@ async def delete_eligibility(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    record = await _record(record_id, org_id, db)
+    record = await _record(record_id, org_id, db, source="knowledge.api.delete_eligibility")
     return {"eligible": hard_delete_eligible(record, legal_hold=legal_hold)}
 
 

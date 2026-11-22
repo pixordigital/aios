@@ -3,7 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_, select
 
-from aios.api.deps import get_org_id
+from aios.api.deps import get_current_user, get_org_id
+from aios.governance.security import record_cross_tenant_block_if_mismatch
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.governance.capability_registry import (
     ENGINEERING_REVIEW_DISPOSITIONS,
@@ -157,6 +158,7 @@ async def evaluate_fit(
     body: dict,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     _cap_guard(body, "capability evaluate")
     subject_id = str(body.get("subject_id") or "").strip()
@@ -173,13 +175,22 @@ async def evaluate_fit(
     capability_id = body.get("capability_id")
     if capability_id:
         capability = (
-            await db.execute(
-                select(Capability).where(
-                    Capability.id == str(capability_id), _visible(org_id)
-                )
-            )
+            await db.execute(select(Capability).where(Capability.id == str(capability_id)))
         ).scalars().first()
-        if capability is None:
+        if capability is None or (
+            capability.org_id is not None and str(capability.org_id) != str(org_id)
+        ):
+            evt = await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=org_id,
+                resource=capability,
+                source="capabilities.api.evaluate",
+                actor_type="human",
+                actor_id=str(getattr(user, "id", "") or "") or None,
+                payload={"capability_id": str(capability_id)},
+            )
+            if evt is not None:
+                await db.commit()
             raise HTTPException(404, "capability not found")
 
     disposition, rationale = solution_fit(
