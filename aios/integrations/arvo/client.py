@@ -62,10 +62,16 @@ async def ping() -> dict:
 
 
 async def send_event(
-    event_type: str, payload: dict, idempotency_key: str | None = None
+    event_type: str,
+    payload: dict,
+    idempotency_key: str | None = None,
+    business_trace_id: str | None = None,
 ) -> dict:
     """POST /events idempotente. Retry 3× em 5xx/timeout."""
+    trace_id = business_trace_id or payload.get("business_trace_id")
     body_dict = {"type": event_type, "payload": payload}
+    if trace_id:
+        body_dict["business_trace_id"] = trace_id
     body = json.dumps(body_dict, separators=(",", ":")).encode()
     path = f"{PATH_PREFIX}/events"
     key = idempotency_key or str(uuid.uuid4())

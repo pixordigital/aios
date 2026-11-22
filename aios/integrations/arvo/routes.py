@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -132,6 +133,13 @@ class ArvoEvent(BaseModel):
 class ContextRequest(BaseModel):
     business_trace_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     org_id: str | None = None
+
+
+class SsoTicketRequest(BaseModel):
+    sub: str = Field(..., min_length=1, max_length=64)
+    email: str = Field(..., min_length=1, max_length=255)
+    org_id: str = Field(..., min_length=1, max_length=64)
+    role: str = Field(..., min_length=1, max_length=50)
 
 
 def _get_idempotent(key: str) -> dict | None:
@@ -298,22 +306,32 @@ async def _handle_action_verified(payload: dict, trace_id: str | None, idempoten
     verified = payload.get("verified_amount")
     deal_id = payload.get("deal_id")
     trace_id = trace_id or payload.get("business_trace_id") or str(action_id)
+    recovered = False
+    if verified is not None:
+        try:
+            recovered = Decimal(str(verified)) > 0
+        except (InvalidOperation, ValueError):
+            recovered = False
     updated_deal = False
     try:
         if org_id:
             from aios.db.engine import async_session
             from aios.db.models import AuditLog, CrmDeal
 
+            details = {"finding_id": finding_id, "verified_amount": verified, "deal_id": deal_id}
+            if not recovered:
+                details["recovery_verified"] = False
             async with async_session() as s:
-                s.add(AuditLog(org_id=org_id, action="action.verified", resource_type="arvo_action",
-                               resource_id=str(action_id),
-                               details={"finding_id": finding_id, "verified_amount": verified, "deal_id": deal_id}))
-                if deal_id:
+                if deal_id and recovered:
                     deal = await s.get(CrmDeal, deal_id)
                     if deal and deal.org_id == org_id:
                         deal.stage = "closed_won"
                         deal.extra_data = {**(deal.extra_data or {}), "recovered_brl": verified}
                         updated_deal = True
+                    elif deal:
+                        details["deal_org_mismatch"] = True
+                s.add(AuditLog(org_id=org_id, action="action.verified", resource_type="arvo_action",
+                               resource_id=str(action_id), details=details))
                 await s.commit()
     except Exception as e:
         logger.debug("action.verified audit/update fallback: %s", e)
@@ -447,43 +465,50 @@ async def ingest_event(
         raise
 
 @router.post("/sso-ticket", dependencies=[Depends(_require_auth)])
-async def sso_ticket():
-    """Generate SSO ticket for identity sharing between AIOS and ARVO.
-    
-    Uses the existing HMAC peer channel for authentication.
-    Returns a signed ticket that ARVO can verify to identify the AIOS user.
-    """
+async def sso_ticket(identity: SsoTicketRequest):
+    """Signed SSO ticket carrying asserted user identity, TTL <= 60s."""
     import json
     import hmac
     import hashlib
-    import time
     import secrets
     import jwt
     from .auth import _PATH
-    
+
     key_id = settings.arvo_service_key_id
     key = settings.arvo_service_key
-    
+
     if not key or not key_id:
         raise HTTPException(503, "ARVO integration not configured")
-    
-    # Generate ticket with HMAC-signed payload
+
     ts = str(int(time.time()))
     nonce = secrets.token_hex(32)
+    persisted = await _db_persist_nonce(nonce)
+    if persisted is False:
+        raise HTTPException(401, "Replay nonce (SSO ticket)")
+    if persisted is None:
+        raise HTTPException(503, "Replay protection unavailable")
+
+    iat = int(ts)
     payload = {
         "iss": "aios",
-        "iat": int(ts),
-        "jti": nonce,
         "aud": "arvo",
+        "iat": iat,
+        "exp": iat + 60,
+        "jti": nonce,
+        "sub": identity.sub,
+        "email": identity.email,
+        "org_id": identity.org_id,
+        "role": identity.role,
     }
-    body_bytes = json.dumps(payload).encode()
-    bhash = hashlib.sha256(body_bytes).hexdigest()
+    bhash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     canonical = f"{key_id}.{ts}.{nonce}.POST.{_PATH}.{bhash}"
     sig = hmac.new(key.encode(), canonical.encode(), hashlib.sha256).hexdigest()
-    
+
     return {
         "ticket": jwt.encode(payload, key, algorithm="HS256"),
         "key_id": key_id,
         "timestamp": ts,
         "nonce": nonce,
+        "signature": sig,
+        "expires_in": 60,
     }

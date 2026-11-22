@@ -135,6 +135,7 @@ async def _deliver(row: IntegrationOutbox, raise_errors: bool) -> bool:
             row.event_type,
             row.payload,
             idempotency_key=row.idempotency_key,
+            business_trace_id=row.business_trace_id,
         )
     except Exception as error:
         retryable = (
