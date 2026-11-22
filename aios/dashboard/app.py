@@ -4368,21 +4368,38 @@ async def crm_deal_detail(request: Request, deal_id: str):
         versions = (await db.execute(
             select(CrmDealVersion).where(CrmDealVersion.deal_id==deal_id).order_by(CrmDealVersion.created_at.desc())
         )).scalars().all()
-        
+
         agent_name = ""
         if deal.agent_id:
             ag = await db.get(Agent, deal.agent_id)
             agent_name = ag.name if ag else ""
-        
+
         notes = (deal.extra_data or {}).get("notes", "")
-        
+
+        # CRM 360: account/contact/timeline visibility (read-only, no schema change)
+        account = contact = None
+        interactions = []
+        try:
+            from aios.core.crm_intelligence import find_account_for_deal, find_contact_for_deal, InteractionEvent
+
+            account = await find_account_for_deal(db, deal)
+            contact = await find_contact_for_deal(db, deal)
+            q = select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.deal_id == deal_id)
+            interactions = (await db.execute(q.order_by(InteractionEvent.occurred_at.desc()).limit(30))).scalars().all()
+        except Exception:
+            pass
+
         # C9: Load custom field definitions for this deal's pipeline
         org = await db.get(Organization, org_id)
         if not org:
             return RedirectResponse("/dashboard/crm", status_code=303)
         custom_fields = (org.extra_data or {}).get("crm_custom_fields", {}).get(deal.pipeline or "default", [])
-        
-        return await _render("crm_deal_detail.html", request, title=f"Deal {deal_id[:8]}", deal=deal, versions=versions, agent_name=agent_name, notes=notes, custom_fields=custom_fields)
+
+        return await _render(
+            "crm_deal_detail.html", request, title=f"Deal {deal_id[:8]}", deal=deal, versions=versions,
+            agent_name=agent_name, notes=notes, custom_fields=custom_fields,
+            account=account, contact=contact, interactions=interactions,
+        )
 
 @router.post("/crm/{deal_id}/notes")
 async def crm_deal_notes(request: Request, deal_id: str):

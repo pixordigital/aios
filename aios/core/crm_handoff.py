@@ -121,15 +121,33 @@ async def record_interaction(
     if deal is not None:
         extra = dict(deal.extra_data or {})
         history = list(extra.get("sdr_history") or [])
-        history.append(
-            {"at": now.isoformat(), "agent_id": agent_id, "summary": summary[:600]}
-        )
-        # Keep the tail: the recent exchanges are what the next agent needs.
-        extra["sdr_history"] = history[-10:]
-        extra["last_contacted_at"] = now.isoformat()
+        history.append({"at": now.isoformat(), "agent_id": agent_id, "summary": summary[:600]})
+        extra["sdr_history"] = history[-10:]  # legacy mirror
+        extra["last_contacted_at"] = now.isoformat()  # legacy mirror
         if summary:
-            extra["last_summary"] = _truncate(summary, 600)
+            extra["last_summary"] = _truncate(summary, 600)  # legacy mirror
         deal.extra_data = extra
+        try:
+            from aios.core.crm_intelligence import find_account_for_deal, find_contact_for_deal, record_interaction_event
+
+            account = await find_account_for_deal(db, deal)
+            contact = await find_contact_for_deal(db, deal)
+            await record_interaction_event(
+                db,
+                org_id=org_id,
+                deal_id=deal_id,
+                account_id=getattr(account, "id", None),
+                contact_id=getattr(contact, "id", None),
+                channel="whatsapp" if field == "sdr_conversation" else "manual",
+                direction="inbound",
+                event_type=field,
+                summary=summary,
+                occurred_at=now,
+                source="crm_handoff",
+                provenance={"agent_id": agent_id},
+            )
+        except Exception:
+            pass
         await db.flush()
 
     db.add(

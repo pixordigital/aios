@@ -6,10 +6,13 @@ from aios.core.crm_intelligence import (
     Account,
     Contact,
     InteractionEvent,
+    deal_entity_kind,
     relationship_health,
     retention_cutoff,
     sales_priority,
 )
+from aios.db.backend import db_session
+from aios.db.models import CrmDeal, Organization
 
 
 def test_health_penalises_stale_and_overdue():
@@ -51,3 +54,72 @@ def test_account_contact_entities_are_separate():
     assert event.contact_id == "c"
     for name in ("crm_accounts", "crm_contacts", "crm_interactions"):
         assert name in Base.metadata.tables
+
+
+def test_deal_entity_kind_is_derived():
+    class D: stage = "mql"
+    assert deal_entity_kind(D()) == "lead"
+    D.stage = "sql"
+    assert deal_entity_kind(D()) == "opportunity"
+    D.stage = "closed_won"
+    assert deal_entity_kind(D()) == "closed_deal"
+
+
+async def test_account_contact_interaction_endpoints_tenant_scoped(test_session):
+    org = Organization(name="A", slug="a", extra_data={"crm_enabled": True})
+    org2 = Organization(name="B", slug="b", extra_data={"crm_enabled": True})
+    test_session.add_all([org, org2])
+    await test_session.flush()
+    acc = Account(org_id=org.id, name="ACME")
+    acc2 = Account(org_id=org2.id, name="OTHER")
+    c = Contact(org_id=org.id, name="Ana", email="ana@acme.com", account_id=acc.id)
+    deal = CrmDeal(org_id=org.id, lead_name="Ana", lead_email="ana@acme.com", stage="mql")
+    test_session.add_all([acc, acc2, c, deal])
+    await test_session.commit()
+
+    from httpx import ASGITransport, AsyncClient
+    from aios.main import app
+    from aios.api.deps import get_current_user, get_db_backend, get_org_id
+    from aios.db.backends.sqlalchemy_backend import SQLAlchemyBackend
+
+    async def _db():
+        yield SQLAlchemyBackend(test_session)
+
+    async def _org():
+        return org.id
+
+    class U:
+        role = "admin"
+        id = "u1"
+
+    async def _user():
+        return U()
+
+    app.dependency_overrides[get_db_backend] = _db
+    app.dependency_overrides[get_org_id] = _org
+    app.dependency_overrides[get_current_user] = _user
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            r = await client.get("/api/crm/accounts")
+            assert r.status_code == 200
+            names = [x["name"] for x in r.json()]
+            assert "ACME" in names and "OTHER" not in names
+
+            r = await client.post("/api/crm/contacts", json={"name": "Bob", "email": "bob@acme.com", "account_id": acc.id})
+            assert r.status_code == 200
+            r = await client.post("/api/crm/interactions", json={"deal_id": deal.id, "account_id": acc.id, "contact_id": c.id, "summary": "call", "channel": "phone"})
+            assert r.status_code == 200
+            body = r.json()
+            assert body["deal_id"] == deal.id
+
+            r = await client.get(f"/api/crm/interactions?deal_id={deal.id}")
+            assert r.status_code == 200
+            assert any(x["summary"] == "call" for x in r.json())
+
+            r = await client.get("/api/crm/360/overview")
+            assert r.status_code == 200
+            ov = r.json()
+            assert ov["available"]["customer_360_read"] is True
+            assert ov["available"]["command_center"] is False
+    finally:
+        app.dependency_overrides.clear()

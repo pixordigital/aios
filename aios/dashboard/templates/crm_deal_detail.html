@@ -15,6 +15,17 @@
     <div><span style="color:var(--text-tertiary)">Previsão Fechamento</span><br><b>{{deal.close_date.strftime('%d/%m/%Y') if deal.close_date else '—'}}</b></div>
     <div><span style="color:var(--text-tertiary)">Dono</span><br><b>{{agent_name or '—'}}</b></div>
     <div><span style="color:var(--text-tertiary)">Origem</span><br><b>{{deal.source}}</b></div>
+    <div><span style="color:var(--text-tertiary)">Entidade (derivada)</span><br><b>{% if deal.stage in ['closed_won','closed_lost'] %}closed_deal{% elif deal.stage in ['sql','opportunity'] %}opportunity{% else %}lead{% endif %}</b></div>
+    <div><span style="color:var(--text-tertiary)">Prioridade</span><br><b>heurística (não preditiva validada)</b></div>
+  </div>
+
+  <div style="margin-bottom:1rem;padding:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:0.75rem">
+    <h3 style="font-size:0.8125rem;margin-bottom:0.5rem">👤 Customer 360 (mínimo)</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
+      <div><span style="color:var(--text-tertiary)">Account</span><br><b>{{ account.name if account else '— não vinculado' }}</b>{% if account and account.cnpj %}<div class="text-xs text-tertiary">CNPJ {{account.cnpj}}</div>{% endif %}</div>
+      <div><span style="color:var(--text-tertiary)">Contact</span><br><b>{{ contact.name if contact else '— não vinculado' }}</b>{% if contact and contact.email %}<div class="text-xs text-tertiary">{{contact.email}}</div>{% endif %}</div>
+    </div>
+    <p class="text-xs text-tertiary" style="margin-top:0.5rem">Vínculos account/contact inferidos de dados existentes; sem mudança de schema. CS workspace / command center / revenue intelligence completa: indisponíveis neste track.</p>
   </div>
 
   {% if custom_fields %}
@@ -56,6 +67,24 @@
         </div>
         <div style="color:var(--red);font-family:monospace">{{v.old_value or '—'}}</div>
         <div style="color:var(--green);font-family:monospace">{{v.new_value or '—'}}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if interactions %}
+  <div style="margin-bottom:1rem">
+    <h3 style="font-size:0.875rem;margin-bottom:0.5rem">🧭 Timeline unificada (deal)</h3>
+    <div style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px">
+      {% for i in interactions %}
+      <div style="padding:0.5rem;border-bottom:1px solid var(--border);font-size:0.6875rem">
+        <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.25rem">
+          <span class="font-mono" style="color:var(--text-tertiary)">{{i.occurred_at.strftime('%d/%m %H:%M') if i.occurred_at else ''}}</span>
+          <span class="badge" style="font-size:0.55rem">{{i.channel}}/{{i.event_type}}</span>
+          <span style="color:var(--text-tertiary)">{{i.direction}}</span>
+        </div>
+        <div>{{i.summary or '—'}}</div>
       </div>
       {% endfor %}
     </div>

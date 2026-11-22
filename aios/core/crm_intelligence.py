@@ -2,11 +2,14 @@
 
 The CRM owns customer state; the knowledge system owns searchable history.
 Do not put customer history into `CrmDeal.extra_data`.
+
+extra_data is legacy/tactical only. Known keys are accessed via DEAL_EXTRA_KEYS
+adapter; new ad-hoc keys must not be added.
 """
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aios.db.engine import Base
@@ -141,3 +144,158 @@ def sales_priority(
 
 def retention_cutoff(now: datetime, retention_days: int) -> datetime:
     return now - timedelta(days=max(0, retention_days))
+
+
+# --- extra_data adapter (legacy/tactical only) -------------------------------
+
+DEAL_EXTRA_KEYS = {
+    "notes": "Operator notes. Legacy: stored in extra_data; prefer typed timeline when possible.",
+    "last_summary": "Last SDR/agent summary. Legacy mirror for fast reads.",
+    "last_contacted_at": "ISO timestamp of last contact. Legacy mirror.",
+    "next_follow_up": "ISO timestamp for next follow-up. Legacy operational field.",
+    "follow_up_note": "Follow-up note. Legacy operational field.",
+    "sdr_history": "Bounded SDR exchange history. Legacy mirror; InteractionEvent is canonical timeline.",
+    "sdr_touched": "Bool flag set by SDR handoff.",
+    "last_ai_notes": "Legacy AI note field from CRM tools.",
+    "attempts": "Contact attempts counter used by timing heuristic.",
+    "company": "Legacy company field; Account is canonical when linked.",
+    "custom_fields": "Pipeline custom fields live under org extra_data definitions; deal values may be mirrored.",
+}
+
+# Keys known to be safe legacy mirrors/adapters. Anything else is ad-hoc.
+_KNOWN_EXTRA_KEYS = set(DEAL_EXTRA_KEYS) | {
+    "source",
+    "lead_status",
+    "batch",
+    "icp",
+    "website",
+    "industry",
+    "location",
+    "company_size",
+    "source_url",
+    "qualification_reason",
+    "pain_points",
+    "decision_maker",
+}
+
+
+def deal_extra_get(deal, key: str, default=None):
+    extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
+    return extra.get(key, default)
+
+
+def deal_extra_set(deal, key: str, value) -> None:
+    """Set a known legacy extra_data key. New unknown keys are blocked."""
+    if key not in _KNOWN_EXTRA_KEYS:
+        raise ValueError(f"ad-hoc CrmDeal.extra_data key blocked: {key}")
+    extra = dict(deal.extra_data or {})
+    if value in (None, "", [], {}):
+        extra.pop(key, None)
+    else:
+        extra[key] = value
+    deal.extra_data = extra
+
+
+def deal_entity_kind(deal) -> str:
+    """Derived, no schema change. Deal mixes lead/opportunity in current model."""
+    stage = getattr(deal, "stage", "") or ""
+    if stage in {"closed_won", "closed_lost"}:
+        return "closed_deal"
+    if stage in {"opportunity", "sql"}:
+        return "opportunity"
+    return "lead"
+
+
+async def find_account_for_deal(db, deal):
+    from aios.core.crm_intelligence import Account  # self import safe at runtime
+
+    extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
+    account_id = extra.get("account_id")
+    if account_id:
+        row = await db.get(Account, str(account_id))
+        if row and row.org_id == deal.org_id:
+            return row
+    cnpj = str(extra.get("cnpj") or "").strip()
+    if cnpj:
+        row = (await db.execute(select(Account).where(Account.org_id == deal.org_id, Account.cnpj == cnpj))).scalar_one_or_none()
+        if row:
+            return row
+    name = str(getattr(deal, "lead_name", "") or "").strip()
+    if name:
+        row = (await db.execute(select(Account).where(Account.org_id == deal.org_id, Account.name == name).limit(1))).scalar_one_or_none()
+        if row:
+            return row
+    return None
+
+
+async def find_contact_for_deal(db, deal):
+    from aios.core.crm_intelligence import Contact
+
+    extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
+    contact_id = extra.get("contact_id")
+    if contact_id:
+        row = await db.get(Contact, str(contact_id))
+        if row and row.org_id == deal.org_id:
+            return row
+    email = str(getattr(deal, "lead_email", "") or "").strip().lower()
+    if email:
+        row = (await db.execute(select(Contact).where(Contact.org_id == deal.org_id, Contact.email == email))).scalar_one_or_none()
+        if row:
+            return row
+    phone = "".join(ch for ch in str(getattr(deal, "lead_phone", "") or "") if ch.isdigit())
+    if phone:
+        rows = (await db.execute(select(Contact).where(Contact.org_id == deal.org_id))).scalars().all()
+        for row in rows:
+            if "".join(ch for ch in str(row.phone or "") if ch.isdigit()) == phone:
+                return row
+    return None
+
+
+def deal_360_payload(deal, account=None, contact=None) -> dict:
+    extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
+    return {
+        "id": deal.id,
+        "entity_kind": deal_entity_kind(deal),
+        "entity_kind_note": "Derived heuristic; CrmDeal schema currently mixes lead/opportunity.",
+        "lead_name": deal.lead_name,
+        "lead_email": deal.lead_email,
+        "lead_phone": deal.lead_phone,
+        "stage": deal.stage,
+        "value": deal.value,
+        "currency": getattr(deal, "currency", "BRL"),
+        "score": deal.score,
+        "source": deal.source,
+        "agent_id": deal.agent_id,
+        "team_id": deal.team_id,
+        "pipeline": deal.pipeline,
+        "close_date": deal.close_date.isoformat() if getattr(deal, "close_date", None) else None,
+        "probability": getattr(deal, "probability", 0.0),
+        "account": {"id": account.id, "name": account.name, "cnpj": account.cnpj} if account else None,
+        "contact": {"id": contact.id, "name": contact.name, "email": contact.email, "phone": contact.phone} if contact else None,
+        "legacy_extra_keys": sorted(extra.keys()),
+        "legacy_extra_data_note": "extra_data is legacy/tactical; use typed CRM objects/timeline where available.",
+    }
+
+
+async def record_interaction_event(
+    db, *, org_id: str, deal_id: str | None = None, account_id: str | None = None,
+    contact_id: str | None = None, channel: str = "manual", direction: str = "outbound",
+    event_type: str = "message", summary: str = "", occurred_at: datetime | None = None,
+    source: str = "crm2", provenance: dict | None = None,
+) -> InteractionEvent:
+    ev = InteractionEvent(
+        org_id=org_id,
+        deal_id=deal_id,
+        account_id=account_id,
+        contact_id=contact_id,
+        channel=(channel or "manual")[:40],
+        direction=(direction or "outbound")[:20],
+        event_type=(event_type or "message")[:60],
+        summary=(summary or "")[:4000],
+        occurred_at=occurred_at or _now(),
+        source=(source or "crm2")[:120],
+        provenance=provenance or {},
+    )
+    db.add(ev)
+    await db.flush()
+    return ev
