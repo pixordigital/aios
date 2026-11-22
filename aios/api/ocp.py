@@ -232,6 +232,7 @@ async def put_ocp_policy(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(404, "organization not found")
+    _require_track_c_autonomous_guard(body, action="policy:update", org=org, user=user)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder/owner required")
     strict = bool(body.get("strict_default_deny", False))

@@ -312,3 +312,25 @@ async def test_ocp_track_c_autonomous_mutation_fail_closed(auth_client, test_db_
         json={"title": "G2", "track": "C", "mode": "track_c_autonomous", "evidence": {"x": 1}, "founder_approved": True},
     )
     assert resp.status_code == 200, resp.text
+
+
+async def test_ocp_policy_put_track_c_autonomous_guard(auth_client, test_db_session, test_org, test_user):
+    """PUT /api/ocp/policy must fail-closed on Track C/autonomous markers."""
+    base = {"strict_default_deny": True, "track": "C", "autonomous": True}
+
+    resp = await auth_client.put("/api/ocp/policy", json=base)
+    assert resp.status_code == 403
+    assert "requires evidence" in resp.json()["detail"]
+
+    resp = await auth_client.put("/api/ocp/policy", json={**base, "evidence": {"source": "test"}})
+    assert resp.status_code == 403
+    assert "Founder approval" in resp.json()["detail"]
+
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    resp = await auth_client.put(
+        "/api/ocp/policy",
+        json={**base, "evidence": {"source": "test"}, "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["strict_default_deny"] is True
