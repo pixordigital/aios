@@ -8,7 +8,9 @@ unknown/not_instrumented; no synthetic numbers.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 MEASUREMENT_LEVELS = (
     "business",
@@ -32,6 +34,8 @@ KPI_CATEGORIES = (
 METRIC_STATUSES = ("available", "partial", "unknown", "not_instrumented")
 
 TARGET_DECISION_STATES = ("proposed", "baseline_required", "evidence_required", "ready_for_review")
+KPI_TARGETS_EXTRA_DATA_KEY = "kpi_targets"
+TARGET_PERSISTENCE = "org_extra_data"
 
 
 def win_rate(closed_won: int, closed_lost: int) -> float:
@@ -426,6 +430,44 @@ def governance_kpis_snapshot(*, audit_count: int | None, decided_approvals: int 
     }
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _target_store(extra_data: dict | None) -> dict[str, Any]:
+    data = extra_data if isinstance(extra_data, dict) else {}
+    raw = data.get(KPI_TARGETS_EXTRA_DATA_KEY)
+    store = raw if isinstance(raw, dict) else {}
+    targets = store.get("targets")
+    if not isinstance(targets, list):
+        targets = []
+    clean_targets = [t for t in targets if isinstance(t, dict)]
+    return {
+        "version": 1,
+        "persistence": TARGET_PERSISTENCE,
+        "targets": clean_targets,
+    }
+
+
+def list_kpi_targets(extra_data: dict | None) -> dict[str, Any]:
+    store = _target_store(extra_data)
+    targets = sorted(store["targets"], key=lambda t: str(t.get("updated_at") or ""), reverse=True)
+    return {
+        "persistence": TARGET_PERSISTENCE,
+        "storage": f"Organization.extra_data[{KPI_TARGETS_EXTRA_DATA_KEY}]",
+        "schema_table": None,
+        "targets": targets,
+        "count": len(targets),
+        "guardrails": {
+            "no_fake_metrics": True,
+            "no_target_without_baseline": True,
+            "no_target_without_evidence": True,
+            "balancing_metrics_required": True,
+            "not_a_target_by_itself": _CAVEAT_NOT_TARGET,
+        },
+    }
+
+
 def validate_target_proposal(
     *,
     metric_key: str,
@@ -459,13 +501,15 @@ def validate_target_proposal(
     if not owner or not str(owner).strip():
         errors.append("owner required")
 
-    bms = [m for m in (balancing_metrics or []) if m]
+    bms = [m for m in (balancing_metrics or []) if isinstance(m, str) and m.strip()]
     required_bms = list(defn.balancing_metrics)
     if required_bms and not bms:
         errors.append(f"balancing_metrics required: {required_bms}")
     unknown_bms = [m for m in bms if m not in defs]
     if unknown_bms:
         errors.append(f"unknown balancing_metrics: {unknown_bms}")
+    if defn.key in bms:
+        errors.append("balancing_metrics must not include the target metric itself")
 
     if defn.status == "not_instrumented":
         errors.append("metric not_instrumented; cannot set target until instrumented")
@@ -482,15 +526,17 @@ def validate_target_proposal(
             "target_value": target_value,
             "baseline_value": baseline_value,
             "baseline_window_days": baseline_window_days,
-            "evidence": evidence,
-            "owner": owner,
+            "evidence": str(evidence).strip() if evidence else evidence,
+            "owner": str(owner).strip() if owner else owner,
             "balancing_metrics": bms,
         },
         "errors": errors,
         "warnings": warnings,
         "persistence": {
             "persisted": False,
-            "blocker": "No KPI target persistence/table in this track; schema/migration required before durable target storage.",
+            "mode": TARGET_PERSISTENCE,
+            "schema_table": None,
+            "blocker": None if not errors else "Target invalid; persistence refused (fail closed).",
         },
         "guardrails": {
             "no_target_without_baseline": True,
@@ -498,6 +544,91 @@ def validate_target_proposal(
             "balancing_metrics_required": bool(required_bms),
             "not_a_target_by_itself": _CAVEAT_NOT_TARGET,
         },
+    }
+
+
+def set_kpi_target(
+    *,
+    extra_data: dict | None,
+    metric_key: str,
+    target_value: float | int | None,
+    baseline_value: float | int | None,
+    baseline_window_days: int | None,
+    evidence: str | None = None,
+    owner: str | None = None,
+    balancing_metrics: list[str] | None = None,
+    actor_user_id: str | None = None,
+    actor_org_id: str | None = None,
+) -> dict[str, Any]:
+    validation = validate_target_proposal(
+        metric_key=metric_key,
+        target_value=target_value,
+        baseline_value=baseline_value,
+        baseline_window_days=baseline_window_days,
+        evidence=evidence,
+        owner=owner,
+        balancing_metrics=balancing_metrics,
+    )
+    if not validation["ok"]:
+        return {
+            **validation,
+            "persistence": {
+                "persisted": False,
+                "mode": TARGET_PERSISTENCE,
+                "schema_table": None,
+                "blocker": "Validation failed; target not persisted (fail closed).",
+            },
+        }
+
+    data = dict(extra_data) if isinstance(extra_data, dict) else {}
+    store = _target_store(data)
+    now = _now_iso()
+    targets = list(store["targets"])
+    existing = next((t for t in targets if t.get("metric_key") == metric_key), None)
+    record = {
+        "id": (existing or {}).get("id") or str(uuid4()),
+        "metric_key": metric_key,
+        "target_value": target_value,
+        "baseline_value": baseline_value,
+        "baseline_window_days": int(baseline_window_days),
+        "evidence": str(evidence).strip(),
+        "owner": str(owner).strip(),
+        "balancing_metrics": list(validation["proposal"]["balancing_metrics"]),
+        "status": "active",
+        "created_at": (existing or {}).get("created_at") or now,
+        "updated_at": now,
+        "provenance": {
+            "actor_user_id": actor_user_id,
+            "actor_org_id": actor_org_id,
+            "source": "api.analytics.kpi.targets.set",
+            "validation_state": validation["state"],
+        },
+        "guardrails": {
+            "no_target_without_baseline": True,
+            "no_target_without_evidence": True,
+            "balancing_metrics_required": bool(validation["metric"]["balancing_metrics"]),
+            "not_a_target_by_itself": _CAVEAT_NOT_TARGET,
+        },
+    }
+    if existing:
+        targets = [record if t.get("metric_key") == metric_key else t for t in targets]
+    else:
+        targets.append(record)
+    data[KPI_TARGETS_EXTRA_DATA_KEY] = {
+        "version": 1,
+        "persistence": TARGET_PERSISTENCE,
+        "targets": targets,
+    }
+    return {
+        **validation,
+        "persistence": {
+            "persisted": True,
+            "mode": TARGET_PERSISTENCE,
+            "schema_table": None,
+            "storage": f"Organization.extra_data[{KPI_TARGETS_EXTRA_DATA_KEY}]",
+        },
+        "target": record,
+        "extra_data": data,
     }
 
 

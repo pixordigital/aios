@@ -116,29 +116,31 @@ async def search_knowledge_records(
         return []
 
 
-async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str = ""):
-    """Semantic search over stored memories.
+async def hybrid_search(
+    org_id: str,
+    query: str,
+    top_k: int = 5,
+    agent_id: str = "",
+    *,
+    actor_departments: set[str] | None = None,
+    is_founder: bool = False,
+    granted_record_ids: set[str] | None = None,
+    include_legacy_memory: bool = False,
+):
+    """Search knowledge with permission-aware defaults.
 
-    Two stores exist and this used to read neither correctly: it selected
-    `memories.embedding` from Postgres, but that column has never existed
-    (`Memory` carries content + extra_data only), so every call raised
-    UndefinedColumn, was swallowed, and returned []. An agent with a knowledge
-    base therefore reported "not found" for everything and hallucinated instead,
-    with ok:true and no error anywhere.
-
-    - agent_id given -> the MemoryManager store (pgvector in production, the
-      per-agent SQLite file in dev), which is where _store_vector writes.
-    - no agent_id -> Postgres rows that carry `extra_data->'embedding'`, which
-      is the format etl_url writes. Org-filtered.
+    - agent_id given -> legacy agent MemoryManager store (agent-scoped memory).
+      Not a KnowledgeRecord; kept for backward compat, no cross-agent leakage.
+    - no agent_id -> permission-filtered KnowledgeRecord search (source of truth).
+      Fails closed on classification/dept/grants. Legacy raw Memory scan is only
+      used when include_legacy_memory=True AND caller provides no actor context
+      expectation? No: legacy Memory has no KnowledgeRecord ACL; to avoid bypass,
+      it is disabled by default. Set include_legacy_memory=True only for
+      explicitly trusted internal flows.
     """
     try:
-        from aios.core.memory import _embed
-
-        q = _embed(query)
-
         if agent_id:
-            # Same store the MemoryManager writes to, so this works in
-            # multi-replica deployments instead of reading a local SQLite file.
+            # Agent-scoped memory store; same boundary as MemoryManager.
             from aios.core.memory import MemoryManager
 
             return await MemoryManager(agent_id).search_similar(query, top_k=top_k)
@@ -146,6 +148,30 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
         if not org_id:
             return []
 
+        # Governed KnowledgeRecords are source of truth.
+        kr = await search_knowledge_records(
+            org_id,
+            query,
+            top_k=top_k,
+            actor_departments=actor_departments or set(),
+            is_founder=is_founder,
+            granted_record_ids=granted_record_ids,
+        )
+        if kr or not include_legacy_memory:
+            if not kr and not include_legacy_memory:
+                logger.debug(
+                    "hybrid_search: legacy Memory path disabled (use search_knowledge_records or include_legacy_memory=True)"
+                )
+            return kr
+
+        # Explicit opt-in legacy Memory scan (not KnowledgeRecord-governed).
+        logger.warning(
+            "hybrid_search using legacy Memory path for org=%s; not KnowledgeRecord-permissioned",
+            org_id,
+        )
+        from aios.core.memory import _embed
+
+        q = _embed(query)
         async with async_session() as s:
             try:
                 await s.execute(text("SET LOCAL hnsw.ef_search = 100"))
@@ -159,8 +185,6 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
                 ),
                 {"org": org_id},
             )
-            import json as _json
-
             scored = []
             for rid, content, emb in result:
                 try:
@@ -171,7 +195,13 @@ async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str =
                 scored.append((dot, rid, content))
             scored.sort(key=lambda x: -x[0])
             return [
-                {"id": r[1], "content": r[2], "score": round(float(r[0]), 4)}
+                {
+                    "id": r[1],
+                    "content": r[2],
+                    "score": round(float(r[0]), 4),
+                    "source": "legacy_memory",
+                    "legacy_unpermissioned": True,
+                }
                 for r in scored[:top_k]
             ]
     except Exception as e:

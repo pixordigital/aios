@@ -79,13 +79,25 @@ class ToolExecutionError(Exception):
 
 
 class ToolEngine:
-    def __init__(self, tool_names: list[str], org_id: str = "", agent_id: str = ""):
+    def __init__(
+        self,
+        tool_names: list[str],
+        org_id: str = "",
+        agent_id: str = "",
+        *,
+        actor_departments: set[str] | None = None,
+        is_founder: bool = False,
+        granted_record_ids: set[str] | None = None,
+    ):
         self.tools: dict[str, Any] = {}
         self.org_id = org_id or ""
         # Caller identity for tools that answer "who is asking" (team_collaboration
         # resolves the caller's team from it). Empty on admin/dashboard paths,
         # where there is no agent — those callers pass org only.
         self.agent_id = agent_id or ""
+        self.actor_departments = set(actor_departments or [])
+        self.is_founder = bool(is_founder)
+        self.granted_record_ids = set(granted_record_ids or [])
         self.missing: list[str] = []
         for name in tool_names:
             # A tool name that no longer exists must not take the whole agent
@@ -138,12 +150,14 @@ class ToolEngine:
         _TOOL_CALL_TRACKING[name] = _TOOL_CALL_TRACKING.get(name, 0) + 1
 
         last_err = None
-        # Org context for tools that touch org-scoped rows (sql_query, read_file).
-        # Without this every tool ran with a god-view session: an agent could
-        # SELECT another org's rows and nothing recorded whose data it was.
+        # Org/actor context for tools. Knowledge tools must fail closed when
+        # actor context is absent; callers may inject explicit actor attrs.
         try:
             tool._org_id = self.org_id
             tool._agent_id = self.agent_id
+            tool._actor_departments = set(self.actor_departments)
+            tool._is_founder = bool(self.is_founder)
+            tool._granted_record_ids = set(self.granted_record_ids)
         except Exception:
             pass
         # A retry is only safe for tools whose effect is idempotent. Retrying

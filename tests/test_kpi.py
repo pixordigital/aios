@@ -6,6 +6,8 @@ from aios.governance.kpi import (
     governance_kpis_snapshot,
     interpret_kpis,
     kpi_catalog,
+    list_kpi_targets,
+    set_kpi_target,
     validate_target_proposal,
     win_rate,
 )
@@ -76,6 +78,8 @@ def test_target_proposal_requires_baseline_and_evidence():
     assert "baseline_value required; no target before baseline" in result["errors"]
     assert "evidence required (query, report, incident log, or audit reference)" in result["errors"]
     assert result["persistence"]["persisted"] is False
+    assert result["persistence"]["mode"] == "org_extra_data"
+    assert result["persistence"]["schema_table"] is None
 
 
 def test_target_proposal_rejects_uninstrumented_metric():
@@ -109,3 +113,55 @@ def test_governance_snapshot_marks_missing_sources_unknown():
     assert by_key["security.incidents_open"]["status"] == "unknown"
     assert by_key["privacy.requests_open"]["status"] == "unknown"
     assert snap["guardrails"]["no_fake_metrics"] is True
+
+
+def test_set_kpi_target_persists_in_org_extra_data_with_provenance():
+    result = set_kpi_target(
+        extra_data={},
+        metric_key="crm.win_rate",
+        target_value=0.7,
+        baseline_value=0.55,
+        baseline_window_days=30,
+        evidence="Q2 CRM export",
+        owner="sales-lead",
+        balancing_metrics=["crm.close_rate", "crm.average_deal_size"],
+        actor_user_id="u1",
+        actor_org_id="org1",
+    )
+    assert result["ok"] is True
+    assert result["persistence"] == {
+        "persisted": True,
+        "mode": "org_extra_data",
+        "schema_table": None,
+        "storage": "Organization.extra_data[kpi_targets]",
+    }
+    target = result["target"]
+    assert target["metric_key"] == "crm.win_rate"
+    assert target["owner"] == "sales-lead"
+    assert target["provenance"]["actor_user_id"] == "u1"
+    assert target["provenance"]["actor_org_id"] == "org1"
+    assert target["created_at"]
+    assert target["updated_at"]
+
+    listed = list_kpi_targets(result["extra_data"])
+    assert listed["count"] == 1
+    assert listed["persistence"] == "org_extra_data"
+    assert listed["schema_table"] is None
+
+
+def test_set_kpi_target_fail_closed_no_persistence_on_invalid():
+    before = {"kpi_targets": {"targets": [{"metric_key": "crm.close_rate", "owner": "x"}]}}
+    result = set_kpi_target(
+        extra_data=before,
+        metric_key="crm.win_rate",
+        target_value=0.8,
+        baseline_value=None,
+        baseline_window_days=30,
+        evidence="report",
+        owner="sales",
+        balancing_metrics=["crm.close_rate"],
+    )
+    assert result["ok"] is False
+    assert result["persistence"]["persisted"] is False
+    assert "extra_data" not in result
+    assert list_kpi_targets(before)["count"] == 1

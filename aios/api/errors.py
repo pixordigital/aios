@@ -21,7 +21,7 @@ class ProblemResponse(BaseModel):
     type: str = "about:blank"
     title: str
     status: int
-    detail: str = ""
+    detail: str | dict | list = ""
     instance: str = ""
 
 
@@ -51,7 +51,9 @@ _TITLES_EN = {
     500: "Internal server error",
 }
 
-def _translate_detail(detail: str) -> str:
+def _translate_detail(detail):
+    if not isinstance(detail, str):
+        return detail
     mapping = {
         "Not authenticated": "Não autenticado",
         "Invalid token": "Token inválido",
@@ -92,7 +94,7 @@ def register_error_handlers(app: FastAPI):
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         lang = request.headers.get("accept-language", "pt")
         use_en = "en" in lang.lower() and "pt" not in lang.lower()
-        detail = exc.detail or ""
+        detail = exc.detail if exc.detail is not None else ""
         if not use_en:
             detail = _translate_detail(detail)
         title = (_TITLES_EN if use_en else _DEFAULT_TITLES).get(exc.status_code, "Erro")

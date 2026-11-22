@@ -15,6 +15,8 @@ from aios.governance.kpi import (
     governance_kpis_snapshot,
     interpret_kpis,
     kpi_catalog,
+    list_kpi_targets,
+    set_kpi_target,
     validate_target_proposal,
     win_rate,
 )
@@ -875,8 +877,8 @@ async def validate_kpi_target(
     payload: dict,
     user=Depends(get_current_user),
 ):
-    """Validate target proposal. No persistence: baseline+evidence required; no fake targets."""
-    return validate_target_proposal(
+    """Validate target proposal. No persistence in this endpoint; use POST /kpi/targets to persist."""
+    result = validate_target_proposal(
         metric_key=str(payload.get("metric_key") or ""),
         target_value=payload.get("target_value"),
         baseline_value=payload.get("baseline_value"),
@@ -885,3 +887,64 @@ async def validate_kpi_target(
         owner=payload.get("owner"),
         balancing_metrics=payload.get("balancing_metrics") or [],
     )
+    result["persistence"] = {
+        "persisted": False,
+        "mode": "org_extra_data",
+        "schema_table": None,
+        "blocker": "Validation-only endpoint; use POST /api/analytics/kpi/targets for durable org_extra_data persistence.",
+    }
+    return result
+
+
+@router.get("/kpi/targets")
+async def list_kpi_targets_endpoint(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """List persisted KPI targets from Organization.extra_data (no schema table)."""
+    org = await db.get(Organization, org_id)
+    return list_kpi_targets(org.extra_data if org else {})
+
+
+@router.post("/kpi/targets")
+async def set_kpi_target_endpoint(
+    payload: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    user=Depends(get_current_user),
+    org_id: str = Depends(get_org_id),
+):
+    """Persist KPI target in Organization.extra_data. Fail closed on validation/guardrail errors."""
+    from fastapi import HTTPException
+
+    org = await db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(404, "Organization not found")
+
+    result = set_kpi_target(
+        extra_data=org.extra_data if isinstance(org.extra_data, dict) else {},
+        metric_key=str(payload.get("metric_key") or ""),
+        target_value=payload.get("target_value"),
+        baseline_value=payload.get("baseline_value"),
+        baseline_window_days=payload.get("baseline_window_days"),
+        evidence=payload.get("evidence"),
+        owner=payload.get("owner"),
+        balancing_metrics=payload.get("balancing_metrics") or [],
+        actor_user_id=user.id,
+        actor_org_id=org_id,
+    )
+    if not result.get("ok"):
+        raise HTTPException(422, {"message": "KPI target rejected (fail closed)", **result})
+
+    org.extra_data = result["extra_data"]
+    await db.commit()
+    await db.refresh(org)
+    stored = list_kpi_targets(org.extra_data)
+    target = result["target"]
+    return {
+        "ok": True,
+        "persistence": result["persistence"],
+        "target": target,
+        "targets": stored["targets"],
+        "count": stored["count"],
+        "guardrails": result["guardrails"],
+    }

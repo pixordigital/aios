@@ -98,8 +98,71 @@ async def test_target_validation_rejects_missing_baseline_and_evidence(auth_clie
     body = resp.json()
     assert body["ok"] is False
     assert body["persistence"]["persisted"] is False
+    assert body["persistence"]["mode"] == "org_extra_data"
+    assert body["persistence"]["schema_table"] is None
     assert any("baseline" in e for e in body["errors"])
     assert any("evidence" in e for e in body["errors"])
+
+
+async def test_kpi_target_set_and_list_persisted_in_org_extra_data(auth_client, test_db_session, test_org):
+    payload = {
+        "metric_key": "crm.win_rate",
+        "target_value": 0.7,
+        "baseline_value": 0.55,
+        "baseline_window_days": 30,
+        "evidence": "CRM export 2026-Q2",
+        "owner": "sales-lead",
+        "balancing_metrics": ["crm.close_rate", "crm.average_deal_size"],
+    }
+    resp = await auth_client.post("/api/analytics/kpi/targets", json=payload)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["persistence"]["persisted"] is True
+    assert body["persistence"]["mode"] == "org_extra_data"
+    assert body["persistence"]["schema_table"] is None
+    assert body["target"]["metric_key"] == "crm.win_rate"
+    assert body["target"]["provenance"]["actor_org_id"] == test_org.id
+    assert body["count"] == 1
+
+    await test_db_session.refresh(test_org)
+    store = (test_org.extra_data or {}).get("kpi_targets", {})
+    assert store.get("persistence") == "org_extra_data"
+    assert len(store.get("targets", [])) == 1
+
+    listed = await auth_client.get("/api/analytics/kpi/targets")
+    assert listed.status_code == 200, listed.text
+    lb = listed.json()
+    assert lb["persistence"] == "org_extra_data"
+    assert lb["schema_table"] is None
+    assert lb["count"] == 1
+    assert lb["targets"][0]["owner"] == "sales-lead"
+
+
+async def test_kpi_target_set_fail_closed_no_persist(auth_client, test_db_session, test_org):
+    bad = {
+        "metric_key": "crm.win_rate",
+        "target_value": 0.9,
+        "baseline_value": None,
+        "baseline_window_days": 30,
+        "evidence": "",
+        "owner": "",
+        "balancing_metrics": [],
+    }
+    resp = await auth_client.post("/api/analytics/kpi/targets", json=bad)
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["ok"] is False
+    assert detail["persistence"]["persisted"] is False
+    assert any("baseline" in e for e in detail["errors"])
+    assert any("evidence" in e for e in detail["errors"])
+
+    await test_db_session.refresh(test_org)
+    assert "kpi_targets" not in (test_org.extra_data or {})
+
+    listed = await auth_client.get("/api/analytics/kpi/targets")
+    assert listed.status_code == 200
+    assert listed.json()["count"] == 0
 
 
 async def test_process_global_metrics_require_superadmin(async_client, test_db_session, test_org):

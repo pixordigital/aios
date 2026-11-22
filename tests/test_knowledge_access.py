@@ -74,3 +74,38 @@ def test_statement_does_not_become_fact_silently():
     assert not fact_promotion_allowed(statement, human_confirmed=False)
     assert fact_promotion_allowed(statement, human_confirmed=True)
     assert fact_promotion_allowed(_rec(kind="fact"), human_confirmed=False)
+
+
+async def test_hybrid_search_defaults_to_permissioned_knowledge(monkeypatch):
+    from aios.core import rag
+
+    calls = {}
+
+    async def fake_search(org_id, query, **kwargs):
+        calls["org_id"] = org_id
+        calls["query"] = query
+        calls["kwargs"] = kwargs
+        return [{"id": "k1"}]
+
+    monkeypatch.setattr(rag, "search_knowledge_records", fake_search)
+    out = await rag.hybrid_search("org1", "pricing", top_k=3)
+    assert out == [{"id": "k1"}]
+    assert calls["kwargs"]["actor_departments"] == set()
+    assert calls["kwargs"]["is_founder"] is False
+    assert calls["kwargs"]["granted_record_ids"] is None or calls["kwargs"]["granted_record_ids"] == set()
+
+
+async def test_hybrid_search_no_legacy_memory_bypass_by_default(monkeypatch):
+    from aios.core import rag
+
+    async def fake_search(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(rag, "search_knowledge_records", fake_search)
+
+    async def should_not_run(*args, **kwargs):
+        raise AssertionError("legacy memory path should not run by default")
+
+    monkeypatch.setattr("aios.core.memory._embed", should_not_run)
+    out = await rag.hybrid_search("org1", "pricing", top_k=3)
+    assert out == []
