@@ -1,3 +1,5 @@
+import logging
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,6 +17,8 @@ from aios.governance.knowledge import (
 )
 from aios.governance.ocp import DepartmentMember
 from .deps import get_current_user, get_org_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
@@ -174,6 +178,7 @@ async def search(
 ):
     from aios.core.rag import search_knowledge_records
 
+    started = time.perf_counter()
     org = await db.get(Organization, user.org_id)
     deps = await _actor_deps(db, user)
     results = await search_knowledge_records(
@@ -182,6 +187,14 @@ async def search(
         top_k=top_k,
         actor_departments=deps,
         is_founder=_is_founder(user, org),
+    )
+    logger.info(
+        "knowledge.search org=%s user=%s top_k=%d returned=%d ms=%.2f",
+        user.org_id,
+        user.id,
+        top_k,
+        len(results),
+        (time.perf_counter() - started) * 1000,
     )
     return {
         "query": q,

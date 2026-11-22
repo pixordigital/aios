@@ -1,5 +1,6 @@
 import json as _json
 import logging
+import time
 
 from sqlalchemy import select, text
 
@@ -86,6 +87,7 @@ async def search_knowledge_records(
     """
     if not org_id or not (query or "").strip():
         return []
+    started = time.perf_counter()
     try:
         async with async_session() as s:
             rows = (
@@ -93,6 +95,7 @@ async def search_knowledge_records(
                     select(KnowledgeRecord).where(KnowledgeRecord.org_id == org_id)
                 )
             ).scalars().all()
+        scanned = len(rows)
         allowed = [
             r
             for r in rows
@@ -110,9 +113,24 @@ async def search_knowledge_records(
             if score > 0:
                 scored.append((score, r))
         scored.sort(key=lambda x: (-x[0], x[1].created_at.timestamp() if x[1].created_at else 0))
-        return [_knowledge_hit(r, score) for score, r in scored[: max(1, top_k)]]
+        hits = [_knowledge_hit(r, score) for score, r in scored[: max(1, top_k)]]
+        logger.debug(
+            "search_knowledge_records org=%s scanned=%d allowed=%d matched=%d returned=%d ms=%.2f",
+            org_id,
+            scanned,
+            len(allowed),
+            len(scored),
+            len(hits),
+            (time.perf_counter() - started) * 1000,
+        )
+        return hits
     except Exception as e:
-        logger.warning("search_knowledge_records failed: %s", e)
+        logger.warning(
+            "search_knowledge_records failed org=%s ms=%.2f: %s",
+            org_id,
+            (time.perf_counter() - started) * 1000,
+            e,
+        )
         return []
 
 
