@@ -48,6 +48,7 @@ class SQLQueryTool(BaseTool):
     _DENY_APP_TABLES = (
         "users", "credentials", "channel_connections", "oauth_accounts",
         "invitations", "organizations", "whatsapp_contacts", "pending_approvals",
+        "refresh_tokens",
     )
 
     _DENY_APP_PATTERN = re.compile(

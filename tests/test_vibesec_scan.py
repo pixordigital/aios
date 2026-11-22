@@ -81,3 +81,14 @@ def test_backup_restore_uses_argument_vectors_without_shell(monkeypatch, tmp_pat
     assert calls[0][0] == ["gzip", "-dc", "--", str(archive)]
     assert calls[1][0] == ["psql", "postgresql://db/test"]
     assert all("shell" not in kwargs or kwargs["shell"] is False for _, kwargs in calls)
+
+
+@pytest.mark.asyncio
+async def test_sql_query_blocks_refresh_tokens_table():
+    from aios.tools.sql_query import SQLQueryTool
+
+    tool = SQLQueryTool()
+    result = await tool.run("SELECT jti, user_id FROM refresh_tokens")
+    assert "error" in result
+    assert "refresh_tokens" not in str(result).lower() or "bloqueada" in str(result.get("error", "")).lower()
+    assert "bloqueada" in result["error"].lower()
