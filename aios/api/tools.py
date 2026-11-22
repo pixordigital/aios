@@ -6,7 +6,8 @@ from sqlalchemy import select
 
 from aios.core.tools import ToolEngine
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Tool
+from aios.db.models import Organization, Tool
+from aios.governance.ocp import DepartmentMember
 from aios.schemas import BaseModel, PageResponse
 from .deps import get_current_user, get_org_id
 
@@ -99,6 +100,33 @@ async def tool_audit_calls(user=Depends(get_current_user)):
     return ToolEngine.audit_summary()
 
 
+async def _tool_actor_context(db: DatabaseBackend, user) -> dict:
+    """Best-effort actor identity for tool execution. Fail closed downstream if unresolved."""
+    actor_departments: set[str] = set()
+    is_founder = False
+    try:
+        rows = (
+            await db.execute(
+                select(DepartmentMember.department_id).where(
+                    DepartmentMember.org_id == user.org_id,
+                    DepartmentMember.user_id == user.id,
+                )
+            )
+        ).scalars().all()
+        actor_departments = {d for d in rows if d}
+        org = await db.get(Organization, user.org_id)
+        extra = (org.extra_data or {}) if org else {}
+        is_founder = bool(extra.get("founder_user_id") == user.id or getattr(user, "role", "") == "owner")
+    except Exception:
+        pass
+    return {
+        "actor_user_id": str(getattr(user, "id", "") or ""),
+        "actor_departments": actor_departments,
+        "is_founder": is_founder,
+        "granted_record_ids": set(),
+    }
+
+
 def registry_entries() -> list[dict]:
     """Code registry as builder metadata: name, description, input schema.
 
@@ -153,7 +181,8 @@ async def test_tool(
     if tool.code_reference and tool.code_reference.startswith("code:"):
         from aios.tools.dynamic import register_dynamic_tool
         register_dynamic_tool(tool.name, tool.description, tool.code_reference[5:], tool.input_schema)
-    eng = ToolEngine([tool.name], org_id=org_id)
+    actor = await _tool_actor_context(db, user)
+    eng = ToolEngine([tool.name], org_id=org_id, **actor)
     try:
         out = await eng.execute(tool.name, json.dumps(args))
         return {"ok": True, "output": out}
