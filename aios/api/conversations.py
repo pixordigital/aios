@@ -11,11 +11,38 @@ from aios.core.orchestrator import TeamOrchestrator
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, Conversation, Message, Team
 from aios.schemas import ConversationCreate, ConversationOut, MessageOut, MessageSend, SendMessageResponse, PageResponse
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
+
+
+async def _get_conversation(
+    db: DatabaseBackend,
+    org_id: str,
+    conversation_id: str,
+    *,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    source: str = "conversations.api.lookup",
+) -> Conversation:
+    conv = await db.get(Conversation, conversation_id)
+    try:
+        await verify_org_access_async(
+            org_id,
+            conv,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"conversation_id": str(conversation_id)},
+        )
+    except HTTPException:
+        if conv is not None and conv.org_id != org_id:
+            await db.commit()
+        raise
+    return conv
 
 
 @router.post("", response_model=ConversationOut)
@@ -72,10 +99,9 @@ async def get_conversation(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
-    return conv
+    return await _get_conversation(
+        db, org_id, conversation_id, source="conversations.api.get_conversation"
+    )
 
 
 @router.get("/search/semantic")
@@ -111,9 +137,7 @@ async def semantic_search(q: str = "", top_k: int = 10, db: DatabaseBackend = De
 
 @router.get("/{conversation_id}/handover")
 async def get_handover(conversation_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation(db, org_id, conversation_id, source="conversations.api.get_handover")
     h = (conv.extra_data or {}).get("handover", {"status": "bot"})
     pending = []
     try:
@@ -130,9 +154,7 @@ async def get_handover(conversation_id: str, db: DatabaseBackend = Depends(get_d
 
 @router.post("/{conversation_id}/handover")
 async def post_handover(conversation_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation(db, org_id, conversation_id, actor_id=user.id, actor_type="human", source="conversations.api.post_handover")
     action = body.get("action", "take")
     extra = dict(conv.extra_data or {})
     h = dict(extra.get("handover", {}))
@@ -148,9 +170,7 @@ async def post_handover(conversation_id: str, body: dict, db: DatabaseBackend = 
 
 @router.get("/{conversation_id}/autonomous-trace")
 async def get_autonomous_trace(conversation_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation(db, org_id, conversation_id, source="conversations.api.get_autonomous_trace")
     trace = (conv.extra_data or {}).get("autonomous_trace", [])
     # also fetch recent skills for this conversation's agent/team
     skills = []
@@ -178,9 +198,7 @@ async def get_autonomous_trace(conversation_id: str, db: DatabaseBackend = Depen
 
 @router.post("/{conversation_id}/human-reply")
 async def human_reply(conversation_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation(db, org_id, conversation_id, actor_id=user.id, actor_type="human", source="conversations.api.human_reply")
     text = (body.get("content") or body.get("text") or "").strip()
     if not text:
         raise HTTPException(400, "content required")
@@ -220,9 +238,7 @@ async def get_messages(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    await _get_conversation(db, org_id, conversation_id, source="conversations.api.get_messages")
 
     query = (
         select(Message)
@@ -244,9 +260,7 @@ async def send_message(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation(db, org_id, conversation_id, actor_id=user.id, actor_type="human", source="conversations.api.send_message")
 
     msg = Message(
         conversation_id=conversation_id,
@@ -312,9 +326,7 @@ async def send_message_stream(
     user=Depends(get_current_user),
 ):
     """SSE streaming endpoint. Yields token/tool_call/done events as JSON."""
-    conv = await db.get(Conversation, conversation_id)
-    if not conv or conv.org_id != org_id:
-        raise HTTPException(404)
+    conv = await _get_conversation(db, org_id, conversation_id, actor_id=user.id, actor_type="human", source="conversations.api.send_message_stream")
 
     msg = Message(conversation_id=conversation_id, role="user", content=body.content, org_id=org_id, extra_data={"handover": (conv.extra_data or {}).get("handover")})
     db.add(msg)
