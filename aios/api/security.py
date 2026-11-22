@@ -19,6 +19,7 @@ from aios.governance.security import (
     emit_security_metric_event,
     incident_metrics,
     is_founder_authority,
+    record_cross_tenant_block_if_mismatch,
     record_security_event,
     require_privacy_handoff,
 )
@@ -34,9 +35,28 @@ def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-async def _get_incident(db: DatabaseBackend, org_id: str, incident_id: str) -> SecurityIncident:
+async def _get_incident(
+    db: DatabaseBackend,
+    org_id: str,
+    incident_id: str,
+    *,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    source: str = "security.api.incident_lookup",
+) -> SecurityIncident:
     incident = await db.get(SecurityIncident, incident_id)
     if incident is None or incident.org_id != org_id:
+        evt = await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=org_id,
+            resource=incident,
+            source=source,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            payload={"incident_id": str(incident_id)},
+        )
+        if evt is not None:
+            await db.commit()
         raise HTTPException(404, "incident not found")
     return incident
 
@@ -156,7 +176,16 @@ async def respond(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    incident = await _get_incident(db, org_id, incident_id)
+    actor_type = "human"
+    actor_id = str(getattr(user, "id", "") or "") or None
+    incident = await _get_incident(
+        db,
+        org_id,
+        incident_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        source="security.api.respond",
+    )
     if incident.status == "closed":
         raise HTTPException(409, "incident is closed")
     action = str(body.get("action") or "").strip()
@@ -212,7 +241,15 @@ async def close_incident(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    incident = await _get_incident(db, org_id, incident_id)
+    actor_id = str(getattr(user, "id", "") or "") or None
+    incident = await _get_incident(
+        db,
+        org_id,
+        incident_id,
+        actor_type="human",
+        actor_id=actor_id,
+        source="security.api.incident_close",
+    )
     target = str(body.get("status") or "closed")
     if target not in VALID_STATUSES:
         raise HTTPException(400, f"invalid status: {target}")
@@ -315,6 +352,17 @@ async def ingest_event(
     if incident_id:
         incident = await db.get(SecurityIncident, str(incident_id))
         if incident is None or incident.org_id != org_id:
+            evt = await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=org_id,
+                resource=incident,
+                source="security.api.event_ingest",
+                actor_type="human",
+                actor_id=str(getattr(user, "id", "") or "") or None,
+                payload={"incident_id": str(incident_id)},
+            )
+            if evt is not None:
+                await db.commit()
             raise HTTPException(404, "incident not found")
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
     metric = str(body.get("metric") or "").strip()

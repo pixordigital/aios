@@ -53,6 +53,73 @@ async def test_missing_incident_is_404(auth_client):
     assert resp.status_code == 404, resp.text
 
 
+async def test_cross_tenant_incident_access_records_metric(auth_client, test_db_session, second_org):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent, SecurityIncident
+
+    other = SecurityIncident(
+        org_id=second_org.id,
+        incident_key="other-inc-1",
+        title="Other org incident",
+        severity="low",
+        status="detected",
+    )
+    test_db_session.add(other)
+    await test_db_session.commit()
+    await test_db_session.refresh(other)
+
+    resp = await auth_client.post(f"/api/security/incidents/{other.id}/respond", json={"action": "preserve_logs"})
+    assert resp.status_code == 404, resp.text
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    assert any(
+        e.payload.get("metric") == "cross_tenant_block"
+        and e.payload.get("resource_type") == "SecurityIncident"
+        and e.payload.get("resource_org_id") == second_org.id
+        and e.payload.get("incident_id") == other.id
+        and e.source == "security.api.respond"
+        for e in rows
+    )
+
+
+async def test_cross_tenant_event_ingest_records_metric(auth_client, test_db_session, second_org):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent, SecurityIncident
+
+    other = SecurityIncident(
+        org_id=second_org.id,
+        incident_key="other-inc-2",
+        title="Other org incident 2",
+        severity="low",
+        status="detected",
+    )
+    test_db_session.add(other)
+    await test_db_session.commit()
+    await test_db_session.refresh(other)
+
+    resp = await auth_client.post(
+        "/api/security/events",
+        json={"event_type": "security.auth.failure", "incident_id": other.id, "payload": {"x": 1}},
+    )
+    assert resp.status_code == 404, resp.text
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    assert any(
+        e.payload.get("incident_id") == other.id
+        and e.source == "security.api.event_ingest"
+        and e.payload.get("resource_type") == "SecurityIncident"
+        for e in rows
+    )
+
+
 async def test_metrics_endpoint(auth_client):
     resp = await auth_client.get("/api/security/metrics")
     assert resp.status_code == 200, resp.text

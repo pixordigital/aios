@@ -14,6 +14,7 @@ from aios.governance.security import (
     incident_metrics,
     record_auth_failure,
     record_cross_tenant_block,
+    record_cross_tenant_block_if_mismatch,
     record_false_positive,
     record_recovery_drill,
     record_vuln_reported,
@@ -146,6 +147,43 @@ async def test_metric_producers_best_effort_no_crash():
     db = _FakeDB(fail=True)
     assert await record_auth_failure(db, org_id="o1") is None
     assert await emit_security_metric_event(db, org_id="o1", metric="custom", source="test") is None
+
+
+@pytest.mark.asyncio
+async def test_record_cross_tenant_block_if_mismatch():
+    db = _FakeDB()
+
+    class R:
+        org_id = "other-org"
+        id = "r1"
+
+    evt = await record_cross_tenant_block_if_mismatch(
+        db,
+        org_id="org-a",
+        resource=R(),
+        source="api.test",
+        actor_type="human",
+        actor_id="u1",
+        payload={"incident_id": "i1"},
+    )
+    assert evt is not None
+    assert len(db.added) == 1
+    payload = db.added[0].payload
+    assert db.added[0].event_type == "security.cross_tenant.blocked"
+    assert payload["metric"] == "cross_tenant_block"
+    assert payload["requested_org_id"] == "org-a"
+    assert payload["resource_org_id"] == "other-org"
+    assert payload["resource_type"] == "R"
+    assert payload["incident_id"] == "i1"
+
+    assert await record_cross_tenant_block_if_mismatch(db, org_id="org-a", resource=None) is None
+    assert len(db.added) == 1
+
+    class Same:
+        org_id = "org-a"
+
+    assert await record_cross_tenant_block_if_mismatch(db, org_id="org-a", resource=Same()) is None
+    assert len(db.added) == 1
 
 
 def test_incident_metrics_from_metric_producers():

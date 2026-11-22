@@ -364,6 +364,52 @@ async def record_cross_tenant_block(
     )
 
 
+async def record_cross_tenant_block_if_mismatch(
+    db: Any,
+    *,
+    org_id: str,
+    resource: Any | None,
+    resource_org_attr: str = "org_id",
+    source: str = "tenant_guard",
+    severity: str = "high",
+    incident_id: str | None = None,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    """Record cross-tenant block when resource exists but belongs to other org.
+
+    Central 404-mismatch guard helper: caller keeps returning 404 to avoid
+    resource existence leak; this helper emits deterministic telemetry.
+    Best-effort, never raises.
+    """
+    if resource is None:
+        return None
+    resource_org_id = getattr(resource, resource_org_attr, None)
+    if resource_org_id is None or str(resource_org_id) == str(org_id):
+        return None
+    data = _metric_payload(
+        payload,
+        requested_org_id=str(org_id),
+        resource_org_id=str(resource_org_id),
+        resource_type=type(resource).__name__,
+    )
+    try:
+        return await record_cross_tenant_block(
+            db,
+            org_id=str(org_id),
+            source=source,
+            severity=severity,
+            incident_id=incident_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            payload=data,
+        )
+    except Exception:
+        log.exception("cross-tenant mismatch record failed")
+        return None
+
+
 async def record_recovery_drill(
     db: Any,
     *,
