@@ -2868,6 +2868,9 @@ async def lab_page(request: Request):
     return await _render("lab.html", request, title="Lab — IDE leve", agents=agents, tools=tools, artifacts=artifacts, workflows=wfs)
 
 
+_DASHBOARD_TOOL_RUN_ROLES = {"admin", "owner", "founder", "superadmin"}
+
+
 @router.post("/lab/tool-run")
 async def lab_tool_run(request: Request):
     from fastapi.responses import JSONResponse
@@ -2887,6 +2890,13 @@ async def lab_tool_run(request: Request):
     from aios.tools.registry import TOOL_REGISTRY
     if tool_name not in TOOL_REGISTRY:
         return JSONResponse({"error": f"tool '{tool_name}' not registered"}, status_code=404)
+    from aios.api.deps import get_dashboard_user
+    user = await get_dashboard_user(request)
+    if not user or getattr(user, "role", None) not in _DASHBOARD_TOOL_RUN_ROLES:
+        return JSONResponse(
+            {"ok": False, "tool": tool_name, "error": "admin role required for tool execution", "fail_closed": True},
+            status_code=403,
+        )
     actor = await _dashboard_tool_actor_context(request)
     if actor.get("_unresolved"):
         return JSONResponse(
@@ -2898,8 +2908,9 @@ async def lab_tool_run(request: Request):
     try:
         out = await eng.execute(tool_name, raw_args if isinstance(raw_args, str) else _json.dumps(raw_args))
         return JSONResponse({"ok": True, "tool": tool_name, "output": out})
-    except Exception as e:
-        return JSONResponse({"ok": False, "tool": tool_name, "error": str(e)}, status_code=200)
+    except Exception:
+        logger.exception("Lab tool run failed org=%s tool=%s", await _resolve_org_id(request), tool_name)
+        return JSONResponse({"ok": False, "tool": tool_name, "error": "Tool execution failed"}, status_code=200)
 
 
 @router.get("/lab/traces/{trace_id}")

@@ -211,5 +211,186 @@ async def test_dashboard_tool_actor_context_wires_user(monkeypatch):
     assert "_unresolved" not in ctx
 
 
+@pytest.mark.asyncio
+async def test_dashboard_lab_tool_run_requires_admin_role(monkeypatch):
+    from aios.dashboard import app as dashboard_app
+
+    class _Req:
+        async def json(self):
+            return {"tool": "calculator", "args": {"expression": "1+1"}}
+
+    async def _member(_request):
+        return type("U", (), {"id": "u1", "org_id": "org1", "role": "member"})()
+
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _member)
+    monkeypatch.setattr(dashboard_app, "_dashboard_tool_actor_context", lambda _r: _coro({"_unresolved": True}))
+
+    resp = await dashboard_app.lab_tool_run(_Req())
+    assert resp.status_code == 403
+    body = resp.body.decode()
+    assert "admin role required" in body
+    assert "fail_closed" in body
+
+
+@pytest.mark.asyncio
+async def test_dashboard_lab_tool_run_fail_closed_no_user(monkeypatch):
+    from aios.dashboard import app as dashboard_app
+
+    class _Req:
+        async def json(self):
+            return {"tool": "calculator", "args": {"expression": "1+1"}}
+
+    async def _no_user(_request):
+        return None
+
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _no_user)
+
+    resp = await dashboard_app.lab_tool_run(_Req())
+    assert resp.status_code == 403
+    assert "fail_closed" in resp.body.decode()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_lab_tool_run_allows_admin(monkeypatch):
+    from aios.dashboard import app as dashboard_app
+
+    class _Req:
+        async def json(self):
+            return {"tool": "calculator", "args": {"expression": "1+1"}}
+
+    async def _admin(_request):
+        return type("U", (), {"id": "u1", "org_id": "org1", "role": "admin"})()
+
+    class _FakeToolEngine:
+        def __init__(self, names, **kwargs):
+            self.kwargs = kwargs
+
+        async def execute(self, name, args_json):
+            return "2"
+
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _admin)
+    monkeypatch.setattr(dashboard_app, "_dashboard_tool_actor_context", lambda _r: _coro({
+        "actor_user_id": "u1", "actor_departments": set(), "is_founder": False, "granted_record_ids": set(),
+    }))
+    monkeypatch.setattr(dashboard_app, "_resolve_org_id", lambda _r: _coro("org1"))
+    monkeypatch.setattr("aios.core.tools.ToolEngine", _FakeToolEngine)
+    monkeypatch.setitem(__import__("aios.tools.registry", fromlist=["TOOL_REGISTRY"]).TOOL_REGISTRY, "calculator", {"description": "x"})
+
+    resp = await dashboard_app.lab_tool_run(_Req())
+    assert resp.status_code == 200
+    assert '"ok":true' in resp.body.decode().replace(" ", "").lower() or '"ok": true' in resp.body.decode().lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_hides_internal_exception(monkeypatch):
+    from aios.api import mcp as mcp_api
+
+    logged = {}
+
+    class _FakeToolEngine:
+        def __init__(self, names, **kwargs):
+            pass
+
+        async def execute(self, name, args_json):
+            raise RuntimeError("secret db uri postgresql://user:pw@host/db")
+
+    class _FakeTool:
+        name = "rag_search"
+        code_reference = ""
+
+    def _log_exc(msg, *args, **kwargs):
+        logged["msg"] = msg
+        logged["args"] = args
+
+    monkeypatch.setattr("aios.core.tools.ToolEngine", _FakeToolEngine)
+    monkeypatch.setattr(mcp_api.logger, "exception", _log_exc)
+    monkeypatch.setattr(mcp_api, "_tool_actor_context", lambda db, user: _coro({
+        "actor_user_id": "u1",
+        "actor_departments": set(),
+        "is_founder": False,
+        "granted_record_ids": set(),
+    }))
+
+    async def _fake_exec(*args, **kwargs):
+        return _ScalarResult([_FakeTool()])
+
+    db = _FakeDB()
+    db.execute = _fake_exec
+    out = await mcp_api.mcp_call(
+        {"name": "rag_search", "arguments": {"query": "x"}},
+        db=db,
+        org_id="org1",
+        user=_FakeUser(),
+    )
+    assert out == {"ok": False, "error": "Tool execution failed"}
+    assert "secret db uri" not in out["error"]
+    assert logged["msg"] == "MCP tool call failed org=%s tool=%s"
+    assert logged["args"] == ("org1", "rag_search")
+
+
+@pytest.mark.asyncio
+async def test_dashboard_lab_tool_run_hides_internal_exception(monkeypatch):
+    from aios.dashboard import app as dashboard_app
+
+    logged = {}
+
+    class _FakeUser:
+        id = "u1"
+        org_id = "org1"
+        role = "admin"
+
+    class _FakeRequest:
+        cookies = {}
+
+        async def json(self):
+            return {"tool": "calculator", "args": {"expression": "1+1"}}
+
+    class _FakeToolEngine:
+        def __init__(self, names, **kwargs):
+            pass
+
+        async def execute(self, name, args_json):
+            raise RuntimeError("secret token sk-live-123")
+
+    async def _actor(_request):
+        return {
+            "actor_user_id": "u1",
+            "actor_departments": set(),
+            "is_founder": False,
+            "granted_record_ids": set(),
+        }
+
+    async def _org_id(_request):
+        return "org1"
+
+    async def _dashboard_user(_request):
+        return _FakeUser()
+
+    def _log_exc(msg, *args, **kwargs):
+        logged["msg"] = msg
+        logged["args"] = args
+
+    monkeypatch.setattr("aios.core.tools.ToolEngine", _FakeToolEngine)
+    monkeypatch.setattr("aios.tools.registry.TOOL_REGISTRY", {"calculator": {"description": "x"}})
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _dashboard_user)
+    monkeypatch.setattr(dashboard_app, "_dashboard_tool_actor_context", _actor)
+    monkeypatch.setattr(dashboard_app, "_resolve_org_id", _org_id)
+    monkeypatch.setattr(dashboard_app.logger, "exception", _log_exc)
+
+    resp = await dashboard_app.lab_tool_run(_FakeRequest())
+
+    assert resp.status_code == 200
+    body = resp.body.decode() if hasattr(resp, "body") else ""
+    import json
+
+    data = json.loads(body)
+    assert data["ok"] is False
+    assert data["tool"] == "calculator"
+    assert data["error"] == "Tool execution failed"
+    assert "secret token" not in body
+    assert logged["msg"] == "Lab tool run failed org=%s tool=%s"
+    assert logged["args"] == ("org1", "calculator")
+
+
 async def _coro(val):
     return val

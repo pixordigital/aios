@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 
@@ -5,6 +7,8 @@ from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization, Tool
 from aios.governance.ocp import DepartmentMember
 from .deps import get_current_user, get_org_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
@@ -105,8 +109,9 @@ async def mcp_call(
     try:
         out = await eng.execute(name, json.dumps(args))
         return {"ok": True, "output": out}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        logger.exception("MCP tool call failed org=%s tool=%s", org_id, name)
+        return {"ok": False, "error": "Tool execution failed"}
 
 
 @router.get("/a2a/agents")
