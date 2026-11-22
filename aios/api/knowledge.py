@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 
+# Full-org load + Python ACL filter is a perf hotspot. Scan bounded rows only;
+# page correctness guaranteed within scanned set, truncation surfaced in response.
+KNOWLEDGE_RECORD_SCAN_LIMIT = 2000
+
 
 def _is_founder(user: User, org: Organization | None) -> bool:
     if org is None:
@@ -74,13 +78,32 @@ async def list_records(
     db: DatabaseBackend = Depends(get_db_backend),
     user: User = Depends(get_current_user),
 ):
-    rows = (await db.execute(
-        select(KnowledgeRecord).where(KnowledgeRecord.org_id == user.org_id)
-    )).scalars().all()
+    # Bounded scan: full-org load + Python ACL filter is perf hotspot.
+    # Correctness preserved for returned page within scanned set; truncation surfaced.
+    scan_limit = KNOWLEDGE_RECORD_SCAN_LIMIT
+    rows = (
+        await db.execute(
+            select(KnowledgeRecord)
+            .where(KnowledgeRecord.org_id == user.org_id)
+            .order_by(KnowledgeRecord.created_at.desc(), KnowledgeRecord.id.desc())
+            .limit(scan_limit + 1)
+        )
+    ).scalars().all()
+    truncated = len(rows) > scan_limit
+    if truncated:
+        rows = rows[:scan_limit]
+        logger.warning(
+            "knowledge.records.scan_truncated org=%s user=%s scan_limit=%d",
+            user.org_id,
+            user.id,
+            scan_limit,
+        )
+
     org = await db.get(Organization, user.org_id)
     deps = await _actor_deps(db, user)
     visible = [
-        r for r in rows
+        r
+        for r in rows
         if can_retrieve(
             r,
             actor_org_id=user.org_id,
@@ -88,19 +111,26 @@ async def list_records(
             is_founder=_is_founder(user, org),
         )[0]
     ]
-    total = len(visible)
+    total_visible_scanned = len(visible)
     page = visible[offset : offset + limit]
     return {
         "items": [
             {
-                "id": r.id, "title": r.title, "kind": r.kind,
-                "classification": r.classification, "department_id": r.department_id,
+                "id": r.id,
+                "title": r.title,
+                "kind": r.kind,
+                "classification": r.classification,
+                "department_id": r.department_id,
             }
             for r in page
         ],
-        "total": total,
+        # total = visible count within scanned set; when truncated, true total unknown.
+        "total": total_visible_scanned,
         "limit": limit,
         "offset": offset,
+        "scanned": len(rows),
+        "scan_limit": scan_limit,
+        "truncated": truncated,
     }
 
 

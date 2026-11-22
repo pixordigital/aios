@@ -339,12 +339,38 @@ async def test_knowledge_records_pagination(auth_client):
     assert body["limit"] == 2
     assert body["offset"] == 0
     assert len(body["items"]) == 2
+    assert body["scanned"] == 3
+    assert body["scan_limit"] == 2000
+    assert body["truncated"] is False
 
     resp2 = await auth_client.get("/api/knowledge/records", params={"limit": 2, "offset": 2})
     assert resp2.status_code == 200
     body2 = resp2.json()
     assert body2["total"] == 3
     assert len(body2["items"]) == 1
+    assert body2["truncated"] is False
+
+
+async def test_knowledge_records_scan_truncation_metadata(auth_client, monkeypatch):
+    import aios.api.knowledge as knowledge_api
+
+    monkeypatch.setattr(knowledge_api, "KNOWLEDGE_RECORD_SCAN_LIMIT", 2)
+    for i in range(3):
+        resp = await auth_client.post(
+            "/api/knowledge/records",
+            json={"title": f"ScanRec {i}", "kind": "statement", "classification": "internal", "source_type": "test"},
+        )
+        assert resp.status_code == 200, resp.text
+
+    resp = await auth_client.get("/api/knowledge/records", params={"limit": 10, "offset": 0})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["scanned"] == 2
+    assert body["scan_limit"] == 2
+    assert body["truncated"] is True
+    # total is visible count within scanned set; unknown beyond scan bound
+    assert body["total"] == len(body["items"])
+    assert body["total"] <= 2
 
 
 async def test_knowledge_records_limit_cap(auth_client):
