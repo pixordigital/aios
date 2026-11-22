@@ -5,9 +5,36 @@ from aios.core.audit import log_audit
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, Team
 from aios.schemas import TeamAssignRequest, TeamCreate, TeamOut, PageResponse
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
+
+
+async def _get_team_or_404(
+    db: DatabaseBackend,
+    team_id: str,
+    org_id: str,
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "teams.api.team_lookup",
+) -> Team:
+    team = await db.get(Team, team_id)
+    try:
+        await verify_org_access_async(
+            org_id,
+            team,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"team_id": str(team_id)},
+        )
+    except HTTPException:
+        if team is not None and str(getattr(team, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
+    return team
 
 
 @router.post("", response_model=TeamOut)
@@ -76,11 +103,15 @@ async def get_team(
     team_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    team = await db.get(Team, team_id)
-    if not team or team.org_id != org_id:
-        raise HTTPException(404)
-    return team
+    return await _get_team_or_404(
+        db,
+        team_id,
+        org_id,
+        actor_id=user.id,
+        source="teams.api.get_team",
+    )
 
 
 @router.delete("/{team_id}")
@@ -90,9 +121,13 @@ async def delete_team(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    team = await db.get(Team, team_id)
-    if not team or team.org_id != org_id:
-        raise HTTPException(404)
+    team = await _get_team_or_404(
+        db,
+        team_id,
+        org_id,
+        actor_id=user.id,
+        source="teams.api.delete_team",
+    )
     await log_audit(db, org_id, "team.delete", "team", user_id=user.id, resource_id=team_id, details={"name": team.name})
     await db.delete(team)
     await db.commit()
@@ -105,10 +140,15 @@ async def assign_agents(
     body: TeamAssignRequest,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    team = await db.get(Team, team_id)
-    if not team or team.org_id != org_id:
-        raise HTTPException(404)
+    team = await _get_team_or_404(
+        db,
+        team_id,
+        org_id,
+        actor_id=user.id,
+        source="teams.api.assign_agents",
+    )
 
     result = await db.execute(
         select(Agent).where(

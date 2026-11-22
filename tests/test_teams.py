@@ -141,3 +141,41 @@ class TestTeams:
         assert response.status_code == 200
         data = response.json()
         assert len(data["agents"]) == 2
+
+
+class TestTeamTenantScope:
+    async def test_cross_tenant_team_access_records_metric(self, auth_client, test_db_session, second_org):
+        from sqlalchemy import select
+
+        from aios.db.models import Team
+        from aios.governance.security import SecurityEvent
+
+        other = Team(org_id=second_org.id, name="Other Org Team", routing_strategy="supervisor")
+        test_db_session.add(other)
+        await test_db_session.commit()
+        await test_db_session.refresh(other)
+
+        cases = [
+            ("get", f"/api/teams/{other.id}", None, "teams.api.get_team"),
+            ("delete", f"/api/teams/{other.id}", None, "teams.api.delete_team"),
+            ("post", f"/api/teams/{other.id}/agents", {"agent_ids": ["00000000-0000-0000-0000-000000000001"]}, "teams.api.assign_agents"),
+        ]
+        for method, path, body, source in cases:
+            req = getattr(auth_client, method)
+            resp = await req(path, json=body) if body is not None else await req(path)
+            assert resp.status_code == 404, (path, resp.text)
+
+        rows = (
+            await test_db_session.execute(
+                select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+            )
+        ).scalars().all()
+        for _, _, _, source in cases:
+            assert any(
+                e.payload.get("metric") == "cross_tenant_block"
+                and e.payload.get("resource_type") == "Team"
+                and e.payload.get("resource_org_id") == second_org.id
+                and e.payload.get("team_id") == other.id
+                and e.source == source
+                for e in rows
+            ), source
