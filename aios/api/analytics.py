@@ -15,8 +15,10 @@ from aios.governance.kpi import (
     governance_kpis_snapshot,
     interpret_kpis,
     kpi_catalog,
+    list_kpi_target_history,
     list_kpi_targets,
     set_kpi_target,
+    transition_kpi_target_status,
     validate_target_proposal,
     win_rate,
 )
@@ -906,6 +908,17 @@ async def list_kpi_targets_endpoint(
     return list_kpi_targets(org.extra_data if org else {})
 
 
+@router.get("/kpi/targets/history")
+async def list_kpi_target_history_endpoint(
+    metric_key: str | None = None,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Append-only KPI target history from Organization.extra_data (bounded)."""
+    org = await db.get(Organization, org_id)
+    return list_kpi_target_history(org.extra_data if org else {}, metric_key=metric_key)
+
+
 @router.post("/kpi/targets")
 async def set_kpi_target_endpoint(
     payload: dict,
@@ -929,6 +942,7 @@ async def set_kpi_target_endpoint(
         evidence=payload.get("evidence"),
         owner=payload.get("owner"),
         balancing_metrics=payload.get("balancing_metrics") or [],
+        status=payload.get("status"),
         actor_user_id=user.id,
         actor_org_id=org_id,
     )
@@ -946,5 +960,42 @@ async def set_kpi_target_endpoint(
         "target": target,
         "targets": stored["targets"],
         "count": stored["count"],
+        "history_count": stored.get("history_count", 0),
         "guardrails": result["guardrails"],
+    }
+
+
+@router.post("/kpi/targets/transition")
+async def transition_kpi_target_endpoint(
+    payload: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    user=Depends(get_current_user),
+    org_id: str = Depends(get_org_id),
+):
+    """Transition KPI target status (active/review/retired) with append-only history."""
+    from fastapi import HTTPException
+
+    org = await db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(404, "Organization not found")
+
+    result = transition_kpi_target_status(
+        extra_data=org.extra_data if isinstance(org.extra_data, dict) else {},
+        metric_key=str(payload.get("metric_key") or ""),
+        status=str(payload.get("status") or ""),
+        evidence=payload.get("evidence"),
+        actor_user_id=user.id,
+        actor_org_id=org_id,
+    )
+    if not result.get("ok"):
+        raise HTTPException(422, {"message": "KPI target transition rejected (fail closed)", **result})
+
+    org.extra_data = result["extra_data"]
+    await db.commit()
+    await db.refresh(org)
+    return {
+        "ok": True,
+        "persistence": result["persistence"],
+        "target": result["target"],
+        "history_count": result["history_count"],
     }

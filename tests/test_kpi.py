@@ -6,8 +6,10 @@ from aios.governance.kpi import (
     governance_kpis_snapshot,
     interpret_kpis,
     kpi_catalog,
+    list_kpi_target_history,
     list_kpi_targets,
     set_kpi_target,
+    transition_kpi_target_status,
     validate_target_proposal,
     win_rate,
 )
@@ -134,6 +136,7 @@ def test_set_kpi_target_persists_in_org_extra_data_with_provenance():
         "mode": "org_extra_data",
         "schema_table": None,
         "storage": "Organization.extra_data[kpi_targets]",
+        "history_storage": "Organization.extra_data[kpi_target_history]",
     }
     target = result["target"]
     assert target["metric_key"] == "crm.win_rate"
@@ -165,3 +168,66 @@ def test_set_kpi_target_fail_closed_no_persistence_on_invalid():
     assert result["persistence"]["persisted"] is False
     assert "extra_data" not in result
     assert list_kpi_targets(before)["count"] == 1
+
+
+def test_set_kpi_target_appends_bounded_history_and_status():
+    extra = {}
+    first = set_kpi_target(
+        extra_data=extra,
+        metric_key="crm.win_rate",
+        target_value=0.6,
+        baseline_value=0.5,
+        baseline_window_days=30,
+        evidence="q1",
+        owner="sales",
+        balancing_metrics=["crm.close_rate", "crm.average_deal_size"],
+        actor_user_id="u1",
+        actor_org_id="o1",
+    )
+    assert first["ok"] is True
+    assert first["target"]["status"] == "active"
+    extra = first["extra_data"]
+    second = set_kpi_target(
+        extra_data=extra,
+        metric_key="crm.win_rate",
+        target_value=0.65,
+        baseline_value=0.55,
+        baseline_window_days=30,
+        evidence="q2",
+        owner="sales",
+        balancing_metrics=["crm.close_rate", "crm.average_deal_size"],
+        status="review",
+        actor_user_id="u2",
+        actor_org_id="o1",
+    )
+    assert second["ok"] is True
+    assert second["target"]["status"] == "review"
+    hist = list_kpi_target_history(second["extra_data"], metric_key="crm.win_rate")
+    assert hist["count"] == 2
+    assert hist["history"][0]["event"] == "target_updated"
+    assert hist["history"][0]["to_status"] == "review"
+
+
+def test_transition_kpi_target_status_guardrails_and_history():
+    extra = set_kpi_target(
+        extra_data={},
+        metric_key="crm.win_rate",
+        target_value=0.6,
+        baseline_value=0.5,
+        baseline_window_days=30,
+        evidence="q1",
+        owner="sales",
+        balancing_metrics=["crm.close_rate", "crm.average_deal_size"],
+    )["extra_data"]
+    bad = transition_kpi_target_status(extra_data=extra, metric_key="crm.win_rate", status="retired", evidence="")
+    assert bad["ok"] is False
+    assert "evidence required" in bad["errors"][0]
+    bad2 = transition_kpi_target_status(extra_data=extra, metric_key="crm.win_rate", status="bogus", evidence="x")
+    assert bad2["ok"] is False
+    ok = transition_kpi_target_status(extra_data=extra, metric_key="crm.win_rate", status="retired", evidence="decommissioned", actor_user_id="u1")
+    assert ok["ok"] is True
+    assert ok["target"]["status"] == "retired"
+    hist = list_kpi_target_history(ok["extra_data"], metric_key="crm.win_rate")
+    assert hist["history"][0]["event"] == "status_transition"
+    assert hist["history"][0]["from_status"] == "active"
+    assert hist["history"][0]["to_status"] == "retired"

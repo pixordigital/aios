@@ -124,11 +124,14 @@ async def test_kpi_target_set_and_list_persisted_in_org_extra_data(auth_client, 
     assert body["target"]["metric_key"] == "crm.win_rate"
     assert body["target"]["provenance"]["actor_org_id"] == test_org.id
     assert body["count"] == 1
+    assert body["history_count"] == 1
 
     await test_db_session.refresh(test_org)
     store = (test_org.extra_data or {}).get("kpi_targets", {})
     assert store.get("persistence") == "org_extra_data"
     assert len(store.get("targets", [])) == 1
+    hist = (test_org.extra_data or {}).get("kpi_target_history", [])
+    assert len(hist) == 1
 
     listed = await auth_client.get("/api/analytics/kpi/targets")
     assert listed.status_code == 200, listed.text
@@ -136,6 +139,7 @@ async def test_kpi_target_set_and_list_persisted_in_org_extra_data(auth_client, 
     assert lb["persistence"] == "org_extra_data"
     assert lb["schema_table"] is None
     assert lb["count"] == 1
+    assert lb["history_count"] == 1
     assert lb["targets"][0]["owner"] == "sales-lead"
 
 
@@ -163,6 +167,43 @@ async def test_kpi_target_set_fail_closed_no_persist(auth_client, test_db_sessio
     listed = await auth_client.get("/api/analytics/kpi/targets")
     assert listed.status_code == 200
     assert listed.json()["count"] == 0
+
+
+async def test_kpi_target_history_and_transition_endpoints(auth_client, test_db_session, test_org):
+    payload = {
+        "metric_key": "crm.win_rate",
+        "target_value": 0.7,
+        "baseline_value": 0.55,
+        "baseline_window_days": 30,
+        "evidence": "CRM export 2026-Q2",
+        "owner": "sales-lead",
+        "balancing_metrics": ["crm.close_rate", "crm.average_deal_size"],
+    }
+    create = await auth_client.post("/api/analytics/kpi/targets", json=payload)
+    assert create.status_code == 200, create.text
+
+    bad = await auth_client.post("/api/analytics/kpi/targets/transition", json={
+        "metric_key": "crm.win_rate",
+        "status": "retired",
+        "evidence": "",
+    })
+    assert bad.status_code == 422, bad.text
+
+    ok = await auth_client.post("/api/analytics/kpi/targets/transition", json={
+        "metric_key": "crm.win_rate",
+        "status": "review",
+        "evidence": "weekly governance review",
+    })
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["target"]["status"] == "review"
+
+    hist = await auth_client.get("/api/analytics/kpi/targets/history?metric_key=crm.win_rate")
+    assert hist.status_code == 200, hist.text
+    hb = hist.json()
+    assert hb["count"] == 2
+    assert hb["history"][0]["event"] == "status_transition"
+    assert hb["history"][0]["to_status"] == "review"
+    assert hb["schema_table"] is None
 
 
 async def test_process_global_metrics_require_superadmin(async_client, test_db_session, test_org):

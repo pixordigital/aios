@@ -34,7 +34,10 @@ KPI_CATEGORIES = (
 METRIC_STATUSES = ("available", "partial", "unknown", "not_instrumented")
 
 TARGET_DECISION_STATES = ("proposed", "baseline_required", "evidence_required", "ready_for_review")
+TARGET_STATUSES = ("active", "review", "retired")
 KPI_TARGETS_EXTRA_DATA_KEY = "kpi_targets"
+KPI_TARGET_HISTORY_EXTRA_DATA_KEY = "kpi_target_history"
+KPI_TARGET_HISTORY_MAX = 200
 TARGET_PERSISTENCE = "org_extra_data"
 
 
@@ -434,30 +437,49 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _clean_target_list(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    return [t for t in raw if isinstance(t, dict)]
+
+
 def _target_store(extra_data: dict | None) -> dict[str, Any]:
     data = extra_data if isinstance(extra_data, dict) else {}
     raw = data.get(KPI_TARGETS_EXTRA_DATA_KEY)
     store = raw if isinstance(raw, dict) else {}
-    targets = store.get("targets")
-    if not isinstance(targets, list):
-        targets = []
-    clean_targets = [t for t in targets if isinstance(t, dict)]
     return {
         "version": 1,
         "persistence": TARGET_PERSISTENCE,
-        "targets": clean_targets,
+        "targets": _clean_target_list(store.get("targets")),
     }
+
+
+def _target_history(extra_data: dict | None) -> list[dict[str, Any]]:
+    data = extra_data if isinstance(extra_data, dict) else {}
+    return _clean_target_list(data.get(KPI_TARGET_HISTORY_EXTRA_DATA_KEY))
+
+
+def _append_target_history(extra_data: dict[str, Any], event: dict[str, Any]) -> list[dict[str, Any]]:
+    history = _target_history(extra_data)
+    history.append(event)
+    if len(history) > KPI_TARGET_HISTORY_MAX:
+        history = history[-KPI_TARGET_HISTORY_MAX:]
+    extra_data[KPI_TARGET_HISTORY_EXTRA_DATA_KEY] = history
+    return history
 
 
 def list_kpi_targets(extra_data: dict | None) -> dict[str, Any]:
     store = _target_store(extra_data)
     targets = sorted(store["targets"], key=lambda t: str(t.get("updated_at") or ""), reverse=True)
+    history = _target_history(extra_data)
     return {
         "persistence": TARGET_PERSISTENCE,
         "storage": f"Organization.extra_data[{KPI_TARGETS_EXTRA_DATA_KEY}]",
+        "history_storage": f"Organization.extra_data[{KPI_TARGET_HISTORY_EXTRA_DATA_KEY}]",
         "schema_table": None,
         "targets": targets,
         "count": len(targets),
+        "history_count": len(history),
         "guardrails": {
             "no_fake_metrics": True,
             "no_target_without_baseline": True,
@@ -557,6 +579,7 @@ def set_kpi_target(
     evidence: str | None = None,
     owner: str | None = None,
     balancing_metrics: list[str] | None = None,
+    status: str | None = None,
     actor_user_id: str | None = None,
     actor_org_id: str | None = None,
 ) -> dict[str, Any]:
@@ -580,11 +603,27 @@ def set_kpi_target(
             },
         }
 
+    desired_status = str(status or "active").strip().lower()
+    if desired_status not in TARGET_STATUSES:
+        return {
+            **validation,
+            "ok": False,
+            "state": "rejected",
+            "errors": [f"invalid status; allowed: {list(TARGET_STATUSES)}"],
+            "persistence": {
+                "persisted": False,
+                "mode": TARGET_PERSISTENCE,
+                "schema_table": None,
+                "blocker": "Invalid status; target not persisted (fail closed).",
+            },
+        }
+
     data = dict(extra_data) if isinstance(extra_data, dict) else {}
     store = _target_store(data)
     now = _now_iso()
     targets = list(store["targets"])
     existing = next((t for t in targets if t.get("metric_key") == metric_key), None)
+    previous_status = (existing or {}).get("status")
     record = {
         "id": (existing or {}).get("id") or str(uuid4()),
         "metric_key": metric_key,
@@ -594,7 +633,7 @@ def set_kpi_target(
         "evidence": str(evidence).strip(),
         "owner": str(owner).strip(),
         "balancing_metrics": list(validation["proposal"]["balancing_metrics"]),
-        "status": "active",
+        "status": desired_status,
         "created_at": (existing or {}).get("created_at") or now,
         "updated_at": now,
         "provenance": {
@@ -612,13 +651,30 @@ def set_kpi_target(
     }
     if existing:
         targets = [record if t.get("metric_key") == metric_key else t for t in targets]
+        event_type = "target_updated"
     else:
         targets.append(record)
+        event_type = "target_created"
     data[KPI_TARGETS_EXTRA_DATA_KEY] = {
         "version": 1,
         "persistence": TARGET_PERSISTENCE,
         "targets": targets,
     }
+    history = _append_target_history(data, {
+        "id": str(uuid4()),
+        "event": event_type,
+        "metric_key": metric_key,
+        "target_id": record["id"],
+        "from_status": previous_status,
+        "to_status": desired_status,
+        "actor_user_id": actor_user_id,
+        "actor_org_id": actor_org_id,
+        "at": now,
+        "evidence": record["evidence"],
+        "owner": record["owner"],
+        "target_value": target_value,
+        "baseline_value": baseline_value,
+    })
     return {
         **validation,
         "persistence": {
@@ -626,8 +682,117 @@ def set_kpi_target(
             "mode": TARGET_PERSISTENCE,
             "schema_table": None,
             "storage": f"Organization.extra_data[{KPI_TARGETS_EXTRA_DATA_KEY}]",
+            "history_storage": f"Organization.extra_data[{KPI_TARGET_HISTORY_EXTRA_DATA_KEY}]",
         },
         "target": record,
+        "history_count": len(history),
+        "extra_data": data,
+    }
+
+
+def list_kpi_target_history(extra_data: dict | None, *, metric_key: str | None = None) -> dict[str, Any]:
+    history = _target_history(extra_data)
+    if metric_key:
+        history = [h for h in history if h.get("metric_key") == metric_key]
+    history = sorted(history, key=lambda h: str(h.get("at") or ""), reverse=True)
+    return {
+        "persistence": TARGET_PERSISTENCE,
+        "storage": f"Organization.extra_data[{KPI_TARGET_HISTORY_EXTRA_DATA_KEY}]",
+        "schema_table": None,
+        "history": history,
+        "count": len(history),
+        "max_entries": KPI_TARGET_HISTORY_MAX,
+    }
+
+
+def transition_kpi_target_status(
+    *,
+    extra_data: dict | None,
+    metric_key: str,
+    status: str,
+    evidence: str | None = None,
+    actor_user_id: str | None = None,
+    actor_org_id: str | None = None,
+) -> dict[str, Any]:
+    desired = str(status or "").strip().lower()
+    if desired not in TARGET_STATUSES:
+        return {
+            "ok": False,
+            "state": "rejected",
+            "metric_key": metric_key,
+            "errors": [f"invalid status; allowed: {list(TARGET_STATUSES)}"],
+            "persistence": {"persisted": False, "mode": TARGET_PERSISTENCE, "schema_table": None},
+        }
+    data = dict(extra_data) if isinstance(extra_data, dict) else {}
+    store = _target_store(data)
+    targets = list(store["targets"])
+    existing = next((t for t in targets if t.get("metric_key") == metric_key), None)
+    if not existing:
+        return {
+            "ok": False,
+            "state": "rejected",
+            "metric_key": metric_key,
+            "errors": ["target not found; set target before transition"],
+            "persistence": {"persisted": False, "mode": TARGET_PERSISTENCE, "schema_table": None},
+        }
+
+    ev = str(evidence).strip() if evidence else ""
+    if not ev:
+        return {
+            "ok": False,
+            "state": "evidence_required",
+            "metric_key": metric_key,
+            "errors": ["evidence required for status transition"],
+            "persistence": {"persisted": False, "mode": TARGET_PERSISTENCE, "schema_table": None},
+        }
+
+    now = _now_iso()
+    previous_status = existing.get("status")
+    record = dict(existing)
+    record["status"] = desired
+    record["updated_at"] = now
+    prov = dict(record.get("provenance") or {})
+    prov.update({
+        "actor_user_id": actor_user_id,
+        "actor_org_id": actor_org_id,
+        "source": "api.analytics.kpi.targets.transition",
+        "last_transition_evidence": ev,
+    })
+    record["provenance"] = prov
+    targets = [record if t.get("metric_key") == metric_key else t for t in targets]
+    data[KPI_TARGETS_EXTRA_DATA_KEY] = {
+        "version": 1,
+        "persistence": TARGET_PERSISTENCE,
+        "targets": targets,
+    }
+    history = _append_target_history(data, {
+        "id": str(uuid4()),
+        "event": "status_transition",
+        "metric_key": metric_key,
+        "target_id": record.get("id"),
+        "from_status": previous_status,
+        "to_status": desired,
+        "actor_user_id": actor_user_id,
+        "actor_org_id": actor_org_id,
+        "at": now,
+        "evidence": ev,
+        "owner": record.get("owner"),
+        "target_value": record.get("target_value"),
+        "baseline_value": record.get("baseline_value"),
+    })
+    return {
+        "ok": True,
+        "state": "ready_for_review",
+        "metric_key": metric_key,
+        "target": record,
+        "history_count": len(history),
+        "persistence": {
+            "persisted": True,
+            "mode": TARGET_PERSISTENCE,
+            "schema_table": None,
+            "storage": f"Organization.extra_data[{KPI_TARGETS_EXTRA_DATA_KEY}]",
+            "history_storage": f"Organization.extra_data[{KPI_TARGET_HISTORY_EXTRA_DATA_KEY}]",
+        },
         "extra_data": data,
     }
 
