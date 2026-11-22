@@ -578,6 +578,12 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
         and not settings.registration_enabled
         and not _is_allowlisted(user.email)
     ):
+        await _record_auth_failure_metric(
+            db,
+            org_id=user.org_id,
+            actor_id=user.id,
+            payload={"reason": "email_unverified", "source": "auth.login"},
+        )
         raise HTTPException(403, "Verifique seu e-mail antes de entrar. Link reenviado.")
     if getattr(user, "totp_enabled", False) and user.totp_secret:
         if not body.totp_code:
@@ -623,6 +629,14 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
         raise HTTPException(401, "Token de atualização inválido ou expirado")
 
     if payload.get("type") != "refresh":
+        _uid = payload.get("sub")
+        _user = await db.get(User, _uid) if _uid else None
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(_user, "org_id", None),
+            actor_id=str(_uid) if _uid else None,
+            payload={"reason": "refresh_invalid_type", "source": "auth.refresh"},
+        )
         raise HTTPException(401, "Tipo de token inválido")
 
     user_id = payload["sub"]
@@ -721,6 +735,14 @@ async def verify_email(token: str = Query(...), db: DatabaseBackend = Depends(ge
     if not payload:
         raise HTTPException(400, "Token de verificação inválido ou expirado")
     if payload.get("purpose") != "email_verify":
+        _uid = payload.get("sub")
+        _user = await db.get(User, _uid) if _uid else None
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(_user, "org_id", None),
+            actor_id=str(_uid) if _uid else None,
+            payload={"reason": "invalid_token_purpose", "source": "auth.verify_email"},
+        )
         raise HTTPException(400, "Finalidade do token inválida")
 
     user = await db.get(User, payload["sub"])
@@ -771,6 +793,14 @@ async def reset_password(body: ResetPasswordRequest, db: DatabaseBackend = Depen
     if not payload:
         raise HTTPException(400, "Token de redefinição inválido ou expirado")
     if payload.get("purpose") != "password_reset":
+        _uid = payload.get("sub")
+        _user = await db.get(User, _uid) if _uid else None
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(_user, "org_id", None),
+            actor_id=str(_uid) if _uid else None,
+            payload={"reason": "invalid_token_purpose", "source": "auth.reset_password"},
+        )
         raise HTTPException(400, "Finalidade do token inválida")
 
     _validate_password(body.new_password)
