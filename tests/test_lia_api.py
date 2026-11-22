@@ -139,3 +139,50 @@ async def test_lia_records_are_tenant_scoped(auth_client, test_db_session):
     assert all(c["name"] != "Secret campaign" for c in resp.json()["items"])
     resp = await auth_client.post(f"/api/lia/campaigns/{secret.id}/approve")
     assert resp.status_code == 404
+
+
+async def test_lia_mutating_track_c_autonomous_guard(auth_client, test_db_session, test_org):
+    # source create guarded
+    resp = await auth_client.post(
+        "/api/lia/sources",
+        json={"name": "Auto src", "source_type": "receita_cnpj", "allowed_for_outreach": False, "track": "C", "autonomous": True},
+    )
+    assert resp.status_code == 403
+
+    resp = await auth_client.post(
+        "/api/lia/sources",
+        json={"name": "Auto src", "source_type": "receita_cnpj", "allowed_for_outreach": False, "track": "C", "autonomous": True, "evidence": ["ok"], "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await auth_client.post(
+        "/api/lia/campaigns",
+        json={"name": "C", "channel": "email", "track": "C", "autonomous": True},
+    )
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        "/api/lia/campaigns",
+        json={"name": "C", "channel": "email", "track": "C", "autonomous": True, "evidence": ["ok"], "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+    cid = resp.json()["id"]
+
+    contact = Contact(org_id=test_org.id, name="Lead", email="lead2@example.com", email_verified=True, contact_allowed=True)
+    test_db_session.add(contact)
+    await test_db_session.flush()
+    resp = await auth_client.post(
+        "/api/lia/members",
+        json={"campaign_id": cid, "contact_id": contact.id, "disposition": "qualified", "icp_fit": 0.9, "track": "C", "autonomous": True},
+    )
+    assert resp.status_code == 403
+    resp = await auth_client.post(
+        "/api/lia/members",
+        json={"campaign_id": cid, "contact_id": contact.id, "disposition": "qualified", "icp_fit": 0.9, "track": "C", "autonomous": True, "evidence": ["ok"], "founder_approved": True},
+    )
+    assert resp.status_code == 200, resp.text
+    mid = resp.json()["id"]
+
+    resp = await auth_client.post(f"/api/lia/members/{mid}/handoff", json={"campaign_approved": True, "campaign_legal_reviewed": True, "track": "C", "autonomous": True})
+    assert resp.status_code == 403
+    resp = await auth_client.post(f"/api/lia/members/{mid}/handoff", json={"campaign_approved": True, "campaign_legal_reviewed": True, "track": "C", "autonomous": True, "evidence": ["ok"], "founder_approved": True})
+    assert resp.status_code == 200, resp.text

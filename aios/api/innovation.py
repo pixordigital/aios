@@ -15,6 +15,7 @@ from aios.governance.innovation import (
     MVP_TYPES,
     Experiment,
     Hypothesis,
+    autonomous_action_guard,
     decide_from_result,
     evaluate_experiment,
     has_track_c_evidence,
@@ -22,6 +23,7 @@ from aios.governance.innovation import (
     is_track_c_autonomous,
     missing_experiment_fields,
     production_promotion_allowed,
+    track_b_hypothesis_required,
 )
 
 router = APIRouter(prefix="/api/innovation", tags=["innovation"])
@@ -141,6 +143,9 @@ async def create_experiment(
     missing = missing_experiment_fields(exp)
     if missing:
         raise HTTPException(400, f"missing experiment declaration: {', '.join(missing)}")
+    ok, reason = track_b_hypothesis_required(exp)
+    if not ok:
+        raise HTTPException(400, reason)
     db.add(exp)
     await db.commit()
     await db.refresh(exp)
@@ -200,11 +205,23 @@ async def decide(
     decision = str(body.get("decision") or decide_from_result(exp.result))
     if decision not in DECISIONS:
         raise HTTPException(400, "invalid decision")
+    ok, reason = track_b_hypothesis_required(exp)
+    if not ok:
+        raise HTTPException(400, reason)
     promote_to_production = bool(body.get("promote_to_production", False))
     if promote_to_production or decision == "persevere" and str(body.get("target") or "") == "production":
         allowed, reason = production_promotion_allowed(exp)
         if not allowed:
             raise HTTPException(403, reason)
+    ok, reason = autonomous_action_guard(
+        track=(exp.permissions or {}).get("track"),
+        autonomous=is_track_c_autonomous(exp),
+        has_evidence=has_track_c_evidence(exp),
+        founder_approved=True,
+        action="experiment decision",
+    )
+    if not ok:
+        raise HTTPException(403, reason)
     if is_track_c_autonomous(exp) and decision == "persevere" and not has_track_c_evidence(exp):
         raise HTTPException(403, "Track C autonomous optimization requires evidence before approval")
     exp.decision = decision

@@ -153,3 +153,17 @@ async def test_experiments_are_tenant_scoped(auth_client, test_db_session):
     ).scalars().first()
     resp = await auth_client.post(f"/api/innovation/experiments/{secret.id}/decide", json={})
     assert resp.status_code == 404
+
+
+async def test_track_b_requires_hypothesis_api(auth_client):
+    decl = _decl(None)
+    decl["hypothesis_id"] = None
+    decl["permissions"] = {"track": "B", "orphan_justification": "explore"}
+    resp = await auth_client.post("/api/innovation/experiments", json=decl)
+    assert resp.status_code == 400
+    assert "Track B" in resp.text or "hypothesis" in resp.text.lower()
+
+    h_id = await _hypothesis(auth_client)
+    decl["hypothesis_id"] = h_id
+    resp = await auth_client.post("/api/innovation/experiments", json=decl)
+    assert resp.status_code == 200, resp.text

@@ -127,6 +127,31 @@ def engineering_work_guard(disposition: str) -> tuple[bool, str]:
     return True, "no engineering review gate"
 
 
+def capability_lifecycle_guard(
+    *,
+    track: str | None = None,
+    autonomous: bool = False,
+    has_evidence: bool = False,
+    founder_approved: bool = False,
+    action: str = "mutating capability action",
+) -> tuple[bool, str]:
+    """Fail-closed guard for mutating capability lifecycle actions.
+
+    Coverage is explicit: only capability API mutating actions that opt into
+    Track C/autonomous execution. Does not claim coverage for all execution
+    systems outside this module boundary.
+    """
+    from aios.governance.innovation import autonomous_action_guard
+
+    return autonomous_action_guard(
+        track=track,
+        autonomous=autonomous,
+        has_evidence=has_evidence,
+        founder_approved=founder_approved,
+        action=action,
+    )
+
+
 def capability_fit_score(capability: Capability, required_use_case: str | None) -> float:
     """Deterministic 0..1 signal from declared support and evidence."""
     if required_use_case and required_use_case not in (capability.supported_use_cases or []):

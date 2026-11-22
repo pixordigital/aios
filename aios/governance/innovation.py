@@ -119,6 +119,38 @@ def has_track_c_evidence(exp: Experiment) -> bool:
     return bool(perms.get("evidence_before_track_c") is True)
 
 
+def track_b_hypothesis_required(exp: Experiment) -> tuple[bool, str]:
+    """Track B decisions require a linked hypothesis. Fail closed."""
+    if experiment_track(exp) != "B":
+        return True, "not track B"
+    if (exp.hypothesis_id or "").strip():
+        return True, "hypothesis present"
+    return False, "Track B decisions require hypothesis_id"
+
+
+def autonomous_action_guard(
+    *,
+    track: str | None,
+    autonomous: bool = False,
+    has_evidence: bool = False,
+    founder_approved: bool = False,
+    action: str = "mutating action",
+) -> tuple[bool, str]:
+    """Track C autonomous mutating actions fail closed without evidence+approval.
+
+    Scope is intentionally narrow: only guards actions explicitly marked
+    autonomous/Track C. Does not claim coverage for all execution systems.
+    """
+    track_norm = str(track or "").strip().upper()
+    if not (track_norm == "C" and autonomous):
+        return True, "no Track C autonomous guard triggered"
+    if not has_evidence:
+        return False, f"Track C autonomous {action} requires evidence"
+    if not founder_approved:
+        return False, f"Track C autonomous {action} requires Founder approval"
+    return True, "Track C autonomous action allowed"
+
+
 def missing_experiment_fields(exp: Experiment) -> list[str]:
     missing = []
     for field in EXPERIMENT_REQUIRED_FIELDS:
@@ -132,6 +164,13 @@ def missing_experiment_fields(exp: Experiment) -> list[str]:
     track = (exp.permissions or {}).get("track")
     if track is not None and experiment_track(exp) is None:
         missing.append("track_invalid")
+    if experiment_track(exp) == "B" and not (exp.hypothesis_id or "").strip():
+        if "hypothesis_id_or_orphan_justification" not in missing:
+            missing.append("track_b_hypothesis_required")
+        else:
+            # replace generic orphan allowance with stricter Track B message
+            missing = [m for m in missing if m != "hypothesis_id_or_orphan_justification"]
+            missing.append("track_b_hypothesis_required")
     if is_track_c_autonomous(exp) and not has_track_c_evidence(exp):
         missing.append("track_c_evidence")
     return missing

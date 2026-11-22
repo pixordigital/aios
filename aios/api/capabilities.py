@@ -11,12 +11,28 @@ from aios.governance.capability_registry import (
     Capability,
     SolutionFitAssessment,
     capability_fit_score,
+    capability_lifecycle_guard,
     engineering_work_guard,
     solution_fit,
 )
 
 router = APIRouter(prefix="/api/capabilities", tags=["capabilities"])
 
+
+def _cap_guard(body: dict, action: str) -> None:
+    track = (body.get("permissions") or {}).get("track") if isinstance(body.get("permissions"), dict) else body.get("track")
+    autonomous = bool(body.get("autonomous") or (isinstance(body.get("permissions"), dict) and body.get("permissions", {}).get("autonomous")))
+    has_evidence = bool(body.get("evidence") or body.get("track_c_evidence") or (isinstance(body.get("permissions"), dict) and (body.get("permissions", {}).get("evidence") or body.get("permissions", {}).get("evidence_refs"))))
+    founder_approved = bool(body.get("founder_approved"))
+    ok, reason = capability_lifecycle_guard(
+        track=str(track) if track is not None else None,
+        autonomous=autonomous,
+        has_evidence=has_evidence,
+        founder_approved=founder_approved,
+        action=action,
+    )
+    if not ok:
+        raise HTTPException(403, reason)
 _SCORES = (
     "problem_fit",
     "feasibility",
@@ -76,6 +92,7 @@ async def create_capability(
     review_status = str(body.get("review_status") or "pending_review").strip()
     if review_status not in {"pending_review", "reviewed", "approved", "rejected"}:
         raise HTTPException(400, "invalid review_status")
+    _cap_guard(body, "capability create")
     deployment_evidence = list(body.get("deployment_evidence") or [])
     deployment_evidence.append({"_governance": {"owner_id": owner_id, "review_status": review_status}})
     capability = Capability(
@@ -111,6 +128,7 @@ async def evaluate_fit(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _cap_guard(body, "capability evaluate")
     subject_id = str(body.get("subject_id") or "").strip()
     if not subject_id:
         raise HTTPException(400, "subject_id required")

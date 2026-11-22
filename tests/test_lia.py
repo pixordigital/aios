@@ -68,3 +68,11 @@ def test_stage_transitions_are_deterministic():
     assert can_transition_stage("company_discovery", "prospect_intelligence")[0] is True
     assert can_transition_stage("company_discovery", "meeting_booking")[0] is False
     assert can_transition_stage("outreach", "qualification")[0] is True  # rollback allowed
+
+
+def test_autonomous_action_guard_scope_note():
+    # Guard helper lives in innovation; LIA uses it for mutating Track C autonomous actions.
+    from aios.governance.innovation import autonomous_action_guard
+    ok, reason = autonomous_action_guard(track="C", autonomous=True, has_evidence=True, founder_approved=False, action="lia crm handoff")
+    assert not ok
+    assert "Founder" in reason

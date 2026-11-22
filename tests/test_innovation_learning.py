@@ -46,6 +46,32 @@ def test_track_c_autonomous_requires_evidence_before_approval():
     assert missing_experiment_fields(evidenced) == []
 
 
+def test_track_b_requires_hypothesis():
+    from aios.governance.innovation import track_b_hypothesis_required
+    exp = _exp(hypothesis_id=None, permissions={"track": "B", "orphan_justification": "x"})
+    ok, reason = track_b_hypothesis_required(exp)
+    assert not ok
+    assert "hypothesis" in reason.lower()
+    assert "track_b_hypothesis_required" in missing_experiment_fields(exp)
+    ok2 = _exp(hypothesis_id="h1", permissions={"track": "B"})
+    assert track_b_hypothesis_required(ok2)[0] is True
+    assert "track_b_hypothesis_required" not in missing_experiment_fields(ok2)
+
+
+def test_autonomous_action_guard_fail_closed():
+    from aios.governance.innovation import autonomous_action_guard
+    ok, reason = autonomous_action_guard(track="C", autonomous=True, has_evidence=False, founder_approved=True, action="outreach")
+    assert not ok
+    assert "evidence" in reason.lower()
+    ok, reason = autonomous_action_guard(track="C", autonomous=True, has_evidence=True, founder_approved=False, action="outreach")
+    assert not ok
+    assert "Founder" in reason
+    ok, _ = autonomous_action_guard(track="C", autonomous=True, has_evidence=True, founder_approved=True, action="outreach")
+    assert ok
+    ok, _ = autonomous_action_guard(track="B", autonomous=True, has_evidence=False, founder_approved=False, action="outreach")
+    assert ok  # guard scoped to Track C autonomous only
+
+
 def test_mvp_type_promotion_guard():
     proto = _exp(mvp_type="experimental_prototype", result="success")
     allowed, reason = production_promotion_allowed(proto)

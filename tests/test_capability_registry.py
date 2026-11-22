@@ -78,3 +78,14 @@ def test_unmet_need_cannot_auto_create_engineering_work():
     assert not allowed
     assert "review" in reason.lower()
     assert engineering_work_guard("qualified")[0] is True
+
+
+def test_capability_lifecycle_guard_fail_closed():
+    from aios.governance.capability_registry import capability_lifecycle_guard
+    ok, reason = capability_lifecycle_guard(track="C", autonomous=True, has_evidence=False, founder_approved=True, action="capability evaluate")
+    assert not ok
+    assert "evidence" in reason.lower()
+    ok, reason = capability_lifecycle_guard(track="C", autonomous=True, has_evidence=True, founder_approved=False, action="capability evaluate")
+    assert not ok
+    assert "Founder" in reason
+    assert capability_lifecycle_guard(track="A", autonomous=True, has_evidence=False, founder_approved=False)[0] is True

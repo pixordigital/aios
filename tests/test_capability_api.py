@@ -116,3 +116,30 @@ async def test_invalid_maturity_and_score_rejected(auth_client):
         json={"subject_id": "acct-5", "feasibility": 2.0},
     )
     assert resp.status_code == 400
+
+
+async def test_capability_mutating_track_c_autonomous_guard(auth_client):
+    payload = {
+        "capability_key": "auto-cap",
+        "name": "Auto",
+        "maturity": "pilot",
+        "is_commercially_available": True,
+        "track": "C",
+        "autonomous": True,
+    }
+    resp = await auth_client.post("/api/capabilities", json=payload)
+    assert resp.status_code == 403
+    assert "evidence" in resp.text.lower() or "Founder" in resp.text
+
+    payload["evidence"] = ["pilot-log"]
+    payload["founder_approved"] = True
+    resp = await auth_client.post("/api/capabilities", json=payload)
+    assert resp.status_code == 200, resp.text
+
+    cap_id = resp.json()["id"]
+    bad_eval = {"capability_id": cap_id, "subject_id": "acct-x", "track": "C", "autonomous": True, **_HIGH}
+    resp = await auth_client.post("/api/capabilities/evaluate", json=bad_eval)
+    assert resp.status_code == 403
+    good_eval = {**bad_eval, "evidence": ["log"], "founder_approved": True}
+    resp = await auth_client.post("/api/capabilities/evaluate", json=good_eval)
+    assert resp.status_code == 200, resp.text

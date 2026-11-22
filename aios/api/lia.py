@@ -20,10 +20,34 @@ from aios.core.lia import (
     can_transition_stage,
     crm_handoff_decision,
 )
+from aios.governance.innovation import autonomous_action_guard
+
 
 router = APIRouter(prefix="/api/lia", tags=["lia"])
 
 
+
+def _lia_guard(body: dict, action: str) -> None:
+    """Fail-closed Track C autonomous guard for mutating LIA actions.
+
+    Scoped to actions that can execute outreach/automation when explicitly
+    marked Track C/autonomous. Not a claim of coverage for all execution systems.
+    """
+    perms = body.get("permissions") if isinstance(body.get("permissions"), dict) else {}
+    track = body.get("track", perms.get("track"))
+    autonomous = bool(body.get("autonomous", perms.get("autonomous", False)))
+    evidence = body.get("evidence", perms.get("evidence", perms.get("evidence_refs")))
+    has_evidence = bool(evidence) if not isinstance(evidence, (str, list, tuple, set, dict)) else bool(evidence)
+    founder_approved = bool(body.get("founder_approved", perms.get("founder_approved", False)))
+    ok, reason = autonomous_action_guard(
+        track=str(track) if track is not None else None,
+        autonomous=autonomous,
+        has_evidence=has_evidence,
+        founder_approved=founder_approved,
+        action=action,
+    )
+    if not ok:
+        raise HTTPException(403, reason)
 def _is_founder(user: User, org: Organization | None) -> bool:
     if org is None:
         return False
@@ -50,6 +74,7 @@ async def create_source(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _lia_guard(body, "lia source create")
     source_type = str(body.get("source_type") or "")
     if source_type not in SOURCE_TYPES:
         raise HTTPException(400, "invalid source_type")
@@ -90,6 +115,7 @@ async def create_campaign(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _lia_guard(body, "lia campaign create")
     channel = str(body.get("channel") or "email")
     if channel not in CHANNELS:
         raise HTTPException(400, "invalid channel")
@@ -151,6 +177,7 @@ async def add_suppression(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _lia_guard(body, "lia suppression update")
     kind = str(body.get("kind") or "email")
     value = str(body.get("value") or "").strip()
     if kind not in ("email", "phone", "domain", "cnpj") or not value:
@@ -240,6 +267,7 @@ async def create_member(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _lia_guard(body, "lia member create")
     campaign_id = str(body.get("campaign_id") or "")
     campaign = (
         await db.execute(
@@ -279,6 +307,7 @@ async def advance_stage(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _lia_guard(body, "lia stage advance")
     member = (
         await db.execute(
             select(CampaignMember).where(
@@ -304,6 +333,7 @@ async def handoff(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
+    _lia_guard(body, "lia crm handoff")
     member = (
         await db.execute(
             select(CampaignMember).where(
