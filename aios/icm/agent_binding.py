@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from importlib import import_module
 from types import SimpleNamespace
 
 from aios.config import settings
@@ -29,12 +30,38 @@ class ICMContractRequired(RuntimeError):
     """
 
 
+def _paid_workflow_registry(agent):
+    """Resolve paid-workflow registry from config, not hardcoded vertical import."""
+    extra = getattr(agent, "extra_data", None) or {}
+    cfg = extra.get("icm") or {}
+    module_name = (
+        (cfg.get("workflow_registry") if isinstance(cfg, dict) else None)
+        or extra.get("workflow_registry")
+        or extra.get("paid_workflow_registry")
+    )
+    if module_name:
+        mod = import_module(str(module_name))
+        return (
+            getattr(mod, "paid_workflow_class"),
+            getattr(mod, "has_contract"),
+        )
+    # Backward-compatible fallback for existing pet vertical agents.
+    try:
+        mod = import_module("aios.verticals.pet_business.workflows")
+        return (
+            getattr(mod, "paid_workflow_class"),
+            getattr(mod, "has_contract"),
+        )
+    except Exception:
+        return None
+
+
 def assert_paid_workflow_contract(agent) -> None:
     """Raise when ``extra_data["workflow_class"]`` has no bound stage contract."""
-    # Imported lazily: the vertical package imports ICM contracts, and the
-    # binding module must stay importable while the app is still booting.
-    from aios.verticals.pet_business.workflows import has_contract, paid_workflow_class
-
+    registry = _paid_workflow_registry(agent)
+    if registry is None:
+        return
+    paid_workflow_class, has_contract = registry
     workflow_class = paid_workflow_class(getattr(agent, "extra_data", None))
     if not workflow_class:
         return
@@ -69,15 +96,17 @@ def bind_agent_stage(agent, storage_root: str | None = None, run_id: str | None 
         output_key="icm_input",
         tool_name=None,
     )
+    rid = run_id or f"agent-{uuid.uuid4().hex[:12]}"
     adapter = ICMStageAdapter(
         node,
         storage_root=storage_root or settings.app_data_dir,
         org_id=agent.org_id or "default",
-        run_id=run_id or f"agent-{uuid.uuid4().hex[:12]}",
+        run_id=rid,
         workspace_id=node.workspace_id,
     )
     # Loads bounded layered context and caps the node timeout to the manifest.
-    adapter.pre_execute({}, {"icm_input": ""})
+    adapter.pre_execute({}, {"icm_input": "", "run_id": rid, "task_id": rid})
+    adapter.enforce_execution({"run_id": rid, "task_id": rid, "icm_approval": cfg.get("approval")}, action="agent_run")
     adapter.timeout_seconds = int(node.timeout)
     logger.info(
         "ICM-X bound agent=%s stage=%s workspace=%s v%s",

@@ -488,6 +488,31 @@ class WorkflowEngine:
                     run_id=shared.get("run_id") or conv_id,
                 )
                 stage_adapter.pre_execute(ctx, shared)
+                # Approval/side-effect gate before any execution. Duplicate side
+                # effects are skipped when a prior output exists.
+                action = node.tool_name or node.agent_id or node.id
+                side_key = stage_adapter.enforce_execution(shared, action=str(action))
+                if side_key:
+                    from aios.icm.contracts import manifest_fingerprint
+
+                    attempts = result.outputs.get("_icm_stage_attempts") or {}
+                    if isinstance(attempts, str):
+                        try:
+                            attempts = json.loads(attempts)
+                        except Exception:
+                            attempts = {}
+                    prior = attempts.get(node.id) if isinstance(attempts, dict) else None
+                    fp = manifest_fingerprint(stage_adapter.manifest)
+                    if (
+                        isinstance(prior, dict)
+                        and prior.get("status") == "done"
+                        and prior.get("manifest_fingerprint") == fp
+                        and node.id in result.outputs
+                    ):
+                        result.node_status[node.id] = "done"
+                        shared[node.output_key] = result.outputs[node.id]
+                        shared[node.id] = result.outputs[node.id]
+                        return result
             except Exception as e:
                 logger.warning("ICM-X stage contract error for %s: %s", node.id, e)
                 result.errors[node.id] = str(e)
@@ -545,7 +570,8 @@ class WorkflowEngine:
             # Retry with reflection if configured
             _retries = getattr(node, "retry_count", 0) or 0
             output = None
-            for _trial in range(_retries + 1):
+            _trial = 0
+            while True:
                 try:
                     if stage_adapter is not None:
                         from aios.icm.enforcement import BudgetExceeded
@@ -556,7 +582,14 @@ class WorkflowEngine:
                     output = await runtime.run(conv_id, str(msg))
                     break
                 except Exception as _e:
-                    if _trial < _retries:
+                    decision = "abort"
+                    if stage_adapter is not None:
+                        from aios.icm.enforcement import classify_failure
+
+                        decision = classify_failure(type(_e).__name__, stage_adapter.manifest.retry, _trial + 1)
+                    elif _trial < _retries:
+                        decision = "retry"
+                    if decision == "retry":
                         # Generate reflection
                         try:
                             from aios.core.providers import get_provider
@@ -570,9 +603,9 @@ class WorkflowEngine:
                             msg = f"[Reflexão tentativa {_trial+1}: {_msg_ref}]\n" + str(msg)
                         except Exception:
                             pass
+                        _trial += 1
                         continue
-                    else:
-                        raise
+                    raise
             if stage_adapter is not None:
                 try:
                     _rb = getattr(runtime, "_icm_budget", None)
@@ -638,45 +671,58 @@ class WorkflowEngine:
             engine = ToolEngine([node.tool_name], org_id=org or "")
             args_json = json.dumps(rendered_args if isinstance(rendered_args, dict) else (node.tool_args or {}))
             sem = _get_org_semaphore(org or "global")
-            try:
-                async with sem:
-                    output = await asyncio.wait_for(
-                        engine.execute(node.tool_name, args_json), timeout=node.timeout
-                    )
-                result.outputs[node.id] = output or ""
-                result.node_status[node.id] = "done"
+            _tool_trial = 0
+            while True:
                 try:
-                    parsed = json.loads(output) if isinstance(output, str) and output.strip().startswith("{") else output
-                    if isinstance(parsed, dict) and "output" in parsed:
-                        shared[node.output_key] = json.dumps(parsed["output"]) if isinstance(parsed["output"], (dict,list)) else str(parsed["output"])
-                        shared[node.id] = shared[node.output_key]
-                    elif isinstance(parsed, dict) and "branch" in parsed:
-                        shared[node.output_key] = json.dumps(parsed)
-                        shared[node.id] = json.dumps(parsed)
-                    else:
+                    if stage_adapter is not None:
+                        stage_adapter.budget.charge_tool()
+                    async with sem:
+                        output = await asyncio.wait_for(
+                            engine.execute(node.tool_name, args_json), timeout=node.timeout
+                        )
+                    result.outputs[node.id] = output or ""
+                    result.node_status[node.id] = "done"
+                    try:
+                        parsed = json.loads(output) if isinstance(output, str) and output.strip().startswith("{") else output
+                        if isinstance(parsed, dict) and "output" in parsed:
+                            shared[node.output_key] = json.dumps(parsed["output"]) if isinstance(parsed["output"], (dict,list)) else str(parsed["output"])
+                            shared[node.id] = shared[node.output_key]
+                        elif isinstance(parsed, dict) and "branch" in parsed:
+                            shared[node.output_key] = json.dumps(parsed)
+                            shared[node.id] = json.dumps(parsed)
+                        else:
+                            shared[node.output_key] = output
+                            shared[node.id] = output
+                    except Exception:
                         shared[node.output_key] = output
                         shared[node.id] = output
-                except Exception:
-                    shared[node.output_key] = output
-                    shared[node.id] = output
-            except Exception as e:
-                # Reflection for tool nodes if retry configured
-                if getattr(node, "retry_count", 0) > 0:
-                    try:
-                        from aios.core.providers import get_provider
-                        if stage_adapter is not None:
-                            from aios.core.tracing import estimate_cost
+                    break
+                except Exception as e:
+                    decision = "abort"
+                    if stage_adapter is not None:
+                        from aios.icm.enforcement import classify_failure
 
-                            stage_adapter.charge_llm(estimate_cost("openai/gpt-4o-mini", 256))
-                        _llm2 = get_provider("openai/gpt-4o-mini")
-                        _refl2 = await _llm2.chat_retry(messages=[{"role": "user", "content": f"Tool {node.tool_name} failed: {e}. Sugira ajuste nos args."}], model="openai/gpt-4o-mini", temperature=0.7, max_tokens=100)
-                        logger.info("Workflow tool reflection for %s: %s", node.id, _refl2.get("content", "")[:200])
-                    except Exception:
-                        pass
-                logger.exception("Workflow node execution failed: %s", node.id)
-                result.errors[node.id] = str(e)
-                result.node_status[node.id] = "failed"
-                raise
+                        decision = classify_failure(type(e).__name__, stage_adapter.manifest.retry, _tool_trial + 1)
+                    elif _tool_trial < (getattr(node, "retry_count", 0) or 0):
+                        decision = "retry"
+                    if decision == "retry":
+                        try:
+                            from aios.core.providers import get_provider
+                            if stage_adapter is not None:
+                                from aios.core.tracing import estimate_cost
+
+                                stage_adapter.charge_llm(estimate_cost("openai/gpt-4o-mini", 256))
+                            _llm2 = get_provider("openai/gpt-4o-mini")
+                            _refl2 = await _llm2.chat_retry(messages=[{"role": "user", "content": f"Tool {node.tool_name} failed: {e}. Sugira ajuste nos args."}], model="openai/gpt-4o-mini", temperature=0.7, max_tokens=100)
+                            logger.info("Workflow tool reflection for %s: %s", node.id, _refl2.get("content", "")[:200])
+                        except Exception:
+                            pass
+                        _tool_trial += 1
+                        continue
+                    logger.exception("Workflow node execution failed: %s", node.id)
+                    result.errors[node.id] = str(e)
+                    result.node_status[node.id] = "failed"
+                    raise
 
         if stage_adapter:
             try:

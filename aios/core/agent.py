@@ -21,7 +21,7 @@ from aios.core.providers import (
     STREAM_TOKEN, STREAM_DONE, STREAM_ERROR, STREAM_TOOL_CALL,
 )
 from aios.core import router
-from aios.core.router import floor_from_extra, route, should_escalate
+from aios.core.router import floor_from_extra, route, should_escalate, model_runtime_eligible
 from aios.core.scheduler import scheduler
 from aios.core.syscalls import (
     SyscallRequest, SyscallResponse, SyscallType,
@@ -234,11 +234,28 @@ class AgentRuntime:
         )
         return await syscall_dispatcher.dispatch(req, **extra)
 
+    def _enforce_llm_context_ceiling(self, messages: list[dict], max_tokens: int) -> None:
+        max_ctx = None
+        if self.stage is not None:
+            max_ctx = self.stage.manifest.context.max_context_tokens
+        if not max_ctx:
+            return
+        from aios.core.tokenizer import count_messages_tokens
+
+        used = count_messages_tokens(messages) + int(max_tokens or 0)
+        if used > int(max_ctx):
+            from aios.icm.enforcement import BudgetExceeded
+
+            raise BudgetExceeded(
+                f"ICM context ceiling exceeded: {used} > {int(max_ctx)} tokens"
+            )
+
     async def _llm_chat(self, messages: list[dict], model: str,
                         temperature: float, max_tokens: int,
                         tools: list[dict] | None = None,
                         tool_choice=None) -> dict:
         """Call LLM via syscall or direct fallback."""
+        self._enforce_llm_context_ceiling(messages, max_tokens)
         resp = await self._syscall(SyscallType.LLM_CHAT, {
             "messages": messages,
             "model": model,
@@ -260,6 +277,7 @@ class AgentRuntime:
                                 temperature: float, max_tokens: int,
                                 tools: list[dict] | None = None):
         """Stream LLM via syscall or direct fallback."""
+        self._enforce_llm_context_ceiling(messages, max_tokens)
         resp = await self._syscall(SyscallType.LLM_CHAT_STREAM, {
             "messages": messages,
             "model": model,
@@ -320,12 +338,18 @@ class AgentRuntime:
         # output harness, not a capability the model has to reason about
         # choosing — counting it made every structured call look like
         # multi-step tool use and pinned the whole path to the frontier model.
+        org_extra = self._org_extra()
+        registry_entries = await self._load_runtime_registry(db)
+        configured_model = self.agent.llm_config.get("model", "openai/gpt-4o")
+        self._assert_model_eligible(configured_model, org_extra, registry_entries)
         decision = route(
-            self.agent.llm_config.get("model", "openai/gpt-4o"),
+            configured_model,
             context_tokens=_context_tokens(context),
             tools=existing_tools,
             autonomy=self._autonomy,
             min_tier=self.agent.llm_config.get("min_tier") or None,
+            org_extra=org_extra,
+            registry_entries=registry_entries,
         )
         router.record(decision)
         if decision.changed:
@@ -339,6 +363,8 @@ class AgentRuntime:
             from aios.core.tracing import estimate_cost
 
             budget = self._icm_budget
+            model = decision.model
+            self._assert_model_eligible(model, org_extra, registry_entries)
             input_tokens = max(1, _context_tokens(context))
             output_tokens = max(256, int(input_tokens * 0.05))
             budget.charge(
@@ -351,7 +377,7 @@ class AgentRuntime:
             )
             response = await self._llm_chat(
                 messages=context,
-                model=decision.model,
+                model=model,
                 temperature=self.agent.llm_config.get("temperature", 0.5),
                 max_tokens=self.agent.llm_config.get("max_tokens", 4096),
                 tools=all_tools,
@@ -376,6 +402,12 @@ class AgentRuntime:
                                 usage.get("input_tokens", 0),
                                 usage.get("output_tokens", 0),
                             ),
+                            model=decision.model,
+                            input_tokens=usage.get("input_tokens", 0),
+                            output_tokens=usage.get("output_tokens", 0),
+                            provider=decision.model.split("/")[0] if "/" in decision.model else None,
+                            cost_kind="internal",
+                            attribution={"path": "run_structured", "agent_id": self.agent.id},
                         )
                     except Exception as _e:
                         logger.warning("usage tracking failed for agent %s: %s", self.agent.id, _e)
@@ -517,7 +549,10 @@ class AgentRuntime:
             from aios.icm.enforcement import BudgetExceeded
 
             budget = self._icm_budget
+            org_extra = self._org_extra()
+            registry_entries = await self._load_runtime_registry(db)
             model = self.agent.llm_config.get("model", "openai/gpt-4o")
+            self._assert_model_eligible(model, org_extra, registry_entries)
             temp = self.agent.llm_config.get("temperature", 0.7)
             ceiling = self.agent.llm_config.get("max_tier") or None
             # Ratchets up and never down within a run. Without this the
@@ -544,6 +579,8 @@ class AgentRuntime:
                     autonomy=self._autonomy,
                     max_tokens=self.agent.llm_config.get("max_tokens", 4096),
                     min_tier=floor,
+                    org_extra=org_extra,
+                    registry_entries=registry_entries,
                 )
                 router.record(decision)
                 if decision.changed:
@@ -551,6 +588,7 @@ class AgentRuntime:
                         "routing %s -> %s (%s)", model, decision.model, decision.reason
                     )
                     model = decision.model
+                self._assert_model_eligible(model, org_extra, registry_entries)
 
                 # check cache for first iteration (no tool calls)
                 if iteration == 0 and not tools:
@@ -805,6 +843,12 @@ class AgentRuntime:
                             tokens=billed_tokens,
                             llm_calls=1,
                             cost_usd=actual_cost_usd or self._icm_budget.cost_usd,
+                            model=model,
+                            input_tokens=actual_usage["input_tokens"],
+                            output_tokens=actual_usage["output_tokens"],
+                            provider=model.split("/")[0] if "/" in str(model) else None,
+                            cost_kind="internal",
+                            attribution={"path": "run_stream", "agent_id": self.agent.id},
                         )
                     except Exception as _e:
                         logger.warning("usage tracking failed for agent %s: %s", self.agent.id, _e)
@@ -849,6 +893,12 @@ class AgentRuntime:
                         tokens=actual_usage["input_tokens"] + actual_usage["output_tokens"],
                         llm_calls=1,
                         cost_usd=actual_cost_usd or self._icm_budget.cost_usd,
+                        model=model,
+                        input_tokens=actual_usage["input_tokens"],
+                        output_tokens=actual_usage["output_tokens"],
+                        provider=model.split("/")[0] if "/" in str(model) else None,
+                        cost_kind="internal",
+                        attribution={"path": "run_stream_exhausted", "agent_id": self.agent.id},
                     )
                 except Exception as _e:
                     logger.warning("usage tracking failed for agent %s: %s", self.agent.id, _e)
@@ -900,6 +950,40 @@ class AgentRuntime:
         from aios.core.skill_loader import skill_loader
         skills = skill_loader.load_skills(project_path)
         return skill_loader.format_skills_for_context(skills)
+
+    def _org_extra(self) -> dict | None:
+        extra = getattr(self.agent, "extra_data", None)
+        return extra if isinstance(extra, dict) else None
+
+    async def _load_runtime_registry(self, db) -> list | None:
+        """Best-effort load of org-visible approved registry entries.
+
+        No schema change; returns None on any failure to keep runtime available.
+        """
+        if db is None:
+            return None
+        try:
+            from sqlalchemy import or_, select
+            from aios.governance.model_intelligence import ModelRegistryEntry
+
+            org_id = getattr(self.agent, "org_id", None)
+            q = select(ModelRegistryEntry)
+            if org_id:
+                q = q.where(or_(ModelRegistryEntry.org_id == org_id, ModelRegistryEntry.org_id.is_(None)))
+            rows = (await db.execute(q)).scalars().all()
+            return list(rows)
+        except Exception:
+            logger.debug("registry load failed for agent %s", self.agent.id, exc_info=True)
+            return None
+
+    def _assert_model_eligible(self, model: str, org_extra: dict | None, registry_entries: list | None) -> None:
+        ok, reason, meta = model_runtime_eligible(
+            model, org_extra=org_extra, registry_entries=registry_entries
+        )
+        if not ok:
+            from aios.core.providers import LLMError
+
+            raise LLMError(f"Model policy blocked: {reason} {meta}".strip())
 
     async def _pin_tier(self, model: str, why: str, db=None) -> None:
         """Remember a model escalation so the next run starts on a stronger tier.

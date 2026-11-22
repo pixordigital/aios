@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from aios.icm.contracts import StageManifest, load_stage_manifest, manifest_fingerprint
+from aios.icm.schemas import SchemaValidationError, validate_schema
 from aios.icm.workspace import WorkspacePaths, load_context_files
 
 logger = logging.getLogger(__name__)
@@ -39,9 +40,14 @@ class ICMStageAdapter:
             or "b2b_lead_research"
         )
         self.stage_id = getattr(node, "stage_id", None) or getattr(node, "id", "")
+        self._manifest_from_workspace = False
         self.manifest: StageManifest = self._resolve_manifest()
         self.context_hashes: dict[str, str] = {}
         self.loaded_context: str = ""
+        self.input_validated = False
+        self.output_validated = False
+        self.approval_bound: dict[str, Any] | None = None
+        self.side_effect_recorded = False
         from aios.icm.enforcement import StageBudget
 
         self.budget = StageBudget.from_manifest(self.manifest)
@@ -59,6 +65,7 @@ class ICMStageAdapter:
             stage_dir = self.paths.stage(self.org_id, self.workspace_id, self.stage_id)
             yaml_path = stage_dir / "stage.yaml"
             if yaml_path.is_file():
+                self._manifest_from_workspace = True
                 return load_stage_manifest(yaml_path)
         except Exception:
             pass
@@ -66,6 +73,73 @@ class ICMStageAdapter:
         raise ValueError(
             f"No valid StageManifest found for node '{self.node.id}' (stage_id='{self.stage_id}')"
         )
+
+    @property
+    def requires_approval(self) -> bool:
+        return bool(self.manifest.approval_required or self.manifest.side_effects)
+
+    def side_effect_key(self, task_id: str, action: str | None = None) -> str:
+        from aios.icm.enforcement import idempotency_key
+
+        act = action or getattr(self.node, "tool_name", None) or self.manifest.id
+        return idempotency_key(self.manifest.id, str(task_id), str(act))
+
+    def _applied_keys(self, shared: dict) -> set[str]:
+        raw = shared.get("_icm_side_effect_keys")
+        if isinstance(raw, list):
+            return {str(k) for k in raw}
+        if isinstance(raw, set):
+            return {str(k) for k in raw}
+        keys: set[str] = set()
+        shared["_icm_side_effect_keys"] = keys
+        return keys
+
+    def validate_input(self, payload: Any) -> None:
+        schema_id = self.manifest.inputs_schema
+        if not schema_id:
+            self.input_validated = True
+            return
+        try:
+            validate_schema(schema_id, payload)
+        except SchemaValidationError as e:
+            raise ValueError(f"ICM input schema validation failed: {e}") from e
+        self.input_validated = True
+
+    def validate_output(self, payload: Any) -> None:
+        schema_id = self.manifest.outputs_schema
+        if not schema_id:
+            self.output_validated = True
+            return
+        try:
+            validate_schema(schema_id, payload)
+        except SchemaValidationError as e:
+            raise ValueError(f"ICM output schema validation failed: {e}") from e
+        self.output_validated = True
+
+    def check_approval(self, shared: dict) -> None:
+        """Fail closed when manifest requires approval for this execution."""
+        if not self.requires_approval:
+            return
+        approval = shared.get("icm_approval")
+        if not isinstance(approval, dict):
+            raise PermissionError(
+                f"Stage '{self.manifest.id}' requires approval before execution"
+            )
+        fp = manifest_fingerprint(self.manifest)
+        approval_fp = approval.get("approved_fingerprint") or approval.get("manifest_fingerprint")
+        approval_id = approval.get("approval_id")
+        stage_ok = approval.get("stage_id") in (None, self.manifest.id)
+        node_ok = approval.get("node_id") in (None, getattr(self.node, "id", None))
+        if not approval_id or approval_fp != fp or not stage_ok or not node_ok:
+            raise PermissionError(
+                f"Stage '{self.manifest.id}' approval missing/invalid for manifest fingerprint"
+            )
+        self.approval_bound = {
+            "approval_id": str(approval_id),
+            "approved_fingerprint": fp,
+            "stage_id": self.manifest.id,
+            "node_id": getattr(self.node, "id", None),
+        }
 
     def pre_execute(self, ctx: dict, shared: dict) -> None:
         """Validate governance boundaries and load layered context before execution."""
@@ -86,40 +160,80 @@ class ICMStageAdapter:
             self.node.timeout = min(float(self.node.timeout), float(self.manifest.timeout_seconds))
 
         # 3. Layered Context Loading
-        try:
-            ws_dir = self.paths.workspace(self.org_id, self.workspace_id)
-            if ws_dir.is_dir():
-                layer_map: dict[str, list[str]] = {
-                    "identity": ["L0/WORKSPACE.md"],
-                    "routing": ["L1/ROUTES.md"],
-                    "stage": [f"L2/stages/{self.stage_id}/CONTEXT.md"],
-                }
-                l3_dir = ws_dir / "L3" / "static"
-                if l3_dir.is_dir():
-                    layer_map["static_references"] = [
-                        p.relative_to(ws_dir).as_posix()
-                        for p in sorted(l3_dir.glob("*.md"))
-                    ]
-
-                allowed_layers = list(self.manifest.context.layers)
-                text, hashes = load_context_files(
-                    ws_dir,
-                    layer_map,
-                    allowed_layers=allowed_layers,
+        ws_dir = self.paths.workspace(self.org_id, self.workspace_id)
+        required_layers = list(self.manifest.context.layers)
+        if required_layers and not ws_dir.is_dir():
+            if self._manifest_from_workspace:
+                raise FileNotFoundError(
+                    f"ICM workspace missing for required context layers: {ws_dir}"
                 )
-                self.loaded_context = text
-                self.context_hashes = hashes
+            logger.debug("ICM context workspace missing, skipping: %s", ws_dir)
+            required_layers = []
+        if required_layers and ws_dir.is_dir():
+            layer_map: dict[str, list[str]] = {
+                "identity": ["L0/WORKSPACE.md"],
+                "routing": ["L1/ROUTES.md"],
+                "stage": [f"L2/stages/{self.stage_id}/CONTEXT.md"],
+            }
+            l3_dir = ws_dir / "L3" / "static"
+            if l3_dir.is_dir():
+                layer_map["static_references"] = [
+                    p.relative_to(ws_dir).as_posix()
+                    for p in sorted(l3_dir.glob("*.md"))
+                ]
 
-                if text:
-                    ctx["icm_context"] = text
-                    shared["icm_context"] = text
-                    # For agent execution, append context instructions to the prompt
-                    if getattr(self.node, "agent_id", None):
-                        base_msg = shared.get(self.node.output_key) or shared.get("initial_input") or ""
-                        if text not in str(base_msg):
-                            shared[self.node.output_key] = f"{base_msg}\n\n[ICM Context]:\n{text}".strip()
-        except Exception as e:
-            logger.debug("ICM-X context loading skipped: %s", e)
+            text, hashes = load_context_files(
+                ws_dir,
+                layer_map,
+                allowed_layers=required_layers,
+                max_total_chars=self.manifest.context.max_context_tokens * 4,
+            )
+            self.loaded_context = text
+            self.context_hashes = hashes
+            if self._manifest_from_workspace and not hashes:
+                raise FileNotFoundError(
+                    f"ICM required context layers missing/empty for stage '{self.manifest.id}'"
+                )
+
+            if text:
+                ctx["icm_context"] = text
+                shared["icm_context"] = text
+                # For agent execution, append context instructions to the prompt
+                if getattr(self.node, "agent_id", None):
+                    base_msg = shared.get(self.node.output_key) or shared.get("initial_input") or ""
+                    if text not in str(base_msg):
+                        shared[self.node.output_key] = f"{base_msg}\n\n[ICM Context]:\n{text}".strip()
+
+        # 4. Input schema validation (fail-closed when declared)
+        input_payload = shared.get("icm_input")
+        if input_payload is None:
+            input_payload = shared.get(getattr(self.node, "output_key", ""), shared.get("initial_input"))
+        self.validate_input(input_payload)
+
+    def enforce_execution(self, shared: dict, *, action: str | None = None) -> str | None:
+        """Enforce approval/idempotency gates before side-effecting execution.
+
+        Returns idempotency key when stage has side effects, else None.
+        """
+        self.check_approval(shared)
+        if not self.manifest.side_effects:
+            return None
+        from aios.icm.enforcement import side_effect_already_applied
+
+        task_id = (
+            shared.get("task_id")
+            or shared.get("run_id")
+            or shared.get("conversation_id")
+            or self.run_id
+        )
+        key = self.side_effect_key(str(task_id), action=action)
+        applied = self._applied_keys(shared)
+        if side_effect_already_applied(applied, key):
+            self.side_effect_recorded = True
+            return key
+        applied.add(key)
+        self.side_effect_recorded = True
+        return key
 
     def charge_llm(self, cost_usd: float = 0.0) -> None:
         """Record one paid call or raise BudgetExceeded before the provider is hit."""
@@ -127,6 +241,7 @@ class ICMStageAdapter:
 
     def post_execute(self, output: str, shared: dict) -> dict[str, Any]:
         """Record provenance and persist execution artifacts."""
+        self.validate_output(output)
         fingerprint = manifest_fingerprint(self.manifest)
         provenance = {
             "stage_id": self.manifest.id,
@@ -136,6 +251,14 @@ class ICMStageAdapter:
             "context_hashes": self.context_hashes,
             "llm_calls": self.budget.calls,
             "cost_usd": self.budget.cost_usd,
+            "tool_calls": self.budget.tool_calls,
+            "input_validated": self.input_validated,
+            "output_validated": self.output_validated,
+            "side_effects": self.manifest.side_effects,
+            "approval_required": self.requires_approval,
+            "approval_id": (self.approval_bound or {}).get("approval_id"),
+            "approved_fingerprint": (self.approval_bound or {}).get("approved_fingerprint"),
+            "side_effect_recorded": self.side_effect_recorded,
             "timestamp": time.time(),
         }
 
