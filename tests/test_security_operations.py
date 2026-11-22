@@ -3,12 +3,15 @@
 from datetime import datetime, timedelta
 
 from aios.governance.security import (
+    SecurityEvent,
     SecurityIncident,
     check_response,
     classify_severity,
+    derive_actor_type,
     incident_metrics,
     require_privacy_handoff,
     response_authority,
+    stored_preapproval,
 )
 
 
@@ -55,9 +58,36 @@ def test_incident_metrics():
         contained_at=t0 + timedelta(minutes=20),
         recovered_at=t0 + timedelta(minutes=60),
     )
-    m = incident_metrics([inc])
+    ev = SecurityEvent(org_id="o", source="gw", event_type="security.unauthorized_attempt", payload={})
+    m = incident_metrics([inc], events=[ev])
     assert m["incidents"] == 1
     assert m["critical_open"] == 1
+    assert m["mttd_minutes"] == 5.0
+    assert m["mtta_minutes"] == 5.0
+    assert m["mttr_minutes"] == 60.0
     assert m["mean_detect_minutes"] == 5.0
     assert m["mean_contain_minutes"] == 15.0
     assert m["mean_recover_minutes"] == 40.0
+    assert m["unauthorized_attempts"] == 1
+    assert m["cross_tenant_violations"] == 0
+    assert m["unresolved_critical_vulns"] is None
+    assert m["metric_sources"]["unresolved_critical_vulns"].startswith("unknown:")
+
+
+def test_derive_actor_type_deterministic():
+    class U:
+        id = "u1"
+        role = "member"
+    class O:
+        extra_data = {}
+    assert derive_actor_type(user=U(), org=O()) == "human"
+
+
+def test_stored_preapproval_requires_policy_record():
+    class O:
+        extra_data = {"security_policy": {"preapproved_actions": ["rotate_credential"]}}
+    ok, src = stored_preapproval(action="rotate_credential", org=O(), actor_type="human")
+    assert ok is True
+    assert src == "security_policy.preapproved_actions"
+    ok2, _ = stored_preapproval(action="disable_integration", org=O(), actor_type="human")
+    assert ok2 is False

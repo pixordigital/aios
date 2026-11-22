@@ -1,8 +1,15 @@
+import json as _json
 import logging
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from aios.db.engine import async_session
+from aios.governance.knowledge import (
+    KnowledgeRecord,
+    can_retrieve,
+    knowledge_citation,
+    knowledge_text_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +48,72 @@ async def ensure_vector_extension():
         logger.warning("vector extension not available, RAG fallback sqlite: %s", e)
         RAG_STATUS["vector"] = False
         RAG_STATUS["fallback"] = True
+
+
+def _knowledge_hit(record: KnowledgeRecord, score: float) -> dict:
+    return {
+        "id": record.id,
+        "record_id": record.id,
+        "title": record.title,
+        "content": (record.content or "")[:600],
+        "score": round(float(score), 4),
+        "source": "knowledge_record",
+        "kind": record.kind,
+        "classification": record.classification,
+        "department_id": record.department_id,
+        "source_type": record.source_type,
+        "source_id": record.source_id,
+        "provenance": dict(record.provenance or {}),
+        "derived_from": list(record.derived_from or []),
+        "account_id": record.account_id,
+        "citation": knowledge_citation(record),
+    }
+
+
+async def search_knowledge_records(
+    org_id: str,
+    query: str,
+    *,
+    top_k: int = 5,
+    actor_departments: set[str] | None = None,
+    is_founder: bool = False,
+    granted_record_ids: set[str] | None = None,
+) -> list[dict]:
+    """Deterministic, permission-filtered search over KnowledgeRecords.
+
+    KnowledgeRecord is source of truth; no vector index required. Scans
+    org records, applies can_retrieve fail-closed, scores lexically.
+    """
+    if not org_id or not (query or "").strip():
+        return []
+    try:
+        async with async_session() as s:
+            rows = (
+                await s.execute(
+                    select(KnowledgeRecord).where(KnowledgeRecord.org_id == org_id)
+                )
+            ).scalars().all()
+        allowed = [
+            r
+            for r in rows
+            if can_retrieve(
+                r,
+                actor_org_id=org_id,
+                actor_departments=actor_departments or set(),
+                is_founder=is_founder,
+                granted_record_ids=granted_record_ids,
+            )[0]
+        ]
+        scored = []
+        for r in allowed:
+            score = knowledge_text_score(r, query)
+            if score > 0:
+                scored.append((score, r))
+        scored.sort(key=lambda x: (-x[0], x[1].created_at.timestamp() if x[1].created_at else 0))
+        return [_knowledge_hit(r, score) for score, r in scored[: max(1, top_k)]]
+    except Exception as e:
+        logger.warning("search_knowledge_records failed: %s", e)
+        return []
 
 
 async def hybrid_search(org_id: str, query: str, top_k: int = 5, agent_id: str = ""):

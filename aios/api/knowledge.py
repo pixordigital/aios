@@ -159,15 +159,29 @@ async def delete_eligibility(
 
 
 @router.get("/search")
-async def search(q: str = Query(...), top_k: int = 5, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
-    from aios.core.rag import hybrid_search
-    results = await hybrid_search(org_id, q, top_k)
-    if not results:
-        rows = (await db.execute(select(Memory).where(Memory.org_id==org_id).order_by(Memory.created_at.desc()).limit(top_k))).scalars().all()
-        # fallback keyword
-        filtered = [r for r in rows if q.lower() in (r.content or "").lower()]
-        results = [{"id": r.id, "content": r.content[:600], "score": 0.5} for r in (filtered or rows)[:top_k]]
-    return {"query": q, "results": results}
+async def search(
+    q: str = Query(...),
+    top_k: int = Query(5, ge=1, le=50),
+    db: DatabaseBackend = Depends(get_db_backend),
+    user: User = Depends(get_current_user),
+):
+    from aios.core.rag import search_knowledge_records
+
+    org = await db.get(Organization, user.org_id)
+    deps = await _actor_deps(db, user)
+    results = await search_knowledge_records(
+        user.org_id,
+        q,
+        top_k=top_k,
+        actor_departments=deps,
+        is_founder=_is_founder(user, org),
+    )
+    return {
+        "query": q,
+        "results": results,
+        "count": len(results),
+        "source": "knowledge_records",
+    }
 
 @router.get("/memories")
 async def list_memories(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), limit: int = 50):

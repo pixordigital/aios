@@ -56,6 +56,44 @@ class KnowledgeRecord(Base, TimestampMixin):
 # --- Deterministic access -----------------------------------------------------
 
 
+def knowledge_text_score(record: KnowledgeRecord, query: str) -> float:
+    """Deterministic lexical score over governed record text. No embeddings."""
+    q = (query or "").strip().lower()
+    if not q:
+        return 0.0
+    terms = [t for t in q.split() if t]
+    if not terms:
+        return 0.0
+    hay = " ".join(
+        [record.title or "", record.content or "", record.search_text or ""]
+    ).lower()
+    score = 0.0
+    for t in terms:
+        count = hay.count(t)
+        if count:
+            score += 1.0 + min(count, 5) * 0.1
+    title = (record.title or "").lower()
+    for t in terms:
+        if t in title:
+            score += 0.5
+    return score
+
+
+def knowledge_citation(record: KnowledgeRecord) -> dict:
+    return {
+        "record_id": record.id,
+        "title": record.title,
+        "kind": record.kind,
+        "classification": record.classification,
+        "department_id": record.department_id,
+        "source_type": record.source_type,
+        "source_id": record.source_id,
+        "provenance": dict(record.provenance or {}),
+        "derived_from": list(record.derived_from or []),
+        "account_id": record.account_id,
+    }
+
+
 def can_retrieve(
     record: KnowledgeRecord,
     *,

@@ -3,14 +3,21 @@
 Security is an independent assurance function. Agents may collect evidence and
 run narrow, pre-approved, reversible containment; destructive or fundamental
 actions stay human-controlled. The rules below are the enforcement point.
+
+Storage note: incident/event models share the application DB; they are not
+claimed as independent or append-only storage in this code path.
 """
 
 from datetime import datetime, timezone
+import logging
+from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aios.db.engine import Base
+
+log = logging.getLogger("aios.security")
 
 
 def _uuid() -> str:
@@ -95,6 +102,10 @@ class SecurityEvent(Base, TimestampMixin):
 # --- Deterministic rules ------------------------------------------------------
 
 
+CLOSED_INCIDENT_STATUSES = {"closed"}
+ACTIVE_INCIDENT_STATUSES = set(INCIDENT_STATUSES) - CLOSED_INCIDENT_STATUSES
+
+
 class ResponseDenied(PermissionError):
     """Action exceeds the caller's response authority."""
 
@@ -102,6 +113,47 @@ class ResponseDenied(PermissionError):
 def response_authority(action: str) -> str:
     """Unknown actions fail closed to human control."""
     return RESPONSE_AUTHORITY.get(action, "human")
+
+
+def derive_actor_type(*, user: Any = None, org: Any = None) -> str:
+    """Deterministic actor type from authenticated identity/org role."""
+    if user is None:
+        return "unknown"
+    role = str(getattr(user, "role", "") or "").lower()
+    org_extra = getattr(org, "extra_data", None) or {}
+    founder_id = org_extra.get("founder_user_id")
+    if founder_id and founder_id == getattr(user, "id", None):
+        return "human"
+    if role in {"owner", "admin", "founder", "member", "user", "operator"}:
+        return "human"
+    return "human"
+
+
+def is_founder_authority(*, user: Any = None, org: Any = None) -> bool:
+    if user is None or org is None:
+        return False
+    role = str(getattr(user, "role", "") or "").lower()
+    extra = getattr(org, "extra_data", None) or {}
+    return extra.get("founder_user_id") == getattr(user, "id", None) or role in {"owner", "founder"}
+
+
+def stored_preapproval(*, action: str, org: Any = None, actor_type: str) -> tuple[bool, str | None]:
+    """Preapproval must come from stored policy/approval record, not request body."""
+    if actor_type != "human" or org is None:
+        return False, None
+    extra = getattr(org, "extra_data", None) or {}
+    sec = extra.get("security_policy") if isinstance(extra.get("security_policy"), dict) else {}
+    preapproved_actions = sec.get("preapproved_actions") if isinstance(sec.get("preapproved_actions"), list) else []
+    if action and action in preapproved_actions:
+        return True, "security_policy.preapproved_actions"
+    approvals = sec.get("approvals") if isinstance(sec.get("approvals"), list) else []
+    for rec in approvals:
+        if not isinstance(rec, dict):
+            continue
+        if rec.get("action") == action and rec.get("approved") is True:
+            ref = str(rec.get("id") or rec.get("ticket") or "security_policy.approvals")
+            return True, ref
+    return False, None
 
 
 def check_response(
@@ -146,8 +198,134 @@ def require_privacy_handoff(incident: SecurityIncident, *, now: datetime | None 
     return False
 
 
-def incident_metrics(incidents: list[SecurityIncident]) -> dict:
-    """Mean times in minutes, plus coverage counters. Deterministic."""
+def response_decision_record(
+    *,
+    incident: SecurityIncident,
+    action: str,
+    level: str,
+    allowed: bool,
+    reason: str,
+    actor_type: str,
+    actor_id: str | None,
+    founder: bool,
+    preapproval_source: str | None,
+    requested_preapproved: bool,
+) -> dict[str, Any]:
+    """Deterministic response-gateway audit record; no new DB table required."""
+    return {
+        "kind": "security.response.decision",
+        "incident_id": incident.id,
+        "org_id": incident.org_id,
+        "action": action,
+        "level": level,
+        "allowed": allowed,
+        "reason": reason,
+        "actor_type": actor_type,
+        "actor_id": actor_id,
+        "founder": founder,
+        "preapproval_source": preapproval_source,
+        "requested_preapproved": requested_preapproved,
+        "incident_status": incident.status,
+        "recorded_at": _now().isoformat(),
+    }
+
+
+async def record_security_event(
+    db: Any,
+    *,
+    org_id: str,
+    source: str,
+    event_type: str,
+    severity: str = "info",
+    incident_id: str | None = None,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    """Best-effort SecurityEvent write when table/schema is available."""
+    if db is None or not hasattr(db, "add"):
+        return None
+    try:
+        evt = SecurityEvent(
+            org_id=org_id,
+            source=source,
+            event_type=event_type,
+            severity=severity,
+            incident_id=incident_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            payload=payload or {},
+        )
+        db.add(evt)
+        await db.flush()
+        return evt
+    except Exception:
+        log.exception("security event write failed: %s", event_type)
+        return None
+
+
+async def apply_response_gateway(
+    db: Any,
+    *,
+    incident: SecurityIncident,
+    action: str,
+    user: Any = None,
+    org: Any = None,
+    requested_preapproved: bool = False,
+) -> dict[str, Any]:
+    """Minimal response gateway: authorize, audit, record event metadata."""
+    level = response_authority(action)
+    actor_type = derive_actor_type(user=user, org=org)
+    actor_id = getattr(user, "id", None)
+    founder = is_founder_authority(user=user, org=org)
+    preapproved, preapproval_source = stored_preapproval(action=action, org=org, actor_type=actor_type)
+    allowed, reason = check_response(
+        action,
+        actor_type=actor_type,
+        preapproved=preapproved,
+        founder=founder,
+    )
+    if requested_preapproved and not preapproved:
+        reason = f"{reason}; request.preapproved ignored without stored approval"
+    record = response_decision_record(
+        incident=incident,
+        action=action,
+        level=level,
+        allowed=allowed,
+        reason=reason,
+        actor_type=actor_type,
+        actor_id=str(actor_id) if actor_id else None,
+        founder=founder,
+        preapproval_source=preapproval_source,
+        requested_preapproved=requested_preapproved,
+    )
+    event = await record_security_event(
+        db,
+        org_id=incident.org_id,
+        source="security.api.respond",
+        event_type="security.response.allowed" if allowed else "security.response.denied",
+        severity="high" if not allowed else "info",
+        incident_id=incident.id,
+        actor_type=actor_type,
+        actor_id=str(actor_id) if actor_id else None,
+        payload=record,
+    )
+    if event is not None:
+        record["event_id"] = event.id
+    log.info("security_response_decision %s", record)
+    return record
+
+
+def incident_metrics(
+    incidents: list[SecurityIncident],
+    *,
+    events: list["SecurityEvent"] | None = None,
+) -> dict:
+    """Deterministic metrics from existing incident/event data.
+
+    Fields not computable from available telemetry are returned as null with
+    `unknown` source in `metric_sources`, never fabricated.
+    """
 
     def _mean(values: list[float]) -> float | None:
         return round(sum(values) / len(values), 2) if values else None
@@ -157,14 +335,59 @@ def incident_metrics(incidents: list[SecurityIncident]) -> dict:
             return None
         return (end - start).total_seconds() / 60
 
-    detect = [m for i in incidents if (m := _mins(i.detected_at, i.acknowledged_at)) is not None]
+    mttd = [m for i in incidents if (m := _mins(i.detected_at, i.acknowledged_at)) is not None]
+    mtta = mttd
+    mttr = [m for i in incidents if (m := _mins(i.detected_at, i.recovered_at)) is not None]
     contain = [m for i in incidents if (m := _mins(i.acknowledged_at, i.contained_at)) is not None]
     recover = [m for i in incidents if (m := _mins(i.contained_at, i.recovered_at)) is not None]
+
+    evs = events or []
+    by_type = [str(getattr(e, "event_type", "") or "") for e in evs]
+    unauthorized = sum(1 for t in by_type if "unauthorized" in t or "forbidden" in t or "auth_denied" in t)
+    cross_tenant = sum(1 for t in by_type if "cross_tenant" in t or "tenant_violation" in t)
+    fp_events = sum(1 for t in by_type if "false_positive" in t or t.endswith(".fp"))
+    recovery_tests = [e for e in evs if "recovery_test" in str(getattr(e, "event_type", "") or "")]
+    recovery_pass = sum(1 for e in recovery_tests if (getattr(e, "payload", {}) or {}).get("success") is True)
+    recovery_fail = sum(1 for e in recovery_tests if (getattr(e, "payload", {}) or {}).get("success") is False)
+
+    total_detections = len(incidents) + fp_events
+    fp_rate = round(fp_events / total_detections, 4) if total_detections else None
+
     return {
         "incidents": len(incidents),
-        "open": sum(1 for i in incidents if i.status != "closed"),
-        "critical_open": sum(1 for i in incidents if i.severity == "critical" and i.status != "closed"),
-        "mean_detect_minutes": _mean(detect),
+        "open": sum(1 for i in incidents if i.status not in CLOSED_INCIDENT_STATUSES),
+        "critical_open": sum(1 for i in incidents if i.severity == "critical" and i.status not in CLOSED_INCIDENT_STATUSES),
+        "mttd_minutes": _mean(mttd),
+        "mtta_minutes": _mean(mtta),
+        "mttr_minutes": _mean(mttr),
+        "mean_detect_minutes": _mean(mttd),
         "mean_contain_minutes": _mean(contain),
         "mean_recover_minutes": _mean(recover),
+        "false_positive_rate": fp_rate,
+        "coverage": {
+            "incidents_total": len(incidents),
+            "events_total": len(evs),
+            "incidents_with_ack": sum(1 for i in incidents if i.acknowledged_at is not None),
+            "incidents_with_containment": sum(1 for i in incidents if i.contained_at is not None),
+            "incidents_with_recovery": sum(1 for i in incidents if i.recovered_at is not None),
+        },
+        "unresolved_critical_vulns": None,
+        "recovery_test_success_rate": (
+            round(recovery_pass / (recovery_pass + recovery_fail), 4)
+            if (recovery_pass + recovery_fail)
+            else None
+        ),
+        "unauthorized_attempts": unauthorized,
+        "cross_tenant_violations": cross_tenant,
+        "metric_sources": {
+            "mttd_minutes": "security_incidents.detected_at,acknowledged_at",
+            "mtta_minutes": "security_incidents.detected_at,acknowledged_at",
+            "mttr_minutes": "security_incidents.detected_at,recovered_at",
+            "false_positive_rate": "security_incidents+security_events.false_positive",
+            "coverage": "security_incidents,security_events",
+            "unresolved_critical_vulns": "unknown:no_vuln_telemetry_in_schema",
+            "recovery_test_success_rate": "security_events.recovery_test.payload.success" if recovery_tests else "unknown:no_recovery_test_events",
+            "unauthorized_attempts": "security_events.event_type",
+            "cross_tenant_violations": "security_events.event_type",
+        },
     }

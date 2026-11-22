@@ -94,3 +94,65 @@ async def test_records_are_tenant_scoped(auth_client, test_db_session):
     assert "Secret record" not in titles
     resp = await auth_client.post(f"/api/knowledge/records/{secret.id}/promote", json={"human_confirmed": True})
     assert resp.status_code == 404
+
+
+async def test_search_permission_filtering_and_citations(auth_client, test_db_session, test_org, test_user):
+    dept = Department(org_id=test_org.id, name="Sales", slug="sales-search")
+    test_db_session.add(dept)
+    await test_db_session.flush()
+
+    await _create(auth_client, "Public pricing policy", content="pricing table alfa", classification="internal")
+    await _create(auth_client, "Secret legal", content="pricing table beta", classification="restricted")
+    await _create(auth_client, "Confidential deal", content="pricing table gamma", classification="confidential")
+    await _create(auth_client, "Dept playbook", content="pricing table delta", classification="internal", department_id=dept.id)
+
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "pricing"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["source"] == "knowledge_records"
+    titles = {r["title"] for r in body["results"]}
+    assert "Public pricing policy" in titles
+    assert "Secret legal" not in titles
+    assert "Confidential deal" not in titles
+    assert "Dept playbook" not in titles
+    hit = next(r for r in body["results"] if r["title"] == "Public pricing policy")
+    assert hit["source_type"] == "meeting"
+    assert hit["citation"]["record_id"] == hit["id"]
+    assert hit["citation"]["source_type"] == "meeting"
+    assert "provenance" in hit["citation"]
+
+    test_db_session.add(
+        DepartmentMember(org_id=test_org.id, department_id=dept.id, member_type="human", user_id=test_user.id)
+    )
+    await test_db_session.commit()
+    titles = {r["title"] for r in (await auth_client.get("/api/knowledge/search", params={"q": "pricing"})).json()["results"]}
+    assert "Dept playbook" in titles
+
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    titles = {r["title"] for r in (await auth_client.get("/api/knowledge/search", params={"q": "pricing"})).json()["results"]}
+    assert {"Public pricing policy", "Secret legal", "Confidential deal", "Dept playbook"} <= titles
+
+
+async def test_search_is_tenant_scoped(auth_client, test_db_session, test_org):
+    other = Organization(name="Other", slug="other-search-org")
+    test_db_session.add(other)
+    await test_db_session.flush()
+    secret = KnowledgeRecord(
+        org_id=other.id,
+        title="Other tenant pricing",
+        content="pricing secret",
+        kind="statement",
+        classification="internal",
+        source_type="meeting",
+        source_id="m1",
+    )
+    test_db_session.add(secret)
+    await _create(auth_client, "My pricing", content="pricing mine")
+    await test_db_session.commit()
+
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "pricing"})
+    assert resp.status_code == 200, resp.text
+    titles = {r["title"] for r in resp.json()["results"]}
+    assert "My pricing" in titles
+    assert "Other tenant pricing" not in titles
