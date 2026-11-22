@@ -84,6 +84,17 @@ async def dispatch_task(
     return task
 
 
+async def _task_action_conflict(
+    team_id: str, task_id: str, org_id: str, *, action: str, actionable: set[str]
+) -> HTTPException:
+    existing = await swarm.get_task(task_id, org_id=org_id, team_id=team_id)
+    if not existing:
+        return HTTPException(404, "task not found")
+    if existing.status not in actionable:
+        return HTTPException(409, f"task not {action}: status={existing.status}")
+    return HTTPException(404, "task not found or not claimable")
+
+
 @router.post("/{team_id}/tasks/{task_id}/claim")
 async def claim_task(
     team_id: str, task_id: str,
@@ -93,7 +104,9 @@ async def claim_task(
 ):
     task = await swarm.claim(task_id, agent_id, org_id, team_id=team_id)
     if not task:
-        raise HTTPException(404, "task not found or not claimable")
+        raise await _task_action_conflict(
+            team_id, task_id, org_id, action="claimable", actionable={"queued", "assigned"}
+        )
     return task
 
 
@@ -106,7 +119,9 @@ async def complete_task(
 ):
     task = await swarm.complete(task_id, result=result, error=error, org_id=org_id, team_id=team_id)
     if not task:
-        raise HTTPException(404, "task not found")
+        raise await _task_action_conflict(
+            team_id, task_id, org_id, action="completable", actionable={"queued", "assigned", "running", "consensus"}
+        )
     return task
 
 
@@ -121,7 +136,9 @@ async def consensus_vote(
         raise HTTPException(400, "vote must be approve|reject|abstain")
     task = await swarm.vote(task_id, agent_id, vote, org_id=org_id, team_id=team_id)
     if not task:
-        raise HTTPException(404, "task not found")
+        raise await _task_action_conflict(
+            team_id, task_id, org_id, action="votable", actionable={"queued", "assigned", "running", "consensus"}
+        )
     return task
 
 

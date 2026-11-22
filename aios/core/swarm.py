@@ -285,6 +285,18 @@ class SwarmCoordinator:
             await db.refresh(task)
             return task
 
+    async def get_task(
+        self, task_id: str, *, org_id: str, team_id: str = ""
+    ) -> SwarmTask | None:
+        """Org/team-scoped task lookup for API conflict vs not-found mapping."""
+        async with db_session() as db:
+            if not org_id:
+                return None
+            stmt = select(SwarmTask).where(SwarmTask.id == task_id, SwarmTask.org_id == org_id)
+            if team_id:
+                stmt = stmt.where(SwarmTask.team_id == team_id)
+            return (await db.execute(stmt)).scalar_one_or_none()
+
     async def list_tasks(
         self, *, team_id: str, status: str = "", limit: int = 20, org_id: str = "",
     ) -> list[SwarmTask]:

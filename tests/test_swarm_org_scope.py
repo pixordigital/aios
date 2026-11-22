@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import pytest
 
+from httpx import ASGITransport, AsyncClient
+
+from aios.api.deps import get_current_user, get_org_id
 from aios.core.swarm import SwarmCoordinator
 from aios.db.backend import db_session
-from aios.db.models import Agent, Conversation, Organization, SwarmMessage, SwarmTask, Team, team_agents
+from aios.db.models import Agent, Conversation, Organization, SwarmMessage, SwarmTask, Team, User, team_agents
+from aios.main import app
 
 
 @pytest.fixture
@@ -365,3 +369,128 @@ async def test_claim_rejects_non_claimable_status(two_org_tasks) -> None:
             if row:
                 await db.delete(row)
             await db.commit()
+
+
+@pytest.fixture
+async def swarm_api_client(two_org_tasks):
+    async with db_session() as db:
+        user = await db.get(User, "user-a")
+        if not user:
+            user = User(
+                id="user-a",
+                org_id="org-a",
+                email="a@test.local",
+                hashed_password="test-hash",
+                role="admin",
+            )
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+
+    app.dependency_overrides[get_org_id] = lambda: "org-a"
+    app.dependency_overrides[get_current_user] = lambda: user
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+    app.dependency_overrides.pop(get_org_id, None)
+    app.dependency_overrides.pop(get_current_user, None)
+    async with db_session() as db:
+        row = await db.get(User, "user-a")
+        if row:
+            await db.delete(row)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_api_claim_conflict_vs_not_found(swarm_api_client) -> None:
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-api-done", team_id="team-a", org_id="org-a",
+            task_id="ext-api-done", task_type="agent_call", payload={}, status="done",
+        ))
+        await db.commit()
+    try:
+        resp = await swarm_api_client.post(
+            "/api/swarms/team-a/tasks/task-api-done/claim",
+            params={"agent_id": "agent-a1"},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "task not claimable: status=done"
+
+        missing = await swarm_api_client.post(
+            "/api/swarms/team-a/tasks/nope/claim",
+            params={"agent_id": "agent-a1"},
+        )
+        assert missing.status_code == 404
+        assert missing.json()["detail"] == "task not found"
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-api-done")
+            if row:
+                await db.delete(row)
+                await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_api_complete_conflict_vs_not_found(swarm_api_client) -> None:
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-api-complete", team_id="team-a", org_id="org-a",
+            task_id="ext-api-complete", task_type="agent_call", payload={}, status="done",
+        ))
+        await db.commit()
+    try:
+        # Same-status complete is idempotent in core; different terminal is conflict.
+        idem = await swarm_api_client.post(
+            "/api/swarms/team-a/tasks/task-api-complete/complete",
+        )
+        assert idem.status_code == 200
+
+        resp = await swarm_api_client.post(
+            "/api/swarms/team-a/tasks/task-api-complete/complete",
+            params={"error": "boom"},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "task not completable: status=done"
+
+        missing = await swarm_api_client.post(
+            "/api/swarms/team-a/tasks/nope/complete",
+        )
+        assert missing.status_code == 404
+        assert missing.json()["detail"] == "task not found"
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-api-complete")
+            if row:
+                await db.delete(row)
+                await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_api_vote_conflict_vs_not_found(swarm_api_client) -> None:
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-api-vote", team_id="team-a", org_id="org-a",
+            task_id="ext-api-vote", task_type="consensus", payload={}, status="failed",
+        ))
+        await db.commit()
+    try:
+        resp = await swarm_api_client.post(
+            "/api/swarms/team-a/tasks/task-api-vote/vote",
+            params={"agent_id": "agent-a1", "vote": "approve"},
+        )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "task not votable: status=failed"
+
+        missing = await swarm_api_client.post(
+            "/api/swarms/team-a/tasks/nope/vote",
+            params={"agent_id": "agent-a1", "vote": "approve"},
+        )
+        assert missing.status_code == 404
+        assert missing.json()["detail"] == "task not found"
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-api-vote")
+            if row:
+                await db.delete(row)
+                await db.commit()
