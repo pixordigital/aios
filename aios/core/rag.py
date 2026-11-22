@@ -1,5 +1,6 @@
 import json as _json
 import logging
+import os
 import time
 
 from sqlalchemy import select, text
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 RAG_STATUS = {"vector": False, "hnsw": False, "fallback": True}
+# Observability guardrail: full-org KnowledgeRecord scan can be expensive.
+# No index/migration here; warn when scan size crosses threshold.
+RAG_SCAN_WARN_THRESHOLD = max(1, int(os.getenv("AIOS_RAG_SCAN_WARN_THRESHOLD", "5000")))
 
 async def ensure_vector_extension():
     global RAG_STATUS
@@ -96,6 +100,15 @@ async def search_knowledge_records(
                 )
             ).scalars().all()
         scanned = len(rows)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        if scanned > RAG_SCAN_WARN_THRESHOLD:
+            logger.warning(
+                "search_knowledge_records full-org scan exceeded threshold org=%s scanned=%d threshold=%d ms=%.2f",
+                org_id,
+                scanned,
+                RAG_SCAN_WARN_THRESHOLD,
+                elapsed_ms,
+            )
         allowed = [
             r
             for r in rows
