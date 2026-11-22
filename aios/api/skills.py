@@ -5,7 +5,9 @@ from pydantic import BaseModel, Field
 
 from aios.api.deps import get_current_user
 from aios.core.skills import skill_store
-from aios.db.models import User
+from aios.db.backend import DatabaseBackend, get_db_backend
+from aios.db.models import Organization, User
+from aios.governance.skill_lifecycle import SkillLifecycleError, transition_skill
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
@@ -30,6 +32,10 @@ class SkillUpdate(BaseModel):
 class SkillImportUrl(BaseModel):
     url: str = Field(min_length=5, max_length=2000)
     agent_id: str = Field(min_length=1, max_length=36)
+
+
+class SkillTransition(BaseModel):
+    target: str = Field(min_length=1, max_length=20)
 
 
 @router.get("")
@@ -82,6 +88,26 @@ async def delete_skill(
     if not ok:
         raise HTTPException(404, "Skill not found")
     return {"ok": True}
+
+
+@router.post("/{skill_id}/transition")
+async def transition_skill_route(
+    skill_id: str,
+    body: SkillTransition,
+    user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
+):
+    skill = await skill_store.get(skill_id, org_id=user.org_id)
+    if not skill:
+        raise HTTPException(404, "Skill not found")
+    org = await db.get(Organization, user.org_id)
+    founder = bool(org and ((org.extra_data or {}).get("founder_user_id") == user.id or user.role == "owner"))
+    try:
+        changed = transition_skill(skill, body.target, founder_approved=founder, actor=user.id)
+    except SkillLifecycleError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await skill_store.update(skill_id, org_id=user.org_id, status=changed.status)
+    return {"id": skill_id, "status": changed.status, "actor": user.id}
 
 
 @router.post("/{skill_id}/apply")

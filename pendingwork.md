@@ -1,5 +1,40 @@
 ## pending work handoff
 
+### AIOS consolidated brief — governance/OCP foundations (2026-11-22)
+
+Implemented deterministic foundations from `/tmp/a383f41d-...pdf`:
+`aios/governance/{ocp,privacy,security,model_intelligence,capability_registry,innovation,knowledge,slack_taxonomy}.py`,
+`aios/core/{crm_intelligence,lia}.py`, `aios/icm/enforcement.py`; models registered in
+`aios/db/models.py`; migrations `o7p8q9r0s1t2`..`w5x6y7z8a9b0`; docs `docs/AIOS_OPERATING_MODEL.md`;
+tests `tests/test_{ocp,privacy_governance,security_operations,model_intelligence,capability_registry,innovation_learning,crm_intelligence,lia,knowledge_access,icm_enforcement,slack_taxonomy}.py`.
+
+Open items:
+- [ ] Slack structural migration (BLOCKED: Founder decision/approval). Credentials present in gitignored `.env`; read-only inventory complete (`docs/SLACK_MIGRATION_DRAFT.md`, 7 public/0 private, 3 users). Need Founder-approved per-channel map + explicit per-batch confirmation before any create/rename/archive; set AIOS migration-gate metadata only via approved process.
+- [x] OCP API surface `/api/ocp/{departments,tasks,decisions}` (`aios/api/ocp.py`, tests `tests/test_ocp_api.py`);
+- [x] Privacy + Security API routers added (`aios/api/privacy.py`, `aios/api/security.py`, mounted in `aios/api/router.py`).
+- [x] ICM agent runtime now enforces `AgentRuntime._icm_budget` (stage ceilings) before LLM calls (`aios/core/agent.py`).
+- [x] Decision→task execution linkage added: `execute_decision` (`aios/governance/ocp.py`) + `POST /api/ocp/decisions/{id}/execute` (`aios/api/ocp.py`).
+- [x] ICM agent tool loop now charges `StageBudget.charge_tool()` per executed tool (ceiling enforced, budget exceeded yields STREAM_ERROR).
+- [x] Task-level budget check added (`task_budget_check` in `aios/governance/ocp.py`); LLM call cost now charged via `estimate_cost` in agent runtime (stream + structured).
+- [x] Provider cost attribution: adapters return input/output/cached usage; runtime records actual tokens/cost (`aios/core/providers.py`, `aios/core/agent.py`). Verified 100 tests + inline usage checks.
+- [x] Fixed unbound fallback budget (`max_cost_usd=inf`); `0.0` blocked all non-stage agents (9 router regressions now pass).
+- [x] Provider health checks (`LLMProvider.health_check`, `provider_health`) + deterministic cost anomaly detection (`detect_cost_anomalies`); 53 tests + inline checks pass.
+- [x] Workflow-node cost attribution: `aios/core/workflow.py` pre-checks stage call ceiling, charges real runtime cost + reflection estimates into adapter budget; run cost read from stage provenance. Tests `tests/test_workflow_cost_attribution.py` (64-test workflow/ICM batch pass).
+- [x] LIA→CRM handoff decision (`crm_handoff_decision` in `aios/core/lia.py`) + tests; inherits contact gate.
+- [x] Deterministic KPI interpretation over caller baseline (`interpret_kpis` in `aios/governance/kpi.py`) + tests; no invented targets.
+- [x] Workflow-run process conformance (`_process_conformance` output) + tests (`tests/test_workflow_process_conformance.py`).
+- [x] Capability registry + Solution-Fit API: `aios/api/capabilities.py` mounted at `/api/capabilities` (tenant-scoped create/list/evaluate/assessments); tests `tests/test_capability_api.py` (51-test batch pass).
+- [x] Lean innovation API: `aios/api/innovation.py` mounted at `/api/innovation` (declared-field gate, deterministic evaluate, Founder-only decide, scoreboard); tests `tests/test_innovation_api.py` (47-test batch pass).
+- [x] LIA API: `aios/api/lia.py` mounted at `/api/lia` (sources/campaigns/suppression/members, Founder approval, fail-closed contact check, CRM handoff); tests `tests/test_lia_api.py`.
+- [x] Knowledge governance API: `aios/api/knowledge.py` extended with `/api/knowledge/records` (provenance gate, permission-aware listing, promotion, Founder soft-delete, retention eligibility); tests `tests/test_knowledge_governance_api.py` (50-test batch pass).
+- [x] Slack taxonomy read-only API: `aios/api/slack.py` mounted at `/api/slack` (taxonomy, system-of-record, migration gate, channel validation; no mutation routes); tests `tests/test_slack_api.py`.
+- [x] Model Intelligence API: `aios/api/model_intelligence.py` mounted at `/api/models` (registry, Founder approval, fail-closed eligibility/select, recommend, rollback target); tests `tests/test_model_intelligence_api.py` (50-test batch pass).
+- [x] KPI API: `GET /api/analytics/kpi/sales` in `aios/api/analytics.py` (authoritative CRM SQL/Python metrics, pipeline/baseline filter, deterministic interpretation); tests `tests/test_analytics_kpi.py` (7-test batch pass).
+- [x] `docs/AIOS_OPERATING_MODEL.md` phase rows refreshed (§12, §10, §17, remaining areas).
+- [x] Skills lifecycle persistence: `skills.status` column + migration `b8c9d0e1f2a3` + Founder-gated `POST /api/skills/{id}/transition` + tests (`tests/test_skills_lifecycle_api.py`).
+- [ ] Legal review of privacy registry / legitimate-interest entries (human/counsel).
+- [ ] Dealership pilot with authorised customer data and baseline metrics.
+
 ### ICM-X full architecture rollout (phased) - COMPLETE ✓
 
 1. Persistence/recovery: stage attempts stored in `WorkflowRun.outputs` (`_icm_stage_attempts`), idempotent resume via `resume_outputs`/`resume_status` — test added (`tests/test_workflow_resume_icm.py`) and passes.

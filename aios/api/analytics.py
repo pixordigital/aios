@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Agent, Conversation, Message, Organization, Memory, ChannelConnection
+from aios.db.models import Agent, Conversation, CrmDeal, Message, Organization, Memory, ChannelConnection
 from aios.schemas import BaseModel
 from aios.core.cache import cache
 from aios.core.tracing import METRICS
 from aios.core.agent_health import health_tracker
+from aios.governance.kpi import average_deal_size, conversion_rate, interpret_kpis, win_rate
 from .deps import get_current_user, get_org_id
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -684,3 +685,40 @@ async def toggle_proactive_alerts(
     await db.commit()
 
     return {"enabled": payload.enabled, "message": "Proactive alerts " + ("enabled" if payload.enabled else "disabled")}
+
+
+@router.get("/kpi/sales")
+async def sales_kpis(
+    pipeline: str | None = None,
+    baseline_days: int = 30,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Authoritative CRM KPIs from deterministic SQL/Python; LLM never decides."""
+    stmt = select(CrmDeal.stage, CrmDeal.value, CrmDeal.created_at).where(CrmDeal.org_id == org_id)
+    if pipeline:
+        stmt = stmt.where(CrmDeal.pipeline == pipeline)
+    rows = (await db.execute(stmt)).all()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(days=max(1, min(baseline_days, 365)))
+
+    def _metrics(deals):
+        won = [d for d in deals if d.stage == "closed_won"]
+        lost = [d for d in deals if d.stage == "closed_lost"]
+        closed = len(won) + len(lost)
+        return {
+            "win_rate": win_rate(len(won), len(lost)),
+            "close_rate": conversion_rate(closed, len(deals)),
+            "average_deal_size": average_deal_size([float(d.value or 0.0) for d in won]),
+            "pipeline_deals": float(len(deals)),
+        }
+
+    current = _metrics(rows)
+    previous = _metrics([r for r in rows if r.created_at and r.created_at < cutoff])
+    return {
+        "pipeline": pipeline or "all",
+        "baseline_days": max(1, min(baseline_days, 365)),
+        "current": current,
+        "previous": previous,
+        "interpretation": interpret_kpis(current, previous),
+    }

@@ -477,6 +477,7 @@ class Skill(Base, TimestampMixin, OrgScopedMixin):
     usage_count: Mapped[int] = mapped_column(default=0)
     success_rate: Mapped[float] = mapped_column(default=1.0)
     source_conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
 
     agent = relationship("Agent")
 
@@ -1187,6 +1188,17 @@ class RefreshToken(Base):
     # jti (an attacker replaying a consumed token) be told apart from theft.
     replaced_by: Mapped[str | None] = mapped_column(String(36), default=None)
     created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
+
+
+from aios.governance import ocp as _ocp  # noqa: E402,F401  (registers OCP tables)
+from aios.governance import privacy as _privacy  # noqa: E402,F401  (registers privacy tables)
+from aios.governance import security as _security  # noqa: E402,F401  (registers security tables)
+from aios.governance import model_intelligence as _model_intel  # noqa: E402,F401  (registers model registry)
+from aios.governance import capability_registry as _capabilities  # noqa: E402,F401  (registers capability tables)
+from aios.governance import innovation as _innovation  # noqa: E402,F401  (registers experiment tables)
+from aios.core import crm_intelligence as _crm_intel  # noqa: E402,F401  (registers CRM account tables)
+from aios.core import lia as _lia  # noqa: E402,F401  (registers LIA tables)
+from aios.governance import knowledge as _knowledge  # noqa: E402,F401  (registers knowledge tables)
 
 
 class OwnerNotification(Base, TimestampMixin, OrgScopedMixin):

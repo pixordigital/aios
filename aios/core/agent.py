@@ -184,6 +184,7 @@ class AgentRuntime:
         self._allowed_tools = gov.get("allowed_tools", "__all__")
         self._max_tokens = gov.get("max_tokens_per_run", 500_000)
         self.MAX_ITERATIONS = gov.get("max_iterations", 10) or 10
+        self.MAX_TOOL_CALLS = gov.get("max_tool_calls_per_run", 25) or 25
 
         # ICM-X stage binding: opt-in via extra_data["icm"]. The manifest's
         # allowlist narrows the agent's tools and its timeout caps the run.
@@ -204,6 +205,21 @@ class AgentRuntime:
                     else set(self._allowed_tools) & stage_allowed
                 )
             self._stage_timeout = self.stage.timeout_seconds
+        from aios.icm.enforcement import BudgetExceeded, StageBudget
+
+        # Per-run deterministic execution budget (declared stage ceilings).
+        self._icm_budget = (
+            StageBudget.from_manifest(self.stage.manifest, max_tool_calls=self.MAX_TOOL_CALLS)
+            if self.stage is not None
+            else StageBudget(
+                max_llm_calls=self.MAX_ITERATIONS,
+                # No stage manifest means no declared cost ceiling; 0.0 would
+                # block every call, so an unbound run is capped by call count
+                # and tool count only.
+                max_cost_usd=float("inf"),
+                max_tool_calls=self.MAX_TOOL_CALLS,
+            )
+        )
 
     # ─── Syscall wrappers ───
 
@@ -320,6 +336,19 @@ class AgentRuntime:
 
         span = start_span("agent_structured", model=decision.model, org_id=self.agent.org_id or "")
         try:
+            from aios.core.tracing import estimate_cost
+
+            budget = self._icm_budget
+            input_tokens = max(1, _context_tokens(context))
+            output_tokens = max(256, int(input_tokens * 0.05))
+            budget.charge(
+                estimate_cost(
+                    model,
+                    input_tokens + output_tokens,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            )
             response = await self._llm_chat(
                 messages=context,
                 model=decision.model,
@@ -328,6 +357,28 @@ class AgentRuntime:
                 tools=all_tools,
                 tool_choice={"type": "function", "function": {"name": "_output"}},
             )
+            usage = response.get("usage") or {}
+            if usage:
+                span.extra["usage"] = usage
+                if db is not None:
+                    from aios.core.limits import track_usage
+                    from aios.core.tracing import estimate_cost_detailed
+
+                    try:
+                        await track_usage(
+                            self.agent.org_id,
+                            db,
+                            messages=1,
+                            tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+                            llm_calls=1,
+                            cost_usd=estimate_cost_detailed(
+                                decision.model,
+                                usage.get("input_tokens", 0),
+                                usage.get("output_tokens", 0),
+                            ),
+                        )
+                    except Exception as _e:
+                        logger.warning("usage tracking failed for agent %s: %s", self.agent.id, _e)
         except Exception as e:
             logger.exception("Structured run failed for agent %s", self.agent.id)
             end_span(span, error=str(e))
@@ -419,6 +470,10 @@ class AgentRuntime:
         start_time = time.time()
         total_tokens = 0
         total_tool_calls = 0
+        # What the provider actually billed. The pre-call budget charge is an
+        # estimate; usage reported by the adapter is the attributable number.
+        actual_usage = {"input_tokens": 0, "output_tokens": 0, "cached_tokens": 0}
+        actual_cost_usd = 0.0
 
         # check agent health
         if not health_tracker.is_available(self.agent.id):
@@ -459,6 +514,9 @@ class AgentRuntime:
 
         try:
             context = await self._build_context(conversation_id, user_message, db)
+            from aios.icm.enforcement import BudgetExceeded
+
+            budget = self._icm_budget
             model = self.agent.llm_config.get("model", "openai/gpt-4o")
             temp = self.agent.llm_config.get("temperature", 0.7)
             ceiling = self.agent.llm_config.get("max_tier") or None
@@ -509,6 +567,23 @@ class AgentRuntime:
                 response_content = ""
                 response_tool_calls = None
 
+                try:
+                    from aios.core.tracing import estimate_cost
+
+                    input_tokens = max(1, _context_tokens(context))
+                    output_tokens = max(256, int(input_tokens * 0.05))
+                    budget.charge(
+                        estimate_cost(
+                            model,
+                            input_tokens + output_tokens,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                        )
+                    )
+                except BudgetExceeded as exc:
+                    yield {"type": STREAM_ERROR, "error": f"ICM stage budget exceeded: {exc}"}
+                    return
+
                 async for event in self._llm_chat_stream(
                     messages=context,
                     model=model,
@@ -534,6 +609,17 @@ class AgentRuntime:
                         # this event, but it was swallowed here so neither ever
                         # saw a tool call.
                         yield event
+                    elif event["type"] == STREAM_DONE:
+                        u = event.get("usage") or {}
+                        if u.get("input_tokens") or u.get("output_tokens"):
+                            actual_usage["input_tokens"] += u.get("input_tokens", 0)
+                            actual_usage["output_tokens"] += u.get("output_tokens", 0)
+                            actual_usage["cached_tokens"] += u.get("cached_tokens", 0)
+                            from aios.core.tracing import estimate_cost_detailed
+
+                            actual_cost_usd += estimate_cost_detailed(
+                                model, u.get("input_tokens", 0), u.get("output_tokens", 0)
+                            )
                     elif event["type"] == STREAM_ERROR:
                         yield event
                         return
@@ -584,6 +670,11 @@ class AgentRuntime:
                                 result = f"Tool '{fn_name}' was not approved by human."
                                 logger.info("Approval denied for tool '%s' on agent %s", fn_name, self.agent.id)
                             else:
+                                try:
+                                    self._icm_budget.charge_tool()
+                                except BudgetExceeded as exc:
+                                    yield {"type": STREAM_ERROR, "error": f"ICM stage budget exceeded: {exc}"}
+                                    return
                                 cached_result = tool_cache.get(fn_name, fn_args, self.agent.org_id)
                                 if cached_result is not None:
                                     result = cached_result
@@ -595,6 +686,11 @@ class AgentRuntime:
                                         logger.exception("Tool execution failed: %s", fn_name)
                                         result = f"Tool error: {e}"
                         else:
+                            try:
+                                self._icm_budget.charge_tool()
+                            except BudgetExceeded as exc:
+                                yield {"type": STREAM_ERROR, "error": f"ICM stage budget exceeded: {exc}"}
+                                return
                             cached_result = tool_cache.get(fn_name, fn_args, self.agent.org_id)
                             if cached_result is not None:
                                 result = cached_result
@@ -692,7 +788,26 @@ class AgentRuntime:
                 yield {"type": STREAM_DONE}
                 health_tracker.record_success(self.agent.id)
                 response_ms = int((time.time() - start_time) * 1000)
-                telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, tokens=total_tokens, tool_calls=total_tool_calls)
+                billed_tokens = (
+                    actual_usage["input_tokens"] + actual_usage["output_tokens"]
+                    if actual_usage["input_tokens"] or actual_usage["output_tokens"]
+                    else total_tokens
+                )
+                telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, tokens=billed_tokens, tool_calls=total_tool_calls)
+                if db is not None:
+                    from aios.core.limits import track_usage
+
+                    try:
+                        await track_usage(
+                            self.agent.org_id,
+                            db,
+                            messages=1,
+                            tokens=billed_tokens,
+                            llm_calls=1,
+                            cost_usd=actual_cost_usd or self._icm_budget.cost_usd,
+                        )
+                    except Exception as _e:
+                        logger.warning("usage tracking failed for agent %s: %s", self.agent.id, _e)
                 return
 
             logger.warning("Agent %s hit max iterations (%d)", self.agent.id, self.MAX_ITERATIONS)
@@ -722,7 +837,21 @@ class AgentRuntime:
             # record_success will not recover it and only a manual reset does.
             # The customer sees a permanently dead agent.
             response_ms = int((time.time() - start_time) * 1000)
-            telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms)
+            telemetry.record(self.agent.id, self.agent.org_id, response_ms=response_ms, tokens=actual_usage["input_tokens"] + actual_usage["output_tokens"])
+            if db is not None:
+                from aios.core.limits import track_usage
+
+                try:
+                    await track_usage(
+                        self.agent.org_id,
+                        db,
+                        messages=1,
+                        tokens=actual_usage["input_tokens"] + actual_usage["output_tokens"],
+                        llm_calls=1,
+                        cost_usd=actual_cost_usd or self._icm_budget.cost_usd,
+                    )
+                except Exception as _e:
+                    logger.warning("usage tracking failed for agent %s: %s", self.agent.id, _e)
         except Exception as e:
             logger.exception("Agent stream failed: agent=%s conv=%s", self.agent.id, conversation_id)
             health_tracker.record_failure(self.agent.id, str(e)[:200])

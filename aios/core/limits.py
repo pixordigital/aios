@@ -332,6 +332,49 @@ async def get_usage_summary(org_id: str, db) -> dict:
     }
 
 
+async def detect_cost_anomalies(org_id: str, db, window_days: int = 7, multiplier: float = 2.0) -> list[dict]:
+    """Flag days whose LLM spend exceeds `multiplier` × trailing median.
+
+    Tier-0: SQL read + Python median; no LLM, no writes, no side effects.
+    """
+    import statistics
+    from datetime import timedelta
+
+    if window_days < 3:
+        return []
+    today = date.today()
+    start = today - timedelta(days=window_days * 2)
+    rows = (await db.execute(
+        select(UsageRecord).where(
+            UsageRecord.org_id == org_id,
+            UsageRecord.date >= start.isoformat(),
+            UsageRecord.date <= today.isoformat(),
+        )
+    )).scalars().all()
+    by_day = {r.date: float(r.cost_usd or 0) for r in rows}
+    anomalies = []
+    for offset in range(window_days):
+        day = today - timedelta(days=offset)
+        baseline = [
+            by_day[(day - timedelta(days=lag)).isoformat()]
+            for lag in range(1, window_days + 1)
+            if (day - timedelta(days=lag)).isoformat() in by_day
+        ]
+        if len(baseline) < 3:
+            continue
+        median = statistics.median(baseline)
+        cost = by_day.get(day.isoformat(), 0.0)
+        if median <= 0 or cost <= median * multiplier:
+            continue
+        anomalies.append({
+            "date": day.isoformat(),
+            "cost_usd": round(cost, 4),
+            "baseline_usd": round(median, 4),
+            "ratio": round(cost / median, 2),
+        })
+    return anomalies
+
+
 async def get_monthly_usage(org_id: str, db) -> dict:
     import datetime as _dt
     from datetime import timedelta

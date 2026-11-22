@@ -1,0 +1,129 @@
+"""Model Intelligence API: fail-closed eligibility, evidence-backed proposals, Founder approval."""
+
+from aios.db.models import Organization
+from aios.governance.model_intelligence import ModelRegistryEntry
+
+
+async def _create(auth_client, key, **extra):
+    body = {
+        "model_key": key,
+        "provider": "openrouter",
+        "price_currency": "USD",
+        "quality_score": 0.9,
+        "reliability": 1.0,
+        "capabilities": ["chat"],
+        "context_window": 8000,
+        **extra,
+    }
+    resp = await auth_client.post("/api/models", json=body)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["id"]
+
+
+async def _founder(test_db_session, test_org, test_user):
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+
+
+async def test_registry_approval_eligibility_and_selection(
+    auth_client, test_db_session, test_org, test_user
+):
+    expensive = await _create(auth_client, "expensive", input_price_per_1m=10.0)
+    cheap = await _create(auth_client, "cheap", input_price_per_1m=5.0, quality_score=0.8)
+
+    resp = await auth_client.post(f"/api/models/{cheap}/approve")
+    assert resp.status_code == 403  # admin is not Founder
+    await _founder(test_db_session, test_org, test_user)
+    for mid in (expensive, cheap):
+        resp = await auth_client.post(f"/api/models/{mid}/approve")
+        assert resp.status_code == 200, resp.text
+
+    ids = {m["id"] for m in (await auth_client.get("/api/models")).json()["items"]}
+    assert {expensive, cheap} <= ids
+
+    resp = await auth_client.post(
+        "/api/models/eligible", json={"required_capabilities": ["chat"]}
+    )
+    assert set(resp.json()["items"]) == {"cheap", "expensive"}
+
+    resp = await auth_client.post(
+        "/api/models/select",
+        json={"avg_input_tokens": 1_000_000, "avg_output_tokens": 0, "required_capabilities": ["chat"]},
+    )
+    assert resp.json()["model_key"] == "cheap"
+    assert resp.json()["cost_per_success"] == 5.0
+
+
+async def test_fail_closed_filters(auth_client, test_db_session, test_org, test_user):
+    await _create(auth_client, "unapproved", input_price_per_1m=1.0)
+    restricted = await _create(auth_client, "restricted", input_price_per_1m=1.0, privacy_ok=False)
+    wrong_currency = await _create(auth_client, "euro", input_price_per_1m=1.0, price_currency="EUR")
+    await _founder(test_db_session, test_org, test_user)
+    for mid in (restricted, wrong_currency):
+        assert (await auth_client.post(f"/api/models/{mid}/approve")).status_code == 200
+
+    resp = await auth_client.post("/api/models/eligible", json={})
+    assert resp.json()["items"] == []  # unapproved + privacy fail + currency mismatch
+
+    resp = await auth_client.post(
+        "/api/models/select", json={"avg_input_tokens": 1000, "avg_output_tokens": 0}
+    )
+    assert resp.json() == {"model_key": None, "cost_per_success": None}
+
+
+async def test_recommendation_and_rollback(auth_client, test_db_session, test_org, test_user):
+    current = await _create(auth_client, "current", input_price_per_1m=10.0, quality_score=0.9)
+    proposed = await _create(auth_client, "proposed", input_price_per_1m=5.0, quality_score=0.8)
+    low_quality = await _create(auth_client, "low-quality", input_price_per_1m=1.0, quality_score=0.5)
+    await _founder(test_db_session, test_org, test_user)
+    for mid in (current, proposed, low_quality):
+        assert (await auth_client.post(f"/api/models/{mid}/approve")).status_code == 200
+
+    resp = await auth_client.post(
+        "/api/models/recommend",
+        json={
+            "current_model_key": "current", "proposed_model_key": "proposed",
+            "avg_input_tokens": 1_000_000, "avg_output_tokens": 0,
+            "monthly_tasks": 100, "required_quality": 0.7,
+        },
+    )
+    assert resp.json()["recommended"] is True
+    assert resp.json()["expected_monthly_savings"] == 500.0
+    assert resp.json()["requires_founder_approval"] is True
+
+    resp = await auth_client.post(
+        "/api/models/recommend",
+        json={
+            "current_model_key": "current", "proposed_model_key": "low-quality",
+            "avg_input_tokens": 1_000_000, "avg_output_tokens": 0,
+            "monthly_tasks": 100, "required_quality": 0.7,
+        },
+    )
+    assert resp.json()["recommended"] is False
+
+    resp = await auth_client.get(
+        "/api/models/rollback-target",
+        params={"agent_default_key": "current", "previous_key": "proposed"},
+    )
+    assert resp.json()["model_key"] == "proposed"
+    resp = await auth_client.get(
+        "/api/models/rollback-target",
+        params={"agent_default_key": "current", "previous_key": "missing"},
+    )
+    assert resp.json()["model_key"] == "current"
+
+
+async def test_models_are_tenant_scoped(auth_client, test_db_session, test_org):
+    other = Organization(name="Other", slug="other-model-org")
+    test_db_session.add(other)
+    await test_db_session.flush()
+    secret = ModelRegistryEntry(
+        org_id=other.id, model_key="secret-model", provider="x", approved=True
+    )
+    test_db_session.add(secret)
+    await test_db_session.commit()
+
+    keys = {m["model_key"] for m in (await auth_client.get("/api/models")).json()["items"]}
+    assert "secret-model" not in keys
+    resp = await auth_client.post(f"/api/models/{secret.id}/approve")
+    assert resp.status_code == 404

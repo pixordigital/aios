@@ -42,6 +42,9 @@ class ICMStageAdapter:
         self.manifest: StageManifest = self._resolve_manifest()
         self.context_hashes: dict[str, str] = {}
         self.loaded_context: str = ""
+        from aios.icm.enforcement import StageBudget
+
+        self.budget = StageBudget.from_manifest(self.manifest)
 
     def _resolve_manifest(self) -> StageManifest:
         manifest_obj = getattr(self.node, "stage_manifest", None)
@@ -118,6 +121,10 @@ class ICMStageAdapter:
         except Exception as e:
             logger.debug("ICM-X context loading skipped: %s", e)
 
+    def charge_llm(self, cost_usd: float = 0.0) -> None:
+        """Record one paid call or raise BudgetExceeded before the provider is hit."""
+        self.budget.charge(cost_usd)
+
     def post_execute(self, output: str, shared: dict) -> dict[str, Any]:
         """Record provenance and persist execution artifacts."""
         fingerprint = manifest_fingerprint(self.manifest)
@@ -127,6 +134,8 @@ class ICMStageAdapter:
             "manifest_fingerprint": fingerprint,
             "mode": self.manifest.mode,
             "context_hashes": self.context_hashes,
+            "llm_calls": self.budget.calls,
+            "cost_usd": self.budget.cost_usd,
             "timestamp": time.time(),
         }
 

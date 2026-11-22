@@ -109,8 +109,64 @@ def _fallback_models(model: str) -> list[str]:
     return _FALLBACK_CHAIN.get(model, [])
 
 
+def _usage_from_openai(data: dict) -> dict:
+    u = data.get("usage") or {}
+    details = u.get("prompt_tokens_details") or {}
+    return {
+        "input_tokens": u.get("prompt_tokens", 0) or 0,
+        "output_tokens": u.get("completion_tokens", 0) or 0,
+        "cached_tokens": details.get("cached_tokens", 0) or 0,
+        "total_tokens": u.get("total_tokens", 0) or 0,
+    }
+
+
+def _usage_from_anthropic(data: dict) -> dict:
+    u = data.get("usage") or {}
+    inp = u.get("input_tokens", 0) or 0
+    out = u.get("output_tokens", 0) or 0
+    return {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "cached_tokens": u.get("cache_read_input_tokens", 0) or 0,
+        "total_tokens": inp + out,
+    }
+
+
+def _usage_from_ollama(data: dict) -> dict:
+    inp = data.get("prompt_eval_count", 0) or 0
+    out = data.get("eval_count", 0) or 0
+    return {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "cached_tokens": 0,
+        "total_tokens": inp + out,
+    }
+
+
 class LLMProvider(ABC):
     """Base class for all LLM providers."""
+
+    requires_key = True
+
+    def health_check(self, model: str = "") -> dict:
+        """Credential + circuit state; no network call and no secret exposure."""
+        key_ok = bool(getattr(self, "api_key", None)) if self.requires_key else True
+        prefix = f"{type(self).__name__}:"
+        states = [
+            s for k, s in _circuits.items()
+            if k.startswith(prefix) and (not model or k == prefix + model)
+        ]
+        open_circuit = any(
+            s["status"] == "open" and time.time() - s["last_failure"] <= _CIRCUIT_TIMEOUT
+            for s in states
+        )
+        return {
+            "provider": type(self).__name__,
+            "model": model,
+            "available": key_ok and not open_circuit,
+            "credentials_configured": key_ok,
+            "circuit": "open" if open_circuit else "closed",
+        }
 
     @abstractmethod
     async def chat(
@@ -200,6 +256,10 @@ def get_provider(model: str, api_key: str | None = None) -> LLMProvider:
         return OpenRouterProvider(api_key)
 
 
+def provider_health(model: str, api_key: str | None = None) -> dict:
+    return get_provider(model, api_key=api_key).health_check(model)
+
+
 # ─── OpenRouter ───
 
 class OpenRouterProvider(LLMProvider):
@@ -241,7 +301,10 @@ class OpenRouterProvider(LLMProvider):
             if resp.status_code == 429:
                 raise LLMError("OpenRouter rate limited")
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]
+            data = resp.json()
+            message = data["choices"][0]["message"]
+            message["usage"] = _usage_from_openai(data)
+            return message
 
     async def chat_stream(
         self,
@@ -257,6 +320,7 @@ class OpenRouterProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": min(max_tokens, 16384),
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             body["tools"] = tools
@@ -285,6 +349,7 @@ class OpenRouterProvider(LLMProvider):
 
                 content_parts = []
                 tool_calls_acc = {}
+                usage = None
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -296,7 +361,10 @@ class OpenRouterProvider(LLMProvider):
                     except json.JSONDecodeError:
                         continue
 
-                    delta = chunk.get("choices", [{}])[0].get("delta", {}) or {}
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    choices = chunk.get("choices") or [{}]
+                    delta = choices[0].get("delta", {}) or {}
                     if delta.get("content"):
                         content_parts.append(delta["content"])
                         yield {"type": STREAM_TOKEN, "content": delta["content"]}
@@ -320,7 +388,7 @@ class OpenRouterProvider(LLMProvider):
                     tcs = [v for _, v in sorted(tool_calls_acc.items())]
                     yield {"type": STREAM_TOOL_CALL, "tool_calls": tcs}
 
-                yield {"type": STREAM_DONE}
+                yield {"type": STREAM_DONE, "usage": _usage_from_openai({"usage": usage})}
 
 
 # ─── OpenAI (direct) ───
@@ -361,7 +429,10 @@ class OpenAIProvider(LLMProvider):
             if resp.status_code == 401:
                 raise LLMError("OpenAI auth failed")
             resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]
+            data = resp.json()
+            message = data["choices"][0]["message"]
+            message["usage"] = _usage_from_openai(data)
+            return message
 
     async def chat_stream(
         self,
@@ -377,6 +448,7 @@ class OpenAIProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": min(max_tokens, 16384),
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if tools:
             body["tools"] = tools
@@ -399,6 +471,7 @@ class OpenAIProvider(LLMProvider):
 
                 content_parts = []
                 tool_calls_acc = {}
+                usage = None
                 async for line in resp.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -410,7 +483,10 @@ class OpenAIProvider(LLMProvider):
                     except json.JSONDecodeError:
                         continue
 
-                    delta = chunk.get("choices", [{}])[0].get("delta", {}) or {}
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    choices = chunk.get("choices") or [{}]
+                    delta = choices[0].get("delta", {}) or {}
                     if delta.get("content"):
                         content_parts.append(delta["content"])
                         yield {"type": STREAM_TOKEN, "content": delta["content"]}
@@ -434,7 +510,7 @@ class OpenAIProvider(LLMProvider):
                     tcs = [v for _, v in sorted(tool_calls_acc.items())]
                     yield {"type": STREAM_TOOL_CALL, "tool_calls": tcs}
 
-                yield {"type": STREAM_DONE}
+                yield {"type": STREAM_DONE, "usage": _usage_from_openai({"usage": usage})}
 
 
 # ─── Anthropic (direct) ───
@@ -537,6 +613,7 @@ class AnthropicProvider(LLMProvider):
                             "arguments": str(block.get("input", {})),
                         },
                     })
+            choice["usage"] = _usage_from_anthropic(data)
             return choice
 
     async def chat_stream(
@@ -562,6 +639,7 @@ class AnthropicProvider(LLMProvider):
 
         content_acc = []
         current_tool = None
+        anthropic_usage: dict = {}
 
         async with httpx.AsyncClient(timeout=300) as client:
             async with client.stream(
@@ -592,7 +670,13 @@ class AnthropicProvider(LLMProvider):
                         continue
 
                     etype = event.get("type", "")
-                    if etype == "content_block_start":
+                    if etype == "message_start":
+                        anthropic_usage = dict(event.get("message", {}).get("usage") or {})
+                    elif etype == "message_delta":
+                        u = event.get("usage") or {}
+                        if u.get("output_tokens") is not None:
+                            anthropic_usage["output_tokens"] = u["output_tokens"]
+                    elif etype == "content_block_start":
                         block = event.get("content_block", {})
                         if block.get("type") == "tool_use":
                             current_tool = {
@@ -621,12 +705,14 @@ class AnthropicProvider(LLMProvider):
                         yield {"type": STREAM_TOOL_CALL, "tool_calls": tool_calls}
                         current_tool = None
 
-                yield {"type": STREAM_DONE}
+                yield {"type": STREAM_DONE, "usage": _usage_from_anthropic({"usage": anthropic_usage})}
 
 
 # ─── Ollama (local) ───
 
 class OllamaProvider(LLMProvider):
+    requires_key = False
+
     def __init__(self, base_url: str | None = None):
         self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
 
@@ -674,6 +760,7 @@ class OllamaProvider(LLMProvider):
                         "arguments": str(tc["function"]["arguments"]),
                     },
                 } for i, tc in enumerate(data["message"]["tool_calls"])]
+            choice["usage"] = _usage_from_ollama(data)
             return choice
 
     async def chat_stream(
@@ -698,6 +785,7 @@ class OllamaProvider(LLMProvider):
             body["tools"] = [t["function"] for t in tools]
 
         tool_calls_acc = {}
+        ollama_usage: dict = {}
         async with httpx.AsyncClient(timeout=300) as client:
             async with client.stream(
                 "POST",
@@ -731,13 +819,14 @@ class OllamaProvider(LLMProvider):
                                 },
                             }
                     if chunk.get("done"):
+                        ollama_usage = chunk
                         break
 
                 if tool_calls_acc:
                     tcs = [v for _, v in sorted(tool_calls_acc.items())]
                     yield {"type": STREAM_TOOL_CALL, "tool_calls": tcs}
 
-                yield {"type": STREAM_DONE}
+                yield {"type": STREAM_DONE, "usage": _usage_from_ollama(ollama_usage)}
 
 
 class LLMError(Exception):

@@ -34,6 +34,8 @@ from .automations import router as automations_router
 from .knowledge import router as knowledge_router
 from .integrations import router as integrations_router
 from .dev import router as dev_router
+from .privacy import router as privacy_router
+from .security import router as security_router
 from .crm2 import router as crm_router
 from .voice import router as voice_router
 from .license import router as license_router
@@ -41,16 +43,30 @@ from .whatsapp import router as whatsapp_router
 from .agent_db import router as agent_db_router
 from .swarm import router as swarm_router
 from .sparc import router as sparc_router
+from .ocp import router as ocp_router
+from .capabilities import router as capabilities_router
+from .innovation import router as innovation_router
+from .lia import router as lia_router
+from .slack import router as slack_router
+from .model_intelligence import router as models_router
 
 api_router = APIRouter()
 api_router.include_router(whatsapp_router)
 api_router.include_router(agent_db_router)
 api_router.include_router(swarm_router)
 api_router.include_router(sparc_router)
+api_router.include_router(ocp_router)
+api_router.include_router(capabilities_router)
+api_router.include_router(innovation_router)
+api_router.include_router(lia_router)
+api_router.include_router(slack_router)
+api_router.include_router(models_router)
 api_router.include_router(crm_router)
 api_router.include_router(voice_router)
 api_router.include_router(license_router)
 api_router.include_router(dev_router)
+api_router.include_router(privacy_router)
+api_router.include_router(security_router)
 api_router.include_router(integrations_router)
 api_router.include_router(knowledge_router)
 api_router.include_router(automations_router)

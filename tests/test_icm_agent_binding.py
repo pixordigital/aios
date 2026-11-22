@@ -65,6 +65,8 @@ def test_agent_runtime_applies_stage_context_tools_and_timeout(tmp_path: Path, m
     # "__all__" means the manifest allowlist is now the whole policy.
     assert runtime._allowed_tools <= set(runtime.stage.manifest.allowed_tools)
     assert "crm_merge_deals" not in runtime._allowed_tools
+    assert runtime._icm_budget.max_llm_calls == runtime.stage.manifest.max_llm_calls
+    assert runtime._icm_budget.max_tool_calls == runtime.MAX_TOOL_CALLS
 
 
 def test_agent_allowlist_is_intersected_with_stage(tmp_path: Path, monkeypatch):
@@ -84,3 +86,4 @@ def test_agent_without_icm_config_has_no_stage():
     runtime = AgentRuntime(_agent())
     assert runtime.stage is None
     assert runtime._allowed_tools == "__all__"
+    assert runtime._icm_budget.max_llm_calls == runtime.MAX_ITERATIONS

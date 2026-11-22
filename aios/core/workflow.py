@@ -196,8 +196,23 @@ class WorkflowEngine:
                             run.tokens = total // 4
                             from aios.core.tracing import estimate_cost
 
-                            run.cost_usd = estimate_cost(
-                                "openai/gpt-4o-mini", run.tokens
+                            # Stage provenance carries what the adapters actually
+                            # spent. Length-based guessing understated paid runs.
+                            stage_costs = []
+                            for _k, _v in result.outputs.items():
+                                if not _k.endswith("_icm_provenance"):
+                                    continue
+                                if isinstance(_v, str):
+                                    try:
+                                        _v = json.loads(_v)
+                                    except Exception:
+                                        continue
+                                if isinstance(_v, dict):
+                                    stage_costs.append(float(_v.get("cost_usd") or 0))
+                            run.cost_usd = (
+                                round(sum(stage_costs), 6)
+                                if stage_costs
+                                else estimate_cost("openai/gpt-4o-mini", run.tokens)
                             )
                         except Exception:
                             pass
@@ -349,6 +364,63 @@ class WorkflowEngine:
                 result.errors[nid] = "workflow timeout"
                 result.node_status[nid] = "failed"
 
+        try:
+            from aios.governance.process_conformance import check_conformance
+
+            attempts = result.outputs.get("_icm_stage_attempts") or {}
+            if isinstance(attempts, str):
+                try:
+                    attempts = json.loads(attempts)
+                except Exception:
+                    attempts = {}
+            approvals_required = 0
+            tools_allowed: list[str] = []
+            tools_used: list[str] = []
+            not_executed = {"pending", "ready", "skipped"}
+            for node in workflow.nodes.values():
+                manifest = getattr(node, "stage_manifest", None)
+                if isinstance(manifest, dict):
+                    required = bool(manifest.get("approval_required"))
+                    allowed = list(manifest.get("allowed_tools") or [])
+                else:
+                    required = bool(getattr(manifest, "approval_required", False))
+                    allowed = list(getattr(manifest, "allowed_tools", None) or [])
+                approvals_required += int(required)
+                if node.tool_name and allowed and result.node_status.get(node.id) not in not_executed:
+                    tools_allowed.extend(allowed)
+                    tools_used.append(node.tool_name)
+            approvals_done = sum(
+                1 for a in attempts.values()
+                if isinstance(a, dict) and a.get("approval_id")
+            )
+            limit_words = ("budget", "limit", "ceiling", "quota")
+            limits_hit = any(
+                any(w in str(e).lower() for w in limit_words)
+                for e in result.errors.values()
+            )
+            deviation, findings = check_conformance(
+                steps_expected=list(workflow.nodes),
+                steps_executed=[
+                    nid for nid, st in result.node_status.items() if st not in not_executed
+                ],
+                approvals_required=approvals_required,
+                approvals_done=approvals_done,
+                tools_allowed=tools_allowed or None,
+                tools_used=tools_used or None,
+                limits_exceeded=limits_hit,
+                outputs_valid=all(
+                    nid in result.outputs
+                    for nid, st in result.node_status.items() if st == "done"
+                ),
+                exception_occurred=bool(result.errors),
+                escalated=bool(shared.get("escalated")),
+            )
+            result.outputs["_process_conformance"] = json.dumps(
+                {"deviation": deviation, "findings": findings}
+            )
+        except Exception as e:
+            logger.warning("Process conformance check failed: %s", e)
+
         await _persist("done" if result.ok() else "failed")
         return result
 
@@ -475,6 +547,12 @@ class WorkflowEngine:
             output = None
             for _trial in range(_retries + 1):
                 try:
+                    if stage_adapter is not None:
+                        from aios.icm.enforcement import BudgetExceeded
+
+                        _ok, _reason = stage_adapter.budget.can_call()
+                        if not _ok:
+                            raise BudgetExceeded(f"ICM stage budget: {_reason}")
                     output = await runtime.run(conv_id, str(msg))
                     break
                 except Exception as _e:
@@ -482,6 +560,10 @@ class WorkflowEngine:
                         # Generate reflection
                         try:
                             from aios.core.providers import get_provider
+                            if stage_adapter is not None:
+                                from aios.core.tracing import estimate_cost
+
+                                stage_adapter.charge_llm(estimate_cost("openai/gpt-4o-mini", 256))
                             _llm = get_provider(agent_model.llm_config.get("model", "openai/gpt-4o-mini") if hasattr(agent_model, "llm_config") else "openai/gpt-4o-mini")
                             _refl = await _llm.chat_retry(messages=[{"role": "user", "content": f"Workflow node {node.id} failed: {_e}. Gere reflexão curta (1 frase) do que tentar diferente."}], model="openai/gpt-4o-mini", temperature=0.7, max_tokens=100)
                             _msg_ref = _refl.get("content", "")[:200]
@@ -491,6 +573,13 @@ class WorkflowEngine:
                         continue
                     else:
                         raise
+            if stage_adapter is not None:
+                try:
+                    _rb = getattr(runtime, "_icm_budget", None)
+                    if _rb is not None:
+                        stage_adapter.charge_llm(_rb.cost_usd)
+                except Exception as e:
+                    logger.warning("ICM stage cost attribution failed for %s: %s", node.id, e)
             result.outputs[node.id] = output or ""
             result.node_status[node.id] = "done"
             try:
@@ -575,6 +664,10 @@ class WorkflowEngine:
                 if getattr(node, "retry_count", 0) > 0:
                     try:
                         from aios.core.providers import get_provider
+                        if stage_adapter is not None:
+                            from aios.core.tracing import estimate_cost
+
+                            stage_adapter.charge_llm(estimate_cost("openai/gpt-4o-mini", 256))
                         _llm2 = get_provider("openai/gpt-4o-mini")
                         _refl2 = await _llm2.chat_retry(messages=[{"role": "user", "content": f"Tool {node.tool_name} failed: {e}. Sugira ajuste nos args."}], model="openai/gpt-4o-mini", temperature=0.7, max_tokens=100)
                         logger.info("Workflow tool reflection for %s: %s", node.id, _refl2.get("content", "")[:200])
