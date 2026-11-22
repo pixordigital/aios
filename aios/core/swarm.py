@@ -43,6 +43,13 @@ def _select_for_update(db, stmt):
     return stmt.with_for_update()
 
 
+async def _lock_team_dispatch(db, team_id: str, org_id: str) -> bool:
+    """Best-effort dispatch serializer. PG: row lock on team; SQLite: no-op lock, still fail-closed on ownership."""
+    stmt = select(Team.id).where(Team.id == team_id, Team.org_id == org_id)
+    stmt = _select_for_update(db, stmt)
+    return (await db.execute(stmt)).scalar_one_or_none() is not None
+
+
 async def _team_belongs_to_org(db, team_id: str, org_id: str) -> bool:
     """Fail-closed team ownership check."""
     if not team_id or not org_id:
@@ -197,9 +204,10 @@ class SwarmCoordinator:
 
         Idempotency: if payload/extra_data carries idempotency_key (or explicit arg),
         return existing active/terminal task with same team/org/task_type/key instead of duplicating.
+        Best-effort without unique index: serialize on team row when supported, recheck after flush.
         """
         async with db_session() as db:
-            if not await _team_belongs_to_org(db, team_id, org_id):
+            if not await _lock_team_dispatch(db, team_id, org_id):
                 return None
             if agent_id and not await _agent_in_team(db, agent_id, team_id, org_id):
                 return None
@@ -220,8 +228,8 @@ class SwarmCoordinator:
                     SwarmTask.org_id == org_id,
                     SwarmTask.task_type == task_type,
                 ).order_by(desc(SwarmTask.created_at)).limit(50)
-                existing_rows = (await db.execute(existing_stmt)).scalars().all()
-                for row in existing_rows:
+                existing_stmt = _select_for_update(db, existing_stmt)
+                for row in (await db.execute(existing_stmt)).scalars().all():
                     if _task_idempotency_key(row) == idem:
                         return row
 
@@ -232,6 +240,20 @@ class SwarmCoordinator:
                 assigned_agent_id=agent_id, status="queued" if not agent_id else "assigned",
             )
             db.add(task)
+            await db.flush()
+            if isinstance(idem, str) and idem:
+                recheck_stmt = select(SwarmTask).where(
+                    SwarmTask.team_id == team_id,
+                    SwarmTask.org_id == org_id,
+                    SwarmTask.task_type == task_type,
+                    SwarmTask.id != task.id,
+                ).order_by(desc(SwarmTask.created_at)).limit(50)
+                recheck_stmt = _select_for_update(db, recheck_stmt)
+                for row in (await db.execute(recheck_stmt)).scalars().all():
+                    if _task_idempotency_key(row) == idem:
+                        await db.delete(task)
+                        await db.commit()
+                        return row
             await db.commit()
             await db.refresh(task)
             return task

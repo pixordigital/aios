@@ -2848,6 +2848,9 @@ async def files_view(request: Request, art_id: str):
 
 @router.get("/lab", response_class=HTMLResponse)
 async def lab_page(request: Request):
+    from aios.api.deps import get_dashboard_user
+    user = await get_dashboard_user(request)
+    can_run_tools = bool(user and getattr(user, "role", None) in _DASHBOARD_TOOL_RUN_ROLES)
     org_id = await _org_filter(request)
     async with db_session() as db:
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
@@ -2865,7 +2868,7 @@ async def lab_page(request: Request):
             {"name": "send_email", "desc": "Enviar e-mail", "schema": {"to": "string", "subject": "string", "body": "string"}},
             {"name": "read_file", "desc": "Ler arquivo por ID", "schema": {"artifact_id": "string"}},
         ]
-    return await _render("lab.html", request, title="Lab — IDE leve", agents=agents, tools=tools, artifacts=artifacts, workflows=wfs)
+    return await _render("lab.html", request, title="Lab — IDE leve", agents=agents, tools=tools, artifacts=artifacts, workflows=wfs, can_run_tools=can_run_tools)
 
 
 _DASHBOARD_TOOL_RUN_ROLES = {"admin", "owner", "founder", "superadmin"}

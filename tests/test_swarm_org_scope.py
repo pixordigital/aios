@@ -9,6 +9,7 @@ tenant's payloads. Paths now require caller org_id and fail closed
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import select
 
 from httpx import ASGITransport, AsyncClient
 
@@ -291,6 +292,52 @@ async def test_dispatch_idempotency_key_dedupes(two_org_tasks) -> None:
     finally:
         async with db_session() as db:
             for tid in created:
+                row = await db.get(SwarmTask, tid)
+                if row:
+                    await db.delete(row)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_idempotency_concurrent_best_effort(two_org_tasks) -> None:
+    """Best-effort concurrent dedupe. SQLite has no row lock/unique index; allow rare dup but require no crash and >=1 winner."""
+    import asyncio
+
+    coord = SwarmCoordinator()
+    created: list[str] = []
+    try:
+        results = await asyncio.gather(*[
+            coord.dispatch(
+                team_id="team-a", org_id="org-a", task_type="agent_call",
+                payload={"idempotency_key": "idem-concurrent", "n": i},
+            )
+            for i in range(8)
+        ])
+        ok = [r for r in results if r is not None]
+        assert ok
+        ids = {r.id for r in ok}
+        created.extend(ids)
+        # best-effort: ideally 1; on sqlite without unique index race may create few dups
+        assert len(ids) <= 2
+        async with db_session() as db:
+            rows = (await db.execute(
+                select(SwarmTask).where(
+                    SwarmTask.team_id == "team-a",
+                    SwarmTask.org_id == "org-a",
+                    SwarmTask.task_type == "agent_call",
+                )
+            )).scalars().all()
+            idem_rows = []
+            for r in rows:
+                for src in (getattr(r, "payload", None), getattr(r, "extra_data", None)):
+                    if isinstance(src, dict) and src.get("idempotency_key") == "idem-concurrent":
+                        idem_rows.append(r)
+                        break
+            created.extend([r.id for r in idem_rows if r.id not in created])
+            assert 1 <= len(idem_rows) <= 2
+    finally:
+        async with db_session() as db:
+            for tid in set(created):
                 row = await db.get(SwarmTask, tid)
                 if row:
                     await db.delete(row)

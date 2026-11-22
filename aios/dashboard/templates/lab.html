@@ -16,10 +16,15 @@
 
 <!-- TOOLS TAB -->
 <div id="tab-tools" class="card">
+  {% if not can_run_tools %}
+  <div style="background:var(--amber-subtle,rgba(251,191,36,.12));border:1px solid var(--amber,#fbbf24);color:var(--text);border-radius:var(--radius-sm);padding:0.75rem 1rem;margin-bottom:1rem;font-size:0.8125rem">
+    Execução de ferramentas restrita a admin/owner/founder/superadmin. Você pode inspecionar ferramentas, mas não executar.
+  </div>
+  {% endif %}
   <div style="display:grid;grid-template-columns:280px 1fr;gap:1rem">
     <div>
       <label>Ferramenta</label>
-      <select id="tool-select" class="input" onchange="onToolChange()">
+      <select id="tool-select" class="input" onchange="onToolChange()" {% if not can_run_tools %}disabled{% endif %}>
         {% for t in tools %}<option value="{{t.name}}" data-desc="{{t.desc}}">{{t.name}} — {{t.desc}}</option>{% endfor %}
       </select>
       <p id="tool-desc" class="text-xs text-tertiary mt-1">{{tools[0].desc if tools else ''}}</p>
@@ -40,7 +45,7 @@
       <div id="monaco-args" style="height:200px;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden"></div>
       <textarea id="tool-args" style="display:none">{}</textarea>
       <div style="display:flex;gap:0.5rem">
-        <button class="btn btn-primary" onclick="runTool()">▶ Executar</button>
+        <button class="btn btn-primary" onclick="runTool()" {% if not can_run_tools %}disabled title="Apenas admin pode executar"{% endif %}>▶ Executar</button>
         <button class="btn btn-ghost" onclick="formatArgs()">Formatar</button>
         <span id="tool-timing" class="text-xs text-tertiary" style="align-self:center"></span>
       </div>

@@ -637,3 +637,43 @@ async def test_create_nondynamic_tool_allows_member(monkeypatch):
     body = tools_api.ToolCreate(name="plain", code_reference="aios.tools.calculator.Calculator")
     out = await tools_api.create_tool(body, db=db, org_id="org1", user=_Member())
     assert out.name == "plain"
+
+@pytest.mark.asyncio
+async def test_dashboard_lab_page_hides_tool_run_for_member(monkeypatch):
+    from aios.dashboard import app as dashboard_app
+
+    class _Req:
+        cookies = {}
+
+    async def _member(_request):
+        return type("U", (), {"id": "u1", "org_id": "org1", "role": "member"})()
+
+    rendered = {}
+
+    async def _render(name, request, **kw):
+        rendered["name"] = name
+        rendered["kw"] = kw
+        return "<html>forbidden notice</html>"
+
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _member)
+    monkeypatch.setattr(dashboard_app, "_org_filter", lambda _r: _coro("org1"))
+    monkeypatch.setattr(dashboard_app, "_render", _render)
+
+    class _DB:
+        async def execute(self, _q):
+            return _ScalarResult([])
+        async def get(self, *_a, **_k):
+            return None
+
+    class _DBCtx:
+        async def __aenter__(self): return _DB()
+        async def __aexit__(self, *a): return False
+
+    monkeypatch.setattr(dashboard_app, "db_session", lambda: _DBCtx())
+    monkeypatch.setattr("aios.tools.registry.TOOL_REGISTRY", {"calculator": {"description": "x", "input_schema": {}}})
+    monkeypatch.setattr("aios.core.storage.list_artifacts", lambda db, org_id: _coro([]))
+
+    out = await dashboard_app.lab_page(_Req())
+    assert rendered["name"] == "lab.html"
+    assert rendered["kw"]["can_run_tools"] is False
+    assert "forbidden" in out.lower() or isinstance(out, str)
