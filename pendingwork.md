@@ -83,3 +83,12 @@ Open items:
 - Action: cancelled stuck build `biou1fkheuidydmzzw0p5flv`; queued `2pnvysqsu00lxwmwlmo3rdhj` finished 14:09 with commit `e766c56` (includes `c298361`). Next queued deploy `1ubgtgavjg0ya4frmoasqvo9` finished 14:13 with `bdb86ad`.
 - Also fixed (commit `bdb86ad`, pushed): `aios/integrations/arvo/routes.py` SSO endpoint used undefined `jwt` and `_PATH` → NameError at runtime; added local imports. Deployed.
 - Remaining verification: live hover URL on `/dashboard` after hard refresh (auth-gated, not checked via curl). If still `/funnels/advisor`, check browser cache or proxy cache.
+
+### AIOS↔ARVO integration — DONE + LIVE VERIFIED (2026-11-22)
+- Goal met: ARVO stateless on own Supabase; AIOS CRM source of truth; signed trace/idempotent event loop working both directions.
+- Code: 8 agents + trace fix; `business_trace_id` now top-level in HMAC-signed body both directions. ARVO `f1fef81` pushed; AIOS `6eed057` pushed. Tests: ARVO 57 passed, AIOS 18 passed.
+- Live deploy: ARVO `l7p2wj6ysqcnnymtynr08up1` and AIOS `38908ddf-a875-4105-a93f-a4570513911f` both deployed. `/health/ready` → 200 both (ARVO db ok + redis ok on Supabase DSN).
+- Infra fixes made (do NOT re-litigate): stale local container `arvo-web-1` stopped (held host port 9777); `arvo-redis-1` attached to `coolify` network; ARVO prod env `ARVO_DATABASE_URL` host `supabase-db` → `arvo-db-bridge` (existing socat bridge), `ARVO_REDIS_URL` → `redis://:changeme@arvo-redis-1:6379/0`; Supabase ARVO DB migrated `alembic upgrade head` from `53db6d830751` → `c2d3e4f5a6b7` (adds `integration_outbox`, `deal_audit_jobs`); Coolify scheduled task `arvo-outbox-flush` (`rltysj7xr4oeryvvgwtsciba`, every minute) runs `bash -lc 'python -c "...flush_outbox()"'` — needed because no ARVO arq worker in Coolify.
+- Live smoke: signed HMAC health 200 both directions; event POST + idempotent replay 200 both directions; ARVO outbox row → AIOS ingest 200; AIOS outbox row → ARVO ingest, DB response carries same `business_trace_id`.
+- Known limit: ARVO outbox latency up to 60s via Coolify cron (no arq worker). Preview env rows still stale, untouched.
+- If reopening: verify `/health/ready` 200 and one outbox row reaches `status='sent'` before changing anything.
