@@ -12,9 +12,11 @@ from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization
 from aios.governance.security import (
     RESPONSE_AUTHORITY,
+    SECURITY_METRIC_EVENT_TYPES,
     SecurityEvent,
     SecurityIncident,
     apply_response_gateway,
+    emit_security_metric_event,
     incident_metrics,
     is_founder_authority,
     record_security_event,
@@ -302,9 +304,10 @@ async def ingest_event(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
+    metric = str(body.get("metric") or "").strip()
     event_type = str(body.get("event_type") or "").strip()
-    if not event_type:
-        raise HTTPException(400, "event_type required")
+    if not event_type and not metric:
+        raise HTTPException(400, "event_type or metric required")
     severity = str(body.get("severity") or "info")
     if severity not in VALID_SEVERITIES:
         raise HTTPException(400, f"invalid severity: {severity}")
@@ -314,21 +317,37 @@ async def ingest_event(
         if incident is None or incident.org_id != org_id:
             raise HTTPException(404, "incident not found")
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
-    evt = await record_security_event(
-        db,
-        org_id=org_id,
-        source=str(body.get("source") or "security.api.ingest")[:80],
-        event_type=event_type[:80],
-        severity=severity,
-        incident_id=str(incident_id) if incident_id else None,
-        actor_type="human",
-        actor_id=getattr(user, "id", None),
-        payload=payload,
-    )
+    metric = str(body.get("metric") or "").strip()
+    if metric:
+        if metric not in SECURITY_METRIC_EVENT_TYPES:
+            raise HTTPException(400, f"invalid metric: {metric}")
+        evt = await emit_security_metric_event(
+            db,
+            org_id=org_id,
+            metric=metric,
+            source=str(body.get("source") or "security.api.ingest")[:80],
+            severity=severity,
+            incident_id=str(incident_id) if incident_id else None,
+            actor_type="human",
+            actor_id=getattr(user, "id", None),
+            payload=payload,
+        )
+    else:
+        evt = await record_security_event(
+            db,
+            org_id=org_id,
+            source=str(body.get("source") or "security.api.ingest")[:80],
+            event_type=event_type[:80],
+            severity=severity,
+            incident_id=str(incident_id) if incident_id else None,
+            actor_type="human",
+            actor_id=getattr(user, "id", None),
+            payload=payload,
+        )
     if evt is None:
         raise HTTPException(503, "security event storage unavailable")
     await db.commit()
-    return {"id": evt.id, "event_type": evt.event_type, "stored": True}
+    return {"id": evt.id, "event_type": evt.event_type, "metric": metric or None, "stored": True}
 
 
 def _preapproval_payload(org: Organization | None) -> dict[str, Any]:

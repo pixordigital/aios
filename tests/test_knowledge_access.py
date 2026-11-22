@@ -109,3 +109,146 @@ async def test_hybrid_search_no_legacy_memory_bypass_by_default(monkeypatch):
     monkeypatch.setattr("aios.core.memory._embed", should_not_run)
     out = await rag.hybrid_search("org1", "pricing", top_k=3)
     assert out == []
+
+
+async def test_hybrid_search_legacy_escape_hatch_requires_internal_flags(monkeypatch):
+    from aios.core import rag
+
+    async def fake_search(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(rag, "search_knowledge_records", fake_search)
+
+    async def should_not_run(*args, **kwargs):
+        raise AssertionError("legacy memory path must stay blocked without all internal flags")
+
+    monkeypatch.setattr("aios.core.memory._embed", should_not_run)
+
+    # Single flag insufficient
+    out = await rag.hybrid_search("org1", "pricing", include_legacy_memory=True)
+    assert out == []
+    out = await rag.hybrid_search(
+        "org1", "pricing", include_legacy_memory=True, allow_legacy_unpermissioned=True
+    )
+    assert out == []
+
+
+async def test_hybrid_search_legacy_escape_hatch_all_internal_flags(monkeypatch):
+    from aios.core import rag
+
+    async def fake_search(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(rag, "search_knowledge_records", fake_search)
+
+    class _FakeResult:
+        def __iter__(self):
+            return iter([("m1", "legacy content", "[0.1]")])
+
+    class _FakeSession:
+        async def execute(self, *args, **kwargs):
+            return _FakeResult()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("aios.core.rag.async_session", lambda: _FakeSession())
+    monkeypatch.setattr("aios.core.memory._embed", lambda q: [0.1])
+
+    out = await rag.hybrid_search(
+        "org1",
+        "pricing",
+        include_legacy_memory=True,
+        allow_legacy_unpermissioned=True,
+        internal_caller=True,
+    )
+    assert len(out) == 1
+    assert out[0]["source"] == "legacy_memory"
+    assert out[0]["legacy_unpermissioned"] is True
+
+
+async def test_rag_search_tool_fails_closed_without_actor_context(monkeypatch):
+    from aios.tools.rag_search import RagSearchTool
+
+    async def fake_search(*args, **kwargs):
+        raise AssertionError("search should not run when actor unresolved")
+
+    monkeypatch.setattr("aios.core.rag.search_knowledge_records", fake_search)
+
+    tool = RagSearchTool()
+    tool._org_id = "org1"
+    tool._agent_id = ""
+    tool._actor_user_id = ""
+    tool._actor_departments = set()
+    tool._is_founder = False
+    tool._granted_record_ids = set()
+
+    out = await tool.run(query="pricing")
+    assert out["ok"] is False
+    assert out["fail_closed"] is True
+    assert out["results"] == []
+    assert "unresolved" in out["error"]
+
+
+async def test_rag_search_tool_allows_injected_actor_scope(monkeypatch):
+    from aios.tools.rag_search import RagSearchTool
+
+    captured = {}
+
+    async def fake_search(org_id, query, **kwargs):
+        captured["org_id"] = org_id
+        captured["query"] = query
+        captured["kwargs"] = kwargs
+        return [{"id": "k1", "citation": {"record_id": "k1"}}]
+
+    monkeypatch.setattr("aios.core.rag.search_knowledge_records", fake_search)
+
+    tool = RagSearchTool()
+    tool._org_id = "org1"
+    tool._actor_departments = {"dept-sales"}
+    tool._is_founder = False
+    tool._granted_record_ids = set()
+
+    out = await tool.run(query="pricing", top_k=3)
+    assert out["ok"] is True
+    assert out["count"] == 1
+    assert out["actor_resolution"] == "injected"
+    assert captured["kwargs"]["actor_departments"] == {"dept-sales"}
+    assert captured["kwargs"]["is_founder"] is False
+
+
+async def test_tool_engine_injects_actor_identity_to_rag_tool(monkeypatch):
+    from aios.core.tools import ToolEngine
+    from aios.tools.rag_search import RagSearchTool
+
+    captured = {}
+
+    async def fake_run(self, query: str, top_k: int = 5):
+        captured["org"] = getattr(self, "_org_id", "")
+        captured["user"] = getattr(self, "_actor_user_id", "")
+        captured["deps"] = set(getattr(self, "_actor_departments", set()))
+        captured["founder"] = bool(getattr(self, "_is_founder", False))
+        return {"ok": True, "query": query, "results": [], "count": 0}
+
+    monkeypatch.setattr(RagSearchTool, "run", fake_run)
+
+    eng = ToolEngine(
+        ["rag_search"],
+        org_id="org1",
+        agent_id="agent1",
+        actor_user_id="user1",
+        actor_departments={"d1"},
+        is_founder=True,
+        granted_record_ids={"k1"},
+    )
+    out = await eng.execute("rag_search", '{"query":"pricing"}')
+    assert '"ok": true' in out.lower()
+    assert captured == {
+        "org": "org1",
+        "user": "user1",
+        "deps": {"d1"},
+        "founder": True,
+    }

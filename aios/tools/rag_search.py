@@ -24,13 +24,19 @@ class RagSearchTool(BaseTool):
 
     async def _resolve_actor_context(self, org_id: str) -> dict:
         """Best-effort actor context. Fail closed on any resolution error."""
+        actor_user_id = str(getattr(self, "_actor_user_id", "") or "")
         ctx = {
             "actor_departments": set(getattr(self, "_actor_departments", None) or []),
             "is_founder": bool(getattr(self, "_is_founder", False)),
             "granted_record_ids": set(getattr(self, "_granted_record_ids", None) or []),
+            "actor_user_id": actor_user_id,
+            "actor_resolved": False,
+            "resolution": "none",
         }
-        # Caller explicitly injected context; trust only positive scope narrowing attrs.
+        # Caller explicitly injected scope; treat as resolved.
         if ctx["actor_departments"] or ctx["is_founder"] or ctx["granted_record_ids"]:
+            ctx["actor_resolved"] = True
+            ctx["resolution"] = "injected"
             return ctx
         agent_id = getattr(self, "_agent_id", "") or ""
         if not org_id:
@@ -39,6 +45,7 @@ class RagSearchTool(BaseTool):
             from sqlalchemy import select
 
             from aios.db.engine import async_session
+            from aios.db.models import Organization, User
             from aios.governance.ocp import DepartmentMember
 
             async with async_session() as s:
@@ -53,13 +60,41 @@ class RagSearchTool(BaseTool):
                         )
                     ).scalars().all()
                     ctx["actor_departments"] = {d for d in rows if d}
-                # No user identity on tool; founder stays False (fail closed).
+                    ctx["actor_resolved"] = True
+                    ctx["resolution"] = "agent_departments"
+
+                if actor_user_id:
+                    user = (
+                        await s.execute(
+                            select(User).where(User.id == actor_user_id, User.org_id == org_id)
+                        )
+                    ).scalars().first()
+                    if user is not None:
+                        org = await s.get(Organization, org_id)
+                        extra = (org.extra_data or {}) if org else {}
+                        ctx["is_founder"] = bool(
+                            extra.get("founder_user_id") == user.id or user.role == "owner"
+                        )
+                        rows = (
+                            await s.execute(
+                                select(DepartmentMember.department_id).where(
+                                    DepartmentMember.org_id == org_id,
+                                    DepartmentMember.user_id == user.id,
+                                )
+                            )
+                        ).scalars().all()
+                        ctx["actor_departments"] |= {d for d in rows if d}
+                        ctx["actor_resolved"] = True
+                        ctx["resolution"] = "user_identity"
         except Exception:
             # Fail closed: no departments/grants/founder.
             return {
                 "actor_departments": set(),
                 "is_founder": False,
                 "granted_record_ids": set(),
+                "actor_user_id": actor_user_id,
+                "actor_resolved": False,
+                "resolution": "error_fail_closed",
             }
         return ctx
 
@@ -77,6 +112,25 @@ class RagSearchTool(BaseTool):
             from aios.core.rag import search_knowledge_records
 
             actor = await self._resolve_actor_context(org_id)
+            # Fail closed when no actor scope/identity can be resolved. Returning
+            # unfiltered results would leak restricted/confidential records.
+            has_scope = bool(
+                actor["actor_departments"]
+                or actor["is_founder"]
+                or actor["granted_record_ids"]
+                or actor.get("actor_user_id")
+            )
+            if not actor.get("actor_resolved") and not has_scope:
+                return {
+                    "ok": False,
+                    "error": "actor identity unresolved; search fail-closed",
+                    "query": query,
+                    "results": [],
+                    "count": 0,
+                    "source": "knowledge_records",
+                    "actor_resolution": actor.get("resolution", "none"),
+                    "fail_closed": True,
+                }
             results = await search_knowledge_records(
                 org_id,
                 query,
@@ -91,6 +145,7 @@ class RagSearchTool(BaseTool):
                 "results": results,
                 "count": len(results),
                 "source": "knowledge_records",
+                "actor_resolution": actor.get("resolution", "unknown"),
             }
         except Exception as e:
             return {"ok": False, "error": str(e)[:500], "query": query}

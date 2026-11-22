@@ -85,6 +85,7 @@ class ToolEngine:
         org_id: str = "",
         agent_id: str = "",
         *,
+        actor_user_id: str = "",
         actor_departments: set[str] | None = None,
         is_founder: bool = False,
         granted_record_ids: set[str] | None = None,
@@ -95,6 +96,7 @@ class ToolEngine:
         # resolves the caller's team from it). Empty on admin/dashboard paths,
         # where there is no agent — those callers pass org only.
         self.agent_id = agent_id or ""
+        self.actor_user_id = actor_user_id or ""
         self.actor_departments = set(actor_departments or [])
         self.is_founder = bool(is_founder)
         self.granted_record_ids = set(granted_record_ids or [])
@@ -155,6 +157,7 @@ class ToolEngine:
         try:
             tool._org_id = self.org_id
             tool._agent_id = self.agent_id
+            tool._actor_user_id = self.actor_user_id
             tool._actor_departments = set(self.actor_departments)
             tool._is_founder = bool(self.is_founder)
             tool._granted_record_ids = set(self.granted_record_ids)

@@ -54,6 +54,18 @@ RESPONSE_AUTHORITY = {
     "accept_risk": "human",
 }
 
+# Deterministic in-process producers for security metrics. Best-effort: they
+# write SecurityEvent rows when storage is available and never raise on metric
+# recording failures. They do not claim an independent append-only sink.
+SECURITY_METRIC_EVENT_TYPES = {
+    "auth_failure": "security.auth.failure",
+    "cross_tenant_block": "security.cross_tenant.blocked",
+    "recovery_drill": "security.recovery.drill",
+    "false_positive": "security.detection.false_positive",
+    "vuln_reported": "security.vuln.reported",
+    "vuln_resolved": "security.vuln.resolved",
+}
+
 AUTHORITY_LEVELS = ("autonomous", "conditional", "human")
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
@@ -264,6 +276,197 @@ async def record_security_event(
         return None
 
 
+def _metric_payload(payload: dict | None = None, **extra: Any) -> dict[str, Any]:
+    data = dict(payload or {})
+    data.update({k: v for k, v in extra.items() if v is not None})
+    return data
+
+
+async def emit_security_metric_event(
+    db: Any,
+    *,
+    org_id: str,
+    metric: str,
+    source: str,
+    severity: str = "info",
+    incident_id: str | None = None,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    """Generic deterministic security metric producer. Best-effort, no crash."""
+    event_type = SECURITY_METRIC_EVENT_TYPES.get(metric)
+    if event_type is None:
+        event_type = f"security.metric.{metric}" if metric else "security.metric.unknown"
+    data = _metric_payload(payload, metric=metric)
+    try:
+        return await record_security_event(
+            db,
+            org_id=org_id,
+            source=source,
+            event_type=event_type,
+            severity=severity,
+            incident_id=incident_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            payload=data,
+        )
+    except Exception:
+        log.exception("security metric emit failed: %s", metric)
+        return None
+
+
+async def record_auth_failure(
+    db: Any,
+    *,
+    org_id: str,
+    source: str = "auth",
+    severity: str = "medium",
+    incident_id: str | None = None,
+    actor_type: str | None = "human",
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    return await emit_security_metric_event(
+        db,
+        org_id=org_id,
+        metric="auth_failure",
+        source=source,
+        severity=severity,
+        incident_id=incident_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        payload=payload,
+    )
+
+
+async def record_cross_tenant_block(
+    db: Any,
+    *,
+    org_id: str,
+    source: str = "tenant_guard",
+    severity: str = "high",
+    incident_id: str | None = None,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    return await emit_security_metric_event(
+        db,
+        org_id=org_id,
+        metric="cross_tenant_block",
+        source=source,
+        severity=severity,
+        incident_id=incident_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        payload=payload,
+    )
+
+
+async def record_recovery_drill(
+    db: Any,
+    *,
+    org_id: str,
+    success: bool,
+    source: str = "recovery_drill",
+    severity: str | None = None,
+    incident_id: str | None = None,
+    actor_type: str | None = "human",
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    sev = severity or ("info" if success else "high")
+    return await emit_security_metric_event(
+        db,
+        org_id=org_id,
+        metric="recovery_drill",
+        source=source,
+        severity=sev,
+        incident_id=incident_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        payload=_metric_payload(payload, success=bool(success)),
+    )
+
+
+async def record_false_positive(
+    db: Any,
+    *,
+    org_id: str,
+    source: str = "detection",
+    severity: str = "low",
+    incident_id: str | None = None,
+    actor_type: str | None = "human",
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    return await emit_security_metric_event(
+        db,
+        org_id=org_id,
+        metric="false_positive",
+        source=source,
+        severity=severity,
+        incident_id=incident_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        payload=payload,
+    )
+
+
+async def record_vuln_reported(
+    db: Any,
+    *,
+    org_id: str,
+    vuln_id: str,
+    critical: bool = False,
+    source: str = "vuln_scanner",
+    severity: str | None = None,
+    incident_id: str | None = None,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    sev = severity or ("critical" if critical else "high")
+    return await emit_security_metric_event(
+        db,
+        org_id=org_id,
+        metric="vuln_reported",
+        source=source,
+        severity=sev,
+        incident_id=incident_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        payload=_metric_payload(payload, vuln_id=str(vuln_id), critical=bool(critical)),
+    )
+
+
+async def record_vuln_resolved(
+    db: Any,
+    *,
+    org_id: str,
+    vuln_id: str,
+    critical: bool = False,
+    source: str = "vuln_scanner",
+    severity: str = "info",
+    incident_id: str | None = None,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> SecurityEvent | None:
+    return await emit_security_metric_event(
+        db,
+        org_id=org_id,
+        metric="vuln_resolved",
+        source=source,
+        severity=severity,
+        incident_id=incident_id,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        payload=_metric_payload(payload, vuln_id=str(vuln_id), critical=bool(critical)),
+    )
+
+
 async def apply_response_gateway(
     db: Any,
     *,
@@ -316,6 +519,30 @@ async def apply_response_gateway(
     return record
 
 
+def _vuln_state(events: list["SecurityEvent"]) -> tuple[int | None, str]:
+    """Compute unresolved critical vulns from deterministic vuln events."""
+    vuln_events = [
+        e
+        for e in events
+        if str(getattr(e, "event_type", "") or "") in {"security.vuln.reported", "security.vuln.resolved"}
+    ]
+    if not vuln_events:
+        return None, "unknown:no_vuln_telemetry"
+    state: dict[str, bool] = {}
+    for e in vuln_events:
+        payload = getattr(e, "payload", {}) or {}
+        vuln_id = str(payload.get("vuln_id") or "").strip()
+        if not vuln_id:
+            continue
+        critical = bool(payload.get("critical", False))
+        et = str(getattr(e, "event_type", "") or "")
+        if et == "security.vuln.reported":
+            state[vuln_id] = critical
+        elif et == "security.vuln.resolved":
+            state.pop(vuln_id, None)
+    return sum(1 for critical in state.values() if critical), "security_events.vuln_reported/vuln_resolved"
+
+
 def incident_metrics(
     incidents: list[SecurityIncident],
     *,
@@ -343,15 +570,29 @@ def incident_metrics(
 
     evs = events or []
     by_type = [str(getattr(e, "event_type", "") or "") for e in evs]
-    unauthorized = sum(1 for t in by_type if "unauthorized" in t or "forbidden" in t or "auth_denied" in t)
-    cross_tenant = sum(1 for t in by_type if "cross_tenant" in t or "tenant_violation" in t)
+    unauthorized = sum(
+        1
+        for t in by_type
+        if "unauthorized" in t or "forbidden" in t or "auth_denied" in t or t == "security.auth.failure"
+    )
+    cross_tenant = sum(
+        1
+        for t in by_type
+        if "cross_tenant" in t or "tenant_violation" in t or t == "security.cross_tenant.blocked"
+    )
     fp_events = sum(1 for t in by_type if "false_positive" in t or t.endswith(".fp"))
-    recovery_tests = [e for e in evs if "recovery_test" in str(getattr(e, "event_type", "") or "")]
+    recovery_tests = [
+        e
+        for e in evs
+        if "recovery_test" in str(getattr(e, "event_type", "") or "")
+        or str(getattr(e, "event_type", "") or "") == "security.recovery.drill"
+    ]
     recovery_pass = sum(1 for e in recovery_tests if (getattr(e, "payload", {}) or {}).get("success") is True)
     recovery_fail = sum(1 for e in recovery_tests if (getattr(e, "payload", {}) or {}).get("success") is False)
 
     total_detections = len(incidents) + fp_events
     fp_rate = round(fp_events / total_detections, 4) if total_detections else None
+    unresolved_critical_vulns, vuln_source = _vuln_state(evs)
 
     return {
         "incidents": len(incidents),
@@ -370,8 +611,11 @@ def incident_metrics(
             "incidents_with_ack": sum(1 for i in incidents if i.acknowledged_at is not None),
             "incidents_with_containment": sum(1 for i in incidents if i.contained_at is not None),
             "incidents_with_recovery": sum(1 for i in incidents if i.recovered_at is not None),
+            "false_positive_events": fp_events,
+            "recovery_test_events": len(recovery_tests),
+            "vuln_events": sum(1 for t in by_type if t in {"security.vuln.reported", "security.vuln.resolved"}),
         },
-        "unresolved_critical_vulns": None,
+        "unresolved_critical_vulns": unresolved_critical_vulns,
         "recovery_test_success_rate": (
             round(recovery_pass / (recovery_pass + recovery_fail), 4)
             if (recovery_pass + recovery_fail)
@@ -385,9 +629,11 @@ def incident_metrics(
             "mttr_minutes": "security_incidents.detected_at,recovered_at",
             "false_positive_rate": "security_incidents+security_events.false_positive",
             "coverage": "security_incidents,security_events",
-            "unresolved_critical_vulns": "unknown:no_vuln_telemetry_in_schema",
-            "recovery_test_success_rate": "security_events.recovery_test.payload.success" if recovery_tests else "unknown:no_recovery_test_events",
-            "unauthorized_attempts": "security_events.event_type",
-            "cross_tenant_violations": "security_events.event_type",
+            "unresolved_critical_vulns": vuln_source,
+            "recovery_test_success_rate": (
+                "security_events.recovery_test/recovery_drill.payload.success" if recovery_tests else "unknown:no_recovery_test_events"
+            ),
+            "unauthorized_attempts": "security_events.event_type(auth_failure/unauthorized/forbidden/auth_denied)",
+            "cross_tenant_violations": "security_events.event_type(cross_tenant_block/cross_tenant/tenant_violation)",
         },
     }

@@ -126,17 +126,20 @@ async def hybrid_search(
     is_founder: bool = False,
     granted_record_ids: set[str] | None = None,
     include_legacy_memory: bool = False,
+    allow_legacy_unpermissioned: bool = False,
+    internal_caller: bool = False,
 ):
     """Search knowledge with permission-aware defaults.
 
     - agent_id given -> legacy agent MemoryManager store (agent-scoped memory).
       Not a KnowledgeRecord; kept for backward compat, no cross-agent leakage.
     - no agent_id -> permission-filtered KnowledgeRecord search (source of truth).
-      Fails closed on classification/dept/grants. Legacy raw Memory scan is only
-      used when include_legacy_memory=True AND caller provides no actor context
-      expectation? No: legacy Memory has no KnowledgeRecord ACL; to avoid bypass,
-      it is disabled by default. Set include_legacy_memory=True only for
-      explicitly trusted internal flows.
+      Fails closed on classification/dept/grants. Legacy raw Memory scan is
+      disabled by default because Memory rows have no KnowledgeRecord ACL.
+      Escape hatch requires include_legacy_memory=True AND
+      allow_legacy_unpermissioned=True AND internal_caller=True; all three must
+      be set explicitly by trusted internal code. Never expose this path to
+      user/agent-controlled tool args.
     """
     try:
         if agent_id:
@@ -157,17 +160,27 @@ async def hybrid_search(
             is_founder=is_founder,
             granted_record_ids=granted_record_ids,
         )
-        if kr or not include_legacy_memory:
-            if not kr and not include_legacy_memory:
-                logger.debug(
-                    "hybrid_search: legacy Memory path disabled (use search_knowledge_records or include_legacy_memory=True)"
+        legacy_allowed = (
+            include_legacy_memory
+            and allow_legacy_unpermissioned
+            and internal_caller
+        )
+        if kr or not legacy_allowed:
+            if include_legacy_memory and not legacy_allowed:
+                logger.warning(
+                    "hybrid_search blocked legacy Memory path for org=%s: "
+                    "requires include_legacy_memory, allow_legacy_unpermissioned, "
+                    "and internal_caller all true",
+                    org_id,
                 )
             return kr
 
-        # Explicit opt-in legacy Memory scan (not KnowledgeRecord-governed).
+        # Explicit internal-only legacy Memory scan (not KnowledgeRecord-governed).
         logger.warning(
-            "hybrid_search using legacy Memory path for org=%s; not KnowledgeRecord-permissioned",
+            "hybrid_search using legacy Memory path for org=%s; "
+            "not KnowledgeRecord-permissioned; internal_caller=%s",
             org_id,
+            internal_caller,
         )
         from aios.core.memory import _embed
 

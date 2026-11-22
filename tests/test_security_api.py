@@ -74,11 +74,48 @@ async def test_security_events_list_ingest(auth_client):
         json={"event_type": "security.unauthorized_attempt", "severity": "high", "incident_id": incident_id, "payload": {"ip": "1.2.3.4"}},
     )
     assert ing.status_code == 200, ing.text
-    assert ing.json()["stored"] is True
+    body = ing.json()
+    assert body["stored"] is True
+    assert body["metric"] is None
     listed = await auth_client.get(f"/api/security/events?incident_id={incident_id}")
     assert listed.status_code == 200, listed.text
     items = listed.json()["items"]
     assert any(i["event_type"] == "security.unauthorized_attempt" for i in items)
+
+
+async def test_security_metric_ingest_and_metrics(auth_client):
+    created = await auth_client.post("/api/security/incidents", json={"title": "MetricEvt", "severity": "low"})
+    incident_id = created.json()["id"]
+
+    for metric, payload in [
+        ("auth_failure", {"ip": "1.2.3.4"}),
+        ("cross_tenant_block", {"target_org": "other"}),
+        ("recovery_drill", {"success": True}),
+        ("false_positive", {"reason": "benign"}),
+        ("vuln_reported", {"vuln_id": "CVE-TEST-1", "critical": True}),
+        ("vuln_resolved", {"vuln_id": "CVE-TEST-1", "critical": True}),
+    ]:
+        resp = await auth_client.post(
+            "/api/security/events",
+            json={"metric": metric, "incident_id": incident_id, "payload": payload},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["metric"] == metric
+
+    bad = await auth_client.post("/api/security/events", json={"metric": "not_a_metric"})
+    assert bad.status_code == 400, bad.text
+
+    metrics = await auth_client.get("/api/security/metrics")
+    assert metrics.status_code == 200, metrics.text
+    m = metrics.json()
+    assert m["unauthorized_attempts"] >= 1
+    assert m["cross_tenant_violations"] >= 1
+    assert m["false_positive_rate"] is not None
+    assert m["recovery_test_success_rate"] == 1.0
+    assert m["unresolved_critical_vulns"] == 0
+    assert m["metric_sources"]["unresolved_critical_vulns"] == "security_events.vuln_reported/vuln_resolved"
+    assert m["coverage"]["recovery_test_events"] >= 1
+    assert m["coverage"]["false_positive_events"] >= 1
 
 
 async def test_respond_closed_incident_conflict(auth_client):
