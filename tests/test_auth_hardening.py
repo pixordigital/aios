@@ -147,3 +147,93 @@ class _LoginBody:
     email = "nobody@example.com"
     password = "hunter2"
     totp_code = None
+
+# ─── auth failure recording on allowlist/totp ─────────────────────────────
+
+@pytest.mark.asyncio
+async def test_verify_email_allowlist_denied_records_failure(monkeypatch):
+    calls = []
+
+    async def fake_record(db, **kw):
+        calls.append(kw)
+
+    monkeypatch.setattr(auth_mod, "_record_auth_failure_metric", fake_record)
+    monkeypatch.setattr(auth_mod, "_verify_jwt_token", lambda token: {"sub": "u1", "purpose": "email_verify"})
+    monkeypatch.setattr(auth_mod, "_is_login_allowed", lambda email: False)
+
+    user = type("U", (), {"id": "u1", "org_id": "org1", "email": "a@b.com", "email_verified": False})()
+
+    class FakeDB:
+        async def get(self, model, pk):
+            return user
+
+    with pytest.raises(Exception) as exc:
+        await auth_mod.verify_email(token="tok", db=FakeDB())
+    assert getattr(exc.value, "status_code", None) == 400
+    assert calls and calls[0]["org_id"] == "org1"
+    assert calls[0]["payload"]["reason"] == "allowlist_denied"
+    assert calls[0]["payload"]["source"] == "auth.verify_email"
+
+
+@pytest.mark.asyncio
+async def test_reset_password_allowlist_denied_records_failure(monkeypatch):
+    calls = []
+
+    async def fake_record(db, **kw):
+        calls.append(kw)
+
+    monkeypatch.setattr(auth_mod, "_record_auth_failure_metric", fake_record)
+    monkeypatch.setattr(auth_mod, "_verify_jwt_token", lambda token: {"sub": "u1", "purpose": "password_reset"})
+    monkeypatch.setattr(auth_mod, "_validate_password", lambda p: None)
+    monkeypatch.setattr(auth_mod, "_is_login_allowed", lambda email: False)
+
+    user = type("U", (), {"id": "u1", "org_id": "org1", "email": "a@b.com"})()
+
+    class FakeDB:
+        async def get(self, model, pk):
+            return user
+
+    body = type("B", (), {"token": "tok", "new_password": "ValidPass123!"})()
+    with pytest.raises(Exception) as exc:
+        await auth_mod.reset_password(body=body, db=FakeDB())
+    assert getattr(exc.value, "status_code", None) == 400
+    assert calls and calls[0]["org_id"] == "org1"
+    assert calls[0]["payload"]["reason"] == "allowlist_denied"
+    assert calls[0]["payload"]["source"] == "auth.reset_password"
+
+
+@pytest.mark.asyncio
+async def test_totp_verify_invalid_code_records_failure(monkeypatch):
+    calls = []
+
+    async def fake_record(db, **kw):
+        calls.append(kw)
+
+    monkeypatch.setattr(auth_mod, "_record_auth_failure_metric", fake_record)
+
+    user = type(
+        "U",
+        (),
+        {"id": "u1", "org_id": "org1", "totp_secret": "SECRET", "totp_backup_codes": [], "totp_enabled": False},
+    )()
+
+    async def fake_get_current_user(request, db):
+        return user
+
+    monkeypatch.setattr("aios.api.deps.get_current_user", fake_get_current_user)
+
+    import pyotp
+
+    monkeypatch.setattr(pyotp.TOTP, "verify", lambda self, code, valid_window=1: False)
+
+    class FakeDB:
+        async def commit(self):
+            return None
+
+    with pytest.raises(Exception) as exc:
+        await auth_mod.totp_verify(_FakeRequest(), code="000000", db=FakeDB())
+    assert getattr(exc.value, "status_code", None) == 401
+    assert calls and calls[0]["org_id"] == "org1"
+    assert calls[0]["actor_id"] == "u1"
+    assert calls[0]["payload"]["reason"] == "totp_invalid"
+    assert calls[0]["payload"]["source"] == "auth.totp_verify"

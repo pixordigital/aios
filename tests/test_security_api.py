@@ -421,3 +421,21 @@ async def test_refresh_unknown_jti_records_auth_metric(async_client, test_user, 
         and (e.payload or {}).get("source") == "auth.refresh"
         for e in rows
     )
+
+async def test_preapprovals_require_founder_records_authz_denied(auth_client, test_db_session, test_user):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    resp = await auth_client.get("/api/security/preapprovals")
+    assert resp.status_code == 403, resp.text
+
+    rows = (await test_db_session.execute(
+        select(SecurityEvent).where(SecurityEvent.event_type == "security.authz.denied")
+    )).scalars().all()
+    assert any(
+        e.actor_id == test_user.id
+        and e.org_id == test_user.org_id
+        and (e.payload or {}).get("reason") == "founder_required"
+        and e.source == "security.api.preapprovals.get"
+        for e in rows
+    )

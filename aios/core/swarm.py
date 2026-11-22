@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, desc, func
 
 from aios.db.backend import db_session
-from aios.db.models import TeamSwarmConfig, SwarmTask, SwarmMessage, Team
+from aios.db.models import Agent, Conversation, SwarmMessage, SwarmTask, Team, TeamSwarmConfig, team_agents
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,78 @@ async def _team_belongs_to_org(db, team_id: str, org_id: str) -> bool:
     return (
         await db.execute(select(Team.id).where(Team.id == team_id, Team.org_id == org_id))
     ).scalar_one_or_none() is not None
+
+
+async def _agent_in_team(db, agent_id: str, team_id: str, org_id: str) -> bool:
+    """Fail-closed agent membership check for team+org scope."""
+    if not agent_id or not team_id or not org_id:
+        return False
+    return (
+        await db.execute(
+            select(team_agents.c.agent_id)
+            .join(Agent, Agent.id == team_agents.c.agent_id)
+            .where(
+                team_agents.c.team_id == team_id,
+                team_agents.c.agent_id == agent_id,
+                Agent.org_id == org_id,
+            )
+        )
+    ).scalar_one_or_none() is not None
+
+
+async def _conversation_in_scope(
+    db, conversation_id: str, *, team_id: str, org_id: str
+) -> bool:
+    """Fail-closed conversation ownership check."""
+    if not conversation_id or not team_id or not org_id:
+        return False
+    conv = await db.get(Conversation, conversation_id)
+    if not conv or conv.org_id != org_id:
+        return False
+    if conv.team_id and conv.team_id != team_id:
+        return False
+    return True
+
+
+async def _depends_on_valid(db, depends_on: list[str], *, team_id: str, org_id: str) -> bool:
+    """Fail-closed dependency ownership check. Empty deps are valid."""
+    deps = [d for d in (depends_on or []) if d]
+    if not deps:
+        return True
+    if not team_id or not org_id:
+        return False
+    rows = (
+        await db.execute(
+            select(SwarmTask.id, SwarmTask.task_id).where(
+                SwarmTask.team_id == team_id,
+                SwarmTask.org_id == org_id,
+                (SwarmTask.id.in_(deps) | SwarmTask.task_id.in_(deps)),
+            )
+        )
+    ).all()
+    known: set[str] = set()
+    for row_id, row_task_id in rows:
+        known.add(row_id)
+        if row_task_id:
+            known.add(row_task_id)
+    return all(d in known for d in deps)
+
+
+async def _team_member_count(db, team_id: str, org_id: str) -> int:
+    """Real team member count from team_agents; 0 if unknown/mismatch."""
+    if not team_id or not org_id:
+        return 0
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(team_agents)
+                .join(Agent, Agent.id == team_agents.c.agent_id)
+                .where(team_agents.c.team_id == team_id, Agent.org_id == org_id)
+            )
+        ).scalar()
+        or 0
+    )
 
 
 class SwarmCoordinator:
@@ -96,14 +168,23 @@ class SwarmCoordinator:
         conversation_id: str | None = None, depends_on: list[str] | None = None,
         agent_id: str | None = None,
     ) -> SwarmTask | None:
-        """Queue a task for swarm execution. Fail closed on org/team mismatch."""
+        """Queue a task for swarm execution. Fail closed on org/team/membership/ownership mismatch."""
         async with db_session() as db:
             if not await _team_belongs_to_org(db, team_id, org_id):
+                return None
+            if agent_id and not await _agent_in_team(db, agent_id, team_id, org_id):
+                return None
+            if conversation_id and not await _conversation_in_scope(
+                db, conversation_id, team_id=team_id, org_id=org_id
+            ):
+                return None
+            deps = [d for d in (depends_on or []) if d]
+            if not await _depends_on_valid(db, deps, team_id=team_id, org_id=org_id):
                 return None
             task = SwarmTask(
                 team_id=team_id, org_id=org_id, task_id=str(uuid.uuid4())[:16],
                 task_type=task_type, payload=payload or {}, priority=priority,
-                conversation_id=conversation_id, depends_on=depends_on or [],
+                conversation_id=conversation_id, depends_on=deps,
                 assigned_agent_id=agent_id, status="queued" if not agent_id else "assigned",
             )
             db.add(task)
@@ -118,6 +199,8 @@ class SwarmCoordinator:
                 # Fail closed: a task id from another tenant reads as missing.
                 return None
             if team_id and task.team_id != team_id:
+                return None
+            if not await _agent_in_team(db, agent_id, task.team_id, org_id):
                 return None
             task.assigned_agent_id = agent_id
             task.status = "running"
@@ -169,27 +252,31 @@ class SwarmCoordinator:
                 return None
             if team_id and task.team_id != team_id:
                 return None
+            if not await _agent_in_team(db, agent_id, task.team_id, task.org_id):
+                return None
             votes = dict(task.consensus_votes or {})
             votes[agent_id] = vote
             task.consensus_votes = votes
             # check threshold
             cfg = (await db.execute(select(TeamSwarmConfig).where(TeamSwarmConfig.team_id == task.team_id))).scalar_one_or_none()
             threshold = cfg.consensus_threshold if cfg else 0.6
-            team = await db.get(Team, task.team_id)
-            n_agents = 0
-            if team:
-                # count agents via relationship would need extra query; use swarm_tasks assigned count fallback
-                n_agents = max(1, len(votes))
-                # if we have team_agents count use it
+            n_agents = await _team_member_count(db, task.team_id, task.org_id)
+            if n_agents <= 0:
+                task.status = "failed"
+                task.error = "consensus denominator unavailable"
+                await db.commit()
+                await db.refresh(task)
+                return task
             approves = sum(1 for v in votes.values() if v == "approve")
-            if votes and approves / len(votes) >= threshold:
+            if approves / n_agents >= threshold:
                 task.status = "done"
                 task.result = {"consensus": "approved", "votes": votes}
                 task.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            elif len(votes) >= max(1, n_agents):
-                # all voted but threshold not met → failed
+            elif len(votes) >= n_agents:
+                # all members voted but threshold not met → failed
                 task.status = "failed"
                 task.error = "consensus not reached"
+                task.result = {"consensus": "rejected", "votes": votes}
             await db.commit()
             await db.refresh(task)
             return task
@@ -204,6 +291,12 @@ class SwarmCoordinator:
         async with db_session() as db:
             if not await _team_belongs_to_org(db, team_id, org_id):
                 return None
+            if sender_id and not await _agent_in_team(db, sender_id, team_id, org_id):
+                return None
+            if task_id:
+                task = await db.get(SwarmTask, task_id)
+                if not task or task.org_id != org_id or task.team_id != team_id:
+                    return None
             msg = SwarmMessage(
                 team_id=team_id, org_id=org_id, swarm_task_id=task_id,
                 sender_agent_id=sender_id, message_type="memory",

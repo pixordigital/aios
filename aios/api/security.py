@@ -61,8 +61,31 @@ async def _get_incident(
     return incident
 
 
-def _require_founder(user: Any, org: Organization | None) -> None:
+async def _require_founder(
+    user: Any,
+    org: Organization | None,
+    *,
+    db: DatabaseBackend | None = None,
+    org_id: str | None = None,
+    source: str = "security.api.authz",
+) -> None:
     if not is_founder_authority(user=user, org=org):
+        oid = str(org_id or getattr(org, "id", "") or "")
+        if db is not None and oid:
+            try:
+                await record_security_event(
+                    db,
+                    org_id=oid,
+                    source=source,
+                    event_type="security.authz.denied",
+                    severity="medium",
+                    actor_type="human",
+                    actor_id=str(getattr(user, "id", "") or "") or None,
+                    payload={"reason": "founder_required", "path_source": source},
+                )
+                await db.commit()
+            except Exception:
+                log.debug("authz denied metric skipped", exc_info=True)
         raise HTTPException(403, "Founder/owner authority required")
 
 
@@ -448,7 +471,7 @@ async def get_preapprovals(
     user=Depends(get_current_user),
 ):
     org = await db.get(Organization, org_id)
-    _require_founder(user, org)
+    await _require_founder(user, org, db=db, org_id=org_id, source="security.api.preapprovals.get")
     return _preapproval_payload(org)
 
 
@@ -462,7 +485,7 @@ async def put_preapprovals(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(404, "org not found")
-    _require_founder(user, org)
+    await _require_founder(user, org, db=db, org_id=org_id, source="security.api.preapprovals.put")
     current = _preapproval_payload(org)
     actions = (
         _normalized_preapproved_actions(body["preapproved_actions"])
@@ -487,7 +510,7 @@ async def add_preapproved_action(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(404, "org not found")
-    _require_founder(user, org)
+    await _require_founder(user, org, db=db, org_id=org_id, source="security.api.preapprovals.add_action")
     action = str(body.get("action") or "").strip()
     if not action:
         raise HTTPException(400, "action required")
@@ -512,7 +535,7 @@ async def remove_preapproved_action(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(404, "org not found")
-    _require_founder(user, org)
+    await _require_founder(user, org, db=db, org_id=org_id, source="security.api.preapprovals.remove_action")
     action = str(action or "").strip()
     if action not in RESPONSE_AUTHORITY:
         raise HTTPException(400, f"unknown action: {action}")
@@ -533,7 +556,7 @@ async def add_preapproval_record(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(404, "org not found")
-    _require_founder(user, org)
+    await _require_founder(user, org, db=db, org_id=org_id, source="security.api.preapprovals.add_approval")
     recs = _normalized_approvals([body])
     rec = recs[0]
     current = _preapproval_payload(org)
@@ -563,7 +586,7 @@ async def remove_preapproval_record(
     org = await db.get(Organization, org_id)
     if org is None:
         raise HTTPException(404, "org not found")
-    _require_founder(user, org)
+    await _require_founder(user, org, db=db, org_id=org_id, source="security.api.preapprovals.remove_approval")
     target = str(approval_id or "").strip()
     if not target:
         raise HTTPException(400, "approval_id required")

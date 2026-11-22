@@ -727,6 +727,12 @@ async def verify_email(token: str = Query(...), db: DatabaseBackend = Depends(ge
     if not user:
         raise HTTPException(404, "Usuário não encontrado")
     if not _is_login_allowed(user.email):
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(user, "org_id", None),
+            actor_id=str(getattr(user, "id", "")) or None,
+            payload={"reason": "allowlist_denied", "source": "auth.verify_email"},
+        )
         raise HTTPException(400, "Token de verificação inválido ou expirado")
     if user.email_verified:
         return {"message": "E-mail já verificado"}
@@ -772,6 +778,12 @@ async def reset_password(body: ResetPasswordRequest, db: DatabaseBackend = Depen
     if not user:
         raise HTTPException(404, "Usuário não encontrado")
     if not _is_login_allowed(user.email):
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(user, "org_id", None),
+            actor_id=str(getattr(user, "id", "")) or None,
+            payload={"reason": "allowlist_denied", "source": "auth.reset_password"},
+        )
         raise HTTPException(400, "Token de redefinição inválido ou expirado")
 
     user.hashed_password = _hash_password(body.new_password)
@@ -1146,6 +1158,12 @@ async def totp_verify(request: Request, code: str = Query(...), db: DatabaseBack
             user.totp_backup_codes.remove(code)
             await db.commit()
             return {"enabled": True, "message": "Backup code usado — gere novos se acabarem", "remaining": len(user.totp_backup_codes)}
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(user, "org_id", None),
+            actor_id=str(getattr(user, "id", "")) or None,
+            payload={"reason": "totp_invalid", "source": "auth.totp_verify"},
+        )
         raise HTTPException(401, "Código TOTP inválido")
     user.totp_enabled = True
     # gera 8 backup codes se ainda não tem

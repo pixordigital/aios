@@ -12,7 +12,7 @@ import pytest
 
 from aios.core.swarm import SwarmCoordinator
 from aios.db.backend import db_session
-from aios.db.models import Organization, SwarmMessage, SwarmTask, Team
+from aios.db.models import Agent, Conversation, Organization, SwarmMessage, SwarmTask, Team, team_agents
 
 
 @pytest.fixture
@@ -25,7 +25,13 @@ async def two_org_tasks():
         team_b = Team(id="team-b", org_id="org-b", name="Team B")
         db.add(team_a)
         db.add(team_b)
+        db.add(Agent(id="agent-a1", org_id="org-a", name="A1"))
+        db.add(Agent(id="agent-a2", org_id="org-a", name="A2"))
+        db.add(Agent(id="agent-b1", org_id="org-b", name="B1"))
         await db.flush()
+        await db.execute(team_agents.insert().values(team_id="team-a", agent_id="agent-a1", priority=0))
+        await db.execute(team_agents.insert().values(team_id="team-a", agent_id="agent-a2", priority=1))
+        await db.execute(team_agents.insert().values(team_id="team-b", agent_id="agent-b1", priority=0))
         db.add(SwarmTask(id="task-a1", team_id="team-a", org_id="org-a",
                          task_id="ext-a1", task_type="agent_call", payload={"secret": "a"}))
         db.add(SwarmTask(id="task-b1", team_id="team-b", org_id="org-b",
@@ -37,10 +43,23 @@ async def two_org_tasks():
             t = await db.get(SwarmTask, tid)
             if t:
                 await db.delete(t)
+        for mid in ("msg-a1", "msg-b1"):
+            m = await db.get(SwarmMessage, mid)
+            if m:
+                await db.delete(m)
+        await db.execute(team_agents.delete().where(team_agents.c.team_id.in_(["team-a", "team-b"])))
+        for aid in ("agent-a1", "agent-a2", "agent-b1"):
+            a = await db.get(Agent, aid)
+            if a:
+                await db.delete(a)
         for tid in ("team-a", "team-b"):
             t = await db.get(Team, tid)
             if t:
                 await db.delete(t)
+        for cid in ("conv-a", "conv-b"):
+            c = await db.get(Conversation, cid)
+            if c:
+                await db.delete(c)
         await db.commit()
 
 
@@ -62,22 +81,22 @@ async def test_stats_scoped_to_org(two_org_tasks) -> None:
 @pytest.mark.asyncio
 async def test_claim_complete_vote_reject_foreign_org(two_org_tasks) -> None:
     coord = SwarmCoordinator()
-    assert await coord.claim("task-a1", "agent-x", "org-b") is None
+    assert await coord.claim("task-a1", "agent-a1", "org-b") is None
     assert await coord.complete("task-a1", result={}, org_id="org-b") is None
-    assert await coord.vote("task-a1", "agent-x", "approve", org_id="org-b") is None
-    # own org still works
-    assert await coord.vote("task-a1", "agent-x", "approve", org_id="org-a") is not None
+    assert await coord.vote("task-a1", "agent-a1", "approve", org_id="org-b") is None
+    # own org still works for team member
+    assert await coord.vote("task-a1", "agent-a1", "approve", org_id="org-a") is not None
 
 
 @pytest.mark.asyncio
 async def test_task_team_path_mismatch_rejected(two_org_tasks) -> None:
     coord = SwarmCoordinator()
     # task-a1 belongs to team-a; passing team-b (same org fixture has org-b team) must fail closed
-    assert await coord.claim("task-a1", "agent-x", "org-a", team_id="team-b") is None
+    assert await coord.claim("task-a1", "agent-a1", "org-a", team_id="team-b") is None
     assert await coord.complete("task-a1", result={}, org_id="org-a", team_id="team-b") is None
-    assert await coord.vote("task-a1", "agent-x", "approve", org_id="org-a", team_id="team-b") is None
-    # correct team path works
-    claimed = await coord.claim("task-a1", "agent-x", "org-a", team_id="team-a")
+    assert await coord.vote("task-a1", "agent-a1", "approve", org_id="org-a", team_id="team-b") is None
+    # correct team path works for real member
+    claimed = await coord.claim("task-a1", "agent-a1", "org-a", team_id="team-a")
     assert claimed is not None and claimed.status == "running"
 
 
@@ -156,3 +175,82 @@ async def test_config_scoped_to_org(two_org_tasks) -> None:
     assert await coord.get_config("team-a", org_id="org-b") is None
     got2 = await coord.get_config("team-a", org_id="org-a")
     assert got2 is not None and got2.swarm_mode == "mesh"
+
+
+@pytest.mark.asyncio
+async def test_agent_membership_fail_closed(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    # agent-b1 belongs to org-b/team-b, not team-a
+    assert await coord.claim("task-a1", "agent-b1", "org-a", team_id="team-a") is None
+    assert await coord.vote("task-a1", "agent-b1", "approve", org_id="org-a", team_id="team-a") is None
+    assert await coord.dispatch(
+        team_id="team-a", org_id="org-a", task_type="agent_call", agent_id="agent-b1"
+    ) is None
+    assert await coord.put_shared(
+        team_id="team-a", org_id="org-a", key="k", content={"x": 1}, sender_id="agent-b1"
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_dispatch_conversation_and_dep_ownership(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    async with db_session() as db:
+        db.add(Conversation(id="conv-a", org_id="org-a", team_id="team-a", channel="web"))
+        db.add(Conversation(id="conv-b", org_id="org-b", team_id="team-b", channel="web"))
+        await db.commit()
+    created: list[str] = []
+    try:
+        assert await coord.dispatch(
+            team_id="team-a", org_id="org-a", conversation_id="conv-b"
+        ) is None
+        t = await coord.dispatch(
+            team_id="team-a", org_id="org-a", conversation_id="conv-a"
+        )
+        assert t is not None and t.conversation_id == "conv-a"
+        created.append(t.id)
+        assert await coord.dispatch(
+            team_id="team-a", org_id="org-a", depends_on=["task-b1"]
+        ) is None
+        t2 = await coord.dispatch(
+            team_id="team-a", org_id="org-a", depends_on=["task-a1"]
+        )
+        assert t2 is not None and t2.depends_on == ["task-a1"]
+        created.append(t2.id)
+    finally:
+        async with db_session() as db:
+            for tid in created:
+                row = await db.get(SwarmTask, tid)
+                if row:
+                    await db.delete(row)
+            for cid in ("conv-a", "conv-b"):
+                c = await db.get(Conversation, cid)
+                if c:
+                    await db.delete(c)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_consensus_denominator_uses_real_members(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-consensus", team_id="team-a", org_id="org-a",
+            task_id="ext-consensus", task_type="consensus", payload={}
+        ))
+        await db.commit()
+    try:
+        # team-a has 2 members, threshold default .6; one approval not enough
+        t = await coord.vote("task-consensus", "agent-a1", "approve", org_id="org-a", team_id="team-a")
+        assert t is not None
+        assert t.status in ("queued", "assigned", "running", "consensus")  # not done
+        assert t.status != "done"
+        # second approval reaches 2/2
+        t = await coord.vote("task-consensus", "agent-a2", "approve", org_id="org-a", team_id="team-a")
+        assert t is not None and t.status == "done"
+        assert t.result["consensus"] == "approved"
+    finally:
+        async with db_session() as db:
+            t = await db.get(SwarmTask, "task-consensus")
+            if t:
+                await db.delete(t)
+            await db.commit()
