@@ -9,7 +9,7 @@ from aios.db.models import Workflow, WorkflowNode, WorkflowRun, Agent
 from aios.schemas import BaseModel, PageResponse
 
 logger = logging.getLogger(__name__)
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -121,8 +121,13 @@ async def get_workflow(
     org_id: str = Depends(get_org_id),
 ):
     wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        source="workflows.api.get_workflow",
+        payload={"workflow_id": str(wf_id)},
+    )
     return {
         "id": wf.id,
         "name": wf.name,
@@ -157,8 +162,15 @@ async def update_workflow(
     user=Depends(get_current_user),
 ):
     wf = await db.get(Workflow, wf_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.update_workflow",
+        payload={"workflow_id": str(wf_id)},
+    )
     wf.name = body.name
     wf.description = body.description
     wf.timeout_seconds = body.timeout_seconds
@@ -186,8 +198,15 @@ async def patch_workflow(
     user=Depends(get_current_user),
 ):
     wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.patch_workflow",
+        payload={"workflow_id": str(wf_id)},
+    )
     _require_role(user, ["admin", "org_admin"])
     if body.name is not None:
         wf.name = body.name
@@ -298,8 +317,15 @@ async def delete_workflow(
     user=Depends(get_current_user),
 ):
     wf = await db.get(Workflow, wf_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.delete_workflow",
+        payload={"workflow_id": str(wf_id)},
+    )
     await db.delete(wf)
     await db.commit()
     return {"ok": True}
@@ -314,8 +340,15 @@ async def add_node(
     user=Depends(get_current_user),
 ):
     wf = await db.get(Workflow, wf_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.add_node",
+        payload={"workflow_id": str(wf_id)},
+    )
     _require_role(user, ["admin", "org_admin"])
     if body.agent_id:
         ag = await db.get(Agent, body.agent_id)
@@ -433,8 +466,15 @@ async def delete_node(
     if not node or node.workflow_id != wf_id:
         raise HTTPException(404)
     wf = await db.get(Workflow, wf_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.delete_node",
+        payload={"workflow_id": str(wf_id), "node_id": str(node_id)},
+    )
     await db.delete(node)
     await db.commit()
     return {"ok": True}
@@ -449,8 +489,15 @@ async def run_workflow(
     user=Depends(get_current_user),
 ):
     wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.run_workflow",
+        payload={"workflow_id": str(wf_id)},
+    )
     if not wf.nodes:
         raise HTTPException(400, detail="workflow has no nodes")
     initial_input = body.get("input") or body.get("message") or ""
@@ -461,9 +508,6 @@ async def run_workflow(
     if isinstance(async_mode, str):
         async_mode = async_mode.lower() not in ("false", "0", "no")
     from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
-
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "workflow not found")
     wdef = WorkflowDef(
         id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id
     )
@@ -538,7 +582,14 @@ async def get_run(
     org_id: str = Depends(get_org_id),
 ):
     run = await db.get(WorkflowRun, run_id)
-    if not run or run.workflow_id != wf_id or run.org_id != org_id:
+    await verify_org_access_async(
+        org_id,
+        run,
+        db=db,
+        source="workflows.api.get_run",
+        payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+    )
+    if run.workflow_id != wf_id:
         raise HTTPException(404)
     return run
 
@@ -571,14 +622,30 @@ async def eval_workflow_run(
     from aios.core.providers import get_provider
 
     wf = await db.get(Workflow, wf_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.eval_workflow_run",
+        payload={"workflow_id": str(wf_id)},
+    )
     run_id = body.get("run_id")
     rubric_id = body.get("rubric_id")
     if not run_id or not rubric_id:
         raise HTTPException(400, detail="run_id and rubric_id required")
     run = await db.get(WorkflowRun, run_id)
-    if not run or run.workflow_id != wf_id:
+    await verify_org_access_async(
+        org_id,
+        run,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.eval_workflow_run",
+        payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+    )
+    if run.workflow_id != wf_id:
         raise HTTPException(404, detail="run not found")
     output = json.dumps(run.outputs) if run.outputs else run.error or ""
     llm = get_provider("openai/gpt-4o-mini")
@@ -599,7 +666,16 @@ async def resume_run(
     user=Depends(get_current_user),
 ):
     orig = await db.get(WorkflowRun, run_id)
-    if not orig or orig.workflow_id != wf_id or orig.org_id != org_id:
+    await verify_org_access_async(
+        org_id,
+        orig,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.resume_run",
+        payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+    )
+    if orig.workflow_id != wf_id:
         raise HTTPException(404)
     if orig.status == "done":
         return {"run_id": orig.id, "status": "done", "outputs": orig.outputs}
@@ -607,8 +683,15 @@ async def resume_run(
     from sqlalchemy.orm import selectinload
 
     wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "workflow not found")
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.resume_run",
+        payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+    )
     wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id)
     for n in wf.nodes:
         wdef.nodes[n.id] = WNode(
@@ -644,8 +727,13 @@ async def resume_run(
 async def export_workflow(wf_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     from sqlalchemy.orm import selectinload
     wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id,
+        wf,
+        db=db,
+        source="workflows.api.export_workflow",
+        payload={"workflow_id": str(wf_id)},
+    )
     from aios.db.models import AutomationTrigger
     trigs = (await db.execute(select(AutomationTrigger).where(AutomationTrigger.workflow_id==wf_id))).scalars().all()
     return {"workflow": {"id": wf.id, "name": wf.name, "description": wf.description, "timeout_seconds": wf.timeout_seconds, "entry_node_id": wf.entry_node_id, "nodes": [{"label": n.label, "tool_name": n.tool_name, "tool_args": n.tool_args, "depends_on": n.depends_on, "condition": n.condition, "output_key": n.output_key, "timeout_seconds": n.timeout_seconds, "position": n.position, "on_failure": n.on_failure, "retry_count": n.retry_count} for n in wf.nodes]}, "triggers": [{"type": t.type, "name": t.name, "config": t.config, "cron_expr": t.cron_expr, "event_type": t.event_type} for t in trigs]}
@@ -685,7 +773,16 @@ async def replay_run(
     user=Depends(get_current_user),
 ):
     orig = await db.get(WorkflowRun, run_id)
-    if not orig or orig.workflow_id != wf_id or orig.org_id != org_id:
+    await verify_org_access_async(
+        org_id,
+        orig,
+        db=db,
+        actor_id=str(getattr(user, "id", "") or "") or None,
+        actor_type="human",
+        source="workflows.api.replay_run",
+        payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+    )
+    if orig.workflow_id != wf_id:
         raise HTTPException(404)
     new_run = WorkflowRun(
         workflow_id=wf_id,
@@ -713,8 +810,15 @@ async def replay_run(
         from sqlalchemy.orm import selectinload
 
         wf = await db.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
-        if not wf or wf.org_id != org_id:
-            raise HTTPException(404, "workflow not found")
+        await verify_org_access_async(
+            org_id,
+            wf,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            actor_type="human",
+            source="workflows.api.replay_run",
+            payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+        )
         wdef = WorkflowDef(
             id=wf.id,
             name=wf.name,
