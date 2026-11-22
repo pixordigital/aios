@@ -22,10 +22,10 @@
   <div style="margin-bottom:1rem;padding:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:0.75rem">
     <h3 style="font-size:0.8125rem;margin-bottom:0.5rem">👤 Customer 360 (mínimo)</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-      <div><span style="color:var(--text-tertiary)">Account</span><br><b>{{ account.name if account else '— não vinculado' }}</b>{% if account and account.cnpj %}<div class="text-xs text-tertiary">CNPJ {{account.cnpj}}</div>{% endif %}</div>
-      <div><span style="color:var(--text-tertiary)">Contact</span><br><b>{{ contact.name if contact else '— não vinculado' }}</b>{% if contact and contact.email %}<div class="text-xs text-tertiary">{{contact.email}}</div>{% endif %}</div>
+      <div><span style="color:var(--text-tertiary)">Account</span><br><b>{{ account.name if account else '— não vinculado' }}</b>{% if account and account.cnpj %}<div class="text-xs text-tertiary">CNPJ {{account.cnpj}}</div>{% endif %}<div class="text-xs text-tertiary">vínculo: {{ (account_link or {}).get('kind','none') }} / {{ (account_link or {}).get('source','unlinked') }}{% if not (account_link or {}).get('authoritative') %} (não autoritativo){% endif %}</div></div>
+      <div><span style="color:var(--text-tertiary)">Contact</span><br><b>{{ contact.name if contact else '— não vinculado' }}</b>{% if contact and contact.email %}<div class="text-xs text-tertiary">{{contact.email}}</div>{% endif %}<div class="text-xs text-tertiary">vínculo: {{ (contact_link or {}).get('kind','none') }} / {{ (contact_link or {}).get('source','unlinked') }}{% if not (contact_link or {}).get('authoritative') %} (não autoritativo){% endif %}</div></div>
     </div>
-    <p class="text-xs text-tertiary" style="margin-top:0.5rem">Vínculos account/contact inferidos de dados existentes; sem mudança de schema. CS workspace / command center / revenue intelligence completa: indisponíveis neste track.</p>
+    <p class="text-xs text-tertiary" style="margin-top:0.5rem">Vínculos account/contact inferidos por heurística; sem FK de schema. CS workspace / command center / revenue intelligence completa: indisponíveis neste track. Gap: docs/CRM_SCHEMA_GAPS.md.</p>
   </div>
 
   {% if custom_fields %}

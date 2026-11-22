@@ -6,6 +6,7 @@ from aios.core.crm_intelligence import (
     Account,
     Contact,
     InteractionEvent,
+    deal_360_payload,
     deal_entity_kind,
     relationship_health,
     retention_cutoff,
@@ -65,6 +66,22 @@ def test_deal_entity_kind_is_derived():
     assert deal_entity_kind(D()) == "closed_deal"
 
 
+def test_deal_360_payload_exposes_heuristic_link_labels():
+    class D:
+        id = "d1"; stage = "mql"; lead_name = "Ana"; lead_email = "a@x"; lead_phone = ""
+        value = 0; currency = "BRL"; score = 0; source = "manual"; agent_id = None
+        team_id = None; pipeline = "default"; close_date = None; probability = 0
+        extra_data = {"company": "ACME"}
+
+    p = deal_360_payload(D(), account=None, contact=None)
+    assert p["account_link"]["kind"] == "none"
+    assert p["account_link"]["authoritative"] is False
+    assert "No schema FK" in p["account_link"]["note"]
+    assert p["contact_link"]["kind"] == "none"
+    assert "legacy_extra_data_note" in p
+    assert p["legacy_extra_keys"] == ["company"]
+
+
 async def test_account_contact_interaction_endpoints_tenant_scoped(test_session):
     org = Organization(name="A", slug="a", extra_data={"crm_enabled": True})
     org2 = Organization(name="B", slug="b", extra_data={"crm_enabled": True})
@@ -121,5 +138,32 @@ async def test_account_contact_interaction_endpoints_tenant_scoped(test_session)
             ov = r.json()
             assert ov["available"]["customer_360_read"] is True
             assert ov["available"]["command_center"] is False
+            assert ov["gaps"]["deal_account_fk"]["present"] is False
+            assert ov["gaps"]["deal_contact_fk"]["present"] is False
+            assert "docs/CRM_SCHEMA_GAPS.md" in ov["gaps"]["deal_account_fk"]["doc"]
+            assert any("heuristic" in n.lower() for n in ov["notes"])
+
+            r = await client.get(f"/api/crm/360/deals/{deal.id}")
+            assert r.status_code == 200
+            d360 = r.json()
+            assert d360["account_link"]["kind"] == "none"  # no name/cnpj/extra_data match
+            assert d360["account_link"]["authoritative"] is False
+            assert d360["contact_link"]["kind"] == "heuristic"
+            assert d360["contact_link"]["source"] == "lead_email_exact"
+            assert "No schema FK" in d360["account_link"]["note"]
+
+            r = await client.get(f"/api/crm/360/accounts/{acc.id}")
+            assert r.status_code == 200
+            a360 = r.json()
+            assert a360["read_only"] is True
+            assert a360["schema_gap"]["deal_account_fk"] is False
+            assert "docs/CRM_SCHEMA_GAPS.md" in a360["schema_gap"]["doc"]
+
+            r = await client.get(f"/api/crm/360/contacts/{c.id}")
+            assert r.status_code == 200
+            c360 = r.json()
+            assert c360["read_only"] is True
+            assert c360["schema_gap"]["deal_contact_fk"] is False
+            assert any(x["id"] == deal.id for x in c360["deals"])
     finally:
         app.dependency_overrides.clear()

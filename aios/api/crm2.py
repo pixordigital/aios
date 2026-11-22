@@ -11,7 +11,9 @@ from aios.core.crm_intelligence import (
     deal_360_payload,
     deal_entity_kind,
     find_account_for_deal,
+    find_account_for_deal_with_meta,
     find_contact_for_deal,
+    find_contact_for_deal_with_meta,
     record_interaction_event,
     relationship_health,
     sales_priority,
@@ -91,9 +93,9 @@ async def list_deals(stage: str = "", agent_id: str = "", q: str = "", limit: in
     total = (await db.execute(select(func.count(CrmDeal.id)).where(CrmDeal.org_id == org_id))).scalar()
     enriched = []
     for d in items:
-        account = await find_account_for_deal(db, d)
-        contact = await find_contact_for_deal(db, d)
-        payload = deal_360_payload(d, account=account, contact=contact)
+        account, account_link = await find_account_for_deal_with_meta(db, d)
+        contact, contact_link = await find_contact_for_deal_with_meta(db, d)
+        payload = deal_360_payload(d, account=account, contact=contact, account_link=account_link, contact_link=contact_link)
         payload["prioritization"] = {
             "kind": "deterministic_heuristic",
             "validated_predictive": False,
@@ -210,9 +212,9 @@ async def update_deal(deal_id: str, body: dict, db: DatabaseBackend = Depends(ge
 @router.get("/deals/{deal_id}")
 async def get_deal(deal_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     deal = await _deal_or_404(db, deal_id, org_id)
-    account = await find_account_for_deal(db, deal)
-    contact = await find_contact_for_deal(db, deal)
-    payload = deal_360_payload(deal, account=account, contact=contact)
+    account, account_link = await find_account_for_deal_with_meta(db, deal)
+    contact, contact_link = await find_contact_for_deal_with_meta(db, deal)
+    payload = deal_360_payload(deal, account=account, contact=contact, account_link=account_link, contact_link=contact_link)
     payload["prioritization"] = {
         "kind": "deterministic_heuristic",
         "validated_predictive": False,
@@ -309,9 +311,9 @@ async def get_account(account_id: str, db: DatabaseBackend = Depends(get_db_back
     deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(200))).scalars().all()
     linked_deals = []
     for d in deals:
-        acc = await find_account_for_deal(db, d)
+        acc, acc_link = await find_account_for_deal_with_meta(db, d)
         if acc and acc.id == account_id:
-            linked_deals.append(deal_360_payload(d, account=acc))
+            linked_deals.append(deal_360_payload(d, account=acc, account_link=acc_link))
     interactions = (await db.execute(select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.account_id == account_id).order_by(InteractionEvent.occurred_at.desc()).limit(50))).scalars().all()
     health_score, health_reason = relationship_health(days_since_last_contact=None if not interactions else max(0, int((datetime.utcnow() - interactions[0].occurred_at).total_seconds() // 86400)), open_commitments=0, overdue_commitments=0, support_tickets_open=0)
     return {
@@ -437,11 +439,79 @@ async def crm_360_overview(limit: int = Query(20, le=100), db: DatabaseBackend =
             "Customer 360 is minimal read model from existing CRM data; no schema change.",
             "CS/command center unavailable in this track (needs dedicated models/UI).",
             "Prioritization is deterministic heuristic, not validated predictive.",
+            "Deal->account/contact links are heuristic/inferred; no schema FK (see docs/CRM_SCHEMA_GAPS.md).",
         ],
+        "gaps": {
+            "deal_account_fk": {"present": False, "kind": "schema_gap", "doc": "docs/CRM_SCHEMA_GAPS.md"},
+            "deal_contact_fk": {"present": False, "kind": "schema_gap", "doc": "docs/CRM_SCHEMA_GAPS.md"},
+            "command_center": {"present": False, "kind": "product_gap"},
+            "cs_workspace": {"present": False, "kind": "product_gap"},
+            "validated_predictive_revenue_intelligence": {"present": False, "kind": "evidence_gap"},
+        },
         "counts": {"deals": len(deals), "accounts": len(accounts), "contacts": len(contacts), "interactions": len(interactions)},
         "recent_accounts": [{"id": a.id, "name": a.name, "status": a.status, "health_score": a.health_score} for a in accounts],
         "recent_contacts": [{"id": c.id, "name": c.name, "email": c.email, "account_id": c.account_id} for c in contacts],
         "recent_interactions": [interaction_payload(i) for i in interactions],
+    }
+
+
+@router.get("/360/deals/{deal_id}")
+async def crm_360_deal(deal_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    """Read-only 360 for one deal. Same shape as GET /deals/{id} with explicit heuristic labels."""
+    return await get_deal(deal_id, db=db, org_id=org_id)
+
+
+@router.get("/360/accounts/{account_id}")
+async def crm_360_account(account_id: str, limit: int = Query(50, le=200), db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    """Read-only account 360 from existing data. No schema change."""
+    from aios.db.models import Organization
+
+    org = await db.get(Organization, org_id)
+    if not _crm_enabled(org):
+        raise HTTPException(402, "CRM IA upsell")
+    account = await _account_or_404(db, account_id, org_id)
+    contacts = (await db.execute(select(Contact).where(Contact.org_id == org_id, Contact.account_id == account_id).order_by(Contact.updated_at.desc()).limit(limit))).scalars().all()
+    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(200))).scalars().all()
+    linked_deals = []
+    for d in deals:
+        acc, acc_link = await find_account_for_deal_with_meta(db, d)
+        if acc and acc.id == account_id:
+            linked_deals.append(deal_360_payload(d, account=acc, account_link=acc_link))
+    interactions = (await db.execute(select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.account_id == account_id).order_by(InteractionEvent.occurred_at.desc()).limit(limit))).scalars().all()
+    return {
+        "read_only": True,
+        "schema_gap": {"deal_account_fk": False, "deal_contact_fk": False, "doc": "docs/CRM_SCHEMA_GAPS.md"},
+        "account": {"id": account.id, "name": account.name, "cnpj": account.cnpj, "status": account.status},
+        "contacts": [{"id": c.id, "name": c.name, "email": c.email, "phone": c.phone} for c in contacts],
+        "deals": linked_deals[:limit],
+        "timeline": [interaction_payload(i) for i in interactions],
+        "notes": ["Deal links heuristic/inferred; no schema FK."],
+    }
+
+
+@router.get("/360/contacts/{contact_id}")
+async def crm_360_contact(contact_id: str, limit: int = Query(50, le=200), db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
+    """Read-only contact 360 from existing data. No schema change."""
+    from aios.db.models import Organization
+
+    org = await db.get(Organization, org_id)
+    if not _crm_enabled(org):
+        raise HTTPException(402, "CRM IA upsell")
+    contact = await _contact_or_404(db, contact_id, org_id)
+    interactions = (await db.execute(select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.contact_id == contact_id).order_by(InteractionEvent.occurred_at.desc()).limit(limit))).scalars().all()
+    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(200))).scalars().all()
+    linked_deals = []
+    for d in deals:
+        c, c_link = await find_contact_for_deal_with_meta(db, d)
+        if c and c.id == contact_id:
+            linked_deals.append(deal_360_payload(d, contact=c, contact_link=c_link))
+    return {
+        "read_only": True,
+        "schema_gap": {"deal_account_fk": False, "deal_contact_fk": False, "doc": "docs/CRM_SCHEMA_GAPS.md"},
+        "contact": {"id": contact.id, "account_id": contact.account_id, "name": contact.name, "email": contact.email, "phone": contact.phone},
+        "deals": linked_deals[:limit],
+        "timeline": [interaction_payload(i) for i in interactions],
+        "notes": ["Deal links heuristic/inferred; no schema FK."],
     }
 
 

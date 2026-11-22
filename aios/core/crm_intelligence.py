@@ -207,52 +207,62 @@ def deal_entity_kind(deal) -> str:
 
 
 async def find_account_for_deal(db, deal):
-    from aios.core.crm_intelligence import Account  # self import safe at runtime
+    row, _meta = await find_account_for_deal_with_meta(db, deal)
+    return row
 
+
+async def find_account_for_deal_with_meta(db, deal):
+    """Resolve account by heuristic. No schema FK; never fake authoritative link."""
     extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
     account_id = extra.get("account_id")
     if account_id:
         row = await db.get(Account, str(account_id))
         if row and row.org_id == deal.org_id:
-            return row
+            return row, {"kind": "heuristic", "source": "extra_data.account_id", "validated": False, "authoritative": False}
     cnpj = str(extra.get("cnpj") or "").strip()
     if cnpj:
         row = (await db.execute(select(Account).where(Account.org_id == deal.org_id, Account.cnpj == cnpj))).scalar_one_or_none()
         if row:
-            return row
+            return row, {"kind": "heuristic", "source": "cnpj_exact", "validated": False, "authoritative": False}
     name = str(getattr(deal, "lead_name", "") or "").strip()
     if name:
         row = (await db.execute(select(Account).where(Account.org_id == deal.org_id, Account.name == name).limit(1))).scalar_one_or_none()
         if row:
-            return row
-    return None
+            return row, {"kind": "heuristic", "source": "lead_name_exact", "validated": False, "authoritative": False}
+    return None, {"kind": "none", "source": "unlinked", "validated": False, "authoritative": False}
 
 
 async def find_contact_for_deal(db, deal):
-    from aios.core.crm_intelligence import Contact
+    row, _meta = await find_contact_for_deal_with_meta(db, deal)
+    return row
 
+
+async def find_contact_for_deal_with_meta(db, deal):
+    """Resolve contact by heuristic. No schema FK; never fake authoritative link."""
     extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
     contact_id = extra.get("contact_id")
     if contact_id:
         row = await db.get(Contact, str(contact_id))
         if row and row.org_id == deal.org_id:
-            return row
+            return row, {"kind": "heuristic", "source": "extra_data.contact_id", "validated": False, "authoritative": False}
     email = str(getattr(deal, "lead_email", "") or "").strip().lower()
     if email:
         row = (await db.execute(select(Contact).where(Contact.org_id == deal.org_id, Contact.email == email))).scalar_one_or_none()
         if row:
-            return row
+            return row, {"kind": "heuristic", "source": "lead_email_exact", "validated": False, "authoritative": False}
     phone = "".join(ch for ch in str(getattr(deal, "lead_phone", "") or "") if ch.isdigit())
     if phone:
         rows = (await db.execute(select(Contact).where(Contact.org_id == deal.org_id))).scalars().all()
         for row in rows:
             if "".join(ch for ch in str(row.phone or "") if ch.isdigit()) == phone:
-                return row
-    return None
+                return row, {"kind": "heuristic", "source": "lead_phone_digits", "validated": False, "authoritative": False}
+    return None, {"kind": "none", "source": "unlinked", "validated": False, "authoritative": False}
 
 
-def deal_360_payload(deal, account=None, contact=None) -> dict:
+def deal_360_payload(deal, account=None, contact=None, *, account_link=None, contact_link=None) -> dict:
     extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
+    account_link = account_link or {"kind": "none", "source": "unlinked", "validated": False, "authoritative": False}
+    contact_link = contact_link or {"kind": "none", "source": "unlinked", "validated": False, "authoritative": False}
     return {
         "id": deal.id,
         "entity_kind": deal_entity_kind(deal),
@@ -271,7 +281,15 @@ def deal_360_payload(deal, account=None, contact=None) -> dict:
         "close_date": deal.close_date.isoformat() if getattr(deal, "close_date", None) else None,
         "probability": getattr(deal, "probability", 0.0),
         "account": {"id": account.id, "name": account.name, "cnpj": account.cnpj} if account else None,
+        "account_link": {
+            **account_link,
+            "note": "No schema FK deal->account. Heuristic/read-only link; do not treat as authoritative.",
+        },
         "contact": {"id": contact.id, "name": contact.name, "email": contact.email, "phone": contact.phone} if contact else None,
+        "contact_link": {
+            **contact_link,
+            "note": "No schema FK deal->contact. Heuristic/read-only link; do not treat as authoritative.",
+        },
         "legacy_extra_keys": sorted(extra.keys()),
         "legacy_extra_data_note": "extra_data is legacy/tactical; use typed CRM objects/timeline where available.",
     }
