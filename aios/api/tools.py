@@ -31,6 +31,25 @@ class ToolCreate(BaseModel):
     input_schema: dict = {}
     output_schema: dict = {}
     code_reference: str = ""
+    dynamic: bool = False
+
+
+def _is_dynamic_or_code_tool(*, code_reference: str = "", dynamic: bool = False) -> bool:
+    return bool(dynamic or (code_reference or "").startswith("code:"))
+
+
+async def _require_tool_admin(db: DatabaseBackend, user, org_id: str) -> None:
+    role = getattr(user, "role", "")
+    if role in {"admin", "org_admin", "owner", "superadmin"}:
+        return
+    try:
+        org = await db.get(Organization, org_id)
+        extra = (org.extra_data or {}) if org else {}
+        if extra.get("founder_user_id") == getattr(user, "id", None):
+            return
+    except Exception:
+        pass
+    raise HTTPException(403, "admin, owner, or founder role required for dynamic/code tools")
 
 
 @router.post("", response_model=ToolOut)
@@ -38,7 +57,10 @@ async def create_tool(
     body: ToolCreate,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
+    if _is_dynamic_or_code_tool(code_reference=body.code_reference, dynamic=body.dynamic):
+        await _require_tool_admin(db, user, org_id)
     existing = await db.execute(
         select(Tool).where(Tool.org_id == org_id, Tool.name == body.name)
     )

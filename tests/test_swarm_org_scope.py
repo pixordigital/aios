@@ -254,3 +254,114 @@ async def test_consensus_denominator_uses_real_members(two_org_tasks) -> None:
             if t:
                 await db.delete(t)
             await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_idempotency_key_dedupes(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    created: list[str] = []
+    try:
+        t1 = await coord.dispatch(
+            team_id="team-a", org_id="org-a", task_type="agent_call",
+            payload={"idempotency_key": "idem-1", "x": 1},
+        )
+        t2 = await coord.dispatch(
+            team_id="team-a", org_id="org-a", task_type="agent_call",
+            payload={"idempotency_key": "idem-1", "x": 2},
+        )
+        t3 = await coord.dispatch(
+            team_id="team-a", org_id="org-a", task_type="agent_call",
+            payload={"x": 3}, idempotency_key="idem-1",
+        )
+        assert t1 is not None
+        created.append(t1.id)
+        assert t2 is not None and t2.id == t1.id
+        assert t3 is not None and t3.id == t1.id
+        # Different key creates new task
+        t4 = await coord.dispatch(
+            team_id="team-a", org_id="org-a", task_type="agent_call",
+            payload={"idempotency_key": "idem-2"},
+        )
+        assert t4 is not None and t4.id != t1.id
+        created.append(t4.id)
+    finally:
+        async with db_session() as db:
+            for tid in created:
+                row = await db.get(SwarmTask, tid)
+                if row:
+                    await db.delete(row)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_complete_terminal_state_guard(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-term", team_id="team-a", org_id="org-a",
+            task_id="ext-term", task_type="agent_call", payload={}, status="running",
+        ))
+        await db.commit()
+    try:
+        done = await coord.complete("task-term", result={"ok": True}, org_id="org-a", team_id="team-a")
+        assert done is not None and done.status == "done"
+        # same-status idempotent no-op
+        again = await coord.complete("task-term", result={"ok": True}, org_id="org-a", team_id="team-a")
+        assert again is not None and again.status == "done"
+        # different terminal rejected
+        conflict = await coord.complete("task-term", error="boom", org_id="org-a", team_id="team-a")
+        assert conflict is None
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-term")
+            assert row is not None
+            assert row.status == "done"
+            assert row.error == ""
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-term")
+            if row:
+                await db.delete(row)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_vote_rejects_terminal_overwrite(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-vote-term", team_id="team-a", org_id="org-a",
+            task_id="ext-vote-term", task_type="consensus", payload={},
+            status="done", result={"consensus": "approved"},
+            consensus_votes={"agent-a1": "approve", "agent-a2": "approve"},
+        ))
+        await db.commit()
+    try:
+        same = await coord.vote("task-vote-term", "agent-a1", "approve", org_id="org-a", team_id="team-a")
+        assert same is not None and same.status == "done"
+        conflict = await coord.vote("task-vote-term", "agent-a1", "reject", org_id="org-a", team_id="team-a")
+        assert conflict is None
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-vote-term")
+            if row:
+                await db.delete(row)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_claim_rejects_non_claimable_status(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-done", team_id="team-a", org_id="org-a",
+            task_id="ext-done", task_type="agent_call", payload={}, status="done",
+        ))
+        await db.commit()
+    try:
+        assert await coord.claim("task-done", "agent-a1", "org-a", team_id="team-a") is None
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-done")
+            if row:
+                await db.delete(row)
+            await db.commit()

@@ -51,6 +51,8 @@ async def _record(record_id: str, org_id: str, db: DatabaseBackend) -> Knowledge
 
 @router.get("/records")
 async def list_records(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: DatabaseBackend = Depends(get_db_backend),
     user: User = Depends(get_current_user),
 ):
@@ -68,14 +70,19 @@ async def list_records(
             is_founder=_is_founder(user, org),
         )[0]
     ]
+    total = len(visible)
+    page = visible[offset : offset + limit]
     return {
         "items": [
             {
                 "id": r.id, "title": r.title, "kind": r.kind,
                 "classification": r.classification, "department_id": r.department_id,
             }
-            for r in visible
-        ]
+            for r in page
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
@@ -184,6 +191,22 @@ async def search(
     }
 
 @router.get("/memories")
-async def list_memories(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), limit: int = 50):
-    rows = (await db.execute(select(Memory).where(Memory.org_id==org_id).order_by(Memory.created_at.desc()).limit(limit))).scalars().all()
-    return [{"id": r.id, "content": r.content[:600], "type": r.type, "agent_id": r.agent_id, "created_at": str(r.created_at)} for r in rows]
+async def list_memories(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    rows = (
+        await db.execute(
+            select(Memory)
+            .where(Memory.org_id == org_id)
+            .order_by(Memory.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {"id": r.id, "content": r.content[:600], "type": r.type, "agent_id": r.agent_id, "created_at": str(r.created_at)}
+        for r in rows
+    ]

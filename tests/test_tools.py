@@ -394,3 +394,154 @@ async def test_dashboard_lab_tool_run_hides_internal_exception(monkeypatch):
 
 async def _coro(val):
     return val
+
+
+# ─── dynamic/code tool registration guard ─────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_create_dynamic_tool_requires_admin_role():
+    from aios.api import tools as tools_api
+
+    class _Member:
+        id = "u1"
+        org_id = "org1"
+        role = "member"
+
+    db = _FakeDB(org=_FakeOrg())
+    body = tools_api.ToolCreate(name="dyn1", code_reference="code:result = 1", dynamic=True)
+    with pytest.raises(tools_api.HTTPException) as exc:
+        await tools_api.create_tool(body, db=db, org_id="org1", user=_Member())
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_code_tool_requires_admin_role():
+    from aios.api import tools as tools_api
+
+    class _Member:
+        id = "u1"
+        org_id = "org1"
+        role = "member"
+
+    db = _FakeDB(org=_FakeOrg())
+    body = tools_api.ToolCreate(name="dyn1", code_reference="code:result = 1")
+    with pytest.raises(tools_api.HTTPException) as exc:
+        await tools_api.create_tool(body, db=db, org_id="org1", user=_Member())
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_dynamic_tool_allows_admin(monkeypatch):
+    from aios.api import tools as tools_api
+
+    class _Admin:
+        id = "u1"
+        org_id = "org1"
+        role = "admin"
+
+    class _DB(_FakeDB):
+        def __init__(self):
+            super().__init__(org=_FakeOrg())
+            self.added = None
+
+        def add(self, obj):
+            self.added = obj
+
+        async def commit(self):
+            return None
+
+        async def refresh(self, obj):
+            if not getattr(obj, "id", None):
+                obj.id = "t1"
+            if getattr(obj, "status", None) is None:
+                obj.status = "active"
+            if getattr(obj, "is_builtin", None) is None:
+                obj.is_builtin = False
+
+        async def execute(self, _q):
+            return _ScalarResult([])
+
+    monkeypatch.setattr("aios.tools.dynamic.register_dynamic_tool", lambda *a, **k: None)
+    db = _DB()
+    body = tools_api.ToolCreate(name="dyn1", description="d", code_reference="code:result = 1")
+    out = await tools_api.create_tool(body, db=db, org_id="org1", user=_Admin())
+    assert out.name == "dyn1"
+    assert db.added is not None
+
+
+@pytest.mark.asyncio
+async def test_create_dynamic_tool_allows_founder(monkeypatch):
+    from aios.api import tools as tools_api
+
+    class _MemberFounder:
+        id = "u1"
+        org_id = "org1"
+        role = "member"
+
+    org = _FakeOrg()
+    org.extra_data = {"founder_user_id": "u1"}
+
+    class _DB(_FakeDB):
+        def __init__(self):
+            super().__init__(org=org)
+            self.added = None
+
+        def add(self, obj):
+            self.added = obj
+
+        async def commit(self):
+            return None
+
+        async def refresh(self, obj):
+            if not getattr(obj, "id", None):
+                obj.id = "t1"
+            if getattr(obj, "status", None) is None:
+                obj.status = "active"
+            if getattr(obj, "is_builtin", None) is None:
+                obj.is_builtin = False
+
+        async def execute(self, _q):
+            return _ScalarResult([])
+
+    monkeypatch.setattr("aios.tools.dynamic.register_dynamic_tool", lambda *a, **k: None)
+    db = _DB()
+    body = tools_api.ToolCreate(name="dyn2", code_reference="code:result = 2", dynamic=True)
+    out = await tools_api.create_tool(body, db=db, org_id="org1", user=_MemberFounder())
+    assert out.name == "dyn2"
+
+
+@pytest.mark.asyncio
+async def test_create_nondynamic_tool_allows_member(monkeypatch):
+    from aios.api import tools as tools_api
+
+    class _Member:
+        id = "u1"
+        org_id = "org1"
+        role = "member"
+
+    class _DB(_FakeDB):
+        def __init__(self):
+            super().__init__(org=_FakeOrg())
+            self.added = None
+
+        def add(self, obj):
+            self.added = obj
+
+        async def commit(self):
+            return None
+
+        async def refresh(self, obj):
+            if not getattr(obj, "id", None):
+                obj.id = "t1"
+            if getattr(obj, "status", None) is None:
+                obj.status = "active"
+            if getattr(obj, "is_builtin", None) is None:
+                obj.is_builtin = False
+
+        async def execute(self, _q):
+            return _ScalarResult([])
+
+    db = _DB()
+    body = tools_api.ToolCreate(name="plain", code_reference="aios.tools.calculator.Calculator")
+    out = await tools_api.create_tool(body, db=db, org_id="org1", user=_Member())
+    assert out.name == "plain"

@@ -322,3 +322,42 @@ async def test_rag_search_db_grant_resolution_error_fails_closed(monkeypatch):
     out = await tool.run(query="pricing")
     assert out["ok"] is True
     assert captured["granted_record_ids"] == set()
+
+
+async def test_knowledge_records_pagination(auth_client):
+    for i in range(3):
+        resp = await auth_client.post(
+            "/api/knowledge/records",
+            json={"title": f"Rec {i}", "kind": "statement", "classification": "internal", "source_type": "test"},
+        )
+        assert resp.status_code == 200, resp.text
+
+    resp = await auth_client.get("/api/knowledge/records", params={"limit": 2, "offset": 0})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 3
+    assert body["limit"] == 2
+    assert body["offset"] == 0
+    assert len(body["items"]) == 2
+
+    resp2 = await auth_client.get("/api/knowledge/records", params={"limit": 2, "offset": 2})
+    assert resp2.status_code == 200
+    body2 = resp2.json()
+    assert body2["total"] == 3
+    assert len(body2["items"]) == 1
+
+
+async def test_knowledge_records_limit_cap(auth_client):
+    resp = await auth_client.get("/api/knowledge/records", params={"limit": 201})
+    assert resp.status_code == 422
+    resp = await auth_client.get("/api/knowledge/records", params={"limit": 0})
+    assert resp.status_code == 422
+    resp = await auth_client.get("/api/knowledge/records", params={"offset": -1})
+    assert resp.status_code == 422
+
+
+async def test_knowledge_search_limit_bounded(auth_client):
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "x", "top_k": 51})
+    assert resp.status_code == 422
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "x", "top_k": 0})
+    assert resp.status_code == 422

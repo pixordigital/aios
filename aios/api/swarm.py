@@ -63,6 +63,7 @@ class DispatchRequest(BaseModel):
     conversation_id: str | None = None
     depends_on: list[str] = Field(default_factory=list)
     agent_id: str | None = None
+    idempotency_key: str | None = Field(default=None, max_length=128)
 
 
 @router.post("/{team_id}/dispatch")
@@ -76,7 +77,7 @@ async def dispatch_task(
         team_id=team_id, org_id=org_id, task_type=body.task_type,
         payload=body.payload, priority=body.priority,
         conversation_id=body.conversation_id, depends_on=body.depends_on,
-        agent_id=body.agent_id,
+        agent_id=body.agent_id, idempotency_key=body.idempotency_key,
     )
     if not task:
         raise HTTPException(404, "team not found")
