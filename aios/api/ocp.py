@@ -328,8 +328,6 @@ async def bootstrap_default_departments(
 async def list_members(department_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     dept = await db.get(Department, department_id)
     await verify_org_access_async(org_id, dept, db=db, actor_id=user.id, source="api.ocp.list_members")
-    if dept is None or dept.org_id != org_id:
-        raise HTTPException(404, "department not found")
     rows = (await db.execute(select(DepartmentMember).where(
         DepartmentMember.org_id == org_id, DepartmentMember.department_id == department_id
     ))).scalars().all()

@@ -421,10 +421,11 @@ async def stop_channel(
     channel_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    channel = await db.get(ChannelConnection, channel_id)
-    if not channel or channel.org_id != org_id:
-        raise HTTPException(404)
+    channel = await _get_channel_or_404(
+        db, channel_id, org_id, actor_id=user.id, source="channels.api.stop_channel"
+    )
     channel.is_active = False
     await db.commit()
     return {"ok": True}
