@@ -1,6 +1,6 @@
 """AI SOC API: security incidents, governed response gateway, metrics, events."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
@@ -306,19 +306,52 @@ async def close_incident(
     return {"id": incident.id, "status": incident.status, "changed": True}
 
 
+SECURITY_METRICS_DEFAULT_DAYS = 90
+SECURITY_METRICS_MAX_DAYS = 365
+SECURITY_METRICS_MAX_INCIDENTS = 2000
+SECURITY_METRICS_MAX_EVENTS = 10000
+
+
 @router.get("/metrics")
-async def metrics(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
-    incidents = (
-        await db.execute(select(SecurityIncident).where(SecurityIncident.org_id == org_id))
-    ).scalars().all()
+async def metrics(
+    days: int = Query(default=SECURITY_METRICS_DEFAULT_DAYS, ge=1, le=SECURITY_METRICS_MAX_DAYS),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    since = _now() - timedelta(days=days)
+    incident_stmt = (
+        select(SecurityIncident)
+        .where(SecurityIncident.org_id == org_id, SecurityIncident.created_at >= since)
+        .order_by(SecurityIncident.created_at.desc())
+        .limit(SECURITY_METRICS_MAX_INCIDENTS)
+    )
+    incidents = (await db.execute(incident_stmt)).scalars().all()
     events = []
+    events_truncated = False
     try:
-        events = (
-            await db.execute(select(SecurityEvent).where(SecurityEvent.org_id == org_id))
-        ).scalars().all()
+        event_stmt = (
+            select(SecurityEvent)
+            .where(SecurityEvent.org_id == org_id, SecurityEvent.created_at >= since)
+            .order_by(SecurityEvent.created_at.desc())
+            .limit(SECURITY_METRICS_MAX_EVENTS + 1)
+        )
+        event_rows = (await db.execute(event_stmt)).scalars().all()
+        events_truncated = len(event_rows) > SECURITY_METRICS_MAX_EVENTS
+        # desc for bounded latest-N; reverse for chronological stateful metrics (vuln lifecycle)
+        events = list(reversed(event_rows[:SECURITY_METRICS_MAX_EVENTS]))
     except Exception:
         log.warning("security events unavailable for metrics; returning incident-only metrics")
-    return incident_metrics(list(incidents), events=list(events))
+    result = incident_metrics(list(incidents), events=list(events))
+    result["window_days"] = days
+    result["bounded"] = {
+        "since": since.isoformat(),
+        "max_incidents": SECURITY_METRICS_MAX_INCIDENTS,
+        "max_events": SECURITY_METRICS_MAX_EVENTS,
+        "incidents_returned": len(incidents),
+        "events_returned": len(events),
+        "events_truncated": events_truncated,
+    }
+    return result
 
 
 @router.get("/events")

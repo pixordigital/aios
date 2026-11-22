@@ -131,6 +131,44 @@ async def test_metrics_endpoint(auth_client):
     assert "coverage" in body
     assert "unresolved_critical_vulns" in body
     assert body["metric_sources"]["unresolved_critical_vulns"].startswith("unknown:")
+    assert body["window_days"] == 90
+    assert body["bounded"]["max_incidents"] == 2000
+    assert body["bounded"]["max_events"] == 10000
+    assert body["bounded"]["events_truncated"] is False
+
+
+async def test_metrics_endpoint_bounds_window(auth_client, test_db_session, test_org):
+    from datetime import timedelta
+    from aios.governance.security import SecurityEvent, _now
+
+    old = SecurityEvent(
+        org_id=test_org.id,
+        source="test",
+        event_type="security.auth.failure",
+        severity="medium",
+        payload={"old": True},
+    )
+    old.created_at = _now() - timedelta(days=120)
+    old.updated_at = old.created_at
+    fresh = SecurityEvent(
+        org_id=test_org.id,
+        source="test",
+        event_type="security.auth.failure",
+        severity="medium",
+        payload={"old": False},
+    )
+    test_db_session.add_all([old, fresh])
+    await test_db_session.commit()
+
+    resp = await auth_client.get("/api/security/metrics?days=30")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["window_days"] == 30
+    assert body["unauthorized_attempts"] == 1
+    assert body["coverage"]["events_total"] == 1
+
+    bad = await auth_client.get("/api/security/metrics?days=0")
+    assert bad.status_code == 422, bad.text
 
 
 async def test_security_events_list_ingest(auth_client):
