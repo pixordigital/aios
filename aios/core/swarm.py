@@ -18,13 +18,25 @@ logger = logging.getLogger(__name__)
 _SWARM_MODES = {"supervisor", "consensus", "pipeline", "mesh"}
 _TERMINAL_TASK_STATUSES = {"done", "failed"}
 _ACTIVE_TASK_STATUSES = {"queued", "assigned", "running", "consensus"}
+_VALID_VOTES = {"approve", "reject", "abstain"}
+_IDEMPOTENCY_SCAN_LIMIT = 200
+_IDEMPOTENCY_KEY_MAX = 128
+
+
+def _normalize_idempotency_key(raw: object) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    key = raw.strip()
+    if not key or len(key) > _IDEMPOTENCY_KEY_MAX:
+        return None
+    return key
 
 
 def _task_idempotency_key(task: SwarmTask) -> str | None:
     for src in (getattr(task, "payload", None), getattr(task, "extra_data", None)):
         if isinstance(src, dict):
-            key = src.get("idempotency_key")
-            if isinstance(key, str) and key:
+            key = _normalize_idempotency_key(src.get("idempotency_key"))
+            if key:
                 return key
     return None
 
@@ -202,10 +214,13 @@ class SwarmCoordinator:
     ) -> SwarmTask | None:
         """Queue a task for swarm execution. Fail closed on org/team/membership/ownership mismatch.
 
-        Idempotency: if payload/extra_data carries idempotency_key (or explicit arg),
-        return existing active/terminal task with same team/org/task_type/key instead of duplicating.
-        Best-effort without unique index: serialize on team row when supported, recheck after flush.
+        Idempotency: normalized key from explicit arg or payload.idempotency_key.
+        Same team/org/task_type/key returns existing task (active or terminal) instead of duplicating.
+        Best-effort only, no unique index/migration: PG row lock helps; SQLite has race window.
         """
+        if not team_id or not org_id or not isinstance(task_type, str) or not task_type.strip():
+            return None
+        task_type = task_type.strip()
         async with db_session() as db:
             if not await _lock_team_dispatch(db, team_id, org_id):
                 return None
@@ -215,65 +230,87 @@ class SwarmCoordinator:
                 db, conversation_id, team_id=team_id, org_id=org_id
             ):
                 return None
-            deps = [d for d in (depends_on or []) if d]
+            deps = [d for d in (depends_on or []) if isinstance(d, str) and d]
             if not await _depends_on_valid(db, deps, team_id=team_id, org_id=org_id):
                 return None
 
             payload_data = dict(payload or {})
-            idem = idempotency_key if isinstance(idempotency_key, str) and idempotency_key else payload_data.get("idempotency_key")
-            if isinstance(idem, str) and idem:
-                payload_data.setdefault("idempotency_key", idem)
+            explicit_idem = _normalize_idempotency_key(idempotency_key)
+            payload_idem = _normalize_idempotency_key(payload_data.get("idempotency_key"))
+            idem = explicit_idem or payload_idem
+            if explicit_idem:
+                payload_data["idempotency_key"] = explicit_idem
+            elif payload_idem:
+                payload_data["idempotency_key"] = payload_idem
+
+            if idem:
                 existing_stmt = select(SwarmTask).where(
                     SwarmTask.team_id == team_id,
                     SwarmTask.org_id == org_id,
                     SwarmTask.task_type == task_type,
-                ).order_by(desc(SwarmTask.created_at)).limit(50)
+                ).order_by(desc(SwarmTask.created_at)).limit(_IDEMPOTENCY_SCAN_LIMIT)
                 existing_stmt = _select_for_update(db, existing_stmt)
                 for row in (await db.execute(existing_stmt)).scalars().all():
                     if _task_idempotency_key(row) == idem:
+                        logger.info(
+                            "swarm.dispatch idempotency hit team=%s org=%s type=%s key=%s task=%s",
+                            team_id, org_id, task_type, idem, row.id,
+                        )
                         return row
 
             task = SwarmTask(
                 team_id=team_id, org_id=org_id, task_id=str(uuid.uuid4())[:16],
-                task_type=task_type, payload=payload_data, priority=priority,
+                task_type=task_type, payload=payload_data, priority=int(priority or 0),
                 conversation_id=conversation_id, depends_on=deps,
                 assigned_agent_id=agent_id, status="queued" if not agent_id else "assigned",
             )
             db.add(task)
             await db.flush()
-            if isinstance(idem, str) and idem:
+            if idem:
                 recheck_stmt = select(SwarmTask).where(
                     SwarmTask.team_id == team_id,
                     SwarmTask.org_id == org_id,
                     SwarmTask.task_type == task_type,
                     SwarmTask.id != task.id,
-                ).order_by(desc(SwarmTask.created_at)).limit(50)
+                ).order_by(desc(SwarmTask.created_at)).limit(_IDEMPOTENCY_SCAN_LIMIT)
                 recheck_stmt = _select_for_update(db, recheck_stmt)
                 for row in (await db.execute(recheck_stmt)).scalars().all():
                     if _task_idempotency_key(row) == idem:
                         await db.delete(task)
                         await db.commit()
+                        logger.warning(
+                            "swarm.dispatch idempotency race resolved team=%s org=%s type=%s key=%s kept=%s dropped=%s",
+                            team_id, org_id, task_type, idem, row.id, task.id,
+                        )
                         return row
             await db.commit()
             await db.refresh(task)
             return task
 
     async def claim(self, task_id: str, agent_id: str, org_id: str, team_id: str = "") -> SwarmTask | None:
+        if not task_id or not agent_id or not org_id:
+            return None
         async with db_session() as db:
             stmt = select(SwarmTask).where(SwarmTask.id == task_id)
             stmt = _select_for_update(db, stmt)
             task = (await db.execute(stmt)).scalar_one_or_none()
-            if not task or task.org_id != org_id or task.status not in ("queued", "assigned"):
-                # Fail closed: a task id from another tenant reads as missing.
+            if not task or task.org_id != org_id:
+                # Fail closed: cross-tenant/missing reads as missing.
                 return None
             if team_id and task.team_id != team_id:
                 return None
+            if task.status not in ("queued", "assigned"):
+                return None
             if not await _agent_in_team(db, agent_id, task.team_id, org_id):
+                logger.info(
+                    "swarm.claim rejected: agent not in team task=%s team=%s agent=%s org=%s",
+                    task_id, task.team_id, agent_id, org_id,
+                )
                 return None
             task.assigned_agent_id = agent_id
             task.status = "running"
             task.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            task.attempts += 1
+            task.attempts = int(task.attempts or 0) + 1
             await db.commit()
             await db.refresh(task)
             return task
@@ -281,11 +318,14 @@ class SwarmCoordinator:
     async def complete(
         self, task_id: str, result: dict | None = None, error: str = "", org_id: str = "", team_id: str = "",
     ) -> SwarmTask | None:
+        if not task_id or not org_id:
+            # Fail closed: org_id required for mutating completion.
+            return None
         async with db_session() as db:
             stmt = select(SwarmTask).where(SwarmTask.id == task_id)
             stmt = _select_for_update(db, stmt)
             task = (await db.execute(stmt)).scalar_one_or_none()
-            if not task or (org_id and task.org_id != org_id):
+            if not task or task.org_id != org_id:
                 return None
             if team_id and task.team_id != team_id:
                 return None
@@ -295,12 +335,16 @@ class SwarmCoordinator:
                 # Idempotent same-status completion; reject terminal overwrite/conflict.
                 if task.status == requested_status:
                     return task
+                logger.info(
+                    "swarm.complete conflict task=%s org=%s cur=%s req=%s",
+                    task_id, org_id, task.status, requested_status,
+                )
                 return None
             if task.status not in _ACTIVE_TASK_STATUSES:
                 return None
 
-            task.result = result or {}
-            task.error = error
+            task.result = result if isinstance(result, dict) else {}
+            task.error = str(error or "")
             task.status = requested_status
             task.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             await db.commit()
@@ -338,11 +382,16 @@ class SwarmCoordinator:
 
     async def vote(self, task_id: str, agent_id: str, vote: str, org_id: str = "", team_id: str = "") -> SwarmTask | None:
         """Record a consensus vote (approve|reject|abstain). Check threshold if reached."""
+        if not task_id or not agent_id or not org_id:
+            return None
+        vote_norm = vote.strip().lower() if isinstance(vote, str) else ""
+        if vote_norm not in _VALID_VOTES:
+            return None
         async with db_session() as db:
             stmt = select(SwarmTask).where(SwarmTask.id == task_id)
             stmt = _select_for_update(db, stmt)
             task = (await db.execute(stmt)).scalar_one_or_none()
-            if not task or (org_id and task.org_id != org_id):
+            if not task or task.org_id != org_id:
                 return None
             if team_id and task.team_id != team_id:
                 return None
@@ -351,22 +400,29 @@ class SwarmCoordinator:
 
             if task.status in _TERMINAL_TASK_STATUSES:
                 votes = dict(task.consensus_votes or {})
-                if votes.get(agent_id) == vote:
+                if votes.get(agent_id) == vote_norm:
                     return task
                 return None
             if task.status not in _ACTIVE_TASK_STATUSES:
                 return None
 
             votes = dict(task.consensus_votes or {})
-            votes[agent_id] = vote
+            votes[agent_id] = vote_norm
             task.consensus_votes = votes
             # check threshold
             cfg = (await db.execute(select(TeamSwarmConfig).where(TeamSwarmConfig.team_id == task.team_id))).scalar_one_or_none()
             threshold = cfg.consensus_threshold if cfg else 0.6
+            try:
+                threshold = float(threshold)
+            except (TypeError, ValueError):
+                threshold = 0.6
+            threshold = min(1.0, max(0.0, threshold))
             n_agents = await _team_member_count(db, task.team_id, task.org_id)
             if n_agents <= 0:
                 task.status = "failed"
                 task.error = "consensus denominator unavailable"
+                task.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                logger.warning("swarm.vote failed: no team members task=%s team=%s org=%s", task_id, task.team_id, org_id)
                 await db.commit()
                 await db.refresh(task)
                 return task
@@ -380,6 +436,7 @@ class SwarmCoordinator:
                 task.status = "failed"
                 task.error = "consensus not reached"
                 task.result = {"consensus": "rejected", "votes": votes}
+                task.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             await db.commit()
             await db.refresh(task)
             return task

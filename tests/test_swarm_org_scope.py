@@ -299,6 +299,57 @@ async def test_dispatch_idempotency_key_dedupes(two_org_tasks) -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_idempotency_fail_closed_and_normalized(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    created: list[str] = []
+    try:
+        bad = await coord.dispatch(
+            team_id="team-a", org_id="org-a", task_type="  ", payload={"idempotency_key": "k"}
+        )
+        assert bad is None
+        t1 = await coord.dispatch(
+            team_id="team-a", org_id="org-a", task_type="agent_call",
+            payload={"idempotency_key": "  spaced  "},
+        )
+        t2 = await coord.dispatch(
+            team_id="team-a", org_id="org-a", task_type="agent_call",
+            payload={"idempotency_key": "spaced"},
+        )
+        assert t1 is not None
+        created.append(t1.id)
+        assert t2 is not None and t2.id == t1.id
+    finally:
+        async with db_session() as db:
+            for tid in created:
+                row = await db.get(SwarmTask, tid)
+                if row:
+                    await db.delete(row)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_complete_requires_org_and_vote_rejects_invalid(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-guard", team_id="team-a", org_id="org-a",
+            task_id="ext-guard", task_type="consensus", payload={}, status="running",
+        ))
+        await db.commit()
+    try:
+        assert await coord.complete("task-guard", result={"ok": True}, org_id="") is None
+        assert await coord.vote("task-guard", "agent-a1", "MAYBE", org_id="org-a", team_id="team-a") is None
+        ok = await coord.vote("task-guard", "agent-a1", " approve ", org_id="org-a", team_id="team-a")
+        assert ok is not None
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-guard")
+            if row:
+                await db.delete(row)
+            await db.commit()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_idempotency_concurrent_best_effort(two_org_tasks) -> None:
     """Best-effort concurrent dedupe. SQLite has no row lock/unique index; allow rare dup but require no crash and >=1 winner."""
     import asyncio
