@@ -190,6 +190,8 @@ async def test_rag_search_tool_fails_closed_without_actor_context(monkeypatch):
     assert out["ok"] is False
     assert out["fail_closed"] is True
     assert out["results"] == []
+    assert out["count"] == 0
+    assert out["source"] == "knowledge_records"
     assert "unresolved" in out["error"]
     assert out["actor_resolution"] == "none"
     assert "actor_user_id" in out["missing_actor_context"]

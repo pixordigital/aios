@@ -1,9 +1,13 @@
 """RAG search — governed KnowledgeRecords with permission filtering."""
 
+import logging
+
 from pydantic import BaseModel, Field
 
 from aios.tools.base import BaseTool
 from aios.tools.registry import TOOL_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 
 class RagSearchInput(BaseModel):
@@ -13,15 +17,6 @@ class RagSearchInput(BaseModel):
     top_k: int = Field(default=5, description="Quantos registros retornar (1-10)")
 
 
-class RagSearchTool(BaseTool):
-    name = "rag_search"
-    description = (
-        "Busca permission-aware em KnowledgeRecords governados (fonte da verdade com "
-        "proveniência/citação). Filtra por tenant/departamento/classificação. "
-        "Sempre cite citation/source_type/source_id."
-    )
-    input_model = RagSearchInput
-
 async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str]:
     """Best-effort DB resolve of active knowledge grants for actor user in org.
 
@@ -29,6 +24,11 @@ async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str
     Fail-closed: callers should treat empty as no explicit confidential grants.
     """
     if not org_id or not actor_user_id:
+        logger.debug(
+            "rag_search.grants_skipped reason=missing_identity org_present=%s actor_present=%s",
+            bool(org_id),
+            bool(actor_user_id),
+        )
         return set()
     try:
         from sqlalchemy import inspect as sa_inspect, select
@@ -51,6 +51,7 @@ async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str
             except Exception:
                 continue
         if GrantModel is None:
+            logger.debug("rag_search.grants_unavailable org=%s actor=%s", org_id, actor_user_id)
             return set()
 
         mapper = sa_inspect(GrantModel)
@@ -64,6 +65,7 @@ async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str
                 user_col = name
                 break
         if user_col is None:
+            logger.debug("rag_search.grants_unavailable reason=no_user_col org=%s actor=%s", org_id, actor_user_id)
             return set()
         conditions.append(getattr(GrantModel, user_col) == actor_user_id)
         if "revoked_at" in cols:
@@ -78,6 +80,7 @@ async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str
                 record_col = name
                 break
         if record_col is None:
+            logger.debug("rag_search.grants_unavailable reason=no_record_col org=%s actor=%s", org_id, actor_user_id)
             return set()
 
         now = None
@@ -97,8 +100,16 @@ async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str
 
         async with async_session() as s:
             rows = (await s.execute(select(getattr(GrantModel, record_col)).where(*conditions))).scalars().all()
-        return {str(r) for r in rows if r}
+        grants = {str(r) for r in rows if r}
+        logger.debug("rag_search.grants_resolved org=%s actor=%s count=%s", org_id, actor_user_id, len(grants))
+        return grants
     except Exception:
+        logger.warning(
+            "rag_search.grants_resolution_failed org=%s actor=%s fail_closed=true",
+            org_id,
+            actor_user_id,
+            exc_info=True,
+        )
         return set()
 
 
@@ -181,6 +192,13 @@ class RagSearchTool(BaseTool):
                         ctx["actor_resolved"] = True
                         ctx["resolution"] = "user_identity"
         except Exception:
+            logger.warning(
+                "rag_search.actor_resolution_failed org=%s agent=%s actor=%s fail_closed=true",
+                org_id,
+                agent_id,
+                actor_user_id,
+                exc_info=True,
+            )
             # Fail closed: no departments/grants/founder.
             return {
                 "actor_departments": set(),
@@ -225,6 +243,12 @@ class RagSearchTool(BaseTool):
                 or actor.get("actor_user_id")
             )
             if not actor.get("actor_resolved") and not has_scope:
+                logger.warning(
+                    "rag_search.fail_closed reason=unresolved_actor org=%s resolution=%s has_actor_user_id=%s",
+                    org_id,
+                    actor.get("resolution", "none"),
+                    bool(actor.get("actor_user_id")),
+                )
                 return {
                     "ok": False,
                     "error": "actor identity unresolved; search fail-closed",
@@ -263,7 +287,15 @@ class RagSearchTool(BaseTool):
                 "actor_resolution": actor.get("resolution", "unknown"),
             }
         except Exception as e:
-            return {"ok": False, "error": str(e)[:500], "query": query}
+            logger.warning(
+                "rag_search.error org=%s agent=%s actor=%s resolution=%s",
+                org_id,
+                getattr(self, "_agent_id", "") or "",
+                getattr(self, "_actor_user_id", "") or "",
+                locals().get("actor", {}).get("resolution", "unknown") if isinstance(locals().get("actor"), dict) else "unknown",
+                exc_info=True,
+            )
+            return {"ok": False, "error": str(e)[:500], "query": query, "results": [], "count": 0}
 
 
 TOOL_REGISTRY["rag_search"] = {"code_reference": "aios.tools.rag_search.RagSearchTool"}
