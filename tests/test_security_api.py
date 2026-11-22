@@ -231,3 +231,26 @@ async def test_preapproval_record_authorizes_respond(auth_client, test_org, test
     resp2 = await auth_client.post(f"/api/security/incidents/{incident2}/respond", json={"action": "disable_integration"})
     assert resp2.status_code == 200, resp2.text
     assert resp2.json()["allowed"] is False
+
+
+async def test_login_failure_records_auth_metric(async_client, auth_client, test_user):
+    resp = await async_client.post(
+        "/api/auth/login",
+        json={"email": test_user.email, "password": "wrong-password"},
+    )
+    assert resp.status_code == 401, resp.text
+    assert resp.json()["detail"] == "E-mail ou senha inválidos"
+
+    events = await auth_client.get("/api/security/events?event_type=security.auth.failure")
+    assert events.status_code == 200, events.text
+    items = events.json()["items"]
+    assert any(
+        i.get("payload", {}).get("reason") == "invalid_credentials"
+        and i.get("payload", {}).get("source") == "auth.login"
+        and i.get("actor_id") == test_user.id
+        for i in items
+    )
+
+    metrics = await auth_client.get("/api/security/metrics")
+    assert metrics.status_code == 200, metrics.text
+    assert metrics.json()["unauthorized_attempts"] >= 1

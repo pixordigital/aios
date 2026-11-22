@@ -415,6 +415,28 @@ def _verify_jwt_token(token: str) -> dict | None:
     return _decode_jwt_token(token)
 
 
+async def _record_auth_failure_metric(
+    db,
+    *,
+    org_id: str | None,
+    actor_id: str | None = None,
+    payload: dict | None = None,
+) -> None:
+    if not org_id or db is None:
+        return
+    try:
+        from aios.governance.security import record_auth_failure
+
+        await record_auth_failure(
+            db,
+            org_id=str(org_id),
+            actor_id=str(actor_id) if actor_id else None,
+            payload=payload or {},
+        )
+    except Exception:
+        logger.debug("auth failure metric skipped", exc_info=True)
+
+
 # ─── Login allowlist (single-operator lockdown) ───
 
 
@@ -527,12 +549,24 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
     # registered addresses by response time despite the generic message.
     _verify_password(body.password, user.hashed_password if user else _DUMMY_HASH)
     if not user or not _verify_password(body.password, user.hashed_password):
+        await _record_auth_failure_metric(
+            db,
+            org_id=getattr(user, "org_id", None),
+            actor_id=getattr(user, "id", None),
+            payload={"reason": "invalid_credentials", "source": "auth.login"},
+        )
         raise HTTPException(401, "E-mail ou senha inválidos")
     # Allowlist is checked AFTER password verification with the same generic
     # message, so the response is indistinguishable from a wrong password and
     # reveals neither allowlist membership nor account existence.
     if not _is_login_allowed(user.email):
         logger.warning("login rejected for non-allowlisted account: %s", user.email)
+        await _record_auth_failure_metric(
+            db,
+            org_id=user.org_id,
+            actor_id=user.id,
+            payload={"reason": "allowlist_denied", "source": "auth.login"},
+        )
         raise HTTPException(401, "E-mail ou senha inválidos")
     # An explicitly allowlisted operator account is trusted by configuration,
     # so the closed-beta verification gate does not apply to it. Without this
@@ -547,6 +581,12 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
         raise HTTPException(403, "Verifique seu e-mail antes de entrar. Link reenviado.")
     if getattr(user, "totp_enabled", False) and user.totp_secret:
         if not body.totp_code:
+            await _record_auth_failure_metric(
+                db,
+                org_id=user.org_id,
+                actor_id=user.id,
+                payload={"reason": "totp_missing", "source": "auth.login"},
+            )
             raise HTTPException(401, "Código 2FA (TOTP) obrigatório — use backup code se perdeu o celular")
         import pyotp
         totp_ok = pyotp.TOTP(user.totp_secret).verify(body.totp_code, valid_window=1)
@@ -558,6 +598,12 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
                 user.totp_backup_codes = codes
                 await db.commit()
             else:
+                await _record_auth_failure_metric(
+                    db,
+                    org_id=user.org_id,
+                    actor_id=user.id,
+                    payload={"reason": "totp_invalid", "source": "auth.login"},
+                )
                 raise HTTPException(401, "Código 2FA inválido")
 
     token = _create_access_token(user.id, user.org_id)
