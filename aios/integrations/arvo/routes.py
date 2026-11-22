@@ -22,6 +22,15 @@ _events_lock = threading.Lock()
 _EVENTS_TTL = 86400
 _PROCESSING_TTL = 60
 
+# Fail-closed: only events with a handler may be claimed/deduplicated.
+_ALLOWED_INBOUND_EVENTS = {
+    "commitment.at_risk",
+    "action.executed",
+    "action.verified",
+    "deal.created",
+    "deal.stage_changed",
+}
+
 
 async def _db_persist_nonce(nonce: str) -> bool | None:
     """Insert nonce; False means duplicate, None means persistence unavailable."""
@@ -401,6 +410,8 @@ async def ingest_event(
     body: ArvoEvent,
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
+    if body.type not in _ALLOWED_INBOUND_EVENTS:
+        raise HTTPException(400, f"Unknown event type: {body.type}")
     if not idempotency_key or len(idempotency_key) > 128:
         raise HTTPException(400, "Invalid Idempotency-Key")
     cached = _get_idempotent(idempotency_key)

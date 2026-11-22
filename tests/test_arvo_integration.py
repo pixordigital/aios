@@ -88,7 +88,7 @@ def test_events_idempotency():
         _clear_nonces()
         _clear_events()
         path = "/api/integrations/arvo/v1/events"
-        body = json.dumps({"type": "test.event", "payload": {"a": 1}}, separators=(",", ":")).encode()
+        body = json.dumps({"type": "action.executed", "payload": {"a": 1}}, separators=(",", ":")).encode()
         hdr = sign_request("POST", path, body, "kid-1", "secret-1")
         hdr["Idempotency-Key"] = "idem-1"
         hdr["Content-Type"] = "application/json"
@@ -99,6 +99,46 @@ def test_events_idempotency():
         hdr2["Content-Type"] = "application/json"
         r2 = c.post(path, content=body, headers=hdr2)
         assert r2.json()["deduplicated"] is True
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
+
+
+def test_events_reject_unknown_type_before_idempotency():
+    import json
+    from fastapi.testclient import TestClient
+    from aios.config import settings
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+
+    c = TestClient(app)
+    orig_enabled, orig_id, orig_key = settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        path = "/api/integrations/arvo/v1/events"
+        key = "idem-unknown-type"
+
+        unknown = json.dumps({"type": "not.a.real.event", "payload": {"a": 1}}, separators=(",", ":")).encode()
+        hdr = sign_request("POST", path, unknown, "kid-1", "secret-1")
+        hdr["Idempotency-Key"] = key
+        hdr["Content-Type"] = "application/json"
+        assert c.post(path, content=unknown, headers=hdr).status_code == 400
+
+        # Rejected type must not claim the key: valid event still processes.
+        known = json.dumps({"type": "action.executed", "payload": {"action_id": "a-1"}}, separators=(",", ":")).encode()
+        hdr2 = sign_request("POST", path, known, "kid-1", "secret-1")
+        hdr2["Idempotency-Key"] = key
+        hdr2["Content-Type"] = "application/json"
+        r2 = c.post(path, content=known, headers=hdr2)
+        assert r2.status_code == 200
+        assert r2.json()["deduplicated"] is False
     finally:
         settings.arvo_integration_enabled = orig_enabled
         settings.arvo_service_key_id = orig_id
