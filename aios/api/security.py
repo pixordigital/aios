@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -10,10 +11,12 @@ from aios.api.deps import get_current_user, get_org_id
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization
 from aios.governance.security import (
+    RESPONSE_AUTHORITY,
     SecurityEvent,
     SecurityIncident,
     apply_response_gateway,
     incident_metrics,
+    is_founder_authority,
     record_security_event,
     require_privacy_handoff,
 )
@@ -34,6 +37,54 @@ async def _get_incident(db: DatabaseBackend, org_id: str, incident_id: str) -> S
     if incident is None or incident.org_id != org_id:
         raise HTTPException(404, "incident not found")
     return incident
+
+
+def _require_founder(user: Any, org: Organization | None) -> None:
+    if not is_founder_authority(user=user, org=org):
+        raise HTTPException(403, "Founder/owner authority required")
+
+
+def _security_policy(org: Organization | None) -> dict[str, Any]:
+    extra = getattr(org, "extra_data", None) or {}
+    sec = extra.get("security_policy")
+    return dict(sec) if isinstance(sec, dict) else {}
+
+
+def _normalized_preapproved_actions(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise HTTPException(400, "preapproved_actions must be a list")
+    out: list[str] = []
+    for item in value:
+        action = str(item or "").strip()
+        if not action:
+            raise HTTPException(400, "preapproved_actions entries must be non-empty strings")
+        if action not in RESPONSE_AUTHORITY:
+            raise HTTPException(400, f"unknown action: {action}")
+        if action not in out:
+            out.append(action)
+    return out
+
+
+def _normalized_approvals(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise HTTPException(400, "approvals must be a list")
+    out: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise HTTPException(400, "approval entries must be objects")
+        action = str(item.get("action") or "").strip()
+        if not action:
+            raise HTTPException(400, "approval.action required")
+        if action not in RESPONSE_AUTHORITY:
+            raise HTTPException(400, f"unknown action: {action}")
+        rec: dict[str, Any] = {"action": action, "approved": bool(item.get("approved", False))}
+        for key in ("id", "ticket", "note"):
+            if item.get(key) is not None:
+                text = str(item.get(key)).strip()
+                if text:
+                    rec[key] = text
+        out.append(rec)
+    return out
 
 
 @router.get("/incidents")
@@ -278,3 +329,181 @@ async def ingest_event(
         raise HTTPException(503, "security event storage unavailable")
     await db.commit()
     return {"id": evt.id, "event_type": evt.event_type, "stored": True}
+
+
+def _preapproval_payload(org: Organization | None) -> dict[str, Any]:
+    sec = _security_policy(org)
+    actions = sec.get("preapproved_actions")
+    approvals = sec.get("approvals")
+    return {
+        "preapproved_actions": [str(a) for a in actions if str(a).strip()] if isinstance(actions, list) else [],
+        "approvals": [dict(r) for r in approvals if isinstance(r, dict)] if isinstance(approvals, list) else [],
+        "storage": "org.extra_data.security_policy (shared app DB; not independent/append-only storage)",
+    }
+
+
+async def _save_preapprovals(
+    *,
+    db: DatabaseBackend,
+    org: Organization,
+    user: Any,
+    preapproved_actions: list[str],
+    approvals: list[dict[str, Any]],
+) -> dict[str, Any]:
+    extra = dict(getattr(org, "extra_data", None) or {})
+    sec = dict(extra.get("security_policy") if isinstance(extra.get("security_policy"), dict) else {})
+    before = _preapproval_payload(org)
+    sec["preapproved_actions"] = preapproved_actions
+    sec["approvals"] = approvals
+    sec["updated_at"] = _now().isoformat()
+    sec["updated_by"] = str(getattr(user, "id", ""))
+    extra["security_policy"] = sec
+    org.extra_data = extra
+    await record_security_event(
+        db,
+        org_id=org.id,
+        source="security.api.preapprovals",
+        event_type="security.policy.preapprovals_updated",
+        severity="info",
+        actor_type="human",
+        actor_id=getattr(user, "id", None),
+        payload={"before": before, "after": {"preapproved_actions": preapproved_actions, "approvals": approvals}},
+    )
+    await db.commit()
+    await db.refresh(org)
+    return _preapproval_payload(org)
+
+
+@router.get("/preapprovals")
+async def get_preapprovals(
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    org = await db.get(Organization, org_id)
+    _require_founder(user, org)
+    return _preapproval_payload(org)
+
+
+@router.put("/preapprovals")
+async def put_preapprovals(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(404, "org not found")
+    _require_founder(user, org)
+    current = _preapproval_payload(org)
+    actions = (
+        _normalized_preapproved_actions(body["preapproved_actions"])
+        if "preapproved_actions" in body
+        else list(current["preapproved_actions"])
+    )
+    approvals = (
+        _normalized_approvals(body["approvals"])
+        if "approvals" in body
+        else list(current["approvals"])
+    )
+    return await _save_preapprovals(db=db, org=org, user=user, preapproved_actions=actions, approvals=approvals)
+
+
+@router.post("/preapprovals/actions")
+async def add_preapproved_action(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(404, "org not found")
+    _require_founder(user, org)
+    action = str(body.get("action") or "").strip()
+    if not action:
+        raise HTTPException(400, "action required")
+    if action not in RESPONSE_AUTHORITY:
+        raise HTTPException(400, f"unknown action: {action}")
+    current = _preapproval_payload(org)
+    actions = list(current["preapproved_actions"])
+    if action not in actions:
+        actions.append(action)
+    return await _save_preapprovals(
+        db=db, org=org, user=user, preapproved_actions=actions, approvals=current["approvals"]
+    )
+
+
+@router.delete("/preapprovals/actions/{action}")
+async def remove_preapproved_action(
+    action: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(404, "org not found")
+    _require_founder(user, org)
+    action = str(action or "").strip()
+    if action not in RESPONSE_AUTHORITY:
+        raise HTTPException(400, f"unknown action: {action}")
+    current = _preapproval_payload(org)
+    actions = [a for a in current["preapproved_actions"] if a != action]
+    return await _save_preapprovals(
+        db=db, org=org, user=user, preapproved_actions=actions, approvals=current["approvals"]
+    )
+
+
+@router.post("/preapprovals/approvals")
+async def add_preapproval_record(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(404, "org not found")
+    _require_founder(user, org)
+    recs = _normalized_approvals([body])
+    rec = recs[0]
+    current = _preapproval_payload(org)
+    approvals = list(current["approvals"])
+    rec_id = str(rec.get("id") or "").strip()
+    replaced = False
+    if rec_id:
+        for i, existing in enumerate(approvals):
+            if str(existing.get("id") or "").strip() == rec_id:
+                approvals[i] = rec
+                replaced = True
+                break
+    if not replaced:
+        approvals.append(rec)
+    return await _save_preapprovals(
+        db=db, org=org, user=user, preapproved_actions=current["preapproved_actions"], approvals=approvals
+    )
+
+
+@router.delete("/preapprovals/approvals/{approval_id}")
+async def remove_preapproval_record(
+    approval_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    org = await db.get(Organization, org_id)
+    if org is None:
+        raise HTTPException(404, "org not found")
+    _require_founder(user, org)
+    target = str(approval_id or "").strip()
+    if not target:
+        raise HTTPException(400, "approval_id required")
+    current = _preapproval_payload(org)
+    approvals = [r for r in current["approvals"] if str(r.get("id") or "").strip() != target]
+    if len(approvals) == len(current["approvals"]):
+        raise HTTPException(404, "approval not found")
+    return await _save_preapprovals(
+        db=db, org=org, user=user, preapproved_actions=current["preapproved_actions"], approvals=approvals
+    )

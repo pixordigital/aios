@@ -95,3 +95,102 @@ async def test_close_invalid_status(auth_client):
     incident_id = created.json()["id"]
     resp = await auth_client.post(f"/api/security/incidents/{incident_id}/close", json={"status": "banana"})
     assert resp.status_code == 400, resp.text
+
+
+async def _make_founder(test_org, test_user, test_db_session):
+    test_org.extra_data = {**(test_org.extra_data or {}), "founder_user_id": test_user.id}
+    await test_db_session.commit()
+    await test_db_session.refresh(test_org)
+
+
+async def test_preapprovals_require_founder(auth_client):
+    resp = await auth_client.get("/api/security/preapprovals")
+    assert resp.status_code == 403, resp.text
+
+
+async def test_preapprovals_crud_and_respond_authorization(auth_client, test_org, test_user, test_db_session):
+    await _make_founder(test_org, test_user, test_db_session)
+
+    got = await auth_client.get("/api/security/preapprovals")
+    assert got.status_code == 200, got.text
+    body = got.json()
+    assert body["preapproved_actions"] == []
+    assert body["approvals"] == []
+    assert "shared app DB" in body["storage"]
+
+    put = await auth_client.put(
+        "/api/security/preapprovals",
+        json={"preapproved_actions": ["rotate_credential"], "approvals": [{"id": "a1", "action": "disable_integration", "approved": True, "ticket": "SEC-1"}]},
+    )
+    assert put.status_code == 200, put.text
+    pbody = put.json()
+    assert pbody["preapproved_actions"] == ["rotate_credential"]
+    assert pbody["approvals"][0]["ticket"] == "SEC-1"
+
+    add = await auth_client.post("/api/security/preapprovals/actions", json={"action": "isolate_container"})
+    assert add.status_code == 200, add.text
+    assert "isolate_container" in add.json()["preapproved_actions"]
+
+    rm = await auth_client.delete("/api/security/preapprovals/actions/isolate_container")
+    assert rm.status_code == 200, rm.text
+    assert "isolate_container" not in rm.json()["preapproved_actions"]
+
+    rec = await auth_client.post(
+        "/api/security/preapprovals/approvals",
+        json={"id": "a2", "action": "restrict_db_route", "approved": True},
+    )
+    assert rec.status_code == 200, rec.text
+    assert any(r["id"] == "a2" for r in rec.json()["approvals"])
+
+    del_rec = await auth_client.delete("/api/security/preapprovals/approvals/a2")
+    assert del_rec.status_code == 200, del_rec.text
+    assert all(r.get("id") != "a2" for r in del_rec.json()["approvals"])
+
+    created = await auth_client.post("/api/security/incidents", json={"title": "Cred leak", "severity": "high"})
+    incident_id = created.json()["id"]
+    resp = await auth_client.post(
+        f"/api/security/incidents/{incident_id}/respond",
+        json={"action": "rotate_credential"},
+    )
+    assert resp.status_code == 200, resp.text
+    rbody = resp.json()
+    assert rbody["allowed"] is True
+    assert rbody["level"] == "conditional"
+    assert rbody["preapproval_source"] == "security_policy.preapproved_actions"
+
+    events = await auth_client.get("/api/security/events?event_type=security.policy.preapprovals_updated")
+    assert events.status_code == 200, events.text
+    assert len(events.json()["items"]) >= 1
+
+
+async def test_preapprovals_reject_unknown_action(auth_client, test_org, test_user, test_db_session):
+    await _make_founder(test_org, test_user, test_db_session)
+    bad = await auth_client.post("/api/security/preapprovals/actions", json={"action": "launch_missiles"})
+    assert bad.status_code == 400, bad.text
+    bad_put = await auth_client.put("/api/security/preapprovals", json={"preapproved_actions": ["delete_data_typo"]})
+    assert bad_put.status_code == 400, bad_put.text
+
+
+async def test_preapproval_record_authorizes_respond(auth_client, test_org, test_user, test_db_session):
+    await _make_founder(test_org, test_user, test_db_session)
+    rec = await auth_client.post(
+        "/api/security/preapprovals/approvals",
+        json={"id": "rec-1", "action": "disable_integration", "approved": True, "ticket": "SEC-42"},
+    )
+    assert rec.status_code == 200, rec.text
+
+    created = await auth_client.post("/api/security/incidents", json={"title": "Integration anomaly", "severity": "medium"})
+    incident_id = created.json()["id"]
+    resp = await auth_client.post(f"/api/security/incidents/{incident_id}/respond", json={"action": "disable_integration"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["allowed"] is True
+    assert body["preapproval_source"] == "rec-1"
+
+    rm = await auth_client.delete("/api/security/preapprovals/approvals/rec-1")
+    assert rm.status_code == 200, rm.text
+    created2 = await auth_client.post("/api/security/incidents", json={"title": "Integration anomaly 2", "severity": "medium"})
+    incident2 = created2.json()["id"]
+    resp2 = await auth_client.post(f"/api/security/incidents/{incident2}/respond", json={"action": "disable_integration"})
+    assert resp2.status_code == 200, resp2.text
+    assert resp2.json()["allowed"] is False
