@@ -89,6 +89,7 @@ class ToolEngine:
         actor_departments: set[str] | None = None,
         is_founder: bool = False,
         granted_record_ids: set[str] | None = None,
+        actor_resolver=None,
     ):
         self.tools: dict[str, Any] = {}
         self.org_id = org_id or ""
@@ -100,6 +101,10 @@ class ToolEngine:
         self.actor_departments = set(actor_departments or [])
         self.is_founder = bool(is_founder)
         self.granted_record_ids = set(granted_record_ids or [])
+        # Optional async/sync callback returning dict with actor keys.
+        # Used lazily before execution when injected context is absent.
+        self.actor_resolver = actor_resolver
+        self._actor_resolved = False
         self.missing: list[str] = []
         for name in tool_names:
             # A tool name that no longer exists must not take the whole agent
@@ -122,6 +127,60 @@ class ToolEngine:
 
     def schemas(self) -> list[dict]:
         return [tool.openai_schema() for tool in self.tools.values()]
+
+    def set_actor_context(
+        self,
+        *,
+        actor_user_id: str | None = None,
+        actor_departments: set[str] | None = None,
+        is_founder: bool | None = None,
+        granted_record_ids: set[str] | None = None,
+        resolved: bool = True,
+    ) -> None:
+        """Inject best-effort actor/grant context after construction.
+
+        Knowledge tools fail closed when unresolved; callers may set context from
+        request, agent extra_data hints, or resolved user identity.
+        """
+        if actor_user_id is not None:
+            self.actor_user_id = actor_user_id or ""
+        if actor_departments is not None:
+            self.actor_departments = set(actor_departments or [])
+        if is_founder is not None:
+            self.is_founder = bool(is_founder)
+        if granted_record_ids is not None:
+            self.granted_record_ids = set(granted_record_ids or [])
+        self._actor_resolved = bool(resolved)
+
+    def _has_actor_context(self) -> bool:
+        return bool(
+            self.actor_user_id
+            or self.actor_departments
+            or self.is_founder
+            or self.granted_record_ids
+        )
+
+    async def _ensure_actor_context(self) -> None:
+        if self._actor_resolved or self._has_actor_context() or not self.actor_resolver:
+            self._actor_resolved = self._actor_resolved or self._has_actor_context()
+            return
+        try:
+            resolved = self.actor_resolver()
+            if asyncio.iscoroutine(resolved):
+                resolved = await resolved
+            if isinstance(resolved, dict):
+                self.set_actor_context(
+                    actor_user_id=resolved.get("actor_user_id", self.actor_user_id),
+                    actor_departments=set(resolved.get("actor_departments") or []),
+                    is_founder=bool(resolved.get("is_founder", self.is_founder)),
+                    granted_record_ids=set(resolved.get("granted_record_ids") or []),
+                    resolved=True,
+                )
+            else:
+                self._actor_resolved = True
+        except Exception:
+            logger.debug("actor_resolver failed; keeping fail-closed actor context", exc_info=True)
+            self._actor_resolved = True
 
     async def execute(self, name: str, args_json: str) -> str:
         tool = self.tools.get(name)
@@ -152,6 +211,7 @@ class ToolEngine:
         _TOOL_CALL_TRACKING[name] = _TOOL_CALL_TRACKING.get(name, 0) + 1
 
         last_err = None
+        await self._ensure_actor_context()
         # Org/actor context for tools. Knowledge tools must fail closed when
         # actor context is absent; callers may inject explicit actor attrs.
         try:
@@ -161,6 +221,7 @@ class ToolEngine:
             tool._actor_departments = set(self.actor_departments)
             tool._is_founder = bool(self.is_founder)
             tool._granted_record_ids = set(self.granted_record_ids)
+            tool._actor_resolved = bool(self._actor_resolved or self._has_actor_context())
         except Exception:
             pass
         # A retry is only safe for tools whose effect is idempotent. Retrying

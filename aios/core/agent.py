@@ -191,10 +191,12 @@ class AgentRuntime:
             from aios.core.providers import OpenRouterProvider
 
             self.llm = OpenRouterProvider()
+        actor_ctx = self._actor_context_from_agent(agent)
         self.tool_engine = ToolEngine(
             agent.tools or [],
             org_id=getattr(agent, "org_id", "") or "",
             agent_id=getattr(agent, "id", "") or "",
+            **actor_ctx,
         )
         self.memory = MemoryManager(agent.id, llm_provider=self.llm)
         # governance
@@ -1012,6 +1014,51 @@ class AgentRuntime:
         from aios.core.skill_loader import skill_loader
         skills = skill_loader.load_skills(project_path)
         return skill_loader.format_skills_for_context(skills)
+
+    @staticmethod
+    def _actor_context_from_agent(agent: AgentModel) -> dict[str, Any]:
+        """Best-effort actor hints from agent config.
+
+        Fail-closed remains default: only explicit hints are injected. Runtime
+        cannot safely resolve arbitrary user grants in sync init.
+        """
+        extra = getattr(agent, "extra_data", None) or {}
+        gov = getattr(agent, "governance_config", None) or {}
+        candidates: list[dict] = []
+        for src in (
+            extra.get("actor_context"),
+            extra.get("icm_actor"),
+            gov.get("actor_context"),
+            gov.get("icm_actor"),
+        ):
+            if isinstance(src, dict):
+                candidates.append(src)
+        icm = extra.get("icm")
+        if isinstance(icm, dict):
+            for k in ("actor_context", "actor"):
+                src = icm.get(k)
+                if isinstance(src, dict):
+                    candidates.append(src)
+
+        actor_user_id = ""
+        actor_departments: set[str] = set()
+        granted_record_ids: set[str] = set()
+        is_founder = False
+        found = False
+        for src in candidates:
+            found = True
+            actor_user_id = actor_user_id or str(src.get("actor_user_id") or src.get("user_id") or "")
+            actor_departments |= {str(d) for d in (src.get("actor_departments") or src.get("departments") or []) if d}
+            granted_record_ids |= {str(r) for r in (src.get("granted_record_ids") or src.get("granted_records") or []) if r}
+            is_founder = is_founder or bool(src.get("is_founder", False))
+        if not found:
+            return {}
+        return {
+            "actor_user_id": actor_user_id,
+            "actor_departments": actor_departments,
+            "is_founder": is_founder,
+            "granted_record_ids": granted_record_ids,
+        }
 
     def _org_extra(self) -> dict | None:
         extra = getattr(self.agent, "extra_data", None)

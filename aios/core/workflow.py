@@ -668,7 +668,15 @@ class WorkflowEngine:
             # one statement early — UnboundLocalError on every tool node in
             # every workflow.
             org = shared.get("org_id") or shared.get("initial_input_org") or ""
-            engine = ToolEngine([node.tool_name], org_id=org or "")
+            actor_ctx = shared.get("actor_context") if isinstance(shared.get("actor_context"), dict) else {}
+            engine = ToolEngine(
+                [node.tool_name],
+                org_id=org or "",
+                actor_user_id=str(actor_ctx.get("actor_user_id") or ""),
+                actor_departments=set(actor_ctx.get("actor_departments") or []),
+                is_founder=bool(actor_ctx.get("is_founder", False)),
+                granted_record_ids=set(actor_ctx.get("granted_record_ids") or []),
+            )
             args_json = json.dumps(rendered_args if isinstance(rendered_args, dict) else (node.tool_args or {}))
             sem = _get_org_semaphore(org or "global")
             _tool_trial = 0

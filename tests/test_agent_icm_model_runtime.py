@@ -136,3 +136,110 @@ async def test_runtime_registry_required_fail_closed_on_load_failure(tmp_path, m
     with pytest.raises(Exception) as exc:
         rt._assert_model_eligible("openai/gpt-4o", agent.extra_data, entries)
     assert "Model policy blocked" in str(exc.value)
+
+
+def test_agent_runtime_injects_actor_context_hints(tmp_path, monkeypatch):
+    from aios.config import settings
+    from aios.icm.team_workspaces import seed_team_workspaces
+
+    seed_team_workspaces(tmp_path, "org-1", workspaces=["sales_ops"])
+    monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    agent = _agent(extra_data={
+        "icm": {"workspace_id": "sales_ops", "stage_id": "sdr_prospecting"},
+        "actor_context": {
+            "actor_user_id": "u-1",
+            "actor_departments": ["sales"],
+            "is_founder": False,
+            "granted_record_ids": ["kr-1"],
+        },
+    })
+    rt = AgentRuntime(agent)
+    assert rt.tool_engine.actor_user_id == "u-1"
+    assert rt.tool_engine.actor_departments == {"sales"}
+    assert rt.tool_engine.granted_record_ids == {"kr-1"}
+    assert rt.tool_engine.is_founder is False
+
+
+@pytest.mark.asyncio
+async def test_tool_engine_actor_resolver_used_when_unresolved(monkeypatch):
+    from aios.core.tools import ToolEngine, TOOL_REGISTRY
+    import aios.core.tools as tools_mod
+
+    class DummyTool:
+        @classmethod
+        def openai_schema(cls):
+            return {"type": "function", "function": {"name": "dummy_actor_resolver", "parameters": {"type": "object"}}}
+
+        async def run(self):
+            return {
+                "actor_user_id": getattr(self, "_actor_user_id", ""),
+                "depts": sorted(getattr(self, "_actor_departments", [])),
+            }
+
+    TOOL_REGISTRY["dummy_actor_resolver"] = {
+        "code_reference": "aios.tools.calculator.DummyActorResolver",
+        "description": "d",
+    }
+    monkeypatch.setattr(tools_mod, "_ALLOWED_MODULES", set(tools_mod._ALLOWED_MODULES) | {"aios.tools.calculator"})
+
+    async def resolver():
+        return {"actor_user_id": "u-res", "actor_departments": ["sales"], "granted_record_ids": []}
+
+    engine = ToolEngine([], org_id="org-1", agent_id="agent-1", actor_resolver=resolver)
+    engine.tools["dummy_actor_resolver"] = DummyTool()
+    out = await engine.execute("dummy_actor_resolver", "{}")
+    import json
+    data = json.loads(out)
+    assert data["actor_user_id"] == "u-res"
+    assert data["depts"] == ["sales"]
+
+
+@pytest.mark.asyncio
+async def test_tool_engine_execute_stamps_actor_context(monkeypatch):
+    from aios.core.tools import ToolEngine, TOOL_REGISTRY
+
+    class DummyTool:
+        name = "dummy_actor_tool"
+        description = "d"
+
+        @classmethod
+        def openai_schema(cls):
+            return {"type": "function", "function": {"name": "dummy_actor_tool", "parameters": {"type": "object"}}}
+
+        async def run(self):
+            return {
+                "actor_user_id": getattr(self, "_actor_user_id", ""),
+                "depts": sorted(getattr(self, "_actor_departments", [])),
+                "granted": sorted(getattr(self, "_granted_record_ids", [])),
+                "resolved": getattr(self, "_actor_resolved", False),
+            }
+
+    TOOL_REGISTRY["dummy_actor_tool"] = {
+        "code_reference": "aios.tools.dynamic.DummyActorTool",
+        "description": "d",
+    }
+    engine = ToolEngine.__new__(ToolEngine)
+    engine.tools = {"dummy_actor_tool": DummyTool()}
+    engine.org_id = "org-1"
+    engine.agent_id = "agent-1"
+    engine.actor_user_id = ""
+    engine.actor_departments = set()
+    engine.is_founder = False
+    engine.granted_record_ids = set()
+    engine.actor_resolver = None
+    engine._actor_resolved = False
+    engine.missing = []
+
+    # avoid allow-list/module checks by patching registry/module gate minimally
+    monkeypatch.setitem(TOOL_REGISTRY["dummy_actor_tool"], "code_reference", "aios.tools.calculator.DummyActorTool")
+    import aios.core.tools as tools_mod
+    monkeypatch.setattr(tools_mod, "_ALLOWED_MODULES", set(tools_mod._ALLOWED_MODULES) | {"aios.tools.calculator"})
+
+    engine.set_actor_context(actor_user_id="u-9", actor_departments={"ops"}, granted_record_ids={"kr9"})
+    out = await engine.execute("dummy_actor_tool", "{}")
+    import json
+    data = json.loads(out)
+    assert data["actor_user_id"] == "u-9"
+    assert data["depts"] == ["ops"]
+    assert data["granted"] == ["kr9"]
+    assert data["resolved"] is True
