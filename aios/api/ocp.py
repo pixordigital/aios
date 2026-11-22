@@ -9,6 +9,8 @@ from aios.api.deps import get_current_user, get_org_id
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization
 from aios.governance.ocp import (
+    APPROVAL_BRIDGE_REF_TYPES,
+    APPROVAL_BRIDGE_STATUSES,
     DEFAULT_DEPARTMENTS,
     AuthorityGrant,
     DecisionRecord,
@@ -18,6 +20,7 @@ from aios.governance.ocp import (
     OrgGoal,
     SharedTask,
     TransitionError,
+    approval_bridge_metadata,
     authorize,
     decide,
     decision_level,
@@ -123,12 +126,7 @@ def _decision(r: DecisionRecord) -> dict:
         "linked_task_ids": list(r.linked_task_ids or []),
         "external_approvals": external_approvals,
         # Pragmatic bridge status only; NOT full PendingAction/ApprovalManager unification.
-        "approval_bridge": {
-            "mode": "external_refs_only",
-            "unified": False,
-            "external_approval_count": len(external_approvals),
-            "limitation": "PendingAction/ApprovalManager↔DecisionRecord unification deferred; refs stored in justification._external_approvals",
-        },
+        "approval_bridge": approval_bridge_metadata(r),
         "confidentiality": r.confidentiality,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
@@ -194,7 +192,13 @@ async def get_ocp_policy(
         "mode": "strict_default_deny" if policy["strict_default_deny"] else "policy_if_configured",
         "approval_bridge": {
             "unified": False,
-            "limitation": "PendingAction/ApprovalManager↔DecisionRecord unification deferred; external refs only",
+            "mode": "external_refs_only",
+            "ref_types": list(APPROVAL_BRIDGE_REF_TYPES),
+            "statuses": list(APPROVAL_BRIDGE_STATUSES),
+            "limitation": (
+                "PendingAction/ApprovalManager↔DecisionRecord unification deferred; "
+                "external refs only; no core approval ownership"
+            ),
         },
     }
 
@@ -568,9 +572,24 @@ async def task_approval_links(
         linked.append({
             "decision_id": r.id,
             "decision_status": r.status,
+            "approval_bridge": approval_bridge_metadata(r),
             "external_approvals": list((r.justification or {}).get("_external_approvals") or []),
         })
-    return {"task_id": task_id, "items": linked}
+    total_refs = sum(len(i["external_approvals"]) for i in linked)
+    return {
+        "task_id": task_id,
+        "items": linked,
+        "approval_bridge": {
+            "unified": False,
+            "mode": "external_refs_only",
+            "linked_decision_count": len(linked),
+            "external_approval_count": total_refs,
+            "limitation": (
+                "PendingAction/ApprovalManager↔DecisionRecord unification deferred; "
+                "read-only bridge over decision justification refs"
+            ),
+        },
+    }
 
 
 # --- Goals -------------------------------------------------------------------
@@ -757,7 +776,7 @@ async def link_decision_approval(
     """Bridge external/core approval refs into DecisionRecord justification.
 
     Pragmatic, no core approval ownership change. ref_type examples:
-    pending_action, approval_manager, external_ticket.
+    pending_action, approval_manager, external_ticket, manual.
     """
     record = await db.get(DecisionRecord, decision_id)
     if record is None or record.org_id != org_id:
@@ -775,15 +794,40 @@ async def link_decision_approval(
             ref_id=ref_id,
             status=(body.get("status") or "").strip(),
             note=(body.get("note") or "").strip(),
+            linked_by_type="human",
+            linked_by_id=user.id,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    normalized_status = (record.justification.get("_external_approvals") or [{}])[-1].get("status", "")
     record_org_event(db, org_id=org_id, event_type="decision.approval_linked", actor_type="human", actor_id=user.id,
                      entity_type="decision_record", entity_id=record.id,
-                     payload={"ref_type": ref_type, "ref_id": ref_id, "status": (body.get("status") or "").strip()})
+                     payload={"ref_type": ref_type.strip().lower(), "ref_id": ref_id, "status": normalized_status})
     await db.commit()
     await db.refresh(record)
     return _decision(record)
+
+
+@router.get("/decisions/{decision_id}/approval-bridge")
+async def get_decision_approval_bridge(
+    decision_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Read-only observability for decision approval bridge refs.
+
+    Explicitly not PendingAction/ApprovalManager↔DecisionRecord unification.
+    """
+    record = await db.get(DecisionRecord, decision_id)
+    if record is None or record.org_id != org_id:
+        raise HTTPException(404, "decision not found")
+    external_approvals = list((record.justification or {}).get("_external_approvals") or [])
+    return {
+        "decision_id": record.id,
+        "decision_status": record.status,
+        "approval_bridge": approval_bridge_metadata(record),
+        "external_approvals": external_approvals,
+    }
 
 
 @router.post("/decisions/{decision_id}/execute")

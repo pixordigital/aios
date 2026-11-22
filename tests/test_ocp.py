@@ -90,17 +90,37 @@ def test_ocp_strict_default_deny_flag():
 
 
 def test_link_external_approval_bridge():
-    from aios.governance.ocp import link_external_approval
+    from aios.governance.ocp import approval_bridge_metadata, link_external_approval
 
     record = DecisionRecord(org_id="o", title="t", justification={"proposal": "p"})
-    link_external_approval(record, ref_type="pending_action", ref_id="pa1", status="approved", note="ok")
+    link_external_approval(
+        record,
+        ref_type="pending_action",
+        ref_id="pa1",
+        status="approved",
+        note="ok",
+        linked_by_type="human",
+        linked_by_id="u1",
+    )
     refs = record.justification["_external_approvals"]
     assert len(refs) == 1
     assert refs[0]["ref_type"] == "pending_action"
     assert refs[0]["ref_id"] == "pa1"
     assert refs[0]["status"] == "approved"
+    assert refs[0]["linked_by_type"] == "human"
+    assert refs[0]["linked_by_id"] == "u1"
+    meta = approval_bridge_metadata(record)
+    assert meta["unified"] is False
+    assert meta["mode"] == "external_refs_only"
+    assert meta["external_approval_count"] == 1
+    assert meta["statuses"] == ["approved"]
+    assert meta["ref_types"] == ["pending_action"]
     with pytest.raises(ValueError, match="ref_type and ref_id"):
         link_external_approval(record, ref_type="", ref_id="x")
+    with pytest.raises(ValueError, match="invalid approval bridge ref_type"):
+        link_external_approval(record, ref_type="unknown_type", ref_id="x")
+    with pytest.raises(ValueError, match="invalid approval bridge status"):
+        link_external_approval(record, ref_type="pending_action", ref_id="x", status="bogus")
 
 
 def test_decision_levels_and_founder_gate():

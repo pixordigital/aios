@@ -158,11 +158,35 @@ async def test_decision_list_get_and_external_approval_link(auth_client):
     refs = body["external_approvals"]
     assert refs and refs[0]["ref_type"] == "pending_action"
     assert refs[0]["ref_id"] == "pa-1"
+    assert refs[0]["linked_by_type"] == "human"
     bridge = body["approval_bridge"]
     assert bridge["unified"] is False
     assert bridge["mode"] == "external_refs_only"
     assert bridge["external_approval_count"] == 1
+    assert bridge["statuses"] == ["approved"]
+    assert bridge["ref_types"] == ["pending_action"]
     assert "PendingAction/ApprovalManager" in bridge["limitation"]
+
+    bad_type = await auth_client.post(
+        f"/api/ocp/decisions/{decision_id}/link-approval",
+        json={"ref_type": "bogus", "ref_id": "x"},
+    )
+    assert bad_type.status_code == 400
+    assert "invalid approval bridge ref_type" in bad_type.json()["detail"]
+    bad_status = await auth_client.post(
+        f"/api/ocp/decisions/{decision_id}/link-approval",
+        json={"ref_type": "pending_action", "ref_id": "x", "status": "bogus"},
+    )
+    assert bad_status.status_code == 400
+    assert "invalid approval bridge status" in bad_status.json()["detail"]
+
+    bridge_resp = await auth_client.get(f"/api/ocp/decisions/{decision_id}/approval-bridge")
+    assert bridge_resp.status_code == 200, bridge_resp.text
+    bridge_body = bridge_resp.json()
+    assert bridge_body["decision_id"] == decision_id
+    assert bridge_body["approval_bridge"]["unified"] is False
+    assert bridge_body["approval_bridge"]["external_approval_count"] == 1
+    assert len(bridge_body["external_approvals"]) == 1
 
 
 async def test_task_approval_links_read_only_bridge(auth_client, test_db_session):
@@ -180,10 +204,15 @@ async def test_task_approval_links_read_only_bridge(auth_client, test_db_session
     )
     resp = await auth_client.get(f"/api/ocp/tasks/{task_id}/approval-links")
     assert resp.status_code == 200, resp.text
-    items = resp.json()["items"]
+    body = resp.json()
+    items = body["items"]
     assert len(items) == 1
     assert items[0]["decision_id"] == decision_id
     assert items[0]["external_approvals"][0]["ref_id"] == "am-1"
+    assert items[0]["approval_bridge"]["unified"] is False
+    assert body["approval_bridge"]["unified"] is False
+    assert body["approval_bridge"]["linked_decision_count"] == 1
+    assert body["approval_bridge"]["external_approval_count"] == 1
 
 
 async def test_ocp_strict_default_deny_blocks_ungranted_action(
@@ -215,9 +244,12 @@ async def test_ocp_strict_default_deny_blocks_ungranted_action(
 async def test_ocp_policy_get_put_founder_only(auth_client, test_db_session, test_org, test_user):
     resp = await auth_client.get("/api/ocp/policy")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["strict_default_deny"] is False
-    assert resp.json()["mode"] == "policy_if_configured"
-    assert resp.json()["approval_bridge"]["unified"] is False
+    body = resp.json()
+    assert body["strict_default_deny"] is False
+    assert body["mode"] == "policy_if_configured"
+    assert body["approval_bridge"]["unified"] is False
+    assert body["approval_bridge"]["mode"] == "external_refs_only"
+    assert "pending_action" in body["approval_bridge"]["ref_types"]
 
     resp = await auth_client.put("/api/ocp/policy", json={"strict_default_deny": True})
     assert resp.status_code == 403

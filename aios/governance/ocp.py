@@ -217,6 +217,10 @@ DECISION_PROTOCOL_FIELDS = (
 
 DECISION_STATUSES = ("proposed", "under_review", "approved", "rejected", "executing", "completed", "cancelled")
 
+# Pragmatic bridge only — NOT PendingAction/ApprovalManager unification.
+APPROVAL_BRIDGE_REF_TYPES = ("pending_action", "approval_manager", "external_ticket", "manual")
+APPROVAL_BRIDGE_STATUSES = ("pending", "approved", "rejected", "cancelled", "unknown")
+
 
 class DecisionRecord(Base, TimestampMixin):
     """One shared decision capability. No parallel approval systems."""
@@ -404,6 +408,35 @@ def decide(record: DecisionRecord, *, approve: bool, founder_id: str) -> Decisio
     return record
 
 
+def _normalize_approval_bridge_status(status: str) -> str:
+    normalized = (status or "").strip().lower()
+    if not normalized:
+        return "unknown"
+    if normalized not in APPROVAL_BRIDGE_STATUSES:
+        allowed = ", ".join(APPROVAL_BRIDGE_STATUSES)
+        raise ValueError(f"invalid approval bridge status: {status!r}; allowed: {allowed}")
+    return normalized
+
+
+def approval_bridge_metadata(record: DecisionRecord) -> dict:
+    """Observability-only bridge metadata. Explicitly not core unification."""
+    refs = list((record.justification or {}).get("_external_approvals") or [])
+    statuses = sorted({str(r.get("status") or "unknown") for r in refs})
+    ref_types = sorted({str(r.get("ref_type") or "") for r in refs if r.get("ref_type")})
+    return {
+        "mode": "external_refs_only",
+        "unified": False,
+        "external_approval_count": len(refs),
+        "statuses": statuses,
+        "ref_types": ref_types,
+        "latest_linked_at": refs[-1].get("linked_at") if refs else None,
+        "limitation": (
+            "PendingAction/ApprovalManager↔DecisionRecord unification deferred; "
+            "refs stored in justification._external_approvals; no core approval ownership"
+        ),
+    }
+
+
 def link_external_approval(
     record: DecisionRecord,
     *,
@@ -411,6 +444,8 @@ def link_external_approval(
     ref_id: str,
     status: str = "",
     note: str = "",
+    linked_by_type: str = "",
+    linked_by_id: str = "",
 ) -> DecisionRecord:
     """Pragmatic bridge: attach external approval refs without schema change.
 
@@ -418,19 +453,25 @@ def link_external_approval(
     This avoids core approval/runtime ownership; full PendingAction/DecisionRecord
     unification remains deferred.
     """
-    ref_type = (ref_type or "").strip()
+    ref_type = (ref_type or "").strip().lower()
     ref_id = (ref_id or "").strip()
     if not ref_type or not ref_id:
         raise ValueError("ref_type and ref_id are required")
+    if ref_type not in APPROVAL_BRIDGE_REF_TYPES:
+        allowed = ", ".join(APPROVAL_BRIDGE_REF_TYPES)
+        raise ValueError(f"invalid approval bridge ref_type: {ref_type!r}; allowed: {allowed}")
+    normalized_status = _normalize_approval_bridge_status(status)
     justification = dict(record.justification or {})
     refs = list(justification.get("_external_approvals") or [])
     refs.append(
         {
             "ref_type": ref_type,
             "ref_id": ref_id,
-            "status": (status or "").strip(),
+            "status": normalized_status,
             "note": (note or "").strip(),
             "linked_at": _now().isoformat(),
+            "linked_by_type": (linked_by_type or "").strip(),
+            "linked_by_id": (linked_by_id or "").strip(),
         }
     )
     justification["_external_approvals"] = refs
