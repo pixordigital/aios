@@ -2,12 +2,62 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from aios.api.deps import get_current_user, get_org_id
 from aios.core.swarm import swarm
-from aios.db.models import User
+from aios.db.backend import db_session
+from aios.db.models import Agent, Conversation, SwarmTask, Team, User, team_agents
 
 router = APIRouter(prefix="/api/swarms", tags=["swarms"])
+
+
+async def _team_in_org(team_id: str, org_id: str) -> bool:
+    async with db_session() as db:
+        return (
+            await db.execute(select(Team.id).where(Team.id == team_id, Team.org_id == org_id))
+        ).scalar_one_or_none() is not None
+
+
+async def _agent_in_team_org(agent_id: str, team_id: str, org_id: str) -> bool:
+    async with db_session() as db:
+        return (
+            await db.execute(
+                select(team_agents.c.agent_id)
+                .join(Agent, Agent.id == team_agents.c.agent_id)
+                .where(
+                    team_agents.c.team_id == team_id,
+                    team_agents.c.agent_id == agent_id,
+                    Agent.org_id == org_id,
+                )
+            )
+        ).scalar_one_or_none() is not None
+
+
+async def _conversation_in_team_org(conversation_id: str, team_id: str, org_id: str) -> bool:
+    async with db_session() as db:
+        conv = await db.get(Conversation, conversation_id)
+        if not conv or conv.org_id != org_id:
+            return False
+        return not conv.team_id or conv.team_id == team_id
+
+
+async def _depends_on_in_team_org(depends_on: list[str], team_id: str, org_id: str) -> bool:
+    deps = [d for d in depends_on if isinstance(d, str) and d]
+    if not deps:
+        return True
+    async with db_session() as db:
+        rows = (
+            await db.execute(
+                select(SwarmTask.id, SwarmTask.task_id).where(
+                    SwarmTask.team_id == team_id,
+                    SwarmTask.org_id == org_id,
+                    (SwarmTask.id.in_(deps) | SwarmTask.task_id.in_(deps)),
+                )
+            )
+        ).all()
+    known = {v for row in rows for v in row if v}
+    return all(d in known for d in deps)
 
 
 # ── Config ──
@@ -57,7 +107,7 @@ async def update_swarm_config(
 # ── Tasks ──
 
 class DispatchRequest(BaseModel):
-    task_type: str = Field(default="agent_call")
+    task_type: str = Field(default="agent_call", min_length=1, max_length=64)
     payload: dict = Field(default_factory=dict)
     priority: int = 0
     conversation_id: str | None = None
@@ -73,10 +123,24 @@ async def dispatch_task(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
+    task_type = body.task_type.strip()
+    if not task_type:
+        raise HTTPException(400, "task_type required")
+    if not await _team_in_org(team_id, org_id):
+        raise HTTPException(404, "team not found")
+    if body.agent_id and not await _agent_in_team_org(body.agent_id, team_id, org_id):
+        raise HTTPException(404, "agent not found in team")
+    if body.conversation_id and not await _conversation_in_team_org(body.conversation_id, team_id, org_id):
+        raise HTTPException(404, "conversation not found")
+    deps = [d for d in body.depends_on if isinstance(d, str) and d]
+    if body.depends_on and not deps:
+        raise HTTPException(400, "depends_on must contain task ids")
+    if not await _depends_on_in_team_org(deps, team_id, org_id):
+        raise HTTPException(404, "dependency not found")
     task = await swarm.dispatch(
-        team_id=team_id, org_id=org_id, task_type=body.task_type,
+        team_id=team_id, org_id=org_id, task_type=task_type,
         payload=body.payload, priority=body.priority,
-        conversation_id=body.conversation_id, depends_on=body.depends_on,
+        conversation_id=body.conversation_id, depends_on=deps,
         agent_id=body.agent_id, idempotency_key=body.idempotency_key,
     )
     if not task:
@@ -89,6 +153,8 @@ async def _task_action_conflict(
 ) -> HTTPException:
     existing = await swarm.get_task(task_id, org_id=org_id, team_id=team_id)
     if not existing:
+        if not await _team_in_org(team_id, org_id):
+            return HTTPException(404, "team not found")
         return HTTPException(404, "task not found")
     if existing.status not in actionable:
         return HTTPException(409, f"task not {action}: status={existing.status}")
@@ -104,9 +170,16 @@ async def claim_task(
 ):
     task = await swarm.claim(task_id, agent_id, org_id, team_id=team_id)
     if not task:
-        raise await _task_action_conflict(
-            team_id, task_id, org_id, action="claimable", actionable={"queued", "assigned"}
-        )
+        existing = await swarm.get_task(task_id, org_id=org_id, team_id=team_id)
+        if not existing:
+            if not await _team_in_org(team_id, org_id):
+                raise HTTPException(404, "team not found")
+            raise HTTPException(404, "task not found")
+        if existing.status not in {"queued", "assigned"}:
+            raise HTTPException(409, f"task not claimable: status={existing.status}")
+        if not await _agent_in_team_org(agent_id, team_id, org_id):
+            raise HTTPException(404, "agent not found in team")
+        raise HTTPException(404, "task not found or not claimable")
     return task
 
 
@@ -176,6 +249,10 @@ async def put_shared_memory(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
+    if not await _team_in_org(team_id, org_id):
+        raise HTTPException(404, "team not found")
+    if body.sender_id and not await _agent_in_team_org(body.sender_id, team_id, org_id):
+        raise HTTPException(404, "agent not found in team")
     msg = await swarm.put_shared(
         team_id=team_id, org_id=org_id, key=body.key,
         content=body.content, sender_id=body.sender_id,
@@ -194,5 +271,7 @@ async def get_shared_memory(
 ):
     msg = await swarm.get_shared(team_id=team_id, key=key, org_id=org_id)
     if not msg:
+        if not await _team_in_org(team_id, org_id):
+            raise HTTPException(404, "team not found")
         raise HTTPException(404, "memory key not found or expired")
     return msg
