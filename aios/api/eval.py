@@ -6,7 +6,7 @@ import time
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from aios.api.deps import get_current_user, get_org_id
+from aios.api.deps import get_current_user, get_org_id, verify_org_access_async
 from aios.core.agent import AgentRuntime
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Agent
@@ -41,8 +41,9 @@ async def eval_agent(
     user=Depends(get_current_user),
 ):
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id, agent, db=db, actor_id=user.id, source="api.eval.eval_agent"
+    )
     runtime = AgentRuntime(agent)
     results = []
     for case in body.cases[:20]:
@@ -123,8 +124,9 @@ async def eval_history(
     from aios.db.models import EvalRun
 
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id, agent, db=db, actor_id=user.id, source="api.eval.eval_history"
+    )
     rows = (
         (
             await db.execute(
@@ -160,8 +162,9 @@ async def create_dataset(
     from aios.db.models import Dataset
 
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id, agent, db=db, actor_id=user.id, source="api.eval.create_dataset"
+    )
     ds = Dataset(
         agent_id=agent_id,
         org_id=org_id,
@@ -183,8 +186,9 @@ async def upload_dataset_csv(
     user=Depends(get_current_user),
 ):
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id, agent, db=db, actor_id=user.id, source="api.eval.upload_dataset_csv"
+    )
     raw = await file.read()
     try:
         text = raw.decode("utf-8")
@@ -222,14 +226,16 @@ async def list_datasets(
     agent_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     from sqlalchemy import select
 
     from aios.db.models import Dataset
 
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id, agent, db=db, actor_id=user.id, source="api.eval.list_datasets"
+    )
     rows = (
         (await db.execute(select(Dataset).where(Dataset.agent_id == agent_id)))
         .scalars()

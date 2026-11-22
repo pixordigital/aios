@@ -3,7 +3,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from aios.api.deps import get_current_user, get_org_id
+from aios.api.deps import get_current_user, get_org_id, verify_org_access_async
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Agent
 
@@ -70,8 +70,9 @@ async def ab_test_agent(
     user=Depends(get_current_user),
 ):
     agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    await verify_org_access_async(
+        org_id, agent, db=db, actor_id=user.id, source="api.promptlab.ab_test_agent"
+    )
     prompt_a = body.get("prompt_a") or agent.system_prompt
     prompt_b = body.get("prompt_b")
     if not prompt_b:
