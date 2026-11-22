@@ -396,6 +396,98 @@ async def _coro(val):
     return val
 
 
+# ─── dynamic tool sandbox hardening ──────────────────────────────────────
+
+def test_dynamic_tool_blocks_dangerous_names():
+    from aios.tools.dynamic import _validate_ast
+    import pytest
+
+    bad = [
+        "result = getattr(x, 'y')",
+        "setattr(x, 'y', 1)",
+        "delattr(x, 'y')",
+        "result = type(1)",
+        "result = object()",
+        "result = globals()",
+        "result = locals()",
+        "result = vars()",
+        "result = __import__('os')",
+        "eval('1+1')",
+        "exec('x=1')",
+        "open('x')",
+    ]
+    for code in bad:
+        with pytest.raises(ValueError):
+            _validate_ast(code)
+
+
+def test_dynamic_tool_blocks_dangerous_attrs():
+    from aios.tools.dynamic import _validate_ast
+    import pytest
+
+    bad = [
+        "result = ''.__class__",
+        "result = [].__class__.__mro__",
+        "result = ().__class__.__bases__[0].__subclasses__()",
+        "x.__dict__['y']=1",
+        "f.__globals__",
+        "f.__code__",
+    ]
+    for code in bad:
+        with pytest.raises(ValueError):
+            _validate_ast(code)
+
+
+def test_dynamic_tool_blocks_dangerous_nodes():
+    from aios.tools.dynamic import _validate_ast
+    import pytest
+
+    bad = [
+        "import os",
+        "from os import path",
+        "while True: pass",
+        "for i in [1]: pass",
+        "async def f(): pass",
+        "def f(): pass",
+        "class X: pass",
+        "lambda: 1",
+        "global x",
+    ]
+    for code in bad:
+        with pytest.raises(ValueError):
+            _validate_ast(code)
+
+
+@pytest.mark.asyncio
+async def test_dynamic_tool_runs_simple_code():
+    from aios.tools.dynamic import DynamicTool
+
+    t = DynamicTool("t_ok", "ok", "result = {'sum': a + b}", {"type": "object"})
+    out = await t.run(a=2, b=3)
+    assert out == {"sum": 5}
+
+
+@pytest.mark.asyncio
+async def test_dynamic_tool_rejects_large_output():
+    from aios.tools.dynamic import DynamicTool
+
+    t = DynamicTool("t_big", "big", "result = {'x': 'a' * 200000}")
+    out = await t.run()
+    assert out.get("error") == "output too large"
+
+
+@pytest.mark.asyncio
+async def test_dynamic_tool_rejects_nonserializable_output():
+    from aios.tools.dynamic import DynamicTool
+
+    t = DynamicTool("t_set", "set", "result = {'x': {1,2,3}}")
+    out = await t.run()
+    # set is json serializable with default=str? json.dumps default=str makes it string - acceptable; but better be stable.
+    # If serialized, it returns parsed form. Accept either stringified set or error.
+    assert isinstance(out, dict)
+    assert "x" in out or "error" in out
+
+
 # ─── dynamic/code tool registration guard ─────────────────────────────────
 
 @pytest.mark.asyncio

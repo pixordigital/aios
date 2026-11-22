@@ -439,3 +439,47 @@ async def test_preapprovals_require_founder_records_authz_denied(auth_client, te
         and e.source == "security.api.preapprovals.get"
         for e in rows
     )
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body"),
+    [
+        ("put", "/api/security/preapprovals", {"preapproved_actions": []}),
+        ("post", "/api/security/preapprovals/actions", {"action": "rotate_credential"}),
+        ("delete", "/api/security/preapprovals/actions/rotate_credential", None),
+        ("post", "/api/security/preapprovals/approvals", {"id": "x", "action": "rotate_credential", "approved": True}),
+        ("delete", "/api/security/preapprovals/approvals/x", None),
+    ],
+)
+async def test_preapprovals_mutations_require_founder(auth_client, method, path, json_body):
+    req = getattr(auth_client, method)
+    resp = await req(path, json=json_body) if json_body is not None else await req(path)
+    assert resp.status_code == 403, resp.text
+
+
+async def test_preapproval_delete_missing_approval_404(auth_client, test_org, test_user, test_db_session):
+    await _make_founder(test_org, test_user, test_db_session)
+    resp = await auth_client.delete("/api/security/preapprovals/approvals/missing")
+    assert resp.status_code == 404, resp.text
+
+
+async def test_preapproval_validation_edges(auth_client, test_org, test_user, test_db_session):
+    await _make_founder(test_org, test_user, test_db_session)
+
+    bad_action = await auth_client.post("/api/security/preapprovals/actions", json={"action": ""})
+    assert bad_action.status_code == 400, bad_action.text
+
+    bad_delete = await auth_client.delete("/api/security/preapprovals/actions/unknown_action")
+    assert bad_delete.status_code == 400, bad_delete.text
+
+    bad_approvals_shape = await auth_client.put("/api/security/preapprovals", json={"approvals": "nope"})
+    assert bad_approvals_shape.status_code == 400, bad_approvals_shape.text
+
+    bad_record = await auth_client.post("/api/security/preapprovals/approvals", json={"approved": True})
+    assert bad_record.status_code == 400, bad_record.text
+
+    bad_record_action = await auth_client.post(
+        "/api/security/preapprovals/approvals",
+        json={"id": "r1", "action": "launch_missiles", "approved": True},
+    )
+    assert bad_record_action.status_code == 400, bad_record_action.text
