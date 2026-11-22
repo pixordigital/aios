@@ -130,6 +130,16 @@ async def test_org(test_session: AsyncSession) -> Organization:
 
 
 @pytest_asyncio.fixture(loop_scope="function")
+async def second_org(test_session: AsyncSession) -> Organization:
+    """Create second organization for tenant-scope tests."""
+    org = Organization(name="Second Org", slug="second-org", extra_data={"plan": "pro"})
+    test_session.add(org)
+    await test_session.commit()
+    await test_session.refresh(org)
+    return org
+
+
+@pytest_asyncio.fixture(loop_scope="function")
 async def test_user(test_session: AsyncSession, test_org: Organization) -> User:
     """Create test user."""
     from aios.api.auth import _hash_password

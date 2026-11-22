@@ -38,6 +38,11 @@ def count_message_tokens(msg: dict) -> int:
     return count_tokens(content) + overhead
 
 
+def count_messages_tokens(messages: list[dict]) -> int:
+    """Count tokens across a message list."""
+    return sum(count_message_tokens(m) for m in messages)
+
+
 def truncate_context(
     messages: list[dict],
     max_tokens: int,

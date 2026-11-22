@@ -259,6 +259,31 @@ class TransitionError(ValueError):
     """Illegal task state transition."""
 
 
+def record_org_event(
+    db,
+    *,
+    org_id: str,
+    event_type: str,
+    actor_type: str | None = None,
+    actor_id: str | None = None,
+    entity_type: str = "",
+    entity_id: str | None = None,
+    payload: dict | None = None,
+) -> OrgEvent:
+    """Append-only OrgEvent emitter. Caller owns commit/flush."""
+    event = OrgEvent(
+        org_id=org_id,
+        event_type=event_type,
+        actor_type=actor_type,
+        actor_id=actor_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        payload=payload or {},
+    )
+    db.add(event)
+    return event
+
+
 def can_transition(current: str, target: str) -> bool:
     return target in TASK_TRANSITIONS.get(current, ())
 
@@ -362,13 +387,24 @@ def execute_decision(
     """Approved decision executes linked shared tasks; approval is not enough to skip state checks."""
     if record.status != "approved":
         raise ValueError("only approved decisions execute")
-    if not record.linked_task_ids:
+    raw_ids = list(record.linked_task_ids or [])
+    linked = {str(tid) for tid in raw_ids if tid is not None}
+    if not linked and not any(tid is None for tid in raw_ids):
         raise ValueError("approved decision has no linked tasks")
+    reconciled: list[str] = []
     for task in tasks:
-        if task.id in (record.linked_task_ids or []):
-            if task.status == "ready":
-                transition_task(task, "in_progress", actor_type, actor_id, "decision execution")
-            task.audit_history = task.audit_history or []
+        task_id = task.id
+        matches = task_id in raw_ids or (task_id is not None and str(task_id) in linked)
+        if not matches:
+            continue
+        if task.status == "ready":
+            transition_task(task, "in_progress", actor_type, actor_id, "decision execution")
+        task.audit_history = task.audit_history or []
+        if task_id is not None:
+            reconciled.append(str(task_id))
+    if not reconciled and not any(t is not None and (t.id in raw_ids or str(t.id) in linked) for t in tasks):
+        raise ValueError("approved decision has no linked tasks in scope")
+    record.linked_task_ids = reconciled
     record.status = "executed"
     return record
 

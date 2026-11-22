@@ -2,7 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
-from aios.db.models import CrmDeal
+from aios.db.models import AuditLog, CrmDeal, PendingAction, User
+from aios.api.auth import _create_access_token
 
 
 async def test_sales_kpis_use_deterministic_crm_data(auth_client, test_db_session, test_org):
@@ -48,3 +49,74 @@ async def test_sales_kpis_pipeline_filter_and_empty(auth_client, test_db_session
     assert resp.status_code == 200
     assert resp.json()["current"]["pipeline_deals"] == 0.0
     assert resp.json()["interpretation"]["watch"] is None
+
+
+async def test_kpi_catalog_endpoint_reports_levels_and_unknowns(auth_client):
+    resp = await auth_client.get("/api/analytics/kpi/catalog")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "measurement_model" in body
+    assert {"business", "department", "process", "agent_team", "infra_resource"} <= set(body["measurement_model"]["levels"])
+    statuses = {m["status"] for m in body["metrics"]}
+    assert "not_instrumented" in statuses
+    assert body["measurement_model"]["principles"]
+
+
+async def test_governance_kpis_are_org_scoped_and_no_fake(auth_client, test_db_session, test_org, second_org):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    test_db_session.add_all([
+        AuditLog(org_id=test_org.id, action="x", resource_type="t"),
+        AuditLog(org_id=second_org.id, action="y", resource_type="t"),
+        PendingAction(org_id=test_org.id, agent_id="a1", conversation_id="c1", tool_name="t", status="approved", created_at=now - timedelta(hours=2), decided_at=now - timedelta(hours=1)),
+        PendingAction(org_id=test_org.id, agent_id="a1", conversation_id="c1", tool_name="t", status="rejected", created_at=now - timedelta(hours=3), decided_at=now - timedelta(hours=2)),
+        PendingAction(org_id=second_org.id, agent_id="a2", conversation_id="c2", tool_name="t", status="approved", created_at=now - timedelta(hours=1), decided_at=now),
+    ])
+    await test_db_session.commit()
+
+    resp = await auth_client.get("/api/analytics/kpi/governance")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["scope"] == "org"
+    assert body["org_id"] == test_org.id
+    by_key = {m["key"]: m for m in body["metrics"]}
+    assert by_key["governance.audit_events"]["value"] == 1
+    assert by_key["governance.approval_rejection_rate"]["value"] == 0.5
+    assert body["guardrails"]["no_fake_metrics"] is True
+    # missing/unknown sources must be explicit, not fabricated
+    for key in ["security.incidents_open", "privacy.requests_open"]:
+        assert by_key[key]["status"] in {"unknown", "partial"}
+        assert by_key[key]["value"] is None or isinstance(by_key[key]["value"], (int, float))
+
+
+async def test_target_validation_rejects_missing_baseline_and_evidence(auth_client):
+    resp = await auth_client.post("/api/analytics/kpi/targets/validate", json={
+        "metric_key": "crm.win_rate",
+        "target_value": 0.9,
+        "balancing_metrics": [],
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["persistence"]["persisted"] is False
+    assert any("baseline" in e for e in body["errors"])
+    assert any("evidence" in e for e in body["errors"])
+
+
+async def test_process_global_metrics_require_superadmin(async_client, test_db_session, test_org):
+    member = User(org_id=test_org.id, email="member-kpi@test.io", role="member", hashed_password="x")
+    owner = User(org_id=test_org.id, email="owner-kpi@test.io", role="owner", hashed_password="x")
+    test_db_session.add_all([member, owner])
+    await test_db_session.commit()
+    await test_db_session.refresh(member)
+    await test_db_session.refresh(owner)
+
+    async_client.headers["Authorization"] = f"Bearer {_create_access_token(member.id, member.org_id)}"
+    resp = await async_client.get("/api/analytics/metrics")
+    assert resp.status_code == 403
+
+    async_client.headers["Authorization"] = f"Bearer {_create_access_token(owner.id, owner.org_id)}"
+    resp = await async_client.get("/api/analytics/metrics")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tenant_scoped"] is False
+    assert body["scope"] == "process_global"
