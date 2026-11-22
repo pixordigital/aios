@@ -10,10 +10,37 @@ from aios.schemas import AgentCreate, AgentOut, AgentUpdate, PageResponse
 from pydantic import BaseModel
 from aios.templates import apply_template
 from aios.core.skill_loader import skill_loader
-from .deps import get_current_user, get_org_id
+from .deps import get_current_user, get_org_id, verify_org_access_async
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
+
+
+async def _get_agent_or_404(
+    db: DatabaseBackend,
+    agent_id: str,
+    org_id: str,
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "agents.api.agent_lookup",
+) -> Agent:
+    agent = await db.get(Agent, agent_id)
+    try:
+        await verify_org_access_async(
+            org_id,
+            agent,
+            db=db,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            source=source,
+            payload={"agent_id": str(agent_id)},
+        )
+    except HTTPException:
+        if agent is not None and str(getattr(agent, "org_id", "")) != str(org_id):
+            await db.commit()
+        raise
+    return agent
 
 
 @router.post("", response_model=AgentOut)
@@ -127,10 +154,14 @@ async def get_agent(
     agent_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.get_agent',
+    )
     return agent
 
 
@@ -140,10 +171,14 @@ async def update_agent(
     body: AgentUpdate,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.update_agent',
+    )
 
     update_data = body.model_dump(exclude_unset=True)
     if "llm_config" in update_data and isinstance(update_data["llm_config"], dict):
@@ -174,9 +209,12 @@ async def delete_agent(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.delete_agent',
+    )
     await log_audit(db, org_id, "agent.delete", "agent", user_id=user.id, resource_id=agent_id, details={"name": agent.name})
     await db.delete(agent)
     await db.commit()
@@ -190,9 +228,12 @@ async def deploy_agent(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.deploy_agent',
+    )
     from aios.core.deployment import DeploymentError, deploy_and_verify
 
     try:
@@ -210,9 +251,12 @@ async def verify_agent_endpoint(
     user=Depends(get_current_user),
 ):
     """Re-probe a live agent without changing its deployment state."""
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.verify_agent',
+    )
     from aios.core.deployment import DeploymentError, verify_agent
 
     try:
@@ -229,9 +273,12 @@ async def promote_canary(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.promote_canary',
+    )
     rows = (
         await db.execute(
             select(AgentInstance).where(AgentInstance.agent_id == agent_id, AgentInstance.status == "running")
@@ -256,9 +303,12 @@ async def rollback_canary(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.rollback_canary',
+    )
     rows = (
         await db.execute(
             select(AgentInstance).where(AgentInstance.agent_id == agent_id, AgentInstance.status == "running")
@@ -283,9 +333,12 @@ async def reset_agent_health(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.reset_health',
+    )
     from aios.core.agent_health import health_tracker
 
     health_tracker.reset(agent_id)
@@ -300,9 +353,12 @@ async def stop_agent(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.stop_agent',
+    )
     agent.status = "draft"
     result = await db.execute(
         select(AgentInstance).where(
@@ -326,11 +382,15 @@ async def export_agent(
     agent_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Export agent config as JSON — portable across AIOS instances."""
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.export_agent',
+    )
     return {
         "name": agent.name,
         "agent_type": agent.agent_type,
@@ -383,9 +443,12 @@ async def push_agent_to_fleet(
     user=Depends(get_current_user),
 ):
     """Push agent config to remote fleet instances."""
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.push_agent',
+    )
 
     from aios.db.models import RemoteInstance
     results: list[dict[str, object]] = []
@@ -440,9 +503,12 @@ async def spawn_subagent(
     user=Depends(get_current_user),
 ):
     """Spawn an isolated subprocess agent for parallel work."""
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.spawn_subagent',
+    )
 
     task_prompt = body.get("prompt", "")
     if not task_prompt:
@@ -477,11 +543,15 @@ async def reload_agent_skills(
     agent_id: str,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Reload project skills for an agent (clears cache and reloads from disk)."""
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.reload_skills',
+    )
 
     project_path = (agent.extra_data or {}).get("project_path")
     if not project_path:
@@ -504,11 +574,15 @@ async def get_agent_skills(
     q: str = Query("", description="Query to filter skills"),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Get skills relevant to a query (DB + project skills)."""
-    agent = await db.get(Agent, agent_id)
-    if not agent or agent.org_id != org_id:
-        raise HTTPException(404)
+    agent = await _get_agent_or_404(
+        db, agent_id, org_id,
+        actor_id=user.id,
+        actor_type='human',
+        source='agents.api.get_skills',
+    )
 
     from aios.core.skills import skill_store
 
