@@ -318,3 +318,72 @@ async def test_action_verified_updates_deal(test_session):
         settings.arvo_service_key = orig_key
         _clear_nonces()
         _clear_events()
+
+
+def test_events_accept_envelope_without_version():
+    import json
+    from fastapi.testclient import TestClient
+    from aios.config import settings
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+
+    c = TestClient(app)
+    orig_enabled, orig_id, orig_key = settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        path = "/api/integrations/arvo/v1/events"
+        body = json.dumps({"type": "action.executed", "payload": {"action_id": "a-nov", "business_trace_id": "trace-nov"}}, separators=(",", ":")).encode()
+        hdr = sign_request("POST", path, body, "kid-1", "secret-1")
+        hdr["Idempotency-Key"] = "idem-nov-version"
+        hdr["Content-Type"] = "application/json"
+        r = c.post(path, content=body, headers=hdr)
+        assert r.status_code == 200
+        assert r.json()["event_version"] == "1"
+        assert r.json()["business_trace_id"] == "trace-nov"
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
+
+
+async def test_agent_run_persists_business_trace_in_audit(test_session, test_org, monkeypatch):
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.core.agent import AgentRuntime
+    from aios.db.models import Agent, AuditLog
+    from aios.tasks.jobs import process_commitment_at_risk
+
+    agent = Agent(name="Trace Agent", org_id=test_org.id, status="active")
+    test_session.add(agent)
+    await test_session.commit()
+    await test_session.refresh(agent)
+
+    async def fake_run(self, conv_id, msg):
+        return "action plan"
+
+    async def no_enqueue(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(AgentRuntime, "run", fake_run)
+    monkeypatch.setattr("aios.integrations.arvo.publisher.enqueue_outbox", no_enqueue)
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_base_url", "http://peer.test")
+
+    result = await process_commitment_at_risk(
+        None, {"org_id": test_org.id, "finding_id": "f-trace"}, "trace-agent-1"
+    )
+    assert result["business_trace_id"] == "trace-agent-1"
+
+    row = (await test_session.execute(
+        select(AuditLog).where(AuditLog.org_id == test_org.id, AuditLog.action == "agent.execution")
+    )).scalar_one()
+    assert row.resource_id == agent.id
+    assert row.details["business_trace_id"] == "trace-agent-1"
+    assert row.details["finding_id"] == "f-trace"

@@ -1162,6 +1162,21 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
         raise
 
     try:
+        from aios.db.models import AuditLog
+
+        async with async_session() as s:
+            s.add(AuditLog(
+                org_id=org_id,
+                action="agent.execution",
+                resource_type="agent",
+                resource_id=str(agent.id),
+                details={"business_trace_id": str(business_trace_id), "finding_id": str(finding_id), "event_type": "commitment.at_risk"},
+            ))
+            await s.commit()
+    except Exception:
+        logger.exception("commitment.at_risk execution audit failed")
+
+    try:
         from aios.integrations.arvo.publisher import enqueue_outbox
         await enqueue_outbox(
             "agent.action.completed",

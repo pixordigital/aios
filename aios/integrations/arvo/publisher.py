@@ -11,6 +11,8 @@ from aios.config import settings
 from aios.db.engine import async_session
 from aios.db.models import IntegrationOutbox
 
+from .events import ArvoEnvelope
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,6 +24,9 @@ async def enqueue_outbox(
     idempotency_key: str | None = None,
 ) -> str:
     """Insert durable pending row and best-effort schedule immediate flush."""
+    envelope = ArvoEnvelope(
+        type=event_type, payload=payload, business_trace_id=business_trace_id
+    )
     key = idempotency_key or str(uuid.uuid4())
     async with async_session() as session:
         existing = await session.scalar(
@@ -31,9 +36,9 @@ async def enqueue_outbox(
             return existing.id
         row = IntegrationOutbox(
             peer=peer,
-            event_type=event_type,
-            payload=payload,
-            business_trace_id=business_trace_id,
+            event_type=envelope.type,
+            payload=envelope.payload,
+            business_trace_id=envelope.business_trace_id,
             idempotency_key=key,
             status="pending",
         )

@@ -4,7 +4,6 @@ HMAC + timeout + backoff.
 """
 
 import asyncio
-import json
 import uuid
 
 import httpx
@@ -12,6 +11,7 @@ import httpx
 from aios.config import settings
 
 from .auth import sign_request
+from .events import ArvoEnvelope
 
 PATH_PREFIX = "/api/v1/integrations/aios/v1"
 _TIMEOUT = 5.0
@@ -69,10 +69,10 @@ async def send_event(
 ) -> dict:
     """POST /events idempotente. Retry 3× em 5xx/timeout."""
     trace_id = business_trace_id or payload.get("business_trace_id")
-    body_dict = {"type": event_type, "payload": payload}
-    if trace_id:
-        body_dict["business_trace_id"] = trace_id
-    body = json.dumps(body_dict, separators=(",", ":")).encode()
+    envelope = ArvoEnvelope(
+        type=event_type, payload=payload, business_trace_id=trace_id
+    )
+    body = envelope.model_dump_json(exclude_none=True).encode()
     path = f"{PATH_PREFIX}/events"
     key = idempotency_key or str(uuid.uuid4())
 

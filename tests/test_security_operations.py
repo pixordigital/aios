@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from fastapi import HTTPException
+
+from aios.api.deps import verify_org_access, verify_org_access_async
 from aios.governance.security import (
     SecurityEvent,
     SecurityIncident,
@@ -207,3 +210,73 @@ def test_incident_metrics_from_metric_producers():
     assert m["coverage"]["recovery_test_events"] == 2
     assert m["coverage"]["vuln_events"] == 3
     assert m["metric_sources"]["unresolved_critical_vulns"] == "security_events.vuln_reported/vuln_resolved"
+
+
+def test_verify_org_access_sync_preserves_404_semantics():
+    class R:
+        org_id = "org-a"
+        id = "r1"
+
+    verify_org_access("org-a", R())
+    with pytest.raises(HTTPException) as exc_missing:
+        verify_org_access("org-a", None)
+    assert exc_missing.value.status_code == 404
+    with pytest.raises(HTTPException) as exc_mismatch:
+        verify_org_access("org-a", type("R2", (), {"org_id": "org-b"})())
+    assert exc_mismatch.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_verify_org_access_async_records_cross_tenant_mismatch():
+    db = _FakeDB()
+
+    class R:
+        org_id = "org-b"
+        id = "r1"
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_org_access_async(
+            "org-a",
+            R(),
+            db=db,
+            actor_id="u1",
+            actor_type="human",
+            source="api.test.verify_org_access",
+            payload={"endpoint": "/x"},
+        )
+    assert exc.value.status_code == 404
+    assert len(db.added) == 1
+    evt = db.added[0]
+    assert evt.event_type == "security.cross_tenant.blocked"
+    assert evt.payload["requested_org_id"] == "org-a"
+    assert evt.payload["resource_org_id"] == "org-b"
+    assert evt.payload["endpoint"] == "/x"
+    assert evt.actor_id == "u1"
+    assert evt.actor_type == "human"
+
+
+@pytest.mark.asyncio
+async def test_verify_org_access_async_no_metric_on_same_org_or_missing():
+    db = _FakeDB()
+
+    class R:
+        org_id = "org-a"
+
+    await verify_org_access_async("org-a", R(), db=db, actor_id="u1")
+    assert db.added == []
+
+    with pytest.raises(HTTPException):
+        await verify_org_access_async("org-a", None, db=db, actor_id="u1")
+    assert db.added == []
+
+
+@pytest.mark.asyncio
+async def test_verify_org_access_async_metric_failure_still_404():
+    db = _FakeDB(fail=True)
+
+    class R:
+        org_id = "org-b"
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_org_access_async("org-a", R(), db=db, actor_id="u1")
+    assert exc.value.status_code == 404

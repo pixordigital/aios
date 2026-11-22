@@ -98,6 +98,47 @@ def verify_org_access(org_id: str, resource) -> None:
         raise HTTPException(404)
 
 
+async def verify_org_access_async(
+    org_id: str,
+    resource,
+    *,
+    db: DatabaseBackend | None = None,
+    actor_id: str | None = None,
+    actor_type: str | None = "human",
+    source: str = "api.deps.verify_org_access",
+    payload: dict | None = None,
+) -> None:
+    """Like verify_org_access, but emits best-effort cross-tenant mismatch metric.
+
+    Sync verify_org_access stays for backward compat; it has no db/actor context.
+    Use this async variant where db is available so cross-tenant 404 mismatches
+    produce deterministic security telemetry without leaking resource existence.
+    """
+    resource_org = getattr(resource, "org_id", None) if resource else None
+    if not resource or resource_org != org_id:
+        if (
+            db is not None
+            and resource is not None
+            and resource_org is not None
+            and str(resource_org) != str(org_id)
+        ):
+            try:
+                from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+                await record_cross_tenant_block_if_mismatch(
+                    db,
+                    org_id=str(org_id),
+                    resource=resource,
+                    source=source,
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    payload=payload,
+                )
+            except Exception:
+                pass
+        raise HTTPException(404)
+
+
 def require_org_id(request: FastAPIRequest):
     org_id = getattr(request.state, "org_id", None)
     if not org_id:

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from aios.config import settings
 from .auth import _forget_nonce, verify_request
+from .events import ArvoEnvelope as ArvoEvent
 
 logger = logging.getLogger(__name__)
 
@@ -129,14 +130,6 @@ async def _db_release_event(key: str) -> None:
         if row and row.response.get("status") == "processing":
             await s.delete(row)
             await s.commit()
-
-
-class ArvoEvent(BaseModel):
-    type: str = Field(..., max_length=64, pattern=r"^[a-z0-9_.-]+$")
-    payload: dict = Field(default_factory=dict)
-    occurred_at: str | None = None
-    business_trace_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
-    event_version: str | None = Field(default="1", max_length=16)
 
 
 class ContextRequest(BaseModel):
