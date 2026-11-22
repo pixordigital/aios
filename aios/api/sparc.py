@@ -3,8 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from aios.api.deps import get_current_user, get_org_id
+from aios.api.deps import get_current_user, get_org_id, verify_org_access_async
 from aios.core.sparc import sparc_engine, PHASES
+from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import User
 
 router = APIRouter(prefix="/api/sparc", tags=["sparc"])
@@ -46,10 +47,10 @@ async def get_sparc(
     workflow_id: str,
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
     wf = await sparc_engine.get(workflow_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "sparc workflow not found")
+    await verify_org_access_async(org_id, wf, db=db, actor_id=user.id, source="api.sparc.get")
     return wf
 
 
@@ -63,10 +64,10 @@ async def advance_phase(
     workflow_id: str, body: PhaseAdvanceBody,
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
     wf = await sparc_engine.get(workflow_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "sparc workflow not found")
+    await verify_org_access_async(org_id, wf, db=db, actor_id=user.id, source="api.sparc.advance")
     if wf.status != "active":
         raise HTTPException(400, f"workflow status is {wf.status}")
     wf2 = await sparc_engine.advance(
@@ -81,7 +82,10 @@ async def fail_phase(
     workflow_id: str, error: str = "",
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
+    wf = await sparc_engine.get(workflow_id)
+    await verify_org_access_async(org_id, wf, db=db, actor_id=user.id, source="api.sparc.fail")
     wf = await sparc_engine.fail_phase(workflow_id=workflow_id, error=error)
     if not wf:
         raise HTTPException(404, "sparc workflow not found")
@@ -94,10 +98,10 @@ async def sparc_logs(
     limit: int = Query(50, ge=1, le=200),
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
     wf = await sparc_engine.get(workflow_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "sparc workflow not found")
+    await verify_org_access_async(org_id, wf, db=db, actor_id=user.id, source="api.sparc.logs")
     logs = await sparc_engine.logs(workflow_id, limit=limit)
     return {"items": logs}
 
@@ -107,10 +111,10 @@ async def phase_instruction(
     workflow_id: str,
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
     wf = await sparc_engine.get(workflow_id)
-    if not wf or wf.org_id != org_id:
-        raise HTTPException(404, "sparc workflow not found")
+    await verify_org_access_async(org_id, wf, db=db, actor_id=user.id, source="api.sparc.instruction")
     return {
         "phase": wf.current_phase,
         "status": wf.phase_status,
