@@ -139,6 +139,86 @@ def test_workspace_paths_reject_intra_root_tenant_traversal(tmp_path: Path):
         paths.ensure_run_directories("org_1/../org_2", "sales", "run_1")
 
 
+def test_known_schema_validation_rejects_malformed_payloads():
+    from aios.icm.schemas import SchemaValidationError, validate_schema
+
+    for sid in (
+        "lead_research_input.v1",
+        "company_research_output.v1",
+        "lead_qualification_output.v1",
+        "pet.enquiry.v1",
+        "pet.qualified_lead.v1",
+        "pet.lead_context.v1",
+        "pet.follow_up_result.v1",
+        "tool_call.v1",
+        "agent_run.v1",
+        "memory_candidate.v1",
+        "handoff.v1",
+        "trace.v1",
+    ):
+        with pytest.raises(SchemaValidationError):
+            validate_schema(sid, ["not", "a", "dict"])
+        with pytest.raises(SchemaValidationError):
+            validate_schema(sid, 123)
+
+
+def test_known_schema_validation_accepts_valid_shapes():
+    from aios.icm.schemas import validate_schema
+
+    validate_schema("lead_research_input.v1", {"query": "acme"})
+    validate_schema("company_research_output.v1", {"company": "Acme", "summary": "ok"})
+    validate_schema("lead_qualification_output.v1", {"qualified": True, "score": 80})
+    validate_schema("pet.enquiry.v1", {"message": "hi", "phone": "+1"})
+    validate_schema("pet.qualified_lead.v1", {"qualified": False, "status": "new"})
+    validate_schema("pet.lead_context.v1", {"lead_id": "l1", "phone": "+1"})
+    validate_schema("pet.follow_up_result.v1", {"sent": True, "status": "ok"})
+    validate_schema("tool_call.v1", {"tool": "lookup", "args": {"q": "x"}})
+    validate_schema("agent_run.v1", {"agent_id": "a1", "status": "ok"})
+    validate_schema("memory_candidate.v1", {"content": "remember this", "kind": "fact"})
+    validate_schema("handoff.v1", {"target": "human", "reason": "needs review"})
+    validate_schema("trace.v1", {"event": "step", "trace_id": "t1"})
+
+
+def test_known_schema_validation_rejects_wrong_types_and_empty_objects():
+    from aios.icm.schemas import SchemaValidationError, validate_schema
+
+    with pytest.raises(SchemaValidationError):
+        validate_schema("lead_qualification_output.v1", {"qualified": "yes"})
+    with pytest.raises(SchemaValidationError):
+        validate_schema("tool_call.v1", {"tool": ""})
+    with pytest.raises(SchemaValidationError):
+        validate_schema("tool_call.v1", {"args": {}})
+    with pytest.raises(SchemaValidationError):
+        validate_schema("agent_run.v1", {"run_id": "r1"})
+    with pytest.raises(SchemaValidationError):
+        validate_schema("memory_candidate.v1", {"kind": "fact"})
+    with pytest.raises(SchemaValidationError):
+        validate_schema("pet.follow_up_result.v1", {"sent": "true"})
+    with pytest.raises(SchemaValidationError):
+        validate_schema("lead_research_input.v1", {})
+
+
+def test_adapter_known_schema_validation_fail_closed(tmp_path: Path):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = StageManifest.model_validate({
+        "id": "s1", "version": "1.0.0", "mode": "deterministic",
+        "inputs_schema": "lead_research_input.v1",
+        "outputs_schema": "company_research_output.v1",
+    })
+    node = WorkflowNode(id="n1", stage_id="s1", stage_manifest=manifest)
+    adapter = ICMStageAdapter(node=node, storage_root=tmp_path, org_id="o", run_id="r")
+
+    with pytest.raises(ValueError, match="ICM input schema validation failed"):
+        adapter.validate_input(["bad"])
+    with pytest.raises(ValueError, match="ICM output schema validation failed"):
+        adapter.validate_output(["bad"])
+
+    adapter.validate_input({"query": "acme"})
+    adapter.validate_output({"company": "Acme", "summary": "ok"})
+
+
 def test_seed_b2b_lead_research_workspace_and_adapter(tmp_path: Path):
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter
