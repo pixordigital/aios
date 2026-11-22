@@ -130,6 +130,17 @@ class RagSearchTool(BaseTool):
                     "source": "knowledge_records",
                     "actor_resolution": actor.get("resolution", "none"),
                     "fail_closed": True,
+                    "missing_actor_context": [
+                        "actor_user_id",
+                        "actor_departments",
+                        "is_founder",
+                        "granted_record_ids",
+                    ],
+                    "remediation": (
+                        "Inject actor identity into ToolEngine/caller context "
+                        "(actor_user_id or actor_departments/is_founder/granted_record_ids). "
+                        "Knowledge search stays fail-closed without resolvable scope."
+                    ),
                 }
             results = await search_knowledge_records(
                 org_id,

@@ -191,6 +191,10 @@ async def test_rag_search_tool_fails_closed_without_actor_context(monkeypatch):
     assert out["fail_closed"] is True
     assert out["results"] == []
     assert "unresolved" in out["error"]
+    assert out["actor_resolution"] == "none"
+    assert "actor_user_id" in out["missing_actor_context"]
+    assert "granted_record_ids" in out["missing_actor_context"]
+    assert "fail-closed" in out["remediation"].lower()
 
 
 async def test_rag_search_tool_allows_injected_actor_scope(monkeypatch):
