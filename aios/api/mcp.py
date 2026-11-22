@@ -28,11 +28,20 @@ async def _tool_actor_context(db: DatabaseBackend, user) -> dict:
         is_founder = bool(extra.get("founder_user_id") == user.id or getattr(user, "role", "") == "owner")
     except Exception:
         pass
+    granted_record_ids: set[str] = set()
+    try:
+        from aios.tools.rag_search import resolve_granted_record_ids
+
+        granted_record_ids = await resolve_granted_record_ids(
+            str(getattr(user, "org_id", "") or ""), str(getattr(user, "id", "") or "")
+        )
+    except Exception:
+        granted_record_ids = set()
     return {
         "actor_user_id": str(getattr(user, "id", "") or ""),
         "actor_departments": actor_departments,
         "is_founder": is_founder,
-        "granted_record_ids": set(),
+        "granted_record_ids": granted_record_ids,
     }
 
 

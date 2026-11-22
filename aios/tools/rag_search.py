@@ -22,6 +22,95 @@ class RagSearchTool(BaseTool):
     )
     input_model = RagSearchInput
 
+async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str]:
+    """Best-effort DB resolve of active knowledge grants for actor user in org.
+
+    Returns empty set when no grant model exists or resolution fails.
+    Fail-closed: callers should treat empty as no explicit confidential grants.
+    """
+    if not org_id or not actor_user_id:
+        return set()
+    try:
+        from sqlalchemy import inspect as sa_inspect, select
+
+        from aios.db.engine import async_session
+
+        GrantModel = None
+        for mod_path, attr in (
+            ("aios.governance.knowledge", "KnowledgeGrant"),
+            ("aios.governance.knowledge", "KnowledgeRecordGrant"),
+            ("aios.db.models", "KnowledgeGrant"),
+            ("aios.db.models", "KnowledgeRecordGrant"),
+        ):
+            try:
+                mod = __import__(mod_path, fromlist=[attr])
+                candidate = getattr(mod, attr, None)
+                if candidate is not None:
+                    GrantModel = candidate
+                    break
+            except Exception:
+                continue
+        if GrantModel is None:
+            return set()
+
+        mapper = sa_inspect(GrantModel)
+        cols = {c.key for c in mapper.column_attrs}
+        conditions = []
+        if "org_id" in cols:
+            conditions.append(getattr(GrantModel, "org_id") == org_id)
+        user_col = None
+        for name in ("user_id", "actor_user_id", "grantee_user_id", "subject_user_id"):
+            if name in cols:
+                user_col = name
+                break
+        if user_col is None:
+            return set()
+        conditions.append(getattr(GrantModel, user_col) == actor_user_id)
+        if "revoked_at" in cols:
+            conditions.append(getattr(GrantModel, "revoked_at").is_(None))
+        if "active" in cols:
+            conditions.append(getattr(GrantModel, "active").is_(True))
+        if "is_active" in cols:
+            conditions.append(getattr(GrantModel, "is_active").is_(True))
+        record_col = None
+        for name in ("record_id", "knowledge_record_id", "knowledge_id", "resource_id"):
+            if name in cols:
+                record_col = name
+                break
+        if record_col is None:
+            return set()
+
+        now = None
+        if "expires_at" in cols or "valid_until" in cols:
+            from datetime import datetime, timezone
+
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if "expires_at" in cols:
+            exp = getattr(GrantModel, "expires_at")
+            conditions.append((exp.is_(None)) | (exp >= now))
+        if "valid_until" in cols:
+            vu = getattr(GrantModel, "valid_until")
+            conditions.append((vu.is_(None)) | (vu >= now))
+        if "valid_from" in cols and now is not None:
+            vf = getattr(GrantModel, "valid_from")
+            conditions.append((vf.is_(None)) | (vf <= now))
+
+        async with async_session() as s:
+            rows = (await s.execute(select(getattr(GrantModel, record_col)).where(*conditions))).scalars().all()
+        return {str(r) for r in rows if r}
+    except Exception:
+        return set()
+
+
+class RagSearchTool(BaseTool):
+    name = "rag_search"
+    description = (
+        "Busca permission-aware em KnowledgeRecords governados (fonte da verdade com "
+        "proveniência/citação). Filtra por tenant/departamento/classificação. "
+        "Sempre cite citation/source_type/source_id."
+    )
+    input_model = RagSearchInput
+
     async def _resolve_actor_context(self, org_id: str) -> dict:
         """Best-effort actor context. Fail closed on any resolution error."""
         actor_user_id = str(getattr(self, "_actor_user_id", "") or "")
@@ -33,13 +122,18 @@ class RagSearchTool(BaseTool):
             "actor_resolved": False,
             "resolution": "none",
         }
-        # Caller explicitly injected scope; treat as resolved.
-        if ctx["actor_departments"] or ctx["is_founder"] or ctx["granted_record_ids"]:
+        # Caller explicitly injected scope; treat as resolved. Still resolve
+        # DB grants when actor identity is known and grants not injected.
+        injected_scope = bool(ctx["actor_departments"] or ctx["is_founder"] or ctx["granted_record_ids"])
+        agent_id = getattr(self, "_agent_id", "") or ""
+        if injected_scope and not actor_user_id:
             ctx["actor_resolved"] = True
             ctx["resolution"] = "injected"
             return ctx
-        agent_id = getattr(self, "_agent_id", "") or ""
         if not org_id:
+            if injected_scope:
+                ctx["actor_resolved"] = True
+                ctx["resolution"] = "injected"
             return ctx
         try:
             from sqlalchemy import select
@@ -96,6 +190,16 @@ class RagSearchTool(BaseTool):
                 "actor_resolved": False,
                 "resolution": "error_fail_closed",
             }
+
+        # DB grants are additive, best-effort. Never grant on resolver errors.
+        if actor_user_id and not ctx["granted_record_ids"]:
+            try:
+                ctx["granted_record_ids"] = await resolve_granted_record_ids(org_id, actor_user_id)
+            except Exception:
+                ctx["granted_record_ids"] = set()
+        if injected_scope and ctx["actor_resolved"] is False:
+            ctx["actor_resolved"] = True
+            ctx["resolution"] = "injected"
         return ctx
 
     async def run(self, query: str, top_k: int = 5) -> dict:

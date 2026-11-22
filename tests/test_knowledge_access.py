@@ -235,6 +235,7 @@ async def test_tool_engine_injects_actor_identity_to_rag_tool(monkeypatch):
         captured["user"] = getattr(self, "_actor_user_id", "")
         captured["deps"] = set(getattr(self, "_actor_departments", set()))
         captured["founder"] = bool(getattr(self, "_is_founder", False))
+        captured["grants"] = set(getattr(self, "_granted_record_ids", set()))
         return {"ok": True, "query": query, "results": [], "count": 0}
 
     monkeypatch.setattr(RagSearchTool, "run", fake_run)
@@ -255,4 +256,69 @@ async def test_tool_engine_injects_actor_identity_to_rag_tool(monkeypatch):
         "user": "user1",
         "deps": {"d1"},
         "founder": True,
+        "grants": {"k1"},
     }
+
+
+async def test_resolve_granted_record_ids_no_model_returns_empty():
+    from aios.tools.rag_search import resolve_granted_record_ids
+
+    assert await resolve_granted_record_ids("org1", "u1") == set()
+    assert await resolve_granted_record_ids("", "u1") == set()
+    assert await resolve_granted_record_ids("org1", "") == set()
+
+
+async def test_rag_search_resolves_db_grants_best_effort(monkeypatch):
+    from aios.tools import rag_search
+
+    async def fake_grants(org_id, actor_user_id):
+        assert org_id == "org1"
+        assert actor_user_id == "u1"
+        return {"kr-db"}
+
+    captured = {}
+
+    async def fake_search(org_id, query, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(rag_search, "resolve_granted_record_ids", fake_grants)
+    monkeypatch.setattr("aios.core.rag.search_knowledge_records", fake_search)
+
+    tool = rag_search.RagSearchTool()
+    tool._org_id = "org1"
+    tool._actor_user_id = "u1"
+    tool._actor_departments = set()
+    tool._is_founder = False
+    tool._granted_record_ids = set()
+
+    out = await tool.run(query="pricing")
+    assert out["ok"] is True
+    assert captured["granted_record_ids"] == {"kr-db"}
+
+
+async def test_rag_search_db_grant_resolution_error_fails_closed(monkeypatch):
+    from aios.tools import rag_search
+
+    async def boom(org_id, actor_user_id):
+        raise RuntimeError("db boom")
+
+    captured = {}
+
+    async def fake_search(org_id, query, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(rag_search, "resolve_granted_record_ids", boom)
+    monkeypatch.setattr("aios.core.rag.search_knowledge_records", fake_search)
+
+    tool = rag_search.RagSearchTool()
+    tool._org_id = "org1"
+    tool._actor_user_id = "u1"
+    tool._actor_departments = {"d1"}
+    tool._is_founder = False
+    tool._granted_record_ids = set()
+
+    out = await tool.run(query="pricing")
+    assert out["ok"] is True
+    assert captured["granted_record_ids"] == set()

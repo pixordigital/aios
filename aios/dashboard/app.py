@@ -529,11 +529,20 @@ async def _dashboard_tool_actor_context(request: Request) -> dict:
     except Exception:
         logger.debug("dashboard tool actor context lookup failed; failing closed", exc_info=True)
         return {"_unresolved": True}
+    granted_record_ids: set[str] = set()
+    try:
+        from aios.tools.rag_search import resolve_granted_record_ids
+
+        granted_record_ids = await resolve_granted_record_ids(
+            str(getattr(user, "org_id", "") or ""), str(getattr(user, "id", "") or "")
+        )
+    except Exception:
+        granted_record_ids = set()
     return {
         "actor_user_id": str(user.id or ""),
         "actor_departments": actor_departments,
         "is_founder": is_founder,
-        "granted_record_ids": set(),
+        "granted_record_ids": granted_record_ids,
     }
 
 
