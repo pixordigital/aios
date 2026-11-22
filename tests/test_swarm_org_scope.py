@@ -3,7 +3,7 @@
 list_tasks/stats/claim/complete/vote/list_messages/get_shared used to filter
 by team_id or task_id alone. Any authenticated user could read another
 tenant's payloads. Paths now require caller org_id and fail closed
-(missing => not found/empty).
+(missing => not found/empty). Team-path consistency also enforced.
 """
 
 from __future__ import annotations
@@ -69,6 +69,18 @@ async def test_claim_complete_vote_reject_foreign_org(two_org_tasks) -> None:
     assert await coord.vote("task-a1", "agent-x", "approve", org_id="org-a") is not None
 
 
+@pytest.mark.asyncio
+async def test_task_team_path_mismatch_rejected(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    # task-a1 belongs to team-a; passing team-b (same org fixture has org-b team) must fail closed
+    assert await coord.claim("task-a1", "agent-x", "org-a", team_id="team-b") is None
+    assert await coord.complete("task-a1", result={}, org_id="org-a", team_id="team-b") is None
+    assert await coord.vote("task-a1", "agent-x", "approve", org_id="org-a", team_id="team-b") is None
+    # correct team path works
+    claimed = await coord.claim("task-a1", "agent-x", "org-a", team_id="team-a")
+    assert claimed is not None and claimed.status == "running"
+
+
 @pytest.fixture
 async def two_org_messages(two_org_tasks):
     async with db_session() as db:
@@ -106,6 +118,18 @@ async def test_list_messages_scoped_to_org(two_org_messages) -> None:
     assert [m.id for m in rows] == ["msg-a1"]
     assert await coord.list_messages(team_id="team-a", org_id="org-b") == []
     assert await coord.list_messages(team_id="team-a", org_id="") == []
+
+
+@pytest.mark.asyncio
+async def test_team_org_mismatch_fail_closed(two_org_tasks) -> None:
+    coord = SwarmCoordinator()
+    # team-a belongs to org-a; org-b must not dispatch/list/stats/memory on it
+    assert await coord.dispatch(team_id="team-a", org_id="org-b", task_type="x") is None
+    assert await coord.list_tasks(team_id="team-a", org_id="org-b") == []
+    assert await coord.stats("team-a", org_id="org-b") == {"total_tasks": 0, "queued": 0}
+    assert await coord.put_shared(team_id="team-a", org_id="org-b", key="k", content={"x": 1}) is None
+    assert await coord.get_shared(team_id="team-a", key="k1", org_id="org-b") is None
+    assert await coord.list_messages(team_id="team-a", org_id="org-b") == []
 
 
 @pytest.mark.asyncio

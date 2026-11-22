@@ -18,6 +18,15 @@ logger = logging.getLogger(__name__)
 _SWARM_MODES = {"supervisor", "consensus", "pipeline", "mesh"}
 
 
+async def _team_belongs_to_org(db, team_id: str, org_id: str) -> bool:
+    """Fail-closed team ownership check."""
+    if not team_id or not org_id:
+        return False
+    return (
+        await db.execute(select(Team.id).where(Team.id == team_id, Team.org_id == org_id))
+    ).scalar_one_or_none() is not None
+
+
 class SwarmCoordinator:
     """Orchestrate distributed tasks across team members."""
 
@@ -85,10 +94,12 @@ class SwarmCoordinator:
         self, *, team_id: str, org_id: str, task_type: str = "agent_call",
         payload: dict | None = None, priority: int = 0,
         conversation_id: str | None = None, depends_on: list[str] | None = None,
-         agent_id: str | None = None,
-    ) -> SwarmTask:
-        """Queue a task for swarm execution."""
+        agent_id: str | None = None,
+    ) -> SwarmTask | None:
+        """Queue a task for swarm execution. Fail closed on org/team mismatch."""
         async with db_session() as db:
+            if not await _team_belongs_to_org(db, team_id, org_id):
+                return None
             task = SwarmTask(
                 team_id=team_id, org_id=org_id, task_id=str(uuid.uuid4())[:16],
                 task_type=task_type, payload=payload or {}, priority=priority,
@@ -100,11 +111,13 @@ class SwarmCoordinator:
             await db.refresh(task)
             return task
 
-    async def claim(self, task_id: str, agent_id: str, org_id: str) -> SwarmTask | None:
+    async def claim(self, task_id: str, agent_id: str, org_id: str, team_id: str = "") -> SwarmTask | None:
         async with db_session() as db:
             task = await db.get(SwarmTask, task_id)
             if not task or task.org_id != org_id or task.status not in ("queued", "assigned"):
                 # Fail closed: a task id from another tenant reads as missing.
+                return None
+            if team_id and task.team_id != team_id:
                 return None
             task.assigned_agent_id = agent_id
             task.status = "running"
@@ -114,10 +127,14 @@ class SwarmCoordinator:
             await db.refresh(task)
             return task
 
-    async def complete(self, task_id: str, result: dict | None = None, error: str = "", org_id: str = "") -> SwarmTask | None:
+    async def complete(
+        self, task_id: str, result: dict | None = None, error: str = "", org_id: str = "", team_id: str = "",
+    ) -> SwarmTask | None:
         async with db_session() as db:
             task = await db.get(SwarmTask, task_id)
             if not task or (org_id and task.org_id != org_id):
+                return None
+            if team_id and task.team_id != team_id:
                 return None
             task.result = result or {}
             task.error = error
@@ -131,8 +148,8 @@ class SwarmCoordinator:
         self, *, team_id: str, status: str = "", limit: int = 20, org_id: str = "",
     ) -> list[SwarmTask]:
         async with db_session() as db:
-            if not org_id:
-                # No org to scope by: refuse rather than dump another tenant's
+            if not org_id or not await _team_belongs_to_org(db, team_id, org_id):
+                # No org/team proof: refuse rather than dump another tenant's
                 # task payloads. All API routes supply org_id.
                 return []
             stmt = select(SwarmTask).where(SwarmTask.team_id == team_id, SwarmTask.org_id == org_id)
@@ -144,11 +161,13 @@ class SwarmCoordinator:
 
     # ── Consensus ──
 
-    async def vote(self, task_id: str, agent_id: str, vote: str, org_id: str = "") -> SwarmTask | None:
+    async def vote(self, task_id: str, agent_id: str, vote: str, org_id: str = "", team_id: str = "") -> SwarmTask | None:
         """Record a consensus vote (approve|reject|abstain). Check threshold if reached."""
         async with db_session() as db:
             task = await db.get(SwarmTask, task_id)
             if not task or (org_id and task.org_id != org_id):
+                return None
+            if team_id and task.team_id != team_id:
                 return None
             votes = dict(task.consensus_votes or {})
             votes[agent_id] = vote
@@ -180,9 +199,11 @@ class SwarmCoordinator:
     async def put_shared(
         self, *, team_id: str, org_id: str, key: str, content: dict,
         sender_id: str | None = None, ttl_seconds: int = 3600,
-         task_id: str | None = None,
-    ) -> SwarmMessage:
+        task_id: str | None = None,
+    ) -> SwarmMessage | None:
         async with db_session() as db:
+            if not await _team_belongs_to_org(db, team_id, org_id):
+                return None
             msg = SwarmMessage(
                 team_id=team_id, org_id=org_id, swarm_task_id=task_id,
                 sender_agent_id=sender_id, message_type="memory",
@@ -197,7 +218,7 @@ class SwarmCoordinator:
         self, *, team_id: str, key: str, org_id: str = "",
     ) -> SwarmMessage | None:
         async with db_session() as db:
-            if not org_id:
+            if not org_id or not await _team_belongs_to_org(db, team_id, org_id):
                 return None
             stmt = select(SwarmMessage).where(
                 SwarmMessage.team_id == team_id,
@@ -219,7 +240,7 @@ class SwarmCoordinator:
         self, *, team_id: str, limit: int = 20, org_id: str = "",
     ) -> list[SwarmMessage]:
         async with db_session() as db:
-            if not org_id:
+            if not org_id or not await _team_belongs_to_org(db, team_id, org_id):
                 return []
             result = await db.execute(
                 select(SwarmMessage).where(
@@ -232,7 +253,7 @@ class SwarmCoordinator:
 
     async def stats(self, team_id: str, org_id: str = "") -> dict:
         async with db_session() as db:
-            if not org_id:
+            if not org_id or not await _team_belongs_to_org(db, team_id, org_id):
                 return {"total_tasks": 0, "queued": 0}
             base = [SwarmTask.team_id == team_id, SwarmTask.org_id == org_id]
             q = await db.execute(select(func.count(SwarmTask.id)).where(*base))

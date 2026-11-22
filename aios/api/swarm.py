@@ -78,6 +78,8 @@ async def dispatch_task(
         conversation_id=body.conversation_id, depends_on=body.depends_on,
         agent_id=body.agent_id,
     )
+    if not task:
+        raise HTTPException(404, "team not found")
     return task
 
 
@@ -88,7 +90,7 @@ async def claim_task(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    task = await swarm.claim(task_id, agent_id, org_id)
+    task = await swarm.claim(task_id, agent_id, org_id, team_id=team_id)
     if not task:
         raise HTTPException(404, "task not found or not claimable")
     return task
@@ -101,7 +103,7 @@ async def complete_task(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    task = await swarm.complete(task_id, result=result, error=error, org_id=org_id)
+    task = await swarm.complete(task_id, result=result, error=error, org_id=org_id, team_id=team_id)
     if not task:
         raise HTTPException(404, "task not found")
     return task
@@ -116,7 +118,7 @@ async def consensus_vote(
 ):
     if vote not in ("approve", "reject", "abstain"):
         raise HTTPException(400, "vote must be approve|reject|abstain")
-    task = await swarm.vote(task_id, agent_id, vote, org_id=org_id)
+    task = await swarm.vote(task_id, agent_id, vote, org_id=org_id, team_id=team_id)
     if not task:
         raise HTTPException(404, "task not found")
     return task
@@ -161,6 +163,8 @@ async def put_shared_memory(
         content=body.content, sender_id=body.sender_id,
         ttl_seconds=body.ttl_seconds,
     )
+    if not msg:
+        raise HTTPException(404, "team not found")
     return msg
 
 
