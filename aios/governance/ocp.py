@@ -329,6 +329,19 @@ def grant_is_valid(grant: AuthorityGrant, now: datetime | None = None) -> bool:
     return True
 
 
+def ocp_strict_default_deny(org_extra_data: dict | None) -> bool:
+    """Optional OCP strict mode: deny when no relevant grant is configured.
+
+    Default off for compatibility. Flag lives in org extra_data to avoid schema
+    changes: `{"ocp": {"strict_default_deny": true}}`.
+    """
+    extra = org_extra_data or {}
+    ocp_cfg = extra.get("ocp") if isinstance(extra, dict) else None
+    if not isinstance(ocp_cfg, dict):
+        return False
+    return bool(ocp_cfg.get("strict_default_deny"))
+
+
 def authorize(
     grants: list[AuthorityGrant],
     action: str,
@@ -374,6 +387,40 @@ def decide(record: DecisionRecord, *, approve: bool, founder_id: str) -> Decisio
     record.status = "approved" if approve else "rejected"
     record.decided_by = founder_id
     record.decided_at = _now()
+    return record
+
+
+def link_external_approval(
+    record: DecisionRecord,
+    *,
+    ref_type: str,
+    ref_id: str,
+    status: str = "",
+    note: str = "",
+) -> DecisionRecord:
+    """Pragmatic bridge: attach external approval refs without schema change.
+
+    Stores refs in `DecisionRecord.justification["_external_approvals"]`.
+    This avoids core approval/runtime ownership; full PendingAction/DecisionRecord
+    unification remains deferred.
+    """
+    ref_type = (ref_type or "").strip()
+    ref_id = (ref_id or "").strip()
+    if not ref_type or not ref_id:
+        raise ValueError("ref_type and ref_id are required")
+    justification = dict(record.justification or {})
+    refs = list(justification.get("_external_approvals") or [])
+    refs.append(
+        {
+            "ref_type": ref_type,
+            "ref_id": ref_id,
+            "status": (status or "").strip(),
+            "note": (note or "").strip(),
+            "linked_at": _now().isoformat(),
+        }
+    )
+    justification["_external_approvals"] = refs
+    record.justification = justification
     return record
 
 

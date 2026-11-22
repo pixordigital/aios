@@ -130,3 +130,75 @@ async def test_decision_execute_transitions_linked_task(
 
     task = await test_db_session.get(SharedTask, task_id)
     assert task.status == "in_progress"
+
+
+async def test_decision_list_get_and_external_approval_link(auth_client):
+    full = {f: "x" for f in DECISION_PROTOCOL_FIELDS}
+    resp = await auth_client.post(
+        "/api/ocp/decisions",
+        json={"title": "New workflow", "change_type": "new_workflow", "justification": full},
+    )
+    assert resp.status_code == 200, resp.text
+    decision_id = resp.json()["id"]
+
+    resp = await auth_client.get("/api/ocp/decisions")
+    assert resp.status_code == 200
+    assert any(d["id"] == decision_id for d in resp.json()["items"])
+
+    resp = await auth_client.get(f"/api/ocp/decisions/{decision_id}")
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "New workflow"
+
+    resp = await auth_client.post(
+        f"/api/ocp/decisions/{decision_id}/link-approval",
+        json={"ref_type": "pending_action", "ref_id": "pa-1", "status": "approved", "note": "bridge"},
+    )
+    assert resp.status_code == 200, resp.text
+    refs = resp.json()["external_approvals"]
+    assert refs and refs[0]["ref_type"] == "pending_action"
+    assert refs[0]["ref_id"] == "pa-1"
+
+
+async def test_task_approval_links_read_only_bridge(auth_client, test_db_session):
+    task_resp = await auth_client.post("/api/ocp/tasks", json={"title": "Bridge task"})
+    task_id = task_resp.json()["id"]
+    full = {f: "x" for f in DECISION_PROTOCOL_FIELDS}
+    d = await auth_client.post(
+        "/api/ocp/decisions",
+        json={"title": "D", "change_type": "new_workflow", "justification": full, "linked_task_ids": [task_id]},
+    )
+    decision_id = d.json()["id"]
+    await auth_client.post(
+        f"/api/ocp/decisions/{decision_id}/link-approval",
+        json={"ref_type": "approval_manager", "ref_id": "am-1", "status": "pending"},
+    )
+    resp = await auth_client.get(f"/api/ocp/tasks/{task_id}/approval-links")
+    assert resp.status_code == 200, resp.text
+    items = resp.json()["items"]
+    assert len(items) == 1
+    assert items[0]["decision_id"] == decision_id
+    assert items[0]["external_approvals"][0]["ref_id"] == "am-1"
+
+
+async def test_ocp_strict_default_deny_blocks_ungranted_action(
+    auth_client, test_db_session, test_org, test_user
+):
+    test_org.extra_data = {"ocp": {"strict_default_deny": True}}
+    await test_db_session.commit()
+    resp = await auth_client.post("/api/ocp/tasks", json={"title": "Needs grant"})
+    assert resp.status_code == 403
+    assert "strict_default_deny" in resp.json()["detail"]
+
+    # Add matching grant -> allowed.
+    grant_resp = await auth_client.post(
+        "/api/ocp/authority-grants",
+        json={
+            "subject_type": "human",
+            "subject_id": test_user.id,
+            "role": "operator",
+            "actions": ["task:create"],
+        },
+    )
+    assert grant_resp.status_code == 200, grant_resp.text
+    resp = await auth_client.post("/api/ocp/tasks", json={"title": "Granted"})
+    assert resp.status_code == 200, resp.text

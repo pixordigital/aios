@@ -23,7 +23,9 @@ from aios.governance.ocp import (
     decision_level,
     execute_decision,
     grant_is_valid,
+    link_external_approval,
     missing_decision_fields,
+    ocp_strict_default_deny,
     record_org_event,
     transition_task,
 )
@@ -101,6 +103,27 @@ def _event(e: OrgEvent) -> dict:
     }
 
 
+def _decision(r: DecisionRecord) -> dict:
+    justification = r.justification or {}
+    return {
+        "id": r.id,
+        "level": r.level,
+        "change_type": r.change_type,
+        "title": r.title,
+        "status": r.status,
+        "justification": justification,
+        "evidence": r.evidence or {},
+        "requested_by_type": r.requested_by_type,
+        "requested_by_id": r.requested_by_id,
+        "decided_by": r.decided_by,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "linked_task_ids": list(r.linked_task_ids or []),
+        "external_approvals": list(justification.get("_external_approvals") or []),
+        "confidentiality": r.confidentiality,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
 async def _require_grant_if_policy(
     db: DatabaseBackend,
     *,
@@ -111,11 +134,14 @@ async def _require_grant_if_policy(
     resource_type: str | None = None,
     resource_id: str | None = None,
 ) -> None:
-    """Deterministic, non-breaking authorize wiring.
+    """Deterministic OCP authorize wiring.
 
-    If org has any active grants for subject+action domain, require a matching grant.
-    If no grants configured for that subject/action domain, allow (legacy/no-policy).
+    If subject has active grants in the action domain, a matching grant is required.
+    If no relevant grants are configured, behavior depends on org policy:
+    `extra_data.ocp.strict_default_deny` (default false for compat).
     """
+    org = await db.get(Organization, org_id)
+    strict = ocp_strict_default_deny(getattr(org, "extra_data", None))
     rows = (await db.execute(
         select(AuthorityGrant).where(
             AuthorityGrant.org_id == org_id,
@@ -127,6 +153,8 @@ async def _require_grant_if_policy(
     domain = action.split(":", 1)[0]
     relevant = [g for g in active if any(p == "*" or p == action or p == f"{domain}:*" for p in (g.actions or []))]
     if not relevant:
+        if strict:
+            raise HTTPException(403, f"no valid grant for action (ocp.strict_default_deny): {action}")
         return
     ok, reason = authorize(active, action, resource_type=resource_type, resource_id=resource_id, now=_now())
     if not ok:
@@ -425,6 +453,32 @@ async def transition(
     return _task(task)
 
 
+@router.get("/tasks/{task_id}/approval-links")
+async def task_approval_links(
+    task_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Read-only bridge: external approval refs from decisions linked to task."""
+    task = await db.get(SharedTask, task_id)
+    if task is None or task.org_id != org_id:
+        raise HTTPException(404, "task not found")
+    rows = (await db.execute(
+        select(DecisionRecord).where(DecisionRecord.org_id == org_id)
+    )).scalars().all()
+    linked = []
+    for r in rows:
+        ids = [str(x) for x in (r.linked_task_ids or []) if x is not None]
+        if str(task_id) not in ids:
+            continue
+        linked.append({
+            "decision_id": r.id,
+            "decision_status": r.status,
+            "external_approvals": list((r.justification or {}).get("_external_approvals") or []),
+        })
+    return {"task_id": task_id, "items": linked}
+
+
 # --- Goals -------------------------------------------------------------------
 
 @router.get("/goals")
@@ -495,6 +549,38 @@ async def update_goal(
 
 # --- Decisions ---------------------------------------------------------------
 
+@router.get("/decisions")
+async def list_decisions(
+    status: str = "",
+    change_type: str = "",
+    level: int | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    q = select(DecisionRecord).where(DecisionRecord.org_id == org_id)
+    if status:
+        q = q.where(DecisionRecord.status == status)
+    if change_type:
+        q = q.where(DecisionRecord.change_type == change_type)
+    if level is not None:
+        q = q.where(DecisionRecord.level == level)
+    rows = (await db.execute(q.order_by(DecisionRecord.created_at.desc()).limit(limit))).scalars().all()
+    return {"items": [_decision(r) for r in rows]}
+
+
+@router.get("/decisions/{decision_id}")
+async def get_decision(
+    decision_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    record = await db.get(DecisionRecord, decision_id)
+    if record is None or record.org_id != org_id:
+        raise HTTPException(404, "decision not found")
+    return _decision(record)
+
+
 @router.post("/decisions")
 async def propose_decision(
     body: dict,
@@ -523,12 +609,9 @@ async def propose_decision(
                      payload={"level": record.level, "change_type": change_type})
     await db.commit()
     await db.refresh(record)
-    return {
-        "id": record.id,
-        "level": record.level,
-        "status": record.status,
-        "missing_fields": missing_decision_fields(record.justification),
-    }
+    body = _decision(record)
+    body["missing_fields"] = missing_decision_fields(record.justification)
+    return body
 
 
 @router.post("/decisions/{decision_id}/decide")
@@ -555,6 +638,44 @@ async def decide_record(
                      payload={"approve": approve, "status": record.status, "level": record.level})
     await db.commit()
     return {"id": record.id, "status": record.status, "decided_by": record.decided_by}
+
+
+@router.post("/decisions/{decision_id}/link-approval")
+async def link_decision_approval(
+    decision_id: str,
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    """Bridge external/core approval refs into DecisionRecord justification.
+
+    Pragmatic, no core approval ownership change. ref_type examples:
+    pending_action, approval_manager, external_ticket.
+    """
+    record = await db.get(DecisionRecord, decision_id)
+    if record is None or record.org_id != org_id:
+        raise HTTPException(404, "decision not found")
+    ref_type = (body.get("ref_type") or "").strip()
+    ref_id = (body.get("ref_id") or "").strip()
+    if not ref_type or not ref_id:
+        raise HTTPException(400, "ref_type and ref_id are required")
+    try:
+        link_external_approval(
+            record,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            status=(body.get("status") or "").strip(),
+            note=(body.get("note") or "").strip(),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    record_org_event(db, org_id=org_id, event_type="decision.approval_linked", actor_type="human", actor_id=user.id,
+                     entity_type="decision_record", entity_id=record.id,
+                     payload={"ref_type": ref_type, "ref_id": ref_id, "status": (body.get("status") or "").strip()})
+    await db.commit()
+    await db.refresh(record)
+    return _decision(record)
 
 
 @router.post("/decisions/{decision_id}/execute")

@@ -73,6 +73,29 @@ def test_authorize_respects_validity_scope_and_revocation():
     assert not authorize([grant], "task:transition", now=now + timedelta(days=2))[0]
 
 
+def test_ocp_strict_default_deny_flag():
+    from aios.governance.ocp import ocp_strict_default_deny
+
+    assert ocp_strict_default_deny(None) is False
+    assert ocp_strict_default_deny({}) is False
+    assert ocp_strict_default_deny({"ocp": {"strict_default_deny": True}}) is True
+    assert ocp_strict_default_deny({"ocp": {"strict_default_deny": False}}) is False
+
+
+def test_link_external_approval_bridge():
+    from aios.governance.ocp import link_external_approval
+
+    record = DecisionRecord(org_id="o", title="t", justification={"proposal": "p"})
+    link_external_approval(record, ref_type="pending_action", ref_id="pa1", status="approved", note="ok")
+    refs = record.justification["_external_approvals"]
+    assert len(refs) == 1
+    assert refs[0]["ref_type"] == "pending_action"
+    assert refs[0]["ref_id"] == "pa1"
+    assert refs[0]["status"] == "approved"
+    with pytest.raises(ValueError, match="ref_type and ref_id"):
+        link_external_approval(record, ref_type="", ref_id="x")
+
+
 def test_decision_levels_and_founder_gate():
     assert decision_level("execute_approved_process") == 1
     assert decision_level("new_integration") == 2
