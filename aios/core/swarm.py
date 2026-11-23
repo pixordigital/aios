@@ -6,7 +6,9 @@ Backed by team_swarm_configs + swarm_tasks + swarm_messages tables.
 
 import logging
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from typing import Generic, TypeVar
 
 from sqlalchemy import select, desc, func
 
@@ -14,6 +16,25 @@ from aios.db.backend import db_session
 from aios.db.models import Agent, Conversation, SwarmMessage, SwarmTask, Team, TeamSwarmConfig, team_agents
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+@dataclass
+class SwarmScopedResult(Generic[T]):
+    """Explicit scope/query outcome. ok=False means no tenant data exposed."""
+
+    ok: bool
+    reason: str = "ok"
+    value: T | None = None
+
+    @classmethod
+    def denied(cls, reason: str) -> "SwarmScopedResult[T]":
+        return cls(ok=False, reason=reason, value=None)
+
+    @classmethod
+    def success(cls, value: T) -> "SwarmScopedResult[T]":
+        return cls(ok=True, reason="ok", value=value)
 
 _SWARM_MODES = {"supervisor", "consensus", "pipeline", "mesh"}
 _TERMINAL_TASK_STATUSES = {"done", "failed"}
@@ -363,20 +384,41 @@ class SwarmCoordinator:
                 stmt = stmt.where(SwarmTask.team_id == team_id)
             return (await db.execute(stmt)).scalar_one_or_none()
 
-    async def list_tasks(
-        self, *, team_id: str, status: str = "", limit: int = 20, org_id: str = "",
-    ) -> list[SwarmTask]:
+    async def _team_scope_reason(self, db, team_id: str, org_id: str) -> str | None:
+        if not org_id:
+            return "missing_org"
+        if not team_id:
+            return "missing_team"
+        if not await _team_belongs_to_org(db, team_id, org_id):
+            return "team_not_found"
+        return None
+
+    async def inspect_team_scope(self, team_id: str, org_id: str) -> SwarmScopedResult[None]:
         async with db_session() as db:
-            if not org_id or not await _team_belongs_to_org(db, team_id, org_id):
-                # No org/team proof: refuse rather than dump another tenant's
-                # task payloads. All API routes supply org_id.
-                return []
+            reason = await self._team_scope_reason(db, team_id, org_id)
+        if reason:
+            return SwarmScopedResult.denied(reason)
+        return SwarmScopedResult.success(None)
+
+    async def list_tasks_result(
+        self, *, team_id: str, status: str = "", limit: int = 20, org_id: str = "",
+    ) -> SwarmScopedResult[list[SwarmTask]]:
+        async with db_session() as db:
+            reason = await self._team_scope_reason(db, team_id, org_id)
+            if reason:
+                return SwarmScopedResult.denied(reason)
             stmt = select(SwarmTask).where(SwarmTask.team_id == team_id, SwarmTask.org_id == org_id)
             if status:
                 stmt = stmt.where(SwarmTask.status == status)
             stmt = stmt.order_by(desc(SwarmTask.priority), desc(SwarmTask.created_at)).limit(limit)
             result = await db.execute(stmt)
-            return list(result.scalars().all())
+            return SwarmScopedResult.success(list(result.scalars().all()))
+
+    async def list_tasks(
+        self, *, team_id: str, status: str = "", limit: int = 20, org_id: str = "",
+    ) -> list[SwarmTask]:
+        scoped = await self.list_tasks_result(team_id=team_id, status=status, limit=limit, org_id=org_id)
+        return scoped.value if scoped.ok and scoped.value is not None else []
 
     # ── Consensus ──
 
@@ -489,12 +531,13 @@ class SwarmCoordinator:
                     return None
             return msg
 
-    async def list_messages(
+    async def list_messages_result(
         self, *, team_id: str, limit: int = 20, org_id: str = "",
-    ) -> list[SwarmMessage]:
+    ) -> SwarmScopedResult[list[SwarmMessage]]:
         async with db_session() as db:
-            if not org_id or not await _team_belongs_to_org(db, team_id, org_id):
-                return []
+            reason = await self._team_scope_reason(db, team_id, org_id)
+            if reason:
+                return SwarmScopedResult.denied(reason)
             result = await db.execute(
                 select(SwarmMessage).where(
                     SwarmMessage.team_id == team_id,
@@ -502,18 +545,29 @@ class SwarmCoordinator:
                 )
                 .order_by(desc(SwarmMessage.created_at)).limit(limit)
             )
-            return list(result.scalars().all())
+            return SwarmScopedResult.success(list(result.scalars().all()))
 
-    async def stats(self, team_id: str, org_id: str = "") -> dict:
+    async def list_messages(
+        self, *, team_id: str, limit: int = 20, org_id: str = "",
+    ) -> list[SwarmMessage]:
+        scoped = await self.list_messages_result(team_id=team_id, limit=limit, org_id=org_id)
+        return scoped.value if scoped.ok and scoped.value is not None else []
+
+    async def stats_result(self, team_id: str, org_id: str = "") -> SwarmScopedResult[dict]:
         async with db_session() as db:
-            if not org_id or not await _team_belongs_to_org(db, team_id, org_id):
-                return {"total_tasks": 0, "queued": 0}
+            reason = await self._team_scope_reason(db, team_id, org_id)
+            if reason:
+                return SwarmScopedResult.denied(reason)
             base = [SwarmTask.team_id == team_id, SwarmTask.org_id == org_id]
             q = await db.execute(select(func.count(SwarmTask.id)).where(*base))
             total = q.scalar() or 0
             q2 = await db.execute(select(func.count(SwarmTask.id)).where(*base, SwarmTask.status == "queued"))
             queued = q2.scalar() or 0
-            return {"total_tasks": total, "queued": queued}
+            return SwarmScopedResult.success({"total_tasks": total, "queued": queued})
+
+    async def stats(self, team_id: str, org_id: str = "") -> dict:
+        scoped = await self.stats_result(team_id, org_id=org_id)
+        return scoped.value if scoped.ok and scoped.value is not None else {"total_tasks": 0, "queued": 0}
 
 
 swarm = SwarmCoordinator()

@@ -221,9 +221,10 @@ async def list_swarm_tasks(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    if not await _team_in_org(team_id, org_id):
+    scoped = await swarm.list_tasks_result(team_id=team_id, status=status, limit=limit, org_id=org_id)
+    if not scoped.ok:
         raise HTTPException(404, "team not found")
-    rows = await swarm.list_tasks(team_id=team_id, status=status, limit=limit, org_id=org_id)
+    rows = scoped.value or []
     return {"items": rows, "total": len(rows)}
 
 
@@ -233,9 +234,10 @@ async def swarm_stats(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
-    if not await _team_in_org(team_id, org_id):
+    scoped = await swarm.stats_result(team_id, org_id=org_id)
+    if not scoped.ok:
         raise HTTPException(404, "team not found")
-    return await swarm.stats(team_id, org_id=org_id)
+    return scoped.value or {"total_tasks": 0, "queued": 0}
 
 
 # ── Shared memory ──
