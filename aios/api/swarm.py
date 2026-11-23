@@ -221,6 +221,8 @@ async def list_swarm_tasks(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
+    if not await _team_in_org(team_id, org_id):
+        raise HTTPException(404, "team not found")
     rows = await swarm.list_tasks(team_id=team_id, status=status, limit=limit, org_id=org_id)
     return {"items": rows, "total": len(rows)}
 
@@ -231,6 +233,8 @@ async def swarm_stats(
     org_id: str = Depends(get_org_id),
     user: User = Depends(get_current_user),
 ):
+    if not await _team_in_org(team_id, org_id):
+        raise HTTPException(404, "team not found")
     return await swarm.stats(team_id, org_id=org_id)
 
 
