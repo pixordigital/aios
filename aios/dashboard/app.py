@@ -375,7 +375,10 @@ async def login_action(request: Request, email: str = Form(...), password: str =
                     return await login_page(request, error="Código 2FA inválido")
 
         token = create_jwt_token(user.id, user.org_id)
-        resp = RedirectResponse("/dashboard", status_code=303)
+        nxt = request.cookies.get("aios_login_next", "")
+        target = nxt if nxt.startswith("/dashboard/sso/") else "/dashboard"
+        resp = RedirectResponse(target, status_code=303)
+        resp.delete_cookie("aios_login_next", path="/dashboard")
         is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
         resp.set_cookie(
             key=COOKIE_NAME, value=token,

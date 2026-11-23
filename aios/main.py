@@ -520,7 +520,10 @@ async def dashboard_auth(request: Request, call_next):
         user = await get_dashboard_user(request)
         if not user:
             from fastapi.responses import RedirectResponse
-            return RedirectResponse("/dashboard/login", status_code=303)
+            resp = RedirectResponse("/dashboard/login", status_code=303)
+            if path.startswith("/dashboard/sso/"):
+                resp.set_cookie("aios_login_next", path, max_age=600, httponly=True, samesite="lax", path="/dashboard")
+            return resp
         request.state.user_id = user.id
         request.state.user_email = user.email
         request.state.is_superadmin = user.role == "superadmin"
