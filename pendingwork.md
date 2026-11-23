@@ -1,6 +1,6 @@
 ## pending work handoff
 
-Snapshot: 2026-11-23. Local `main` at `fab8879`; `origin/main` at `0982414`; local commits not pushed. Working tree clean.
+Snapshot: 2026-11-23. Local `main` ahead of `origin/main` by unpushed commits. Working tree clean.
 
 ### Current state
 
