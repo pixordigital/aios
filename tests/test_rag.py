@@ -73,6 +73,62 @@ async def test_search_knowledge_records_warns_on_large_scan(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_knowledge_records_vector_candidates_rechecked(monkeypatch):
+    monkeypatch.setattr(rag, "async_session", lambda: _FakeSession(_make_rows(1)))
+
+    def mk(rid, org, classification):
+        return KnowledgeRecord(
+            id=rid, org_id=org, title=rid, content="pricing",
+            kind="fact", classification=classification, source_type="doc",
+            source_id=rid, derived_from=[],
+        )
+
+    candidates = [
+        (mk("vk-ok", "org1", "internal"), 0.9),
+        (mk("vk-secret", "org1", "confidential"), 0.8),
+        (mk("vk-tenant", "org2", "internal"), 0.7),
+    ]
+
+    async def fake_vector(org_id, query, conditions, top_k):
+        return candidates
+
+    monkeypatch.setattr(rag, "_vector_candidates", fake_vector)
+    hits = await rag.search_knowledge_records("org1", "pricing", top_k=10)
+    ids = {h["record_id"] for h in hits}
+    assert "vk-ok" in ids
+    assert "vk-secret" not in ids
+    assert "vk-tenant" not in ids
+
+
+@pytest.mark.asyncio
+async def test_store_knowledge_vectors_upserts_when_enabled(monkeypatch):
+    calls = []
+
+    class _WriteSession:
+        async def execute(self, sql, params=None):
+            calls.append((str(sql), params))
+
+        async def commit(self):
+            calls.append(("commit", None))
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setitem(rag.RAG_STATUS, "vector", True)
+    monkeypatch.setattr("aios.core.vector_store.use_postgres", lambda: True)
+    monkeypatch.setattr(rag, "async_session", lambda: _WriteSession())
+
+    record = _make_rows(1)[0]
+    stored = await rag.store_knowledge_vectors([record], [[0.1, 0.2]])
+    assert stored == 1
+    assert any("ON CONFLICT" in sql for sql, _ in calls if isinstance(sql, str))
+    assert calls[0][1]["emb"] == "[0.1000000,0.2000000]"
+
+
+@pytest.mark.asyncio
 async def test_search_knowledge_records_no_warn_below_threshold(monkeypatch):
     rows = _make_rows(2)
     monkeypatch.setattr(rag, "async_session", lambda: _FakeSession(rows))
