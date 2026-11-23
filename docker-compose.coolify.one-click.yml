@@ -54,7 +54,7 @@ services:
       QRCODE_LIMIT: "30"
       DATABASE_ENABLED: "true"
       DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: "postgresql://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}@postgres:5432/evolution?schema=evolution"
+      DATABASE_CONNECTION_URI: "${EVOLUTION_DATABASE_URI:-postgresql://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}@postgres:5432/evolution?schema=evolution}"
       REDIS_ENABLED: "true"
       REDIS_URI: "redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in Coolify}@redis:6379/6"
       REDIS_PREFIX_KEY: evolution
