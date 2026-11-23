@@ -14,6 +14,7 @@ from aios.governance.model_intelligence import (
     rollback_target,
     select_model,
 )
+from aios.governance.security import record_cross_tenant_block_if_mismatch
 
 router = APIRouter(prefix="/api/models", tags=["model-intelligence"])
 
@@ -37,6 +38,18 @@ async def _entry(entry_id: str, org_id: str, db: DatabaseBackend) -> ModelRegist
         )
     ).scalars().first()
     if entry is None:
+        row = await db.get(ModelRegistryEntry, entry_id)
+        if row is not None and row.org_id is not None and row.org_id != org_id:
+            await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=org_id,
+                resource=row,
+                source="model_registry.get",
+                severity="medium",
+                actor_type="org",
+                actor_id=org_id,
+                payload={"resource": "model_registry_entry", "resource_id": entry_id},
+            )
         raise HTTPException(404, "model registry entry not found")
     return entry
 

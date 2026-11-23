@@ -1,8 +1,11 @@
 """LIA API: acquisition records, suppression, contact gate and CRM handoff."""
 
+from sqlalchemy import select
+
 from aios.core.crm_intelligence import Contact
 from aios.db.models import Organization
-from aios.core.lia import Campaign, CampaignMember, SuppressionEntry
+from aios.core.lia import Campaign, CampaignMember, LeadSource, SuppressionEntry
+from aios.governance.security import SecurityEvent
 
 
 async def test_sources_and_suppression(auth_client):
@@ -279,3 +282,112 @@ async def test_lia_track_c_mode_markers_and_evidence_keys_fail_closed(auth_clien
         },
     )
     assert resp.status_code == 200, resp.text
+
+
+def _lia_cross_tenant_metrics(rows, *, resource_type, resource_org_id, source):
+    return [
+        e
+        for e in rows
+        if e.event_type == "security.cross_tenant.blocked"
+        and e.payload.get("metric") == "cross_tenant_block"
+        and e.payload.get("resource_type") == resource_type
+        and str(e.payload.get("resource_org_id")) == str(resource_org_id)
+        and e.source == source
+    ]
+
+
+async def test_lia_cross_tenant_campaign_approve_records_metric(auth_client, test_db_session, second_org):
+    campaign = Campaign(org_id=second_org.id, name="Secret", channel="email", legal_reviewed=True)
+    test_db_session.add(campaign)
+    await test_db_session.commit()
+    await test_db_session.refresh(campaign)
+
+    resp = await auth_client.post(f"/api/lia/campaigns/{campaign.id}/approve")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "campaign not found"
+
+    rows = (await test_db_session.execute(select(SecurityEvent))).scalars().all()
+    assert _lia_cross_tenant_metrics(
+        rows, resource_type="Campaign", resource_org_id=second_org.id, source="lia.api.approve_campaign"
+    )
+
+
+async def test_lia_cross_tenant_member_lookups_record_metric(auth_client, test_db_session, test_org, second_org):
+    foreign_campaign = Campaign(org_id=second_org.id, name="Foreign", channel="email")
+    foreign_member_campaign = Campaign(org_id=second_org.id, name="Foreign2", channel="email")
+    test_db_session.add_all([foreign_campaign, foreign_member_campaign])
+    await test_db_session.flush()
+    foreign_member = CampaignMember(org_id=second_org.id, campaign_id=foreign_member_campaign.id, stage="company_discovery")
+    test_db_session.add(foreign_member)
+    await test_db_session.commit()
+    await test_db_session.refresh(foreign_campaign)
+    await test_db_session.refresh(foreign_member)
+
+    resp = await auth_client.post("/api/lia/members", json={"campaign_id": foreign_campaign.id})
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "campaign not found"
+
+    resp = await auth_client.post(f"/api/lia/members/{foreign_member.id}/stage", json={"stage": "prospect_intelligence"})
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "member not found"
+
+    resp = await auth_client.post(f"/api/lia/members/{foreign_member.id}/handoff", json={"campaign_approved": True, "campaign_legal_reviewed": True})
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "member not found"
+
+    rows = (await test_db_session.execute(select(SecurityEvent))).scalars().all()
+    assert _lia_cross_tenant_metrics(
+        rows, resource_type="Campaign", resource_org_id=second_org.id, source="lia.api.create_member.campaign"
+    )
+    assert _lia_cross_tenant_metrics(
+        rows, resource_type="CampaignMember", resource_org_id=second_org.id, source="lia.api.advance_stage.member"
+    )
+    assert _lia_cross_tenant_metrics(
+        rows, resource_type="CampaignMember", resource_org_id=second_org.id, source="lia.api.handoff.member"
+    )
+
+
+async def test_lia_cross_tenant_source_lookups_record_metric(auth_client, test_db_session, test_org, second_org):
+    foreign_source = LeadSource(org_id=second_org.id, name="Foreign src", source_type="receita_cnpj", allowed_for_outreach=True)
+    test_db_session.add(foreign_source)
+    await test_db_session.flush()
+    local_campaign = Campaign(org_id=test_org.id, name="Local", channel="email")
+    test_db_session.add(local_campaign)
+    await test_db_session.flush()
+    local_contact = Contact(org_id=test_org.id, name="Lead", email="l@example.com", email_verified=True, contact_allowed=True)
+    test_db_session.add(local_contact)
+    await test_db_session.flush()
+    local_member = CampaignMember(org_id=test_org.id, campaign_id=local_campaign.id, contact_id=local_contact.id, stage="company_discovery", disposition="qualified")
+    test_db_session.add(local_member)
+    await test_db_session.commit()
+    await test_db_session.refresh(foreign_source)
+    await test_db_session.refresh(local_member)
+
+    resp = await auth_client.post(
+        "/api/lia/contact-check",
+        json={
+            "channel": "email",
+            "contact_allowed": True,
+            "campaign_approved": True,
+            "campaign_legal_reviewed": True,
+            "email_verified": True,
+            "source_id": foreign_source.id,
+        },
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "source not found"
+
+    resp = await auth_client.post(
+        f"/api/lia/members/{local_member.id}/handoff",
+        json={"campaign_approved": True, "campaign_legal_reviewed": True, "source_id": foreign_source.id},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "source not found"
+
+    rows = (await test_db_session.execute(select(SecurityEvent))).scalars().all()
+    assert _lia_cross_tenant_metrics(
+        rows, resource_type="LeadSource", resource_org_id=second_org.id, source="lia.api.contact_check.source"
+    )
+    assert _lia_cross_tenant_metrics(
+        rows, resource_type="LeadSource", resource_org_id=second_org.id, source="lia.api.handoff.source"
+    )

@@ -21,6 +21,7 @@ from aios.core.lia import (
     crm_handoff_decision,
 )
 from aios.governance.innovation import TRACK_AUTONOMOUS_MODES, autonomous_action_guard
+from aios.governance.security import record_cross_tenant_block_if_mismatch
 
 
 router = APIRouter(prefix="/api/lia", tags=["lia"])
@@ -178,6 +179,18 @@ async def approve_campaign(
         )
     ).scalars().first()
     if campaign is None:
+        other = await db.get(Campaign, campaign_id)
+        evt = await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=user.org_id,
+            resource=other,
+            source="lia.api.approve_campaign",
+            actor_type="human",
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            payload={"campaign_id": str(campaign_id)},
+        )
+        if evt is not None:
+            await db.commit()
         raise HTTPException(404, "campaign not found")
     if not campaign.legal_reviewed:
         raise HTTPException(400, "legal review required before approval")
@@ -275,6 +288,16 @@ async def contact_check(
             )
         ).scalars().first()
         if src is None:
+            other = await db.get(LeadSource, str(source_id))
+            evt = await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=org_id,
+                resource=other,
+                source="lia.api.contact_check.source",
+                payload={"source_id": str(source_id)},
+            )
+            if evt is not None:
+                await db.commit()
             raise HTTPException(404, "source not found")
         source_allowed = bool(src.allowed_for_outreach)
     allowed, reason = can_contact(
@@ -305,6 +328,16 @@ async def create_member(
         )
     ).scalars().first()
     if campaign is None:
+        other = await db.get(Campaign, campaign_id)
+        evt = await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=org_id,
+            resource=other,
+            source="lia.api.create_member.campaign",
+            payload={"campaign_id": str(campaign_id)},
+        )
+        if evt is not None:
+            await db.commit()
         raise HTTPException(404, "campaign not found")
     disposition = str(body.get("disposition") or "research_required")
     if disposition not in DISPOSITIONS:
@@ -346,6 +379,16 @@ async def advance_stage(
         )
     ).scalars().first()
     if member is None:
+        other = await db.get(CampaignMember, member_id)
+        evt = await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=org_id,
+            resource=other,
+            source="lia.api.advance_stage.member",
+            payload={"member_id": str(member_id)},
+        )
+        if evt is not None:
+            await db.commit()
         raise HTTPException(404, "member not found")
     target = str(body.get("stage") or "").strip()
     allowed, reason = can_transition_stage(member.stage or "company_discovery", target)
@@ -372,6 +415,16 @@ async def handoff(
         )
     ).scalars().first()
     if member is None:
+        other = await db.get(CampaignMember, member_id)
+        evt = await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=org_id,
+            resource=other,
+            source="lia.api.handoff.member",
+            payload={"member_id": str(member_id)},
+        )
+        if evt is not None:
+            await db.commit()
         raise HTTPException(404, "member not found")
     contact = None
     if member.contact_id:
@@ -389,6 +442,16 @@ async def handoff(
             )
         ).scalars().first()
         if src is None:
+            other = await db.get(LeadSource, str(source_id))
+            evt = await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=org_id,
+                resource=other,
+                source="lia.api.handoff.source",
+                payload={"source_id": str(source_id)},
+            )
+            if evt is not None:
+                await db.commit()
             raise HTTPException(404, "source not found")
         source_allowed = bool(src.allowed_for_outreach)
     return crm_handoff_decision(

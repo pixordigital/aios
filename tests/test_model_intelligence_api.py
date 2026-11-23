@@ -114,6 +114,10 @@ async def test_recommendation_and_rollback(auth_client, test_db_session, test_or
 
 
 async def test_models_are_tenant_scoped(auth_client, test_db_session, test_org):
+    from sqlalchemy import select
+
+    from aios.governance.security import SecurityEvent
+
     other = Organization(name="Other", slug="other-model-org")
     test_db_session.add(other)
     await test_db_session.flush()
@@ -127,3 +131,41 @@ async def test_models_are_tenant_scoped(auth_client, test_db_session, test_org):
     assert "secret-model" not in keys
     resp = await auth_client.post(f"/api/models/{secret.id}/approve")
     assert resp.status_code == 404
+    assert resp.json()["detail"] == "model registry entry not found"
+
+    events = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    matches = [
+        e for e in events
+        if (e.payload or {}).get("resource_id") == secret.id
+        and (e.payload or {}).get("resource") == "model_registry_entry"
+    ]
+    assert len(matches) == 1
+    assert matches[0].payload["requested_org_id"] == test_org.id
+    assert matches[0].payload["resource_org_id"] == other.id
+
+
+async def test_model_registry_global_visible_no_cross_tenant_metric(auth_client, test_db_session, test_org, test_user):
+    from sqlalchemy import select
+
+    from aios.governance.security import SecurityEvent
+
+    global_entry = ModelRegistryEntry(
+        org_id=None, model_key="global-model", provider="x", approved=True
+    )
+    test_db_session.add(global_entry)
+    await test_db_session.commit()
+
+    resp = await auth_client.post(f"/api/models/{global_entry.id}/approve")
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "cannot approve a global registry entry"
+
+    events = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    assert not any((e.payload or {}).get("resource_id") == global_entry.id for e in events)
