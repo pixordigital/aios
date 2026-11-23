@@ -462,9 +462,6 @@ async def delete_node(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    node = await db.get(WorkflowNode, node_id)
-    if not node or node.workflow_id != wf_id:
-        raise HTTPException(404)
     wf = await db.get(Workflow, wf_id)
     await verify_org_access_async(
         org_id,
@@ -475,6 +472,20 @@ async def delete_node(
         source="workflows.api.delete_node",
         payload={"workflow_id": str(wf_id), "node_id": str(node_id)},
     )
+    node = await db.get(WorkflowNode, node_id)
+    if not node or node.workflow_id != wf_id:
+        if node is not None and str(node.workflow_id) != str(wf_id):
+            node_wf = await db.get(Workflow, node.workflow_id)
+            await verify_org_access_async(
+                org_id,
+                node_wf,
+                db=db,
+                actor_id=str(getattr(user, "id", "") or "") or None,
+                actor_type="human",
+                source="workflows.api.delete_node.node_workflow",
+                payload={"workflow_id": str(wf_id), "node_id": str(node_id)},
+            )
+        raise HTTPException(404)
     await db.delete(node)
     await db.commit()
     return {"ok": True}
@@ -590,6 +601,14 @@ async def get_run(
         payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
     )
     if run.workflow_id != wf_id:
+        wf = await db.get(Workflow, wf_id)
+        await verify_org_access_async(
+            org_id,
+            wf,
+            db=db,
+            source="workflows.api.get_run.workflow",
+            payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+        )
         raise HTTPException(404)
     return run
 
@@ -646,6 +665,16 @@ async def eval_workflow_run(
         payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
     )
     if run.workflow_id != wf_id:
+        wf_m = await db.get(Workflow, wf_id)
+        await verify_org_access_async(
+            org_id,
+            wf_m,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            actor_type="human",
+            source="workflows.api.eval_workflow_run.workflow",
+            payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+        )
         raise HTTPException(404, detail="run not found")
     output = json.dumps(run.outputs) if run.outputs else run.error or ""
     llm = get_provider("openai/gpt-4o-mini")
@@ -676,6 +705,16 @@ async def resume_run(
         payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
     )
     if orig.workflow_id != wf_id:
+        wf_m = await db.get(Workflow, wf_id)
+        await verify_org_access_async(
+            org_id,
+            wf_m,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            actor_type="human",
+            source="workflows.api.resume_run.workflow",
+            payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+        )
         raise HTTPException(404)
     if orig.status == "done":
         return {"run_id": orig.id, "status": "done", "outputs": orig.outputs}
@@ -783,6 +822,16 @@ async def replay_run(
         payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
     )
     if orig.workflow_id != wf_id:
+        wf_m = await db.get(Workflow, wf_id)
+        await verify_org_access_async(
+            org_id,
+            wf_m,
+            db=db,
+            actor_id=str(getattr(user, "id", "") or "") or None,
+            actor_type="human",
+            source="workflows.api.replay_run.workflow",
+            payload={"workflow_id": str(wf_id), "run_id": str(run_id)},
+        )
         raise HTTPException(404)
     new_run = WorkflowRun(
         workflow_id=wf_id,

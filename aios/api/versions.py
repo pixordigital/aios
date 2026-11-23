@@ -62,6 +62,8 @@ async def rollback_version(agent_id: str, version_id: str, db: DatabaseBackend =
 
 @router.get("/{agent_id}/versions/{version_id}")
 async def get_version(agent_id: str, version_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    agent = await db.get(Agent, agent_id)
+    await verify_org_access_async(org_id, agent, db=db, actor_id=user.id, source="api.versions.get_agent")
     ver = await db.get(AgentVersion, version_id)
     await verify_org_access_async(org_id, ver, db=db, actor_id=user.id, source="api.versions.get")
     if not ver or ver.agent_id != agent_id:
@@ -86,15 +88,9 @@ async def diff_version(
         raise HTTPException(404)
     other = None
     if compare:
-        # `compare` came straight from a query parameter and was fetched with an
-        # unscoped get(), so any tenant could diff against any other tenant's
-        # version and read back its system_prompt, llm_config, tools and
-        # governance_config. Every sibling route in this file scopes by org.
-        other = (await db.execute(
-            select(AgentVersion).where(
-                AgentVersion.id == compare, AgentVersion.org_id == org_id
-            )
-        )).scalar_one_or_none()
+        # Unscoped fetch + verify_org_access_async: metrics cross-tenant mismatch
+        # and returns same 404, without leaking existence.
+        other = await db.get(AgentVersion, compare)
         await verify_org_access_async(org_id, other, db=db, actor_id=user.id, source="api.versions.diff_compare")
     else:
         res = await db.execute(
