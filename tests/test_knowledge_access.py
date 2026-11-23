@@ -111,63 +111,15 @@ async def test_hybrid_search_no_legacy_memory_bypass_by_default(monkeypatch):
     assert out == []
 
 
-async def test_hybrid_search_legacy_escape_hatch_requires_internal_flags(monkeypatch):
+async def test_hybrid_search_has_no_unpermissioned_legacy_path():
+    import inspect
+
     from aios.core import rag
 
-    async def fake_search(*args, **kwargs):
-        return []
-
-    monkeypatch.setattr(rag, "search_knowledge_records", fake_search)
-
-    async def should_not_run(*args, **kwargs):
-        raise AssertionError("legacy memory path must stay blocked without all internal flags")
-
-    monkeypatch.setattr("aios.core.memory._embed", should_not_run)
-
-    # Single flag insufficient
-    out = await rag.hybrid_search("org1", "pricing", include_legacy_memory=True)
-    assert out == []
-    out = await rag.hybrid_search(
-        "org1", "pricing", include_legacy_memory=True, allow_legacy_unpermissioned=True
-    )
-    assert out == []
-
-
-async def test_hybrid_search_legacy_escape_hatch_all_internal_flags(monkeypatch):
-    from aios.core import rag
-
-    async def fake_search(*args, **kwargs):
-        return []
-
-    monkeypatch.setattr(rag, "search_knowledge_records", fake_search)
-
-    class _FakeResult:
-        def __iter__(self):
-            return iter([("m1", "legacy content", "[0.1]")])
-
-    class _FakeSession:
-        async def execute(self, *args, **kwargs):
-            return _FakeResult()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-    monkeypatch.setattr("aios.core.rag.async_session", lambda: _FakeSession())
-    monkeypatch.setattr("aios.core.memory._embed", lambda q: [0.1])
-
-    out = await rag.hybrid_search(
-        "org1",
-        "pricing",
-        include_legacy_memory=True,
-        allow_legacy_unpermissioned=True,
-        internal_caller=True,
-    )
-    assert len(out) == 1
-    assert out[0]["source"] == "legacy_memory"
-    assert out[0]["legacy_unpermissioned"] is True
+    params = inspect.signature(rag.hybrid_search).parameters
+    assert "include_legacy_memory" not in params
+    assert "allow_legacy_unpermissioned" not in params
+    assert "internal_caller" not in params
 
 
 async def test_rag_search_tool_fails_closed_without_actor_context(monkeypatch):
@@ -364,6 +316,24 @@ async def test_search_knowledge_records_sql_acl_pushdown(test_db_session, test_o
 
     hits = await search_knowledge_records(test_org.id, "alpha", actor_departments={"d1"})
     assert {h["record_id"] for h in hits} == {"acl-open", "acl-dept"}
+
+
+async def test_search_knowledge_records_term_prefilter(test_db_session, test_org):
+    from aios.core.rag import search_knowledge_records
+    from aios.governance.knowledge import KnowledgeRecord
+
+    for rid, text in (("match", "pricing rules"), ("other", "unrelated notes")):
+        test_db_session.add(
+            KnowledgeRecord(
+                id=f"term-{rid}", org_id=test_org.id, title=rid,
+                kind="statement", classification="internal",
+                source_type="doc", source_id=rid, derived_from=[], search_text=text,
+            )
+        )
+    await test_db_session.commit()
+
+    hits = await search_knowledge_records(test_org.id, "pricing", is_founder=True)
+    assert {h["record_id"] for h in hits} == {"term-match"}
 
 
 async def test_resolve_granted_record_ids_requires_identity():

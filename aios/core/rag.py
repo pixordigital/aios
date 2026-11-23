@@ -1,4 +1,3 @@
-import json as _json
 import logging
 import os
 import time
@@ -56,6 +55,36 @@ async def ensure_vector_extension():
         RAG_STATUS["fallback"] = True
 
 
+def _acl_conditions(
+    org_id: str,
+    actor_departments: set[str],
+    is_founder: bool,
+    granted_record_ids: set[str],
+    now: datetime,
+) -> list:
+    """Cheap ACL predicates shared by lexical and vector candidate queries."""
+    base = [
+        KnowledgeRecord.org_id == org_id,
+        KnowledgeRecord.deleted_at.is_(None),
+        or_(
+            KnowledgeRecord.retention_until.is_(None),
+            KnowledgeRecord.retention_until >= now,
+        ),
+    ]
+    if is_founder:
+        return base
+    in_scope = or_(
+        KnowledgeRecord.department_id.is_(None),
+        KnowledgeRecord.department_id.in_(actor_departments) if actor_departments else False,
+    )
+    normal = and_(~KnowledgeRecord.classification.in_(("restricted", "confidential")), in_scope)
+    confidential = and_(
+        KnowledgeRecord.classification == "confidential",
+        KnowledgeRecord.id.in_(granted_record_ids) if granted_record_ids else False,
+    )
+    return [*base, or_(normal, confidential)]
+
+
 def _knowledge_hit(record: KnowledgeRecord, score: float) -> dict:
     return {
         "id": record.id,
@@ -76,6 +105,79 @@ def _knowledge_hit(record: KnowledgeRecord, score: float) -> dict:
     }
 
 
+def _vec_literal(vec: list[float]) -> str:
+    return "[" + ",".join(f"{float(v):.7f}" for v in vec) + "]"
+
+
+async def store_knowledge_vectors(
+    records: list[KnowledgeRecord], embeddings: list[list[float]]
+) -> int:
+    """Best-effort pgvector store; never changes governed ACL or ingest result."""
+    if not (RAG_STATUS["vector"] and records):
+        return 0
+    from aios.core.vector_store import use_postgres
+
+    if not use_postgres():
+        return 0
+    stored = 0
+    async with async_session() as s:
+        for record, emb in zip(records, embeddings):
+            try:
+                await s.execute(
+                    text(
+                        "INSERT INTO knowledge_vectors (record_id, org_id, embedding) "
+                        "VALUES (:rid, :org, CAST(:emb AS vector)) "
+                        "ON CONFLICT (record_id) DO UPDATE SET embedding = EXCLUDED.embedding"
+                    ),
+                    {"rid": record.id, "org": record.org_id, "emb": _vec_literal(emb)},
+                )
+                stored += 1
+            except Exception as e:
+                logger.warning("knowledge vector store failed record=%s: %s", record.id, e)
+        await s.commit()
+    return stored
+
+
+async def _vector_candidates(
+    org_id: str, query: str, conditions: list, top_k: int
+) -> list[tuple[KnowledgeRecord, float]]:
+    """ANN candidates re-filtered through the same ACL as the lexical path."""
+    if not (RAG_STATUS["vector"] and RAG_STATUS["hnsw"]):
+        return []
+    try:
+        from aios.core.memory import _embed
+        from aios.core.vector_store import use_postgres
+
+        if not use_postgres():
+            return []
+        q = _vec_literal(_embed(query))
+        k = max(top_k, 5)
+        async with async_session() as s:
+            ids = (
+                await s.execute(
+                    text(
+                        "SELECT record_id FROM knowledge_vectors WHERE org_id=:org"
+                        " ORDER BY embedding <=> CAST(:emb AS vector) LIMIT :k"
+                    ),
+                    {"org": org_id, "emb": q, "k": k},
+                )
+            ).scalars().all()
+            if not ids:
+                return []
+            id_list = [str(i) for i in ids]
+            rows = (
+                await s.execute(
+                    select(KnowledgeRecord).where(KnowledgeRecord.id.in_(id_list), *conditions)
+                )
+            ).scalars().all()
+        # Re-query loses ANN order; restore rank by the original id order.
+        rank = {rid: i for i, rid in enumerate(id_list)}
+        return [(r, 1.0 - rank[str(r.id)] / k) for r in rows if str(r.id) in rank]
+    except Exception as e:
+        logger.warning("knowledge vector search failed org=%s: %s", org_id, e)
+        return []
+
+
 async def search_knowledge_records(
     org_id: str,
     query: str,
@@ -94,31 +196,27 @@ async def search_knowledge_records(
         return []
     started = time.perf_counter()
     try:
-        # Push cheap ACL predicates into SQL: founder sees all, everyone else
-        # only public/internal in-scope or confidential with an explicit grant.
-        # can_retrieve still re-checks every row before scoring.
+        # ACL predicates in SQL; can_retrieve still re-checks before scoring.
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        departments = actor_departments or set()
-        grants = granted_record_ids or set()
-        conditions = [
-            KnowledgeRecord.org_id == org_id,
-            KnowledgeRecord.deleted_at.is_(None),
-            or_(
-                KnowledgeRecord.retention_until.is_(None),
-                KnowledgeRecord.retention_until >= now,
-            ),
-        ]
-        if not is_founder:
-            in_scope = or_(
-                KnowledgeRecord.department_id.is_(None),
-                KnowledgeRecord.department_id.in_(departments) if departments else False,
-            )
-            normal = and_(~KnowledgeRecord.classification.in_(("restricted", "confidential")), in_scope)
-            confidential = and_(
-                KnowledgeRecord.classification == "confidential",
-                KnowledgeRecord.id.in_(grants) if grants else False,
-            )
-            conditions.append(or_(normal, confidential))
+        acl_conditions = _acl_conditions(
+            org_id, actor_departments or set(), is_founder, granted_record_ids or set(), now
+        )
+        conditions = list(acl_conditions)
+        # knowledge_text_score scores a record when ANY query term is present;
+        # push that same OR predicate into SQL so non-matching rows are not fetched.
+        terms = [t for t in query.lower().split() if t]
+        if terms:
+            term_predicates = []
+            for term in terms:
+                pattern = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+                term_predicates.append(
+                    or_(
+                        KnowledgeRecord.title.ilike(pattern, escape="\\"),
+                        KnowledgeRecord.content.ilike(pattern, escape="\\"),
+                        KnowledgeRecord.search_text.ilike(pattern, escape="\\"),
+                    )
+                )
+            conditions.append(or_(*term_predicates))
         async with async_session() as s:
             rows = (await s.execute(select(KnowledgeRecord).where(*conditions))).scalars().all()
         scanned = len(rows)
@@ -147,6 +245,18 @@ async def search_knowledge_records(
             score = knowledge_text_score(r, query)
             if score > 0:
                 scored.append((score, r))
+        # Vector candidates supplement lexical matches; ACL re-checked per record.
+        for record, similarity in await _vector_candidates(org_id, query, acl_conditions, top_k):
+            if any(r.id == record.id for _, r in scored):
+                continue
+            if can_retrieve(
+                record,
+                actor_org_id=org_id,
+                actor_departments=actor_departments or set(),
+                is_founder=is_founder,
+                granted_record_ids=granted_record_ids,
+            )[0]:
+                scored.append((similarity, record))
         scored.sort(key=lambda x: (-x[0], x[1].created_at.timestamp() if x[1].created_at else 0))
         hits = [_knowledge_hit(r, score) for score, r in scored[: max(1, top_k)]]
         logger.debug(
@@ -178,21 +288,12 @@ async def hybrid_search(
     actor_departments: set[str] | None = None,
     is_founder: bool = False,
     granted_record_ids: set[str] | None = None,
-    include_legacy_memory: bool = False,
-    allow_legacy_unpermissioned: bool = False,
-    internal_caller: bool = False,
 ):
     """Search knowledge with permission-aware defaults.
 
-    - agent_id given -> legacy agent MemoryManager store (agent-scoped memory).
-      Not a KnowledgeRecord; kept for backward compat, no cross-agent leakage.
-    - no agent_id -> permission-filtered KnowledgeRecord search (source of truth).
-      Fails closed on classification/dept/grants. Legacy raw Memory scan is
-      disabled by default because Memory rows have no KnowledgeRecord ACL.
-      Escape hatch requires include_legacy_memory=True AND
-      allow_legacy_unpermissioned=True AND internal_caller=True; all three must
-      be set explicitly by trusted internal code. Never expose this path to
-      user/agent-controlled tool args.
+    - agent_id given -> agent-scoped MemoryManager store (no cross-agent leakage).
+    - no agent_id -> permission-filtered KnowledgeRecord search. Unpermissioned
+      legacy Memory scans are not exposed; Memory rows carry no KnowledgeRecord ACL.
     """
     try:
         if agent_id:
@@ -213,63 +314,7 @@ async def hybrid_search(
             is_founder=is_founder,
             granted_record_ids=granted_record_ids,
         )
-        legacy_allowed = (
-            include_legacy_memory
-            and allow_legacy_unpermissioned
-            and internal_caller
-        )
-        if kr or not legacy_allowed:
-            if include_legacy_memory and not legacy_allowed:
-                logger.warning(
-                    "hybrid_search blocked legacy Memory path for org=%s: "
-                    "requires include_legacy_memory, allow_legacy_unpermissioned, "
-                    "and internal_caller all true",
-                    org_id,
-                )
-            return kr
-
-        # Explicit internal-only legacy Memory scan (not KnowledgeRecord-governed).
-        logger.warning(
-            "hybrid_search using legacy Memory path for org=%s; "
-            "not KnowledgeRecord-permissioned; internal_caller=%s",
-            org_id,
-            internal_caller,
-        )
-        from aios.core.memory import _embed
-
-        q = _embed(query)
-        async with async_session() as s:
-            try:
-                await s.execute(text("SET LOCAL hnsw.ef_search = 100"))
-            except Exception:
-                pass
-            result = await s.execute(
-                text(
-                    "SELECT id, content, extra_data->>'embedding' AS emb "
-                    "FROM memories WHERE org_id=:org "
-                    "AND extra_data->>'embedding' IS NOT NULL LIMIT 500"
-                ),
-                {"org": org_id},
-            )
-            scored = []
-            for rid, content, emb in result:
-                try:
-                    stored = _json.loads(emb)
-                except (TypeError, ValueError):
-                    continue
-                dot = sum(a * b for a, b in zip(q, stored))
-                scored.append((dot, rid, content))
-            scored.sort(key=lambda x: -x[0])
-            return [
-                {
-                    "id": r[1],
-                    "content": r[2],
-                    "score": round(float(r[0]), 4),
-                    "source": "legacy_memory",
-                    "legacy_unpermissioned": True,
-                }
-                for r in scored[:top_k]
-            ]
+        return kr
     except Exception as e:
         logger.warning("hybrid_search failed: %s", e)
         return []
