@@ -3,7 +3,8 @@
 from sqlalchemy import select
 
 from aios.db.models import Organization
-from aios.governance.innovation import Experiment
+from aios.governance.innovation import Experiment, Hypothesis
+from aios.governance.security import SECURITY_METRIC_EVENT_TYPES, SecurityEvent
 
 
 def _decl(hypothesis_id: str) -> dict:
@@ -147,7 +148,7 @@ async def test_hypothesis_linkage_track_c_and_mvp_promotion_guards(
     assert "review" in resp.text.lower()
 
 
-async def test_experiments_are_tenant_scoped(auth_client, test_db_session):
+async def test_experiments_are_tenant_scoped(auth_client, test_db_session, test_org):
     other = Organization(name="Other", slug="other-innov-org")
     test_db_session.add(other)
     await test_db_session.flush()
@@ -163,6 +164,23 @@ async def test_experiments_are_tenant_scoped(auth_client, test_db_session):
     resp = await auth_client.post(f"/api/innovation/experiments/{secret.id}/decide", json={})
     assert resp.status_code == 404
 
+    events = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(
+                SecurityEvent.org_id == test_org.id,
+                SecurityEvent.event_type == SECURITY_METRIC_EVENT_TYPES["cross_tenant_block"],
+                SecurityEvent.source == "api.innovation.decide",
+            )
+        )
+    ).scalars().all()
+    mismatch = [
+        e
+        for e in events
+        if e.payload.get("resource_type") == "Experiment"
+        and e.payload.get("resource_org_id") == other.id
+    ]
+    assert mismatch
+
 
 async def test_track_b_requires_hypothesis_api(auth_client):
     decl = _decl(None)
@@ -176,3 +194,32 @@ async def test_track_b_requires_hypothesis_api(auth_client):
     decl["hypothesis_id"] = h_id
     resp = await auth_client.post("/api/innovation/experiments", json=decl)
     assert resp.status_code == 200, resp.text
+
+
+async def test_create_experiment_cross_tenant_hypothesis_emits_metric(auth_client, test_db_session, test_org):
+    other = Organization(name="Other2", slug="other-innov-org-2")
+    test_db_session.add(other)
+    await test_db_session.flush()
+    h = Hypothesis(org_id=other.id, title="Other hyp", kind="value")
+    test_db_session.add(h)
+    await test_db_session.commit()
+
+    resp = await auth_client.post("/api/innovation/experiments", json=_decl(h.id))
+    assert resp.status_code == 404
+
+    events = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(
+                SecurityEvent.org_id == test_org.id,
+                SecurityEvent.event_type == SECURITY_METRIC_EVENT_TYPES["cross_tenant_block"],
+                SecurityEvent.source == "api.innovation.create_experiment",
+            )
+        )
+    ).scalars().all()
+    mismatch = [
+        e
+        for e in events
+        if e.payload.get("resource_type") == "Hypothesis"
+        and e.payload.get("resource_org_id") == other.id
+    ]
+    assert mismatch

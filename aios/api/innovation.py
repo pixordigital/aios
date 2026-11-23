@@ -25,6 +25,7 @@ from aios.governance.innovation import (
     production_promotion_allowed,
     track_b_hypothesis_required,
 )
+from aios.governance.security import record_cross_tenant_block_if_mismatch
 
 
 def _innovation_guard(
@@ -130,6 +131,7 @@ async def list_experiments(db: DatabaseBackend = Depends(get_db_backend), org_id
 @router.post("/experiments")
 async def create_experiment(
     body: dict,
+    user: User = Depends(get_current_user),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
@@ -143,6 +145,18 @@ async def create_experiment(
             )
         ).scalars().first()
         if h is None:
+            candidate = await db.get(Hypothesis, str(hypothesis_id))
+            try:
+                await record_cross_tenant_block_if_mismatch(
+                    db,
+                    org_id=org_id,
+                    resource=candidate,
+                    source="api.innovation.create_experiment",
+                    actor_type="human",
+                    actor_id=user.id,
+                )
+            except Exception:
+                pass
             raise HTTPException(404, "hypothesis not found")
     mvp_type = str(body.get("mvp_type") or "experimental_prototype")
     if mvp_type not in MVP_TYPES:
@@ -196,13 +210,32 @@ async def create_experiment(
     return {"id": exp.id, "result": exp.result, "track": permissions.get("track")}
 
 
-async def _experiment(exp_id: str, org_id: str, db: DatabaseBackend) -> Experiment:
+async def _experiment(
+    exp_id: str,
+    org_id: str,
+    db: DatabaseBackend,
+    *,
+    actor_id: str | None = None,
+    source: str = "api.innovation._experiment",
+) -> Experiment:
     exp = (
         await db.execute(
             select(Experiment).where(Experiment.id == exp_id, Experiment.org_id == org_id)
         )
     ).scalars().first()
     if exp is None:
+        candidate = await db.get(Experiment, exp_id)
+        try:
+            await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=org_id,
+                resource=candidate,
+                source=source,
+                actor_type="human" if actor_id else None,
+                actor_id=actor_id,
+            )
+        except Exception:
+            pass
         raise HTTPException(404, "experiment not found")
     return exp
 
@@ -211,10 +244,17 @@ async def _experiment(exp_id: str, org_id: str, db: DatabaseBackend) -> Experime
 async def evaluate(
     exp_id: str,
     body: dict,
+    user: User = Depends(get_current_user),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    exp = await _experiment(exp_id, org_id, db)
+    exp = await _experiment(
+        exp_id,
+        org_id,
+        db,
+        actor_id=user.id,
+        source="api.innovation.evaluate",
+    )
     _innovation_guard(
         body,
         "innovation experiment evaluate",
@@ -247,7 +287,13 @@ async def decide(
     user: User = Depends(get_current_user),
     db: DatabaseBackend = Depends(get_db_backend),
 ):
-    exp = await _experiment(exp_id, user.org_id, db)
+    exp = await _experiment(
+        exp_id,
+        user.org_id,
+        db,
+        actor_id=user.id,
+        source="api.innovation.decide",
+    )
     if exp.result == "pending":
         raise HTTPException(400, "experiment not evaluated")
     org = await db.get(Organization, user.org_id)
