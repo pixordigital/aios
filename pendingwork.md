@@ -1,10 +1,10 @@
 ## pending work handoff
 
-Snapshot: 2026-11-23. Local `main` equals `origin/main` at `b40eb32`. Working tree clean.
+Snapshot: 2026-11-23. Local `main` may be ahead of `origin/main` by handoff-only commits. Check `git status` for dirty state.
 
 ### Current state
 
-- `origin/main` at `b40eb32` (equals local `main`).
+- `origin/main` move recorded at last verification; check `git rev-parse origin/main` for current value.
 - Verified this session (targeted): `py_compile` touched slices OK; swarm `5/6/8/11 passed` across slices (final conftest run: 9 passed,1 warning,2 errors env/schema setup; minimal harness 11 passed); security/auth `27 passed,69 warnings` + `33 passed,75 warnings`; tools/knowledge `19/24 passed`; OCP `24 passed` + `11 passed`; cap/lia guards `14 passed`; dashboard actor test in `tests/test_tools.py` 6 passed.
 - Landed this session: cap/lia Track C marker/evidence parsing aligned; OCP mutating Track C payload-marker guard incl. `PUT /api/ocp/policy`; MCP/tool-test/dashboard lab ToolEngine actor context wired fail-closed; swarm shared-memory org scope, swarm config org ownership, swarm team-org ownership + task-path consistency + agent membership/conv/depends_on checks + real consensus denominator; security best-effort auth-failure producers in deps/auth refresh/allowlist/totp/verify/reset paths; `_require_founder` 403 emits best-effort `security.authz.denied`; central `record_cross_tenant_block_if_mismatch` helper wired in security-owned paths.
 - Read-only audits done: vibesec, ponytail-debt, ponytail-audit, backend-patterns, perf-audit, ponytail-review. No code-feasible TODO/FIXME markers found in recent governance/core/api scope.
