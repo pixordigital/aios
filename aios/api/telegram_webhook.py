@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from aios.config import settings
 from aios.db.backend import db_session
 from aios.db.models import ChannelConnection
+from aios.governance.security import record_auth_failure
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +44,39 @@ async def telegram_webhook(connection_id: str, request: Request):
         conn = await db.get(ChannelConnection, connection_id)
         secret = _expected_secret(conn)
 
-    # Fail CLOSED. With no secret configured, anyone who finds the URL could
-    # inject messages into a tenant's agent.
-    if not secret:
-        raise HTTPException(503, "Telegram webhook secret not configured")
-    if not header or not hmac.compare_digest(header, secret):
-        logger.warning("Telegram webhook auth failed for connection %s", connection_id)
-        raise HTTPException(401, "Invalid secret token")
+        # Fail CLOSED. With no secret configured, anyone who finds the URL could
+        # inject messages into a tenant's agent.
+        if not secret:
+            if conn and conn.org_id:
+                try:
+                    await record_auth_failure(
+                        db,
+                        org_id=conn.org_id,
+                        source="api.telegram.webhook",
+                        severity="medium",
+                        actor_type="external",
+                        payload={"reason": "missing_webhook_secret", "connection_id": connection_id},
+                    )
+                    await db.commit()
+                except Exception:
+                    logger.debug("telegram security event skipped", exc_info=True)
+            raise HTTPException(503, "Telegram webhook secret not configured")
+        if not header or not hmac.compare_digest(header, secret):
+            if conn and conn.org_id:
+                try:
+                    await record_auth_failure(
+                        db,
+                        org_id=conn.org_id,
+                        source="api.telegram.webhook",
+                        severity="medium",
+                        actor_type="external",
+                        payload={"reason": "invalid_secret_token", "connection_id": connection_id},
+                    )
+                    await db.commit()
+                except Exception:
+                    logger.debug("telegram security event skipped", exc_info=True)
+            logger.warning("Telegram webhook auth failed for connection %s", connection_id)
+            raise HTTPException(401, "Invalid secret token")
 
     if conn is None or conn.channel_type != "telegram" or not conn.is_active:
         # Authenticated, but nothing to route to. 200 so Telegram stops retrying.

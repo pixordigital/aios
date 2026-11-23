@@ -1,16 +1,17 @@
 """Evolution API webhook — unified inbound for Baileys + Meta Cloud API."""
 
 import hashlib
-import time
 import hmac
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Request
+from sqlalchemy import select
 
 from aios.db.backend import db_session
 from aios.db.models import ChannelConnection
-from sqlalchemy import select
+from aios.governance.security import record_auth_failure
 
 logger = logging.getLogger(__name__)
 
@@ -67,20 +68,46 @@ async def evolution_webhook(instance: str, request: Request):
         channel_id = conn.id if conn else ""
         org_id = conn.org_id if conn else ""
 
-    if not instance_key:
-        logger.error(
-            "Evolution webhook: instance %r has no configured channel or api_key "
-            "— rejecting", instance
-        )
-        # Same shape as an auth failure. Distinct reasons let anyone enumerate
-        # which instance names exist by watching which error comes back.
-        return {"status": "ignored", "reason": "unauthorized"}
+        if not instance_key:
+            if conn and org_id:
+                try:
+                    await record_auth_failure(
+                        db,
+                        org_id=org_id,
+                        source="api.evolution.webhook",
+                        severity="medium",
+                        actor_type="external",
+                        payload={"reason": "missing_channel_or_api_key", "instance": instance},
+                    )
+                    await db.commit()
+                except Exception:
+                    logger.debug("evolution security event skipped", exc_info=True)
+            logger.error(
+                "Evolution webhook: instance %r has no configured channel or api_key "
+                "— rejecting", instance
+            )
+            # Same shape as an auth failure. Distinct reasons let anyone enumerate
+            # which instance names exist by watching which error comes back.
+            return {"status": "ignored", "reason": "unauthorized"}
 
-    if not _verify_request(request, instance_key):
-        logger.error(
-            "Evolution webhook: auth failed for instance %r — rejecting", instance
-        )
-        return {"status": "ignored", "reason": "unauthorized"}
+        if not _verify_request(request, instance_key):
+            if conn and org_id:
+                try:
+                    await record_auth_failure(
+                        db,
+                        org_id=org_id,
+                        source="api.evolution.webhook",
+                        severity="medium",
+                        actor_type="external",
+                        payload={"reason": "invalid_auth", "instance": instance},
+                    )
+                    await db.commit()
+                except Exception:
+                    logger.debug("evolution security event skipped", exc_info=True)
+            logger.error(
+                "Evolution webhook: auth failed for instance %r — rejecting", instance
+            )
+            return {"status": "ignored", "reason": "unauthorized"}
 
     # normalize event (Baileys and Meta have different event names)
     event = body.get("event", "")

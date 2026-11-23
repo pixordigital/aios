@@ -24,6 +24,7 @@ from sqlalchemy import select
 
 from aios.db.backend import db_session
 from aios.db.models import WhatsappConnection, WhatsappTemplate
+from aios.governance.security import record_auth_failure
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/whatsapp/webhook", tags=["whatsapp-meta"])
@@ -106,6 +107,18 @@ async def meta_template_status_webhook(request: Request):
 
         # Fail closed: no configured secret means nobody may set our state.
         if not (internal_ok or meta_ok):
+            try:
+                await record_auth_failure(
+                    db,
+                    org_id=conn.org_id,
+                    source="api.meta.webhook.templates",
+                    severity="medium",
+                    actor_type="external",
+                    payload={"reason": "invalid_webhook_secret", "waba_id": waba_id},
+                )
+                await db.commit()
+            except Exception:
+                logger.debug("meta webhook security event skipped", exc_info=True)
             logger.error("template webhook auth failed for waba %s", waba_id)
             raise HTTPException(401, "invalid webhook secret")
 

@@ -14,6 +14,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 
 from aios.config import settings
+from aios.governance.security import record_auth_failure
 
 logger = logging.getLogger(__name__)
 
@@ -121,13 +122,26 @@ async def slack_webhook(request: Request):
         conn = await _find_connection(db, channel_id)
         conn_secret = (conn.config or {}).get("signing_secret", "") if conn else ""
 
-    if not _verify_slack_signature(request, raw_body, conn_secret):
-        logger.warning("Slack webhook signature verification failed")
-        raise HTTPException(401, "Invalid signature")
+        if not _verify_slack_signature(request, raw_body, conn_secret):
+            if conn and conn.org_id:
+                try:
+                    await record_auth_failure(
+                        db,
+                        org_id=conn.org_id,
+                        source="api.slack.webhook",
+                        severity="medium",
+                        actor_type="external",
+                        payload={"reason": "invalid_signature", "channel_id": channel_id},
+                    )
+                    await db.commit()
+                except Exception:
+                    logger.debug("slack security event skipped", exc_info=True)
+            logger.warning("Slack webhook signature verification failed")
+            raise HTTPException(401, "Invalid signature")
 
-    if not conn:
-        logger.warning("Slack webhook: no active slack connection for channel %s", channel_id)
-        return {"status": "ok"}
+        if not conn:
+            logger.warning("Slack webhook: no active slack connection for channel %s", channel_id)
+            return {"status": "ok"}
 
     if body.get("type") != "event_callback":
         return {"status": "ok"}
