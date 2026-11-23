@@ -286,13 +286,21 @@ async def create_grant(
     grantee = await db.get(User, user_id)
     if grantee is None or grantee.org_id != user.org_id:
         raise HTTPException(404, "user not found")
+    expires_at = None
+    if body.get("expires_at") is not None:
+        try:
+            expires_at = datetime.fromisoformat(str(body["expires_at"]).replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, "expires_at must be ISO-8601")
+        if expires_at.tzinfo:
+            expires_at = expires_at.astimezone(timezone.utc).replace(tzinfo=None)
     grant = KnowledgeGrant(
         org_id=user.org_id,
         user_id=user_id,
         record_id=record_id,
         granted_by=user.id,
         reason=str(body.get("reason") or "")[:1000],
-        expires_at=body.get("expires_at"),
+        expires_at=expires_at,
     )
     db.add(grant)
     try:

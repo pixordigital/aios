@@ -16,9 +16,8 @@ from aios.governance.knowledge import (
 logger = logging.getLogger(__name__)
 
 
-RAG_STATUS = {"vector": False, "hnsw": False, "fallback": True}
-# Observability guardrail: full-org KnowledgeRecord scan can be expensive.
-# No index/migration here; warn when scan size crosses threshold.
+RAG_STATUS = {"vector": False, "hnsw": False, "knowledge_hnsw": False, "fallback": True}
+# Observability guardrail: warn when a filtered KnowledgeRecord scan stays large.
 RAG_SCAN_WARN_THRESHOLD = max(1, int(os.getenv("AIOS_RAG_SCAN_WARN_THRESHOLD", "5000")))
 
 async def ensure_vector_extension():
@@ -39,8 +38,13 @@ async def ensure_vector_extension():
                         text("SELECT to_regclass('ix_memory_vectors_embedding')")
                     )
                     RAG_STATUS["hnsw"] = reg.scalar() is not None
+                    knowledge_reg = await s.execute(
+                        text("SELECT to_regclass('ix_knowledge_vectors_embedding')")
+                    )
+                    RAG_STATUS["knowledge_hnsw"] = knowledge_reg.scalar() is not None
                 else:
                     RAG_STATUS["hnsw"] = False
+                    RAG_STATUS["knowledge_hnsw"] = False
                 RAG_STATUS["fallback"] = not RAG_STATUS["hnsw"]
                 logger.info(
                     "vector extension ready; memory hnsw index %s",
@@ -113,7 +117,7 @@ async def store_knowledge_vectors(
     records: list[KnowledgeRecord], embeddings: list[list[float]]
 ) -> int:
     """Best-effort pgvector store; never changes governed ACL or ingest result."""
-    if not (RAG_STATUS["vector"] and records):
+    if not (RAG_STATUS["vector"] and RAG_STATUS["knowledge_hnsw"] and records):
         return 0
     from aios.core.vector_store import use_postgres
 
@@ -142,7 +146,7 @@ async def _vector_candidates(
     org_id: str, query: str, conditions: list, top_k: int
 ) -> list[tuple[KnowledgeRecord, float]]:
     """ANN candidates re-filtered through the same ACL as the lexical path."""
-    if not (RAG_STATUS["vector"] and RAG_STATUS["hnsw"]):
+    if not (RAG_STATUS["vector"] and RAG_STATUS["knowledge_hnsw"]):
         return []
     try:
         from aios.core.memory import _embed
@@ -187,10 +191,11 @@ async def search_knowledge_records(
     is_founder: bool = False,
     granted_record_ids: set[str] | None = None,
 ) -> list[dict]:
-    """Deterministic, permission-filtered search over KnowledgeRecords.
+    """Permission-filtered search over KnowledgeRecords.
 
-    KnowledgeRecord is source of truth; no vector index required. Scans
-    org records, applies can_retrieve fail-closed, scores lexically.
+    KnowledgeRecord is source of truth. SQL pushes ACL + query-term predicates,
+    can_retrieve re-checks every candidate, lexical score ranks matches; pgvector
+    ANN candidates supplement when the migration/index is deployed.
     """
     if not org_id or not (query or "").strip():
         return []

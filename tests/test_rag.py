@@ -118,6 +118,7 @@ async def test_store_knowledge_vectors_upserts_when_enabled(monkeypatch):
             return False
 
     monkeypatch.setitem(rag.RAG_STATUS, "vector", True)
+    monkeypatch.setitem(rag.RAG_STATUS, "knowledge_hnsw", True)
     monkeypatch.setattr("aios.core.vector_store.use_postgres", lambda: True)
     monkeypatch.setattr(rag, "async_session", lambda: _WriteSession())
 

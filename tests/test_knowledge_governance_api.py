@@ -123,6 +123,36 @@ async def test_grant_create_use_and_revoke(auth_client, test_db_session, test_or
     assert resp.status_code == 200 and resp.json()["revoked_at"]
     assert await resolve_granted_record_ids(test_org.id, test_user.id) == set()
 
+    bad = await auth_client.post(
+        "/api/knowledge/grants",
+        json={"record_id": rid, "user_id": test_user.id, "expires_at": "not-a-date"},
+    )
+    assert bad.status_code == 400
+
+    rid_expired = await _create(auth_client, "Expired secret", classification="confidential")
+    expired = await auth_client.post(
+        "/api/knowledge/grants",
+        json={
+            "record_id": rid_expired,
+            "user_id": test_user.id,
+            "expires_at": "2020-01-01T00:00:00+00:00",
+        },
+    )
+    assert expired.status_code == 200, expired.text
+    assert await resolve_granted_record_ids(test_org.id, test_user.id) == set()
+
+    rid_future = await _create(auth_client, "Future secret", classification="confidential")
+    future = await auth_client.post(
+        "/api/knowledge/grants",
+        json={
+            "record_id": rid_future,
+            "user_id": test_user.id,
+            "expires_at": "2099-01-01T00:00:00Z",
+        },
+    )
+    assert future.status_code == 200, future.text
+    assert await resolve_granted_record_ids(test_org.id, test_user.id) == {rid_future}
+
 
 async def test_ingest_chunks_are_bounded_and_cited(auth_client, test_db_session, test_org, test_user):
     resp = await auth_client.post("/api/knowledge/ingest", json={"title": "Doc", "content": "x", "source_type": "doc"})
