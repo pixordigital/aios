@@ -254,6 +254,12 @@ async def ingest_document(
     await db.commit()
     for record in records:
         await db.refresh(record)
+    from aios.core.rag import RAG_STATUS, store_knowledge_vectors
+
+    if RAG_STATUS["vector"]:
+        from aios.core.memory import _embed
+
+        await store_knowledge_vectors(records, [_embed(r.content) for r in records])
     return {
         "count": len(records),
         "chunks": [{"id": r.id, "title": r.title, "citation": knowledge_citation(r)} for r in records],
