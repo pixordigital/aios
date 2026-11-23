@@ -15,7 +15,7 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from aios.dashboard.forms import ffile, fstr
 
@@ -1844,12 +1844,50 @@ async def conversation_detail(request: Request, conv_id: str):
                    conv=conv, messages=msgs)
 
 
+def _slack_workspace_channels(connections) -> list[dict]:
+    token = os.getenv("SLACK_USER_TOKEN", "")
+    if not token:
+        for c in connections:
+            if c.channel_type == "slack" and c.is_active:
+                token = (c.config or {}).get("bot_token", "")
+                if token:
+                    break
+    if not token:
+        return []
+    try:
+        import urllib.request
+
+        q = urlencode({"types": "public_channel,private_channel", "limit": 200, "exclude_archived": "false"})
+        req = urllib.request.Request(
+            "https://slack.com/api/conversations.list?" + q,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+        if not data.get("ok"):
+            logger.warning("Slack channel inventory failed: %s", data.get("error"))
+            return []
+        return [
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "archived": bool(c.get("is_archived")),
+                "members": c.get("num_members", 0),
+            }
+            for c in data.get("channels", [])
+        ]
+    except Exception as exc:
+        logger.warning("Slack channel inventory unavailable: %s", exc)
+        return []
+
+
 @router.get("/channels", response_class=HTMLResponse)
 async def channel_list(request: Request, msg: str = ""):
     org_id = await _org_filter(request)
     async with db_session() as db:
         channels = (await db.execute(select(ChannelConnection).where(ChannelConnection.org_id == org_id).order_by(ChannelConnection.created_at.desc()))).scalars().all()
-    return await _render("channels.html", request, title="Canais", channels=channels, msg=msg)
+    return await _render("channels.html", request, title="Canais", channels=channels, msg=msg,
+                         slack_channels=_slack_workspace_channels(channels))
 
 
 @router.get("/channels/new", response_class=HTMLResponse)
