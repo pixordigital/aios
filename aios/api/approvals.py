@@ -2,9 +2,10 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from aios.api.deps import get_current_user
+from aios.api.deps import get_current_user, verify_org_access_async
 from aios.core.approval import approval_manager
-from aios.db.models import User
+from aios.db.backend import DatabaseBackend, get_db_backend
+from aios.db.models import PendingAction as DBAction, User
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 
@@ -54,12 +55,33 @@ async def list_approvals(
     return {"actions": pending}
 
 
+async def _load_approval_or_404(
+    db: DatabaseBackend, *, action_id: str, org_id: str, actor_id: str | None, source: str
+) -> DBAction:
+    from sqlalchemy import select
+
+    row = (await db.execute(select(DBAction).where(DBAction.id == action_id))).scalar_one_or_none()
+    await verify_org_access_async(
+        org_id,
+        row,
+        db=db,
+        actor_id=actor_id,
+        source=source,
+        payload={"action_id": str(action_id), "resource_type": "PendingAction"},
+    )
+    return row
+
+
 @router.post("/{action_id}/approve")
 async def approve_action(
     action_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
     user: User = Depends(get_current_user),
 ):
     """Approve a pending tool call."""
+    await _load_approval_or_404(
+        db, action_id=action_id, org_id=user.org_id, actor_id=user.id, source="api.approvals.approve"
+    )
     ok = await approval_manager.approve(action_id, decided_by=user.id, org_id=user.org_id)
     if not ok:
         raise HTTPException(404, "Action not found or already decided")
@@ -69,9 +91,13 @@ async def approve_action(
 @router.post("/{action_id}/reject")
 async def reject_action(
     action_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
     user: User = Depends(get_current_user),
 ):
     """Reject a pending tool call."""
+    await _load_approval_or_404(
+        db, action_id=action_id, org_id=user.org_id, actor_id=user.id, source="api.approvals.reject"
+    )
     ok = await approval_manager.reject(action_id, decided_by=user.id, org_id=user.org_id)
     if not ok:
         raise HTTPException(404, "Action not found or already decided")
