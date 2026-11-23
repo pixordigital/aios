@@ -452,7 +452,14 @@ class SwarmCoordinator:
             votes[agent_id] = vote_norm
             task.consensus_votes = votes
             # check threshold
-            cfg = (await db.execute(select(TeamSwarmConfig).where(TeamSwarmConfig.team_id == task.team_id))).scalar_one_or_none()
+            cfg = (
+                await db.execute(
+                    select(TeamSwarmConfig).where(
+                        TeamSwarmConfig.team_id == task.team_id,
+                        TeamSwarmConfig.org_id == task.org_id,
+                    )
+                )
+            ).scalar_one_or_none()
             threshold = cfg.consensus_threshold if cfg else 0.6
             try:
                 threshold = float(threshold)

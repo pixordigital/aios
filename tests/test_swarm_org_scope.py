@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from aios.api.deps import get_current_user, get_org_id
 from aios.core.swarm import SwarmCoordinator
 from aios.db.backend import db_session
-from aios.db.models import Agent, Conversation, Organization, SwarmMessage, SwarmTask, Team, User, team_agents
+from aios.db.models import Agent, Conversation, Organization, SwarmMessage, SwarmTask, Team, TeamSwarmConfig, User, team_agents
 from aios.main import app
 
 
@@ -258,6 +258,44 @@ async def test_consensus_denominator_uses_real_members(two_org_tasks) -> None:
             t = await db.get(SwarmTask, "task-consensus")
             if t:
                 await db.delete(t)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_vote_consensus_config_org_scoped(two_org_tasks) -> None:
+    """Defense-in-depth: vote uses TeamSwarmConfig only when config.org_id == task.org_id."""
+    coord = SwarmCoordinator()
+    async with db_session() as db:
+        db.add(SwarmTask(
+            id="task-cfg-scope", team_id="team-a", org_id="org-a",
+            task_id="ext-cfg-scope", task_type="consensus", payload={}, status="running",
+        ))
+        await db.commit()
+    try:
+        cfg = await coord.ensure_config("team-a", "org-a")
+        assert cfg is not None
+        await coord.update_config("team-a", org_id="org-a", consensus_threshold=1.0)
+
+        # 1/2 approvals should not pass threshold=1.0 from same-org config
+        t = await coord.vote("task-cfg-scope", "agent-a1", "approve", org_id="org-a", team_id="team-a")
+        assert t is not None
+        assert t.status != "done"
+        assert t.status in ("queued", "assigned", "running", "consensus")
+
+        # 2/2 passes
+        t = await coord.vote("task-cfg-scope", "agent-a2", "approve", org_id="org-a", team_id="team-a")
+        assert t is not None and t.status == "done"
+        assert t.result["consensus"] == "approved"
+    finally:
+        async with db_session() as db:
+            row = await db.get(SwarmTask, "task-cfg-scope")
+            if row:
+                await db.delete(row)
+            cfg_row = (await db.execute(
+                select(TeamSwarmConfig).where(TeamSwarmConfig.team_id == "team-a", TeamSwarmConfig.org_id == "org-a")
+            )).scalar_one_or_none()
+            if cfg_row:
+                await db.delete(cfg_row)
             await db.commit()
 
 
