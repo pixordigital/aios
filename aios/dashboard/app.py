@@ -33,6 +33,7 @@ from aios.core.audit import log_audit
 from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
 from aios.config import settings
+from aios.config import MODEL_COST_IN_OUT as MODEL_PRICING
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -42,18 +43,6 @@ _env = Environment(
 )
 
 # ─── Helpers ───
-
-MODEL_PRICING = {
-    "openai/gpt-4o": (2.50, 10.00), "openai/gpt-4o-mini": (0.15, 0.60), "openai/gpt-4.1": (2.50, 10.00),
-    "openai/gpt-4.1-mini": (0.40, 1.60), "openai/gpt-4.1-nano": (0.10, 0.40),
-    "openai/o3": (5.00, 20.00), "openai/o3-mini": (1.10, 4.40), "openai/o4": (10.00, 40.00),
-    "openai/o4-mini": (1.50, 6.00),
-    "anthropic/claude-sonnet-4-20250514": (3.00, 15.00), "anthropic/claude-5-opus-20250714": (15.00, 75.00),
-    "anthropic/claude-4.5-sonnet": (3.00, 15.00), "anthropic/claude-3.5-sonnet": (3.00, 15.00),
-    "anthropic/claude-3-haiku": (0.25, 1.25),
-    "anthropic/claude-opus-4-20250514": (15.00, 75.00),
-    "anthropic/claude-fable-5": (1.50, 7.50),
-}
 
 TOOL_DESCRIPTIONS = {
     "calculator": "Expressões matemáticas, avaliação segura",

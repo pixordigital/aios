@@ -10,6 +10,8 @@ venv/
 
 # Data
 data/
+!aios/data/
+!aios/data/model_prices.json
 tests/test.db*
 
 # Scratch / local tooling

@@ -1,0 +1,36 @@
+name: Model catalog sync
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install -e .
+      - run: python scripts/sync_model_catalog.py > model_drift.md
+      - run: cat model_drift.md >> "$GITHUB_STEP_SUMMARY"
+      - name: open pull request if prices changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- aios/data/model_prices.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B automation/model-catalog-sync
+          git add aios/data/model_prices.json
+          git commit -m "chore: sync model prices from OpenRouter"
+          git push --force-with-lease origin automation/model-catalog-sync
+          if [ -n "$(gh pr list --head automation/model-catalog-sync --json number --jq '.[0].number')" ]; then
+            exit 0
+          fi
+          gh pr create --title "chore: sync model prices from OpenRouter" --body-file model_drift.md

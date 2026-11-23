@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from typing import Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -240,18 +242,8 @@ MODEL_ROLE_MIN_TIER: dict[str, str | None] = {
 
 # USD per 1M tokens (input, output). Pricing is data, so it can be corrected
 # without touching the cost functions.
-MODEL_COST_IN_OUT: dict[str, tuple[float, float]] = {
-    "openai/gpt-4o": (2.50, 10.00),
-    "openai/gpt-4o-mini": (0.15, 0.60),
-    "openai/gpt-4.1": (2.50, 10.00),
-    "openai/gpt-4.1-mini": (0.40, 1.60),
-    "openai/gpt-4.1-nano": (0.10, 0.40),
-    "openai/o3": (5.00, 20.00),
-    "openai/o3-mini": (1.10, 4.40),
-    "anthropic/claude-sonnet-4-20250514": (3.00, 15.00),
-    "anthropic/claude-4.5-sonnet": (3.00, 15.00),
-    "anthropic/claude-opus-4-20250514": (15.00, 75.00),
-}
+_data = json.loads((Path(__file__).parent / "data" / "model_prices.json").read_text())
+MODEL_COST_IN_OUT: dict[str, tuple[float, float]] = {k: tuple(v) for k, v in _data.items()}
 
 # Fallback for models the registry does not price yet. Deliberately the
 # frontier rate: an unknown model must never look cheaper than it is.
