@@ -6,7 +6,7 @@ Backed by the same conversations table.
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from aios.api.deps import get_current_user
+from aios.api.deps import get_current_user, verify_org_access_async
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Conversation, User
 from sqlalchemy import select
@@ -45,8 +45,16 @@ async def get_thread(
     user: User = Depends(get_current_user),
 ):
     thread = await db.get(Conversation, thread_id)
-    if not thread or thread.org_id != user.org_id:
+    if not thread:
         raise HTTPException(404, "Thread not found")
+    await verify_org_access_async(
+        user.org_id,
+        thread,
+        db=db,
+        actor_id=user.id,
+        source="api.threads.get_thread",
+        payload={"thread_id": str(thread_id)},
+    )
     messages = [
         {"id": m.id, "role": m.role, "content": m.content[:500], "created_at": str(m.created_at) if m.created_at else ""}
         for m in thread.messages

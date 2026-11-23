@@ -208,9 +208,11 @@ async def create_trigger(wf_id: str, body: dict, db: DatabaseBackend = Depends(g
 async def delete_trigger(wf_id: str, trig_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     from aios.db.models import AutomationTrigger
     trig = await db.get(AutomationTrigger, trig_id)
-    if not trig or trig.workflow_id != wf_id:
+    if not trig:
         raise HTTPException(404)
     await verify_org_access_async(org_id, trig, db=db, actor_id=user.id, source="api.automations.delete_trigger")
+    if trig.workflow_id != wf_id:
+        raise HTTPException(404)
     await db.delete(trig)
     await db.commit()
     return {"ok": True}
@@ -219,9 +221,11 @@ async def delete_trigger(wf_id: str, trig_id: str, db: DatabaseBackend = Depends
 async def update_trigger(wf_id: str, trig_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
     from aios.db.models import AutomationTrigger
     trig = await db.get(AutomationTrigger, trig_id)
-    if not trig or trig.workflow_id != wf_id:
+    if not trig:
         raise HTTPException(404)
     await verify_org_access_async(org_id, trig, db=db, actor_id=user.id, source="api.automations.update_trigger")
+    if trig.workflow_id != wf_id:
+        raise HTTPException(404)
     for k in ("name","is_active","config","cron_expr","event_type"):
         if k in body:
             setattr(trig, k, body[k])

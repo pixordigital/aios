@@ -281,11 +281,27 @@ async def create_grant(
     if not record_id or not user_id:
         raise HTTPException(400, "record_id and user_id required")
     record = await db.get(KnowledgeRecord, record_id)
-    if record is None or record.org_id != user.org_id:
+    if record is None:
         raise HTTPException(404, "record not found")
+    await verify_org_access_async(
+        user.org_id,
+        record,
+        db=db,
+        actor_id=user.id,
+        source="api.knowledge.create_grant.record",
+        payload={"record_id": record_id},
+    )
     grantee = await db.get(User, user_id)
-    if grantee is None or grantee.org_id != user.org_id:
+    if grantee is None:
         raise HTTPException(404, "user not found")
+    await verify_org_access_async(
+        user.org_id,
+        grantee,
+        db=db,
+        actor_id=user.id,
+        source="api.knowledge.create_grant.grantee",
+        payload={"user_id": user_id},
+    )
     expires_at = None
     if body.get("expires_at") is not None:
         try:
@@ -322,8 +338,16 @@ async def revoke_grant(
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder approval required to revoke knowledge access")
     grant = await db.get(KnowledgeGrant, grant_id)
-    if grant is None or grant.org_id != user.org_id:
+    if grant is None:
         raise HTTPException(404, "grant not found")
+    await verify_org_access_async(
+        user.org_id,
+        grant,
+        db=db,
+        actor_id=user.id,
+        source="api.knowledge.revoke_grant",
+        payload={"grant_id": grant_id},
+    )
     if grant.revoked_at is None:
         grant.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
         await db.commit()
