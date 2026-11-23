@@ -154,6 +154,91 @@ async def test_grant_create_use_and_revoke(auth_client, test_db_session, test_or
     assert await resolve_granted_record_ids(test_org.id, test_user.id) == {rid_future}
 
 
+async def test_granted_confidential_visible_in_list_and_search(
+    auth_client, test_db_session, test_org, test_user
+):
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+
+    rid = await _create(
+        auth_client,
+        "Granted confidential pricing",
+        content="pricing confidential zebra",
+        classification="confidential",
+    )
+    # Founder sees it; remove founder to prove grant path.
+    test_org.extra_data = {}
+    await test_db_session.commit()
+
+    titles = {r["title"] for r in (await auth_client.get("/api/knowledge/records")).json()["items"]}
+    assert "Granted confidential pricing" not in titles
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "pricing confidential zebra"})
+    assert resp.status_code == 200, resp.text
+    assert all(r["title"] != "Granted confidential pricing" for r in resp.json()["results"])
+
+    # Re-grant as founder.
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    grant_resp = await auth_client.post(
+        "/api/knowledge/grants", json={"record_id": rid, "user_id": test_user.id}
+    )
+    assert grant_resp.status_code == 200, grant_resp.text
+    gid = grant_resp.json()["id"]
+
+    test_org.extra_data = {}
+    await test_db_session.commit()
+
+    titles = {r["title"] for r in (await auth_client.get("/api/knowledge/records")).json()["items"]}
+    assert "Granted confidential pricing" in titles
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "pricing confidential zebra"})
+    assert resp.status_code == 200, resp.text
+    search_titles = {r["title"] for r in resp.json()["results"]}
+    assert "Granted confidential pricing" in search_titles
+
+    # Revoke: fail-closed visibility removed.
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    revoke_resp = await auth_client.post(f"/api/knowledge/grants/{gid}/revoke")
+    assert revoke_resp.status_code == 200, revoke_resp.text
+
+    test_org.extra_data = {}
+    await test_db_session.commit()
+    titles = {r["title"] for r in (await auth_client.get("/api/knowledge/records")).json()["items"]}
+    assert "Granted confidential pricing" not in titles
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "pricing confidential zebra"})
+    assert resp.status_code == 200, resp.text
+    assert all(r["title"] != "Granted confidential pricing" for r in resp.json()["results"])
+
+
+async def test_grant_resolution_error_fails_closed_in_list_and_search(
+    auth_client, test_db_session, test_org, test_user, monkeypatch
+):
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    await _create(
+        auth_client,
+        "Confidential but resolver broken",
+        content="resolver broken zebra",
+        classification="confidential",
+    )
+    test_org.extra_data = {}
+    await test_db_session.commit()
+
+    import aios.tools.rag_search as rag_search
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("grant resolver down")
+
+    monkeypatch.setattr(rag_search, "resolve_granted_record_ids", boom)
+
+    titles = {r["title"] for r in (await auth_client.get("/api/knowledge/records")).json()["items"]}
+    assert "Confidential but resolver broken" not in titles
+
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "resolver broken zebra"})
+    assert resp.status_code == 200, resp.text
+    assert all(r["title"] != "Confidential but resolver broken" for r in resp.json()["results"])
+
+
 async def test_ingest_chunks_are_bounded_and_cited(auth_client, test_db_session, test_org, test_user):
     resp = await auth_client.post("/api/knowledge/ingest", json={"title": "Doc", "content": "x", "source_type": "doc"})
     assert resp.status_code == 403  # founder gate

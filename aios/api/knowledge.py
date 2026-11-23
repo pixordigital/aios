@@ -102,6 +102,18 @@ async def list_records(
 
     org = await db.get(Organization, user.org_id)
     deps = await _actor_deps(db, user)
+    try:
+        from aios.tools.rag_search import resolve_granted_record_ids
+
+        granted_record_ids = await resolve_granted_record_ids(user.org_id, user.id)
+    except Exception:
+        logger.warning(
+            "knowledge.records.grants_resolution_failed org=%s user=%s fail_closed=true",
+            user.org_id,
+            user.id,
+            exc_info=True,
+        )
+        granted_record_ids = set()
     visible = [
         r
         for r in rows
@@ -110,6 +122,7 @@ async def list_records(
             actor_org_id=user.org_id,
             actor_departments=deps,
             is_founder=_is_founder(user, org),
+            granted_record_ids=granted_record_ids,
         )[0]
     ]
     total_visible_scanned = len(visible)
@@ -409,12 +422,25 @@ async def search(
     started = time.perf_counter()
     org = await db.get(Organization, user.org_id)
     deps = await _actor_deps(db, user)
+    try:
+        from aios.tools.rag_search import resolve_granted_record_ids
+
+        granted_record_ids = await resolve_granted_record_ids(user.org_id, user.id)
+    except Exception:
+        logger.warning(
+            "knowledge.search.grants_resolution_failed org=%s user=%s fail_closed=true",
+            user.org_id,
+            user.id,
+            exc_info=True,
+        )
+        granted_record_ids = set()
     results = await search_knowledge_records(
         user.org_id,
         q,
         top_k=top_k,
         actor_departments=deps,
         is_founder=_is_founder(user, org),
+        granted_record_ids=granted_record_ids,
     )
     logger.info(
         "knowledge.search org=%s user=%s top_k=%d returned=%d ms=%.2f",
