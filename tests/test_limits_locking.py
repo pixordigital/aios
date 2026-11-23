@@ -78,6 +78,10 @@ class _Permissive:
     def first(self):
         return {"messages": 0, "llm_tokens": 0, "cost_usd": 0.0}
 
+    def one(self):
+        # Aggregate cost query returns (cost_usd, whatsapp_cost_usd).
+        return (0, 0)
+
     def scalar(self):
         return 0
 
@@ -106,8 +110,9 @@ async def test_is_sqlite_returns_bool_not_coroutine():
 
 
 @pytest.mark.asyncio
-async def test_postgres_limit_check_emits_for_update():
+async def test_postgres_limit_check_emits_for_update(monkeypatch):
     """The SELECT that reads today's usage must carry FOR UPDATE on Postgres."""
+    monkeypatch.setattr("aios.config.settings.internal_mode", False)
     db = _FakeDB("postgresql")
     with pytest.raises(_Stop):
         await limits.check_org_limits("org-1", db)
@@ -116,8 +121,9 @@ async def test_postgres_limit_check_emits_for_update():
 
 
 @pytest.mark.asyncio
-async def test_sqlite_limit_check_omits_for_update():
+async def test_sqlite_limit_check_omits_for_update(monkeypatch):
     """SQLite rejects FOR UPDATE, so it must stay off there."""
+    monkeypatch.setattr("aios.config.settings.internal_mode", False)
     db = _FakeDB("sqlite")
     with pytest.raises(_Stop):
         await limits.check_org_limits("org-1", db)
@@ -126,8 +132,9 @@ async def test_sqlite_limit_check_omits_for_update():
     assert not any("FOR UPDATE" in s for s in selects)
 
 
-def test_no_never_awaited_coroutine_warning():
+def test_no_never_awaited_coroutine_warning(monkeypatch):
     """The old bug surfaced at runtime as 'coroutine ... was never awaited'."""
+    monkeypatch.setattr("aios.config.settings.internal_mode", False)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
 

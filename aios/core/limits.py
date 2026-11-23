@@ -91,6 +91,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     max_tokens: int = limits.get("max_tokens_per_month", 999999999)
     _mc = limits.get("max_cost_brl")
     max_cost_brl: float | None = float(_mc) if isinstance(_mc, (int, float)) else None
+    monthly_tokens_val: int | None = None
 
     if max_msgs != 99999 or max_tokens != 999999999 or (max_cost_brl and max_cost_brl != 999999):
         # Lock the current day's usage row (creates if missing) to prevent races.
@@ -131,60 +132,70 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
 
         # Check monthly token limit (sum from start of month)
         if max_tokens != 999999999:
-            monthly_tokens: int = (await db.execute(
+            monthly_tokens_val = int((await db.execute(
                 select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(
                     UsageRecord.org_id == org_id, UsageRecord.date >= start_month
                 )
-            )).scalar() or 0
-            if monthly_tokens >= max_tokens:
+            )).scalar() or 0)
+            if monthly_tokens_val >= max_tokens:
                 return False, f"Monthly token limit reached ({max_tokens}/{plan_name} plan)"
 
         # Check monthly cost guardrail (BRL estimate: USD * 5.5)
+        monthly_spend_usd: float | None = None
         if max_cost_brl and max_cost_brl != 999999:
-            monthly_cost = (await db.execute(
-                select(func.coalesce(func.sum(UsageRecord.cost_usd), 0)).where(
-                    UsageRecord.org_id == org_id, UsageRecord.date >= start_month
-                )
-            )).scalar() or 0
-            # inclui WhatsApp se houver
-            wa_cost = (await db.execute(select(func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month))).scalar() or 0
-            total_brl = (monthly_cost + wa_cost) * _fx()
+            row = (await db.execute(
+                select(
+                    func.coalesce(func.sum(UsageRecord.cost_usd), 0),
+                    func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0),
+                ).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month)
+            )).one()
+            monthly_spend_usd = float(row[0]) + float(row[1])
+            total_brl = monthly_spend_usd * _fx()
             if total_brl >= max_cost_brl:
                 return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${total_brl:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
 
         # Budget check — informativo, nunca bloqueia (usuário pode pagar mais). Apenas alerta.
         # creation (one_off) e operation (monthly) são só forecast/controle, não gate.
         try:
-
             from aios.db.models import Budget
 
             budgets = (await db.execute(select(Budget).where(Budget.org_id == org_id))).scalars().all()
-            for b in budgets:
-                if b.type == "creation":
-                    continue  # one_off informativo, sem checagem mensal
-                if b.scope and b.scope.get("agents"):
-                    continue  # avançado filtrado em runtime
-                spent = (await db.execute(select(func.coalesce(func.sum(UsageRecord.cost_usd + UsageRecord.whatsapp_cost_usd), 0)).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month))).scalar() or 0
-                spent_brl = spent * _fx()
-                pct = (spent_brl / b.amount_brl * 100) if b.amount_brl else 0
-                if pct >= 80:
-                    logger.warning("Budget %s %s%% org %s (R$%.2f/R$%.0f)", b.name, round(pct), org_id, spent_brl, b.amount_brl)
-                    # alerta 80/90/100 sem bloquear
-                    try:
-                        from aios.tasks.queue import enqueue_job
+            alertable = [b for b in budgets if b.type != "creation" and not (b.scope and b.scope.get("agents"))]
+            if alertable:
+                if monthly_spend_usd is None:
+                    row = (await db.execute(
+                        select(
+                            func.coalesce(func.sum(UsageRecord.cost_usd), 0),
+                            func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0),
+                        ).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month)
+                    )).one()
+                    monthly_spend_usd = float(row[0]) + float(row[1])
+                spent_brl = monthly_spend_usd * _fx()
+                for b in alertable:
+                    pct = (spent_brl / b.amount_brl * 100) if b.amount_brl else 0
+                    if pct >= 80:
+                        logger.warning("Budget %s %s%% org %s (R$%.2f/R$%.0f)", b.name, round(pct), org_id, spent_brl, b.amount_brl)
+                        # alerta 80/90/100 sem bloquear
+                        try:
+                            from aios.tasks.queue import enqueue_job
 
-                        await enqueue_job("aios.tasks.jobs.budget_alert_job", {"org_id": org_id, "budget_id": b.id, "pct": round(pct), "spent_brl": spent_brl})
-                    except Exception:
-                        pass
+                            await enqueue_job("aios.tasks.jobs.budget_alert_job", {"org_id": org_id, "budget_id": b.id, "pct": round(pct), "spent_brl": spent_brl})
+                        except Exception:
+                            pass
         except Exception:
             pass
 
     # soft limit warnings (80/90) without blocking
     try:
-        from aios.core.limits import get_monthly_usage as _gmu
-
-        monthly = await _gmu(org_id, db)
-        pct = monthly.get("pct_tokens", 0)
+        pct = 0
+        if max_tokens != 999999999:
+            if monthly_tokens_val is None:
+                monthly_tokens_val = int((await db.execute(
+                    select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(
+                        UsageRecord.org_id == org_id, UsageRecord.date >= start_month
+                    )
+                )).scalar() or 0)
+            pct = round(monthly_tokens_val / max_tokens * 100, 1) if max_tokens else 0
         if 80 <= pct < 100:
             logger.warning("Quota soft limit %s%% for org %s (plan %s)", pct, org_id, plan_name)
             try:

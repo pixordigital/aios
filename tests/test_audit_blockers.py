@@ -90,13 +90,14 @@ class TestRunGateIsSpendOnly:
     agents was denied — one org, zero replies.
     """
 
-    async def test_resource_counts_do_not_gate_a_run(self):
+    async def test_resource_counts_do_not_gate_a_run(self, monkeypatch):
         import sys
         from pathlib import Path
 
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from test_limits_locking import _FakeDB, _Stop
 
+        monkeypatch.setattr("aios.config.settings.internal_mode", False)
         from aios.core import limits
 
         db = _FakeDB("postgresql")
