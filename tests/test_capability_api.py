@@ -143,6 +143,42 @@ async def test_capabilities_and_assessments_are_tenant_scoped(auth_client, test_
     )
 
 
+async def test_blueprint_cross_tenant_records_metric(auth_client, test_db_session, second_org):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    cap = Capability(
+        org_id=second_org.id,
+        capability_key="secret-blueprint-cap",
+        name="Secret blueprint",
+        maturity="production",
+        is_commercially_available=True,
+    )
+    test_db_session.add(cap)
+    await test_db_session.commit()
+    await test_db_session.refresh(cap)
+
+    resp = await auth_client.post(
+        "/api/capabilities/blueprint",
+        json={"capability_id": cap.id, "agent_type": "support", **_HIGH},
+    )
+    assert resp.status_code == 404, resp.text
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    assert any(
+        e.payload.get("metric") == "cross_tenant_block"
+        and e.payload.get("resource_type") == "Capability"
+        and e.payload.get("resource_org_id") == second_org.id
+        and e.payload.get("capability_id") == cap.id
+        and e.source == "api.capabilities.blueprint"
+        for e in rows
+    )
+
+
 async def test_invalid_maturity_and_score_rejected(auth_client):
     resp = await auth_client.post(
         "/api/capabilities",

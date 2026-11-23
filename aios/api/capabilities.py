@@ -229,6 +229,7 @@ async def solution_blueprint(
     body: dict,
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Read-only diagnosis -> solution-fit -> blueprint. No rows, no ROI promise."""
     from aios.config import DEFAULT_PLAN, PLANS
@@ -251,6 +252,17 @@ async def solution_blueprint(
         if capability is None or (
             capability.org_id is not None and str(capability.org_id) != str(org_id)
         ):
+            evt = await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=org_id,
+                resource=capability,
+                source="api.capabilities.blueprint",
+                actor_type="human",
+                actor_id=str(getattr(user, "id", "") or "") or None,
+                payload={"capability_id": str(capability_id)},
+            )
+            if evt is not None:
+                await db.commit()
             raise HTTPException(404, "capability not found")
 
     disposition, rationale = solution_fit(
