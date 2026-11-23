@@ -476,6 +476,40 @@ async def login_action(request: Request, email: str = Form(...), password: str =
 async def logout():
     resp = RedirectResponse("/dashboard/login", status_code=303)
     resp.delete_cookie(COOKIE_NAME, path="/")
+    resp.delete_cookie("arvo_token", path="/")
+    return resp
+
+
+@router.get("/sso/arvo")
+async def sso_arvo(request: Request):
+    import httpx
+    from aios.integrations.arvo.client import PATH_PREFIX
+    from aios.integrations.arvo.routes import SsoTicketRequest, sso_ticket
+
+    async with db_session() as db:
+        user = (await db.execute(select(User).where(User.id == request.state.user_id))).scalar_one_or_none()
+    if not user or not user.org_id:
+        raise HTTPException(403, "AIOS identity not provisioned for ARVO")
+    role = "OWNER" if str(user.role).upper() == "SUPERADMIN" else str(user.role).upper()
+    if role not in {"OWNER", "ADMIN", "MANAGER", "ANALYST", "OPERATOR", "VIEWER"}:
+        role = "VIEWER"
+    ticket = await sso_ticket(SsoTicketRequest(
+        sub=str(user.id), email=user.email, org_id=str(user.org_id), role=role,
+    ))
+    async with httpx.AsyncClient(base_url=settings.arvo_base_url, timeout=5.0) as c:
+        r = await c.post(
+            f"{PATH_PREFIX}/sso-ticket",
+            json={"ticket": ticket["ticket"], "nonce": ticket["nonce"], "key_id": ticket["key_id"]},
+        )
+    if r.status_code != 200:
+        logger.warning("ARVO SSO exchange failed: %s", r.status_code)
+        raise HTTPException(502, "Falha ao entrar no ARVO")
+    is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    resp = RedirectResponse("/arvo/control-center", status_code=303)
+    resp.set_cookie(
+        "arvo_token", r.json()["access_token"], max_age=3600,
+        httponly=True, secure=is_https, samesite="strict", path="/",
+    )
     return resp
 
 
