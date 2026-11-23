@@ -29,7 +29,6 @@ Snapshot: 2026-11-23. HEAD `054c650` verified. Local `main` may be ahead of `ori
 - [ ] **Dealership pilot** — needs authorised customer data + baseline metrics.
 - [ ] **LGPD/privacy counsel review** — privacy registry / legitimate-interest entries need human/counsel review.
 - [ ] **LIA legal review** — human/counsel gate; do not treat LIA contact flows as legally cleared.
-- [ ] **Slack channel ↔ AIOS link sync** — `scripts/seed_internal_teams.py` now dry-run upserts one `ChannelConnection` per Slack channel; `SLACK_SYNC_APPLY=1` persists. Not run. Needs rotated Slack token in prod env, dry-run review, apply, `/dashboard/channels` verify, then commit/push/redeploy by Bash-capable agent.
 - [ ] **Rotate Slack tokens exposed in chat** — secret hygiene incident; rotate/revoke exposed Slack tokens.
 - [ ] **Revoke Hetzner API token shared in chat** — secret hygiene incident; revoke/replace token.
 - [ ] **Prod TLS/secrets/provider re-verify** — production config/secrets/provider posture not re-verified in this handoff.
