@@ -23,8 +23,6 @@ PROPOSED_CHANNELS: dict[str, tuple[str, ...]] = {
         "dept-product",
         "dept-engineering",
         "dept-operations",
-        "dept-security",
-        "dept-privacy-lgpd",
         "dept-finance",
     ),
     "cross_functional": (
@@ -41,6 +39,7 @@ PROPOSED_CHANNELS: dict[str, tuple[str, ...]] = {
         "org-experiments",
         "org-innovation-learning",
         "org-kpi-analytics",
+        "org-random-legacy",
     ),
     "restricted_governance": (
         "security-incidents",

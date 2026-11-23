@@ -31,13 +31,13 @@ oauth_config:
       - channels:history       # read public channel messages
       - im:history             # read DMs
       - reactions:read         # reaction_added events
-      # --- lets us create the 4 team channels and invite the bot ---
-      - conversations:read     # list channels
-      - conversations:write    # create channels, add the bot
+      # --- lists channels for inventory and link sync ---
+      - channels:read          # public channel metadata
+      - groups:read            # private channel metadata
 
 settings:
   event_subscriptions:
-    request_url: http://178.105.181.38:8777/api/slack/webhook
+    request_url: https://178.105.181.38/api/slack/webhook
     bot_events:
       - app_mention
       - message.channels

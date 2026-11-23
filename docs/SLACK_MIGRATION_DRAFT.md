@@ -27,8 +27,8 @@ Observed workspace changes since first inventory — renames: `general`→`compa
 | U0C55DZPDKP | aios2 | AIOS | yes | no |
 | U0C64P7ARCG | pixordigital | Bernardo | no | yes |
 
-## Taxonomy status (31/33 proposed channels present)
-Missing: `dept-security`, `dept-privacy-lgpd`. Extra active: `org-random-legacy`. Restricted governance present: security-incidents, security-monitoring, privacy-governance, privacy-incidents. Projects present: project-showcar-pilot, project-aios-product, project-lia-launch.
+## Taxonomy status (32/32 active channels represented)
+AIOS taxonomy mirrors active Slack channels; 4 archived excluded. Restricted governance present: security-incidents, security-monitoring, privacy-governance, privacy-incidents. Projects present: project-showcar-pilot, project-aios-product, project-lia-launch.
 
 ## System of record (AIOS)
 discussions=slack; tasks=aios_ocp; approvals=aios_decision_approval; customer_information=aios_crm; documents=aios_knowledge; kpis=aios_organizational_intelligence; process_execution=aios_process_workflow_engines; skills=aios_skills
