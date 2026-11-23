@@ -43,36 +43,38 @@
     <h2>2. LLM <span class="text-xs text-tertiary">— onde o agente pensa (1 clique em Coolify depois também)</span></h2>
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-top:0.75rem">
       <div>
-        <label>Modelo (VOICE_LLM_MODEL) — apenas voz-adequados <span class="mono" style="font-size:10px;border:1px solid var(--accent-border);color:var(--accent);padding:1px 5px;border-radius:99px">latência &lt;1s • PT-BR ok • Fit ≥★★★★☆</span></label>
+        <label>Modelo (VOICE_LLM_MODEL) — curadoria voz <span class="mono" style="font-size:10px;border:1px solid var(--accent-border);color:var(--accent);padding:1px 5px;border-radius:99px">PT-BR • baixa latência desejada</span></label>
         <select name="model" id="voice-model" class="input" onchange="updateVoiceCost(this.value);updateVoiceFit(this.value)">
           <optgroup label="OpenAI — rápidos">
-            <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini — $0.15/1M | Q B+ | Fit voz SDR ★★★★★ (300ms, PT ok)</option>
-            <option value="openai/gpt-4o">openai/gpt-4o — $2.5/1M | Q A- | Fit voz ★★★★☆ (600ms)</option>
+            <option value="openai/gpt-4o-mini" selected>openai/gpt-4o-mini — $0.15/$0.60 por 1M | Q B+ | voz SDR</option>
+            <option value="openai/gpt-4o">openai/gpt-4o — $2.50/$10 por 1M | Q A- | equilibrado</option>
           </optgroup>
           <optgroup label="Anthropic — voz">
-            <option value="anthropic/claude-sonnet-4.5">anthropic/claude-sonnet-4.5 — $3/1M | Q A | Fit voz ★★★★★ (800ms, PT ótimo)</option>
-            <option value="anthropic/claude-fable-5-1">anthropic/claude-fable-5-1 — $1.5/1M | Q A- | Fit voz SDR ★★★★☆ (500ms)</option>
-            <option value="anthropic/claude-haiku-4.5">anthropic/claude-haiku-4.5 — $1/1M | Q B | Fit voz ★★★★☆ (400ms, barato)</option>
+            <option value="anthropic/claude-haiku-5.5">anthropic/claude-haiku-5.5 — $0.10/$0.50 por 1M | barato</option>
+            <option value="anthropic/claude-haiku-4.5">anthropic/claude-haiku-4.5 — $1/$5 por 1M | Q B | barato</option>
+            <option value="anthropic/claude-sonnet-5.5">anthropic/claude-sonnet-5.5 — $2/$10 por 1M | PT ótimo</option>
+            <option value="anthropic/claude-sonnet-4.5">anthropic/claude-sonnet-4.5 — $3/$15 por 1M | Q A | PT ótimo</option>
+            <option value="anthropic/claude-fable-5.2">anthropic/claude-fable-5.2 — $8/$40 por 1M | 1M ctx</option>
           </optgroup>
           <optgroup label="Google — Flash">
-            <option value="google/gemini-3.8-flash">google/gemini-3.8-flash — $0.15/1M | Q B+ | Fit voz SDR ★★★★★ (300ms)</option>
+            <option value="google/gemini-3.8-flash">google/gemini-3.8-flash — $0.825/$4.125 por 1M | Q B+</option>
           </optgroup>
           <optgroup label="Meta — PT nativo">
-            <option value="muse/muse-spark-1.2">muse/muse-spark-1.2 — $0.60/1M | Q B+ | Fit voz PT ★★★★★ (500ms, nativo)</option>
-            <option value="muse/muse-spark-1.2-contributor-free">muse/muse-spark-1.2-contributor-free — $0 | Q B | Fit voz PT ★★★★☆ free</option>
+            <option value="meta/muse-spark-1.3">meta/muse-spark-1.3 — $1.25/$4.25 por 1M | nativo</option>
+            <option value="meta/muse-spark-1.3-contributor">meta/muse-spark-1.3-contributor — $0.10/$0.20 por 1M | barato</option>
           </optgroup>
           <optgroup label="Rápido e barato">
-            <option value="deepseek/deepseek-v4-flash">deepseek/deepseek-v4-flash — $0.15/1M | Q B- | Fit voz SDR ★★★★☆ (400ms)</option>
+            <option value="deepseek/deepseek-v4.1-flash">deepseek/deepseek-v4.1-flash — $0.0498/$0.1992 por 1M | PT fraco</option>
           </optgroup>
         </select>
         <div class="text-xs text-tertiary" style="margin-top:0.25rem"><strong>Apenas modelos voz-adequados.</strong> Salvo em <code>AIOS_VOICE_LLM_MODEL</code> `docker-compose.coolify.yml:235`. Troca Coolify → Environment sem rebuild. Ocultos: `gpt-5.6/o4/opus` (reasoning 1,5-2s, caro) e `ollama` (CPU 3s+) — use em `/dashboard/lab` para testes.</div>
-        <div id="voice-fit" class="badge" style="margin-top:0.5rem;font-size:0.7rem;background:var(--accent-subtle);color:var(--accent);border-color:var(--accent-border)">Fit SDR ★★★★★ — rápido, barato, PT ok</div>
+        <div id="voice-fit" class="badge" style="margin-top:0.5rem;font-size:0.7rem;background:var(--accent-subtle);color:var(--accent);border-color:var(--accent-border)">Fit voz SDR — barato, PT ok</div>
       </div>
       <div>
         <label>Custo est.</label>
-        <div class="badge" id="voice-cost" style="font-family:JetBrains Mono,monospace">$0.0006 / req</div>
-        <div class="text-xs text-tertiary" style="margin-top:0.25rem">4096 tokens (1 req voz ~500 tok)</div>
-        <div class="text-xs text-tertiary" id="voice-quality" style="margin-top:0.25rem">Q B+ | Lat 300ms</div>
+        <div class="badge" id="voice-cost" style="font-family:JetBrains Mono,monospace">$0.0008 / req (est.)</div>
+        <div class="text-xs text-tertiary" style="margin-top:0.25rem">Est.: 4k entrada + 400 saída tokens</div>
+        <div class="text-xs text-tertiary" id="voice-quality" style="margin-top:0.25rem">Q B+</div>
       </div>
     </div>
   </div>
@@ -298,155 +300,34 @@ document.getElementById('voice-model').addEventListener('change',()=>updateProgr
 document.getElementById('voice-select').addEventListener('change',()=>updateProgress(4));
 document.getElementById('preview-text').addEventListener('input',()=>updateProgress(4));
 function updateVoiceCost(m){
-  // Preços OpenRouter Set 2026 (input/output $/1M tokens) — fontes: openai.com/pricing, anthropic.com/pricing, ai.google.dev/pricing, openrouter.ai/pricing
-  const pr={ 
-    // OpenAI (oficial + OpenRouter)
-    'openai/gpt-4o-mini':0.0006,    // $0.15/$0.60
-    'openai/gpt-4o':0.012,          // $2.50/$10.00 (legacy)
-    'openai/gpt-4.1':0.008,         // $2.00/$8.00 (flagship)
-    'openai/gpt-4.1-mini':0.004,    // $0.40/$1.60
-    'openai/gpt-4.1-nano':0.001,    // $0.10/$0.40
-    'openai/gpt-4o-mini':0.0006,    // $0.15/$0.60
-    'openai/gpt-4o':0.012,          // $2.50/$10.00 (legacy)
-    'openai/o3':0.04,               // $10/$40 (reasoning)
-    'openai/o3-mini':0.011,         // $1.10/$4.40
-    'openai/o4':0.05,               // $10/$40
-    'openai/o4-mini':0.011,         // $1.10/$4.40
-    'openai/gpt-5':0.0125,          // $1.25/$10.00
-    'openai/gpt-5-mini':0.0025,     // $0.25/$2.00
-    'openai/gpt-5-nano':0.0005,     // $0.05/$0.40
-    'openai/gpt-5.6-sol':0.025,     // $5/$30
-    'openai/gpt-5.6-terra':0.02,    // $2/$12
-    'openai/gpt-5.6-luna':0.0016,    // $0.20/$1.20 (std), $0.10/$0.60 batch ~$0.0016/req @ 4k tok (batch), $0.20/$1.20 standard
-    'openai/gpt-5.6-terra-pro':0.002, // $2/$12
-    'openai/gpt-5.4':0.025,         // $5/$20
-    'openai/gpt-5.5':0.03,          // $3/$20
-    'openai/gpt-5.6':0.025,         // $5/$30
-    'openai/o4':0.05,               // $10/$40
-    'openai/o4-mini':0.011,         // $1.10/$4.40
-    'openai/gpt-4o-mini':0.0006,
-    'openai/gpt-4o':0.012,
-    'openai/gpt-4.1':0.008,
-    'openai/gpt-4.1-mini':0.004,
-    'openai/o4-mini':0.011,
-    // Anthropic (oficial + OpenRouter)
-    'anthropic/claude-opus-4.5':0.025,   // $5/$25
-    'anthropic/claude-opus-4.6':0.025,   // $5/$25
-    'anthropic/claude-opus-4.7':0.025,   // $5/$25
-    'anthropic/claude-sonnet-4.5':0.018, // $3/$15
-    'anthropic/claude-sonnet-4.6':0.018, // $3/$15
-    'anthropic/claude-sonnet-5':0.012,   // $2/$10 (intro até 31/08/2026, depois $3/$15)
-    'anthropic/claude-fable-5-1':0.0075, // $1.5/$7.5
-    'anthropic/claude-fable-5':0.0075,   // $1.5/$7.5
-    'anthropic/claude-mythos-5-1':0.012, // $3/$15
+  // OpenRouter prices 2026-11-23 (USD/1M); estimate = 4k input + 400 output tokens.
+  const pr={
+    'openai/gpt-4o-mini':0.00084,
+    'openai/gpt-4o':0.014,
+    'anthropic/claude-haiku-5.5':0.0006,
+    'anthropic/claude-haiku-4.5':0.006,
+    'anthropic/claude-sonnet-5.5':0.012,
     'anthropic/claude-sonnet-4.5':0.018,
-    'anthropic/claude-3.5-sonnet':0.018,
-    'anthropic/claude-3-haiku':0.0008,   // $0.8/$1.6
-    'anthropic/claude-opus-4.5':0.025,
-    'anthropic/claude-opus-4':0.025,
-    'anthropic/claude-fable-5':0.0075,
-    'anthropic/claude-fable-5-1':0.0075,
-    'anthropic/claude-mythos-5-1':0.012,
-    'anthropic/claude-haiku-4.5':0.0005, // $1/$5
-    'anthropic/claude-3.5-sonnet':0.018,
-    // Google (oficial + OpenRouter)
-    'google/gemini-2.5-flash':0.0003,    // $0.30/$2.50
-    'google/gemini-2.5-flash-lite':0.0001, // $0.10/$0.40
-    'google/gemini-2.5-pro':0.005,       // $1.25/$10 (<=200K), $2.5/$15 (>200K)
-    'google/gemini-3.8-flash':0.0003,    // $0.30/$2.50
-    'google/gemini-3-pro':0.012,         // $2/$12
-    'google/gemini-3.8-flash':0.0003,
-    'google/gemini-3-pro':0.012,
-    'google/gemini-2.5-flash':0.0003,
-    'google/gemini-2.5-flash-lite':0.0001, // $0.10/$0.40
-    'google/gemini-2.5-pro':0.005,
-    'muse/muse-spark-1.2':0.006,         // $0.60/$2.40 (PT nativo)
-    'muse/muse-spark-1.2-contributor-free':0,
-    'qwen/qwen-3-235b-a22b':0.005,       // $0.5/$2
-    'deepseek/deepseek-v4-pro':0.000875, // $0.875/$1.74
-    'deepseek/deepseek-v4':0.005,        // $0.5/$2
-    'deepseek/deepseek-v4-flash':0.00015, // $0.15/$0.60
-    'ollama/qwen3:8b':0,
-    'ollama/llama3':0,
-    'openai/gpt-4o-mini':0.0006,
-    'openai/gpt-4o':0.012,
-    'openai/gpt-4.1':0.008,
-    'openai/gpt-4.1-mini':0.004,
-    'openai/o4-mini':0.011,
-    'anthropic/claude-sonnet-4.5':0.018,
-    'anthropic/claude-fable-5-1':0.0075,
-    'qwen/qwen-3-235b-a22b':0.005,
-    'deepseek/deepseek-v4':0.005,
-    'deepseek/deepseek-v4-flash':0.00015,
-    'ollama/qwen3:8b':0,
-    'ollama/llama3':0
+    'anthropic/claude-fable-5.2':0.048,
+    'google/gemini-3.8-flash':0.00495,
+    'meta/muse-spark-1.3':0.0067,
+    'meta/muse-spark-1.3-contributor':0.00048,
+    'deepseek/deepseek-v4.1-flash':0.000279
   };
-  document.getElementById('voice-cost').textContent='$'+(pr[m]||0.0006).toFixed(4)+' / req';
+  document.getElementById('voice-cost').textContent='$'+(pr[m]||0).toFixed(4)+' / req (est.)';
 }
 var VOICE_FIT={
-  'openai/gpt-4o-mini':['Fit SDR ★★★★★ — rápido, barato, PT ok','Q B+ | Lat 300ms'],
-  'openai/gpt-4o':['Fit voz ★★★★☆ — equilibrado, PT bom','Q A- | Lat 600ms'],
-  'openai/gpt-4.1':['Fit voz ★★★★☆ — equilibrado','Q A- | Lat 800ms'],
-  'openai/gpt-4.1-mini':['Fit voz ★★★★☆ + áudio ok + imagem ✓', 'Q B+ | Lat 500ms'],
-  'openai/gpt-4.1-nano':['Fit voz ★★★★☆ — barato', 'Q B | Lat 400ms'],
-  'openai/o3':['Fit voz Closer ★★★★☆ — melhor reasoning, lento','Q A+ | Lat 2s'],
-  'openai/o3-mini':['Fit voz ★★★★☆ — reasoning', 'Q A | Lat 1s'],
-  'openai/o4':['Fit voz Closer ★★★★☆ — melhor reasoning, lento','Q A+ | Lat 2s'],
-  'openai/o4-mini':['Fit voz Support ★★★★☆ — reasoning lento, bom p/ suporte','Q A | Lat 1.5s'],
-  'openai/gpt-5':['Fit voz ★★★★☆ — flagship + imagem ✓','Q A+ | Lat 1s'],
-  'openai/gpt-5-mini':['Fit voz ★★★★☆ — barato + imagem ✓','Q A- | Lat 500ms'],
-  'openai/gpt-5.6-sol':['Fit voz Closer ★★★★☆ — melhor reasoning, lento e caro','Q A+ | Lat 2s'],
-  'openai/gpt-5.6-terra':['Fit voz Closer ★★★★☆ — reasoning, lento e caro','Q A+ | Lat 2s'],
-  'openai/gpt-5.6-luna':['Fit voz SDR ★★★★★ — $0.20/$1.20 std, $0.10/$0.60 batch','Q B+ | Lat 400ms'],
-  'openai/gpt-5.6-terra-pro':['Fit voz Closer ★★★★☆ — reasoning, lento e caro','Q A+ | Lat 2s'],
-  'openai/gpt-5.4':['Fit voz ★★★★☆ — equilibrado, caro p/ voz','Q A | Lat 1.2s'],
-  'openai/gpt-5.5':['Fit voz ★★★★☆ + imagem ✓','Q A | Lat 1s'],
-  'openai/gpt-5.6':['Fit voz Closer ★★★★☆ — reasoning, lento','Q A+ | Lat 2s'],
-  'openai/o4':['Fit voz Closer ★★★★☆ — melhor reasoning, lento','Q A+ | Lat 2s'],
-  'openai/o4-mini':['Fit voz Support ★★★★☆ — reasoning lento, bom p/ suporte','Q A | Lat 1.5s'],
-  'anthropic/claude-opus-4.5':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-opus-4.6':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-opus-4.7':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-sonnet-4.5':['Fit voz ★★★★★ — PT ótimo, ideal voz','Q A | Lat 800ms'],
-  'anthropic/claude-sonnet-4.6':['Fit voz ★★★★★ — PT ótimo, ideal voz','Q A | Lat 800ms'],
-  'anthropic/claude-sonnet-5':['Fit voz ★★★★★ — PT ótimo, ideal voz (intro)','Q A | Lat 800ms'],
-  'anthropic/claude-fable-5-1':['Fit voz SDR ★★★★☆ — rápido, PT bom','Q A- | Lat 500ms'],
-  'anthropic/claude-fable-5':['Fit voz SDR ★★★★☆ — rápido, PT bom','Q A- | Lat 500ms'],
-  'anthropic/claude-mythos-5-1':['Fit voz ★★★★☆ — PT bom','Q A | Lat 800ms'],
-  'anthropic/claude-sonnet-4.5':['Fit voz ★★★★★ — PT ótimo, ideal voz','Q A | Lat 800ms'],
-  'anthropic/claude-3.5-sonnet':['Fit voz ★★★★☆ PT bom + imagem ✓','Q A- | Lat 800ms'],
-  'anthropic/claude-3-haiku':['Fit voz ★★★★☆ — barato','Q B | Lat 500ms'],
-  'anthropic/claude-opus-4.5':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-opus-4.6':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-opus-4.7':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-fable-5-1':['Fit voz SDR ★★★★☆ — rápido, PT bom','Q A- | Lat 500ms'],
-  'anthropic/claude-fable-5':['Fit voz SDR ★★★★☆ — rápido, PT bom','Q A- | Lat 500ms'],
-  'anthropic/claude-mythos-5-1':['Fit voz ★★★★☆ — PT bom','Q A | Lat 800ms'],
-  'anthropic/claude-sonnet-4.5':['Fit voz ★★★★★ — PT ótimo, ideal voz','Q A | Lat 800ms'],
-  'anthropic/claude-3.5-sonnet':['Fit voz ★★★★☆ PT bom + imagem ✓','Q A- | Lat 800ms'],
-  'anthropic/claude-3-haiku':['Fit voz ★★★★☆ — barato','Q B | Lat 500ms'],
-  'anthropic/claude-opus-4.5':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-opus-4.6':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-opus-4.7':['Fit voz Closer ★★★★★ — melhor PT, caro','Q A+ | Lat 1.5s'],
-  'anthropic/claude-fable-5-1':['Fit voz SDR ★★★★☆ — rápido, PT bom','Q A- | Lat 500ms'],
-  'anthropic/claude-fable-5':['Fit voz SDR ★★★★☆ — rápido, PT bom','Q A- | Lat 500ms'],
-  'anthropic/claude-mythos-5-1':['Fit voz ★★★★☆ — PT bom','Q A | Lat 800ms'],
-  'anthropic/claude-haiku-4.5':['Fit voz ★★★★☆ — barato, PT ok','Q B | Lat 400ms'],
-  'anthropic/claude-3.5-sonnet':['Fit voz ★★★★☆ PT bom + imagem ✓','Q A- | Lat 800ms'],
-  'google/gemini-2.5-flash':['Fit voz SDR ★★★★★ — rápido e barato','Q B+ | Lat 300ms'],
-  'google/gemini-2.5-flash-lite':['Fit voz SDR ★★★★☆ — barato', 'Q B | Lat 400ms'],
-  'google/gemini-2.5-pro':['Fit voz ★★★★☆ + imagem ✓','Q A- | Lat 800ms'],
-  'google/gemini-3.8-flash':['Fit voz SDR ★★★★★ — rápido e barato','Q B+ | Lat 300ms'],
-  'google/gemini-3-pro':['Fit voz ★★★★☆ — PT ok','Q A- | Lat 900ms'],
-  'muse/muse-spark-1.2':['Fit voz PT ★★★★★ — nativo, barato','Q B+ | Lat 500ms'],
-  'muse/muse-spark-1.2-contributor-free':['Fit voz PT ★★★★☆ — free','Q B | Lat 500ms'],
-  'qwen/qwen-3-235b-a22b':['Fit voz ★★★☆☆ — en, barato, PT fraco','Q B | Lat 900ms'],
-  'deepseek/deepseek-v4-pro':['Fit voz ★★★★☆ — 1M ctx, áudio/imagem ✓','Q B+ | Lat 1s'],
-  'deepseek/deepseek-v4':['Fit voz ★★★☆☆ — barato, PT fraco','Q B | Lat 1s'],
-  'deepseek/deepseek-v4-flash':['Fit voz SDR ★★★★☆ — rápido e barato','Q B- | Lat 400ms'],
-  'deepseek/deepseek-v4-pro':['Fit voz ★★★★☆ + áudio ok, imagem ✗','Q B+ | Lat 1s'],
-  'ollama/qwen3:8b':['Fit voz ★★☆☆☆ — local, lento CPU','Q C+ | Lat 3s+'],
-  'ollama/llama3':['Fit voz ★★☆☆☆ — local, lento','Q C | Lat 3s+']
+  'openai/gpt-4o-mini':['Fit voz SDR — barato, PT ok','Q B+'],
+  'openai/gpt-4o':['Fit voz — equilibrado','Q A-'],
+  'anthropic/claude-haiku-5.5':['Fit voz — barato','Q ?'],
+  'anthropic/claude-haiku-4.5':['Fit voz — barato, PT ok','Q B'],
+  'anthropic/claude-sonnet-5.5':['Fit voz — PT ótimo','Q A'],
+  'anthropic/claude-sonnet-4.5':['Fit voz — PT ótimo','Q A'],
+  'anthropic/claude-fable-5.2':['Fit voz — caro, 1M ctx','Q A-'],
+  'google/gemini-3.8-flash':['Fit voz SDR — rápido','Q B+'],
+  'meta/muse-spark-1.3':['Fit voz PT — nativo','Q B+'],
+  'meta/muse-spark-1.3-contributor':['Fit voz PT — barato','Q B'],
+  'deepseek/deepseek-v4.1-flash':['Fit voz SDR — barato, PT fraco','Q B-']
 };
 function updateVoiceFit(m){
   var f=VOICE_FIT[m]||['Fit voz ★★★☆☆','Q ?'];
