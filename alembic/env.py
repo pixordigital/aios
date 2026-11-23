@@ -22,26 +22,43 @@ target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
-    context.configure(url=url, target_metadata=target_metadata, literal_binds=True)
+    is_postgres = "postgresql" in url
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        version_table="alembic_version_aios" if is_postgres else "alembic_version",
+        version_table_schema="aios" if is_postgres else None,
+    )
     with context.begin_transaction():
+        if is_postgres:
+            context.execute("CREATE SCHEMA IF NOT EXISTS aios")
+            context.execute("SET LOCAL search_path TO aios, public, extensions")
         context.run_migrations()
 
 
 def do_run_migrations(connection):
     is_sqlite = connection.dialect.name == "sqlite"
+    if not is_sqlite:
+        connection.exec_driver_sql("CREATE SCHEMA IF NOT EXISTS aios")
+        connection.commit()
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         render_as_batch=is_sqlite,  # batch mode for SQLite ALTER TABLE support
+        version_table="alembic_version" if is_sqlite else "alembic_version_aios",
+        version_table_schema=None if is_sqlite else "aios",
     )
     with context.begin_transaction():
+        if not is_sqlite:
+            connection.exec_driver_sql("SET LOCAL search_path TO aios, public, extensions")
         context.run_migrations()
 
 
 async def run_async_migrations() -> None:
     connect_args = {}
     if "postgresql" in settings.database_url:
-        connect_args["server_settings"] = {"search_path": "public,aios"}
+        connect_args["server_settings"] = {"search_path": "aios, public, extensions"}
     connectable = create_async_engine(
         settings.database_url, poolclass=pool.NullPool,
         connect_args=connect_args,

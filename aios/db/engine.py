@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from aios.config import settings
 
@@ -25,10 +25,13 @@ _pool_kwargs = (
 # indefinitely; an application-side timeout only cancels the client, it does not
 # release the backend. 15s is well above any legitimate query here.
 _connect_kwargs = (
-    {"server_settings": {"search_path": "public,aios", "statement_timeout": "15s"}}
+    {"server_settings": {"search_path": "aios, public, extensions", "statement_timeout": "15s"}}
     if _is_postgres()
     else {}
 )
+# Supavisor transaction pooling (:6543) rejects asyncpg's prepared statements.
+if _is_postgres() and ":6543" in settings.database_url:
+    _connect_kwargs["statement_cache_size"] = 0
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
@@ -36,6 +39,12 @@ engine = create_async_engine(
     connect_args=_connect_kwargs,
     **_pool_kwargs,
 )
+
+if _is_postgres():
+
+    @event.listens_for(engine.sync_engine, "begin")
+    def _set_search_path(conn):
+        conn.exec_driver_sql("SET LOCAL search_path TO aios, public, extensions")
 
 
 class Base(DeclarativeBase):
