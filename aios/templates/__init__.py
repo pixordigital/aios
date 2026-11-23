@@ -35,6 +35,22 @@ from aios.templates.team_managers import (
 
 from aios.templates.manager_data import DATA_MANAGER_TEMPLATE
 
+_SCAFFOLD_MARKER = "# Camada 1 — Papel e escopo"
+_PROMPT_SCAFFOLD = """
+
+# Camada 1 — Papel e escopo
+Faça apenas o que seu papel define. FORA DO ESCOPO: prometer números, prazos ou capacidades não verificados no código.
+
+# Camada 2 — Regras duras
+Nunca invente dado. Nunca prometa limite que não existe em `PLANS`/`check_org_limits`. Ações irreversíveis exigem aprovação humana.
+
+# Camada 3 — Procedimento
+Consulte dado real antes de responder. Se precisar de ferramenta, chame-a antes de afirmar.
+
+# Camada 4 — Comportamento na dúvida
+Na dúvida, diga "não sei" e aponte o que falta verificar. Exemplo de erro corrigido — pergunta: "quantos minutos de voz?"; errado: "10k minutos"; correto: "não sei: `voice_minutes` não existe em `PLANS`; verifico antes de prometer".
+"""
+
 TEMPLATES = {
     "orchestrator": ORCHESTRATOR_TEMPLATE,
     "manager": MANAGER_TEMPLATE,
@@ -77,4 +93,7 @@ def apply_template(agent_type: str, overrides: dict | None = None) -> dict:
     config = dict(template)
     if overrides:
         config.update(overrides)
+    prompt = config.get("system_prompt") or ""
+    if _SCAFFOLD_MARKER not in prompt:
+        config["system_prompt"] = prompt.rstrip() + _PROMPT_SCAFFOLD
     return config

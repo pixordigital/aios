@@ -7,7 +7,7 @@ decides whether an actor may read a record.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, ForeignKey, String, Text
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aios.db.engine import Base
@@ -51,6 +51,23 @@ class KnowledgeRecord(Base, TimestampMixin):
     retention_until: Mapped[datetime | None] = mapped_column(nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     search_text: Mapped[str] = mapped_column(Text, default="")  # full-text companion
+
+
+class KnowledgeGrant(Base, TimestampMixin):
+    """Explicit, revocable per-user grant to one confidential KnowledgeRecord."""
+
+    __tablename__ = "knowledge_grants"
+    __table_args__ = (
+        UniqueConstraint("org_id", "user_id", "record_id", name="uq_knowledge_grant_actor_record"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    record_id: Mapped[str] = mapped_column(ForeignKey("knowledge_records.id"), index=True)
+    granted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 # --- Deterministic access -----------------------------------------------------

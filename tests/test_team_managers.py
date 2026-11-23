@@ -65,6 +65,15 @@ class TestManagerTemplates:
         for key in MANAGERS:
             assert apply_template(key)["agent_type"] == "manager"
 
+    def test_prompt_scaffold_layers_and_idempotence(self):
+        """Viver-style four layers + authorized 'não sei', applied once."""
+        for key in TEMPLATES:
+            prompt = apply_template(key)["system_prompt"]
+            for layer in ("# Camada 1", "# Camada 2", "# Camada 3", "# Camada 4"):
+                assert layer in prompt, key
+            assert "na dúvida" in prompt and '"não sei"' in prompt, key
+            assert prompt.count("# Camada 1 — Papel e escopo") == 1, key
+
 
 class TestManagerToolsMatchTeam:
     """A manager must be able to inspect the work its own workers do."""

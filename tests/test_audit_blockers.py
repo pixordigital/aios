@@ -6,8 +6,51 @@ silent no-op that a green suite did not catch.
 
 import json
 import re
+from pathlib import Path
 
 import pytest
+
+
+class TestPublicClaimsRegistry:
+    """Public numbers need a coded limit or an explicit estimate marker."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+    _CLAIM = re.compile(r"(\d[\d.]*\s*(?:msgs/dia|tokens/mês|min voz|minutos? de voz))", re.I)
+
+    def _registry(self) -> dict[str, tuple[str, str]]:
+        text = (self.ROOT / "docs/PRINCIPIO_VERDADE.md").read_text()
+        rows = {}
+        for line in text.splitlines():
+            if not line.startswith("| `"):
+                continue
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            if len(cells) < 3:
+                continue
+            rows[cells[0].strip("`").lower()] = (cells[1], cells[2])
+        return rows
+
+    def test_every_public_number_is_registered_and_enforced(self):
+        from aios.config import PLANS
+
+        registry = self._registry()
+        assert registry, "empty claims registry"
+        html = (self.ROOT / "website/index.html").read_text()
+        for raw in self._CLAIM.findall(html):
+            claim = raw.lower().strip()
+            assert claim in registry, f"unregistered public claim: {raw}"
+            source, kind = registry[claim]
+            assert kind == "enforced", f"{raw} must be enforced or marked estimate"
+            path, _, snippet = source.partition(":")
+            assert snippet.strip("`,") in (self.ROOT / path).read_text(), source
+        assert PLANS["starter"]["max_messages_per_day"] == 500
+        assert PLANS["starter"]["max_tokens_per_month"] == 5_000_000
+        assert "voice_minutes" not in str(PLANS)
+
+    def test_banned_claims_stay_banned(self):
+        registry = self._registry()
+        assert registry["10k min voz"][1] == "banned"
+        from aios.config import PLANS
+        assert "voice_minutes" not in str(PLANS)
 
 
 class TestAgentRuntimeIsNotAmputated:

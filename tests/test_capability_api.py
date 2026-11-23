@@ -55,6 +55,31 @@ async def test_create_list_and_evaluate(auth_client):
     assert any(a["id"] == body["id"] for a in assessments.json()["items"])
 
 
+async def test_blueprint_is_read_only_and_uses_real_plan_limits(auth_client):
+    from aios.config import DEFAULT_PLAN, PLANS
+
+    resp = await auth_client.post(
+        "/api/capabilities/blueprint",
+        json={"agent_type": "support", "required_use_case": "support", **_HIGH},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["read_only"] is True and body["estimate"] is False
+    assert body["disposition"] == "research_required"  # no capability recorded
+    assert body["blueprint"]["agent_type"] == "support"
+    assert body["blueprint"]["tools"]
+    plan = PLANS.get(body["plan"], PLANS[DEFAULT_PLAN])
+    for key, value in body["plan_limits"].items():
+        assert value == plan.get(key), key
+    assert body["limit_source"] == "aios/config.py:PLANS"
+    assert body["enforced_by"] == "aios/core/limits.py:check_org_limits"
+
+    bad = await auth_client.post("/api/capabilities/blueprint", json={"problem_fit": 2.0})
+    assert bad.status_code == 400
+    bad_type = await auth_client.post("/api/capabilities/blueprint", json={"agent_type": "nope"})
+    assert bad_type.status_code == 400
+
+
 async def test_fit_gates_contact_legal_and_maturity(auth_client):
     resp = await auth_client.post(
         "/api/capabilities/evaluate",

@@ -2,8 +2,9 @@ import json as _json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text
 
 from aios.db.engine import async_session
 from aios.governance.knowledge import (
@@ -93,12 +94,33 @@ async def search_knowledge_records(
         return []
     started = time.perf_counter()
     try:
+        # Push cheap ACL predicates into SQL: founder sees all, everyone else
+        # only public/internal in-scope or confidential with an explicit grant.
+        # can_retrieve still re-checks every row before scoring.
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        departments = actor_departments or set()
+        grants = granted_record_ids or set()
+        conditions = [
+            KnowledgeRecord.org_id == org_id,
+            KnowledgeRecord.deleted_at.is_(None),
+            or_(
+                KnowledgeRecord.retention_until.is_(None),
+                KnowledgeRecord.retention_until >= now,
+            ),
+        ]
+        if not is_founder:
+            in_scope = or_(
+                KnowledgeRecord.department_id.is_(None),
+                KnowledgeRecord.department_id.in_(departments) if departments else False,
+            )
+            normal = and_(~KnowledgeRecord.classification.in_(("restricted", "confidential")), in_scope)
+            confidential = and_(
+                KnowledgeRecord.classification == "confidential",
+                KnowledgeRecord.id.in_(grants) if grants else False,
+            )
+            conditions.append(or_(normal, confidential))
         async with async_session() as s:
-            rows = (
-                await s.execute(
-                    select(KnowledgeRecord).where(KnowledgeRecord.org_id == org_id)
-                )
-            ).scalars().all()
+            rows = (await s.execute(select(KnowledgeRecord).where(*conditions))).scalars().all()
         scanned = len(rows)
         elapsed_ms = (time.perf_counter() - started) * 1000
         if scanned > RAG_SCAN_WARN_THRESHOLD:

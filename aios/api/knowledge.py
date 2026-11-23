@@ -9,6 +9,7 @@ from aios.db.models import Memory, Organization, User
 from aios.governance.knowledge import (
     CLASSIFICATIONS,
     KNOWLEDGE_KINDS,
+    KnowledgeGrant,
     KnowledgeRecord,
     can_retrieve,
     fact_promotion_allowed,
@@ -113,6 +114,7 @@ async def list_records(
     ]
     total_visible_scanned = len(visible)
     page = visible[offset : offset + limit]
+    total_exact = not truncated
     return {
         "items": [
             {
@@ -124,8 +126,15 @@ async def list_records(
             }
             for r in page
         ],
-        # total = visible count within scanned set; when truncated, true total unknown.
+        # Compat: total = visible count within scanned set. Exact only when not truncated.
         "total": total_visible_scanned,
+        "total_scanned_visible": total_visible_scanned,
+        "total_exact": total_exact,
+        "total_note": (
+            "total is exact visible count"
+            if total_exact
+            else "total is visible count within scanned set; scan truncated, true total unknown"
+        ),
         "limit": limit,
         "offset": offset,
         "scanned": len(rows),
@@ -170,6 +179,141 @@ async def create_record(
     await db.commit()
     await db.refresh(record)
     return {"id": record.id, "kind": record.kind, "classification": record.classification}
+
+
+@router.post("/ingest")
+async def ingest_document(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    user: User = Depends(get_current_user),
+):
+    """Split a governed document into cited chunks. Bounded; no vector index."""
+    from aios.governance.knowledge import knowledge_citation
+
+    org = await db.get(Organization, user.org_id)
+    if not _is_founder(user, org):
+        raise HTTPException(403, "Founder approval required for knowledge ingestion")
+    kind = str(body.get("kind") or "statement")
+    classification = str(body.get("classification") or "internal")
+    if kind not in KNOWLEDGE_KINDS or classification not in CLASSIFICATIONS:
+        raise HTTPException(400, "invalid knowledge kind or classification")
+    title = str(body.get("title") or "").strip()
+    content = str(body.get("content") or "")
+    source_type = str(body.get("source_type") or "").strip()
+    if not title or not content.strip() or not source_type:
+        raise HTTPException(400, "title, content and source_type required")
+    source_id = str(body.get("source_id") or "").strip()
+    chunk_size = body.get("chunk_size", 1200)
+    max_chunks = body.get("max_chunks", 50)
+    if not isinstance(chunk_size, int) or not 200 <= chunk_size <= 4000:
+        raise HTTPException(400, "chunk_size must be 200..4000")
+    if not isinstance(max_chunks, int) or not 1 <= max_chunks <= 100:
+        raise HTTPException(400, "max_chunks must be 1..100")
+
+    words = content.split()
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for word in words:
+        if size + len(word) + 1 > chunk_size and current:
+            chunks.append(" ".join(current))
+            current, size = [], 0
+        current.append(word)
+        size += len(word) + 1
+    if current:
+        chunks.append(" ".join(current))
+    if len(chunks) > max_chunks:
+        raise HTTPException(413, f"document exceeds max_chunks={max_chunks}")
+
+    records = []
+    for index, chunk in enumerate(chunks):
+        record = KnowledgeRecord(
+            org_id=user.org_id,
+            department_id=body.get("department_id"),
+            title=f"{title} [{index + 1}/{len(chunks)}]",
+            content=chunk,
+            kind=kind,
+            classification=classification,
+            source_type=source_type,
+            source_id=source_id,
+            provenance={
+                **dict(body.get("provenance") or {}),
+                "ingestion": "document_chunk",
+                "chunk_index": index,
+                "chunk_count": len(chunks),
+            },
+            derived_from=list(body.get("derived_from") or []),
+            account_id=body.get("account_id"),
+            search_text=chunk,
+        )
+        problems = validate_provenance(record)
+        if problems:
+            raise HTTPException(400, f"provenance invalid: {', '.join(problems)}")
+        db.add(record)
+        records.append(record)
+    await db.commit()
+    for record in records:
+        await db.refresh(record)
+    return {
+        "count": len(records),
+        "chunks": [{"id": r.id, "title": r.title, "citation": knowledge_citation(r)} for r in records],
+    }
+
+
+@router.post("/grants")
+async def create_grant(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    user: User = Depends(get_current_user),
+):
+    """Founder-only explicit grant to a confidential record in own org."""
+    org = await db.get(Organization, user.org_id)
+    if not _is_founder(user, org):
+        raise HTTPException(403, "Founder approval required to grant knowledge access")
+    record_id = str(body.get("record_id") or "").strip()
+    user_id = str(body.get("user_id") or "").strip()
+    if not record_id or not user_id:
+        raise HTTPException(400, "record_id and user_id required")
+    record = await db.get(KnowledgeRecord, record_id)
+    if record is None or record.org_id != user.org_id:
+        raise HTTPException(404, "record not found")
+    grantee = await db.get(User, user_id)
+    if grantee is None or grantee.org_id != user.org_id:
+        raise HTTPException(404, "user not found")
+    grant = KnowledgeGrant(
+        org_id=user.org_id,
+        user_id=user_id,
+        record_id=record_id,
+        granted_by=user.id,
+        reason=str(body.get("reason") or "")[:1000],
+        expires_at=body.get("expires_at"),
+    )
+    db.add(grant)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(409, "grant already exists")
+    await db.refresh(grant)
+    return {"id": grant.id, "record_id": record_id, "user_id": user_id, "expires_at": grant.expires_at}
+
+
+@router.post("/grants/{grant_id}/revoke")
+async def revoke_grant(
+    grant_id: str,
+    db: DatabaseBackend = Depends(get_db_backend),
+    user: User = Depends(get_current_user),
+):
+    org = await db.get(Organization, user.org_id)
+    if not _is_founder(user, org):
+        raise HTTPException(403, "Founder approval required to revoke knowledge access")
+    grant = await db.get(KnowledgeGrant, grant_id)
+    if grant is None or grant.org_id != user.org_id:
+        raise HTTPException(404, "grant not found")
+    if grant.revoked_at is None:
+        grant.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db.commit()
+    return {"id": grant.id, "revoked_at": grant.revoked_at}
 
 
 @router.post("/records/{record_id}/promote")

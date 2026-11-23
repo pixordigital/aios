@@ -15,6 +15,38 @@ from .deps import get_current_user, get_org_id, verify_org_access_async
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 logger = logging.getLogger(__name__)
 
+_AUTONOMY_CONTRACT_FIELDS = ("scope", "hard_rules", "allowed_data", "irreversible_actions", "transfer_phrase")
+
+
+def _autonomy_enabled(gov: dict | None) -> bool:
+    gov = gov or {}
+    return gov.get("autonomy") == "autonomous" or gov.get("autonomous") is True
+
+
+def _validate_autonomy_gate(gov: dict | None, *, previous: dict | None = None) -> None:
+    """Only a new autonomous grant needs a written contract + supervision evidence."""
+    gov = dict(gov or {})
+    if not _autonomy_enabled(gov):
+        return
+    if previous is not None and _autonomy_enabled(previous):
+        return
+    contract = gov.get("permission_contract")
+    if not isinstance(contract, dict) or any(
+        not str(contract.get(k, "")).strip() for k in _AUTONOMY_CONTRACT_FIELDS
+    ):
+        raise HTTPException(422, "autonomy requires permission_contract: " + ", ".join(_AUTONOMY_CONTRACT_FIELDS))
+    supervision = gov.get("supervision")
+    try:
+        runs = int((supervision or {}).get("runs_completed", 0) or 0)
+    except (TypeError, ValueError):
+        runs = 0
+    if (
+        not isinstance(supervision, dict)
+        or not str(supervision.get("approved_by", "")).strip()
+        or runs < 1
+    ):
+        raise HTTPException(422, "autonomy requires supervision: runs_completed >= 1 and approved_by")
+
 
 async def _get_agent_or_404(
     db: DatabaseBackend,
@@ -62,6 +94,8 @@ async def create_agent(
         total_cnt = (await db.execute(select(_func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
         if total_cnt >= max_agents:
             raise HTTPException(403, detail=f"quota max_agents {max_agents} for {plan}")
+    if "governance_config" in body.model_fields_set:
+        _validate_autonomy_gate(body.governance_config)
     # per-field template fallback (ponytail: minimal, no nested get truthy bug)
     from aios.schemas import _AGENT_LLM_CONFIG_DEFAULT, _AGENT_MEMORY_DEFAULT
     tpl = apply_template(body.agent_type) if body.agent_type != "custom" else None
@@ -181,6 +215,8 @@ async def update_agent(
     )
 
     update_data = body.model_dump(exclude_unset=True)
+    if "governance_config" in update_data and isinstance(update_data["governance_config"], dict):
+        _validate_autonomy_gate(update_data["governance_config"], previous=agent.governance_config)
     if "llm_config" in update_data and isinstance(update_data["llm_config"], dict):
         merged = dict(agent.llm_config or {})
         merged.update(update_data["llm_config"])

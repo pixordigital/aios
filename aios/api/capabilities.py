@@ -224,6 +224,80 @@ async def evaluate_fit(
     }
 
 
+@router.post("/blueprint")
+async def solution_blueprint(
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    """Read-only diagnosis -> solution-fit -> blueprint. No rows, no ROI promise."""
+    from aios.config import DEFAULT_PLAN, PLANS
+    from aios.db.models import Organization
+    from aios.templates import TEMPLATES, apply_template
+
+    scores: dict[str, float] = {}
+    for field in _SCORES:
+        value = float(body.get(field) or 0.0)
+        if not 0.0 <= value <= 1.0:
+            raise HTTPException(400, f"{field} must be between 0 and 1")
+        scores[field] = value
+
+    capability = None
+    capability_id = body.get("capability_id")
+    if capability_id:
+        capability = (
+            await db.execute(select(Capability).where(Capability.id == str(capability_id)))
+        ).scalars().first()
+        if capability is None or (
+            capability.org_id is not None and str(capability.org_id) != str(org_id)
+        ):
+            raise HTTPException(404, "capability not found")
+
+    disposition, rationale = solution_fit(
+        capability, contact_allowed=bool(body.get("contact_allowed", True)), **scores
+    )
+    fit = capability_fit_score(capability, body.get("required_use_case")) if capability else 0.0
+    eng_allowed, eng_reason = engineering_work_guard(disposition)
+
+    agent_type = str(body.get("agent_type") or "").strip()
+    if agent_type and agent_type not in TEMPLATES:
+        raise HTTPException(400, "unknown agent_type")
+    template = apply_template(agent_type) if agent_type else None
+
+    org = await db.get(Organization, org_id)
+    plan = (org.extra_data or {}).get("plan", DEFAULT_PLAN) if org else DEFAULT_PLAN
+    limits = PLANS.get(plan, PLANS[DEFAULT_PLAN])
+    enforced_keys = (
+        "max_agents", "max_teams", "max_messages_per_day", "max_tokens_per_month",
+        "max_cost_brl", "sla_minutes", "channels", "max_evolution_instances",
+    )
+    return {
+        "read_only": True,
+        "disposition": disposition,
+        "rationale": rationale,
+        "capability_fit": fit,
+        "engineering_work_allowed": eng_allowed,
+        "engineering_work_reason": eng_reason,
+        "capability": {
+            "id": capability.id,
+            "capability_key": capability.capability_key,
+            "maturity": capability.maturity,
+            "limitations": capability.limitations or [],
+            "dependencies": capability.dependencies or [],
+        } if capability else None,
+        "blueprint": {
+            "agent_type": agent_type or None,
+            "tools": template["tools"] if template else [],
+            "governance_config": template.get("governance_config", {}) if template else {},
+        },
+        "plan": plan,
+        "plan_limits": {k: limits.get(k) for k in enforced_keys},
+        "limit_source": "aios/config.py:PLANS",
+        "enforced_by": "aios/core/limits.py:check_org_limits",
+        "estimate": False,
+    }
+
+
 @router.get("/assessments")
 async def list_assessments(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     rows = (

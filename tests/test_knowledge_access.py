@@ -333,12 +333,83 @@ async def test_tool_engine_injects_actor_identity_to_rag_tool(monkeypatch):
     }
 
 
-async def test_resolve_granted_record_ids_no_model_returns_empty():
+async def test_search_knowledge_records_sql_acl_pushdown(test_db_session, test_org):
+    from aios.core.rag import search_knowledge_records
+    from aios.governance.knowledge import KnowledgeRecord
+
+    rows = [
+        ("open", "internal", None, "alpha"),
+        ("dept", "internal", "d1", "alpha"),
+        ("outside", "internal", "d2", "alpha"),
+        ("secret", "confidential", None, "alpha"),
+        ("locked", "restricted", None, "alpha"),
+    ]
+    records = [
+        KnowledgeRecord(
+            id=f"acl-{rid}", org_id=test_org.id, title=rid,
+            kind="statement", classification=cls, department_id=dept,
+            source_type="doc", source_id=rid, derived_from=[],
+            search_text=text,
+        )
+        for rid, cls, dept, text in rows
+    ]
+    test_db_session.add_all(records)
+    await test_db_session.commit()
+
+    hits = await search_knowledge_records(
+        test_org.id, "alpha", actor_departments={"d1"}, granted_record_ids={"acl-secret"}
+    )
+    ids = {h["record_id"] for h in hits}
+    assert ids == {"acl-open", "acl-dept", "acl-secret"}
+
+    hits = await search_knowledge_records(test_org.id, "alpha", actor_departments={"d1"})
+    assert {h["record_id"] for h in hits} == {"acl-open", "acl-dept"}
+
+
+async def test_resolve_granted_record_ids_requires_identity():
     from aios.tools.rag_search import resolve_granted_record_ids
 
-    assert await resolve_granted_record_ids("org1", "u1") == set()
     assert await resolve_granted_record_ids("", "u1") == set()
     assert await resolve_granted_record_ids("org1", "") == set()
+
+
+async def test_resolve_granted_record_ids_active_only(test_db_session, test_org, test_user):
+    from datetime import timedelta
+
+    from aios.governance.knowledge import KnowledgeGrant, KnowledgeRecord, _now
+
+    rec = KnowledgeRecord(
+        id="kr-granted", org_id=test_org.id, title="Confidential",
+        kind="statement", classification="confidential", source_type="doc",
+        source_id="s1", derived_from=[], search_text="secret",
+    )
+    rec_revoked = KnowledgeRecord(
+        id="kr-revoked", org_id=test_org.id, title="Revoked",
+        kind="statement", classification="internal", source_type="doc",
+        source_id="s2", derived_from=[], search_text="",
+    )
+    rec_expired = KnowledgeRecord(
+        id="kr-expired", org_id=test_org.id, title="Expired",
+        kind="statement", classification="internal", source_type="doc",
+        source_id="s3", derived_from=[], search_text="",
+    )
+    test_db_session.add_all([rec, rec_revoked, rec_expired])
+    active = KnowledgeGrant(org_id=test_org.id, user_id=test_user.id, record_id=rec.id)
+    revoked = KnowledgeGrant(
+        org_id=test_org.id, user_id=test_user.id, record_id=rec_revoked.id,
+        revoked_at=_now(),
+    )
+    expired = KnowledgeGrant(
+        org_id=test_org.id, user_id=test_user.id, record_id=rec_expired.id,
+        expires_at=_now() - timedelta(days=1),
+    )
+    test_db_session.add_all([active, revoked, expired])
+    await test_db_session.commit()
+
+    from aios.tools.rag_search import resolve_granted_record_ids
+
+    grants = await resolve_granted_record_ids(test_org.id, test_user.id)
+    assert grants == {rec.id}
 
 
 async def test_rag_search_resolves_db_grants_best_effort(monkeypatch):
@@ -409,6 +480,9 @@ async def test_knowledge_records_pagination(auth_client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["total"] == 3
+    assert body["total_scanned_visible"] == 3
+    assert body["total_exact"] is True
+    assert body["total_note"] == "total is exact visible count"
     assert body["limit"] == 2
     assert body["offset"] == 0
     assert len(body["items"]) == 2
@@ -420,6 +494,8 @@ async def test_knowledge_records_pagination(auth_client):
     assert resp2.status_code == 200
     body2 = resp2.json()
     assert body2["total"] == 3
+    assert body2["total_scanned_visible"] == 3
+    assert body2["total_exact"] is True
     assert len(body2["items"]) == 1
     assert body2["truncated"] is False
 
@@ -441,8 +517,11 @@ async def test_knowledge_records_scan_truncation_metadata(auth_client, monkeypat
     assert body["scanned"] == 2
     assert body["scan_limit"] == 2
     assert body["truncated"] is True
-    # total is visible count within scanned set; unknown beyond scan bound
+    # Compat total = visible count within scanned set; additive fields make ambiguity explicit.
     assert body["total"] == len(body["items"])
+    assert body["total_scanned_visible"] == len(body["items"])
+    assert body["total_exact"] is False
+    assert body["total_note"] == "total is visible count within scanned set; scan truncated, true total unknown"
     assert body["total"] <= 2
 
 

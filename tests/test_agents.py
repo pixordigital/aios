@@ -83,6 +83,48 @@ class TestAgents:
         assert data["name"] == "Updated Name"
         assert data["llm_config"]["temperature"] == 0.5
 
+    async def test_autonomy_gate_requires_contract_and_supervision(self, auth_client: AsyncClient):
+        """Explicit autonomous grant needs written contract + supervised evidence."""
+        resp = await auth_client.post(
+            "/api/agents",
+            json={"name": "No Contract", "agent_type": "custom", "governance_config": {"autonomy": "autonomous"}},
+        )
+        assert resp.status_code == 422
+
+        contract = {
+            "scope": "answer product questions",
+            "hard_rules": "never invent limits",
+            "allowed_data": "public docs",
+            "irreversible_actions": "none",
+            "transfer_phrase": "falo com humano",
+        }
+        resp = await auth_client.post(
+            "/api/agents",
+            json={
+                "name": "Gated Agent",
+                "agent_type": "custom",
+                "governance_config": {
+                    "autonomy": "autonomous",
+                    "permission_contract": contract,
+                    "supervision": {"runs_completed": 2, "approved_by": "founder"},
+                },
+            },
+        )
+        assert resp.status_code == 200
+
+        draft = await auth_client.post(
+            "/api/agents",
+            json={"name": "Draft Agent", "agent_type": "custom", "governance_config": {"autonomy": "draft"}},
+        )
+        assert draft.status_code == 200
+        draft_id = draft.json()["id"]
+
+        resp = await auth_client.put(
+            f"/api/agents/{draft_id}",
+            json={"governance_config": {"autonomy": "autonomous", "permission_contract": contract}},
+        )
+        assert resp.status_code == 422
+
     async def test_delete_agent(self, auth_client: AsyncClient):
         """Test deleting an agent."""
         create_resp = await auth_client.post(

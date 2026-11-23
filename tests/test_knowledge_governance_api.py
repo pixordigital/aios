@@ -96,6 +96,79 @@ async def test_records_are_tenant_scoped(auth_client, test_db_session):
     assert resp.status_code == 404
 
 
+async def test_grant_create_use_and_revoke(auth_client, test_db_session, test_org, test_user):
+    resp = await auth_client.post(
+        "/api/knowledge/grants", json={"record_id": "r1", "user_id": test_user.id}
+    )
+    assert resp.status_code == 403  # non-founder blocked
+
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    rid = await _create(auth_client, "Secret", classification="confidential")
+    resp = await auth_client.post(
+        "/api/knowledge/grants", json={"record_id": rid, "user_id": test_user.id}
+    )
+    assert resp.status_code == 200, resp.text
+    gid = resp.json()["id"]
+
+    from aios.tools.rag_search import resolve_granted_record_ids
+
+    assert await resolve_granted_record_ids(test_org.id, test_user.id) == {rid}
+
+    missing = await auth_client.post(
+        "/api/knowledge/grants", json={"record_id": "missing", "user_id": test_user.id}
+    )
+    assert missing.status_code == 404
+
+    resp = await auth_client.post(f"/api/knowledge/grants/{gid}/revoke")
+    assert resp.status_code == 200 and resp.json()["revoked_at"]
+    assert await resolve_granted_record_ids(test_org.id, test_user.id) == set()
+
+
+async def test_ingest_chunks_are_bounded_and_cited(auth_client, test_db_session, test_org, test_user):
+    resp = await auth_client.post("/api/knowledge/ingest", json={"title": "Doc", "content": "x", "source_type": "doc"})
+    assert resp.status_code == 403  # founder gate
+
+    test_org.extra_data = {"founder_user_id": test_user.id}
+    await test_db_session.commit()
+    resp = await auth_client.post(
+        "/api/knowledge/ingest",
+        json={
+            "title": "Policy",
+            "content": " ".join(["alpha"] * 120),
+            "source_type": "doc",
+            "source_id": "policy-1",
+            "chunk_size": 200,
+            "classification": "internal",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["count"] >= 2
+    for chunk in body["chunks"]:
+        citation = chunk["citation"]
+        assert citation["source_type"] == "doc"
+        assert citation["source_id"] == "policy-1"
+        assert citation["provenance"]["ingestion"] == "document_chunk"
+        assert citation["provenance"]["chunk_count"] == body["count"]
+
+    resp = await auth_client.get("/api/knowledge/search", params={"q": "alpha"})
+    hits = resp.json()["results"]
+    assert hits and all("citation" in hit for hit in hits)
+    assert any(hit["citation"]["provenance"].get("ingestion") == "document_chunk" for hit in hits)
+
+    oversized = await auth_client.post(
+        "/api/knowledge/ingest",
+        json={
+            "title": "Big",
+            "content": " ".join(["word"] * 400),
+            "source_type": "doc",
+            "chunk_size": 200,
+            "max_chunks": 2,
+        },
+    )
+    assert oversized.status_code == 413
+
+
 async def test_search_permission_filtering_and_citations(auth_client, test_db_session, test_org, test_user):
     dept = Department(org_id=test_org.id, name="Sales", slug="sales-search")
     test_db_session.add(dept)
