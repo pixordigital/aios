@@ -437,20 +437,45 @@ async def evolution_analytics(
     days: int = Query(7, ge=1, le=90),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
 ):
     """Get Evolution instance message analytics using channel_connection_id and separate db session."""
     
-    # Find channel connection for this instance
-    # Use JSON extraction compatible with both SQLite and PostgreSQL
+    # Find channel connection for this instance (dialect-safe JSON path)
     channel = (await db.execute(
         select(ChannelConnection).where(
             ChannelConnection.channel_type == "evolution",
             ChannelConnection.org_id == org_id,
-            func.json_extract(ChannelConnection.config, '$.instance') == instance_name
+            ChannelConnection.config["instance"].as_string() == instance_name,
         )
     )).scalar_one_or_none()
     
     if not channel:
+        try:
+            other = (
+                await db.execute(
+                    select(ChannelConnection).where(
+                        ChannelConnection.channel_type == "evolution",
+                        ChannelConnection.org_id != org_id,
+                        ChannelConnection.config["instance"].as_string() == instance_name,
+                    ).limit(1)
+                )
+            ).scalars().first()
+            if other is not None:
+                from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+                await record_cross_tenant_block_if_mismatch(
+                    db,
+                    org_id=str(org_id),
+                    resource=other,
+                    source="channels.api.evolution_analytics_instance_not_found",
+                    actor_type="human",
+                    actor_id=getattr(user, "id", None),
+                    payload={"instance": instance_name},
+                )
+                await db.commit()
+        except Exception:
+            logger.exception("cross-tenant probe failed for evolution analytics instance=%s", instance_name)
         raise HTTPException(404, "Instance not found or not linked to this org")
     
     channel_connection_id = channel.id

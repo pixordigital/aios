@@ -3,7 +3,10 @@
 import pytest
 from datetime import datetime, timezone
 
+from sqlalchemy import select
+
 from aios.db.models import ChannelConnection, Conversation, Message, Organization, User
+from aios.governance.security import SecurityEvent
 
 
 @pytest.mark.asyncio
@@ -65,6 +68,41 @@ async def test_evolution_analytics_not_found(test_db_session, test_org, test_use
     data = response.json()
     assert "detail" in data
     assert data["detail"] == "Instance not found or not linked to this org"
+    rows = (await test_db_session.execute(
+        select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+    )).scalars().all()
+    assert not any(e.payload.get("metric") == "cross_tenant_block" for e in rows)
+
+
+@pytest.mark.asyncio
+async def test_evolution_analytics_cross_tenant_emits_metric(test_db_session, test_org, test_user, auth_client, second_org):
+    """Cross-tenant instance returns same 404 and emits mismatch metric."""
+    chan = ChannelConnection(
+        org_id=second_org.id,
+        channel_type="evolution",
+        label="Other Org WhatsApp",
+        config={"instance": "other-org-instance", "server_url": "http://evolution:8080", "api_key": "k"},
+        is_active=True,
+    )
+    test_db_session.add(chan)
+    await test_db_session.commit()
+    await test_db_session.refresh(chan)
+
+    response = await auth_client.get("/api/channels/evolution/other-org-instance/analytics?days=7")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Instance not found or not linked to this org"
+
+    rows = (await test_db_session.execute(
+        select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+    )).scalars().all()
+    assert any(
+        e.payload.get("metric") == "cross_tenant_block"
+        and e.payload.get("resource_type") == "ChannelConnection"
+        and e.payload.get("resource_org_id") == second_org.id
+        and e.payload.get("instance") == "other-org-instance"
+        and e.source == "channels.api.evolution_analytics_instance_not_found"
+        for e in rows
+    )
 
 
 @pytest.mark.asyncio

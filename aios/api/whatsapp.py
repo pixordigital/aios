@@ -46,8 +46,35 @@ async def whatsapp_send(
                 ChannelConnection.channel_type == "evolution",
             )
         )).all()
-    if not any((r[0] or {}).get("instance") == body.instance for r in rows):
-        raise HTTPException(404, "instance not found")
+        if not any((r[0] or {}).get("instance") == body.instance for r in rows):
+            try:
+                other = (
+                    await db.execute(
+                        sql_select(ChannelConnection)
+                        .where(
+                            ChannelConnection.channel_type == "evolution",
+                            ChannelConnection.org_id != org_id,
+                            ChannelConnection.config["instance"].as_string() == body.instance,
+                        )
+                        .limit(1)
+                    )
+                ).scalars().first()
+                if other is not None:
+                    from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+                    await record_cross_tenant_block_if_mismatch(
+                        db,
+                        org_id=str(org_id),
+                        resource=other,
+                        source="whatsapp.api.send_instance_not_found",
+                        actor_type="human",
+                        actor_id=getattr(user, "id", None),
+                        payload={"instance": body.instance},
+                    )
+                    await db.commit()
+            except Exception:
+                logger.exception("cross-tenant probe failed for whatsapp send instance=%s", body.instance)
+            raise HTTPException(404, "instance not found")
     if not allow(body.instance):
         msg_total.labels(instance=body.instance, direction="out", status="rate_limited").inc()
         return {"ok": False, "error": "rate_limited"}
@@ -82,10 +109,37 @@ async def whatsapp_health(
                 ).limit(1)
             )
         ).first()
-    if not mine:
-        from fastapi import HTTPException
+        if not mine:
+            try:
+                other = (
+                    await db.execute(
+                        select(ChannelConnection)
+                        .where(
+                            ChannelConnection.channel_type == "evolution",
+                            ChannelConnection.org_id != org_id,
+                            ChannelConnection.config["instance"].as_string() == instance,
+                        )
+                        .limit(1)
+                    )
+                ).scalars().first()
+                if other is not None:
+                    from aios.governance.security import record_cross_tenant_block_if_mismatch
 
-        raise HTTPException(404, "instance not found")
+                    await record_cross_tenant_block_if_mismatch(
+                        db,
+                        org_id=str(org_id),
+                        resource=other,
+                        source="whatsapp.api.health_instance_not_found",
+                        actor_type="human",
+                        actor_id=getattr(user, "id", None),
+                        payload={"instance": instance},
+                    )
+                    await db.commit()
+            except Exception:
+                logger.exception("cross-tenant probe failed for whatsapp health instance=%s", instance)
+            from fastapi import HTTPException
+
+            raise HTTPException(404, "instance not found")
     from aios.core.whatsapp.anti_ban.health_monitor import compute
     p = get_provider(provider if provider in ("baileys","cloud","coexistence") else "baileys")
     h = await p.health(instance)
