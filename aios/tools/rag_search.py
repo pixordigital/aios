@@ -125,6 +125,7 @@ class RagSearchTool(BaseTool):
     async def _resolve_actor_context(self, org_id: str) -> dict:
         """Best-effort actor context. Fail closed on any resolution error."""
         actor_user_id = str(getattr(self, "_actor_user_id", "") or "")
+        actor_resolved_flag = bool(getattr(self, "_actor_resolved", False))
         ctx = {
             "actor_departments": set(getattr(self, "_actor_departments", None) or []),
             "is_founder": bool(getattr(self, "_is_founder", False)),
@@ -133,9 +134,17 @@ class RagSearchTool(BaseTool):
             "actor_resolved": False,
             "resolution": "none",
         }
-        # Caller explicitly injected scope; treat as resolved. Still resolve
-        # DB grants when actor identity is known and grants not injected.
-        injected_scope = bool(ctx["actor_departments"] or ctx["is_founder"] or ctx["granted_record_ids"])
+        # Caller/ToolEngine already resolved scope. Honor it to avoid redundant DB
+        # actor/grant lookups. Conservative: skip only when scope is already
+        # sufficient (depts/founder/grants injected/resolved). actor_user_id-only
+        # is not enough to know depts/grants, so keep DB resolution path.
+        injected_scope = bool(
+            ctx["actor_departments"] or ctx["is_founder"] or ctx["granted_record_ids"]
+        )
+        if actor_resolved_flag and injected_scope:
+            ctx["actor_resolved"] = True
+            ctx["resolution"] = "injected"
+            return ctx
         agent_id = getattr(self, "_agent_id", "") or ""
         if injected_scope and not actor_user_id:
             ctx["actor_resolved"] = True

@@ -226,6 +226,77 @@ async def test_rag_search_tool_allows_injected_actor_scope(monkeypatch):
     assert captured["kwargs"]["is_founder"] is False
 
 
+async def test_rag_search_honors_actor_resolved_scope_skips_db(monkeypatch):
+    from aios.tools import rag_search
+
+    async def boom_grants(*args, **kwargs):
+        raise AssertionError("grant DB lookup should be skipped when scope resolved")
+
+    class BoomSession:
+        async def __aenter__(self):
+            raise AssertionError("actor DB lookup should be skipped when scope resolved")
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    captured = {}
+
+    async def fake_search(org_id, query, **kwargs):
+        captured.update(kwargs)
+        return [{"id": "k1"}]
+
+    monkeypatch.setattr(rag_search, "resolve_granted_record_ids", boom_grants)
+    monkeypatch.setattr("aios.db.engine.async_session", lambda: BoomSession())
+    monkeypatch.setattr("aios.core.rag.search_knowledge_records", fake_search)
+
+    tool = rag_search.RagSearchTool()
+    tool._org_id = "org1"
+    tool._actor_user_id = "u1"
+    tool._actor_departments = {"d1"}
+    tool._is_founder = False
+    tool._granted_record_ids = set()
+    tool._actor_resolved = True
+
+    out = await tool.run(query="pricing")
+    assert out["ok"] is True
+    assert out["actor_resolution"] == "injected"
+    assert captured["actor_departments"] == {"d1"}
+    assert captured["granted_record_ids"] == set()
+
+
+async def test_rag_search_actor_resolved_user_only_still_resolves_scope(monkeypatch):
+    from aios.tools import rag_search
+
+    grant_calls = {"n": 0}
+
+    async def fake_grants(org_id, actor_user_id):
+        grant_calls["n"] += 1
+        assert (org_id, actor_user_id) == ("org1", "u1")
+        return {"kr-db"}
+
+    captured = {}
+
+    async def fake_search(org_id, query, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(rag_search, "resolve_granted_record_ids", fake_grants)
+    monkeypatch.setattr("aios.core.rag.search_knowledge_records", fake_search)
+
+    tool = rag_search.RagSearchTool()
+    tool._org_id = "org1"
+    tool._actor_user_id = "u1"
+    tool._actor_departments = set()
+    tool._is_founder = False
+    tool._granted_record_ids = set()
+    tool._actor_resolved = True  # resolved flag alone insufficient without scope
+
+    out = await tool.run(query="pricing")
+    assert out["ok"] is True
+    assert grant_calls["n"] == 1
+    assert captured["granted_record_ids"] == {"kr-db"}
+
+
 async def test_tool_engine_injects_actor_identity_to_rag_tool(monkeypatch):
     from aios.core.tools import ToolEngine
     from aios.tools.rag_search import RagSearchTool
