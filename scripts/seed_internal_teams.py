@@ -69,11 +69,14 @@ async def _sync_slack_channels(db, org, bot_token, apply):
 
     token = os.environ.get("SLACK_USER_TOKEN", "") or bot_token
     send_token = bot_token
-    if not token:
-        for c in existing:
-            stored = decrypt_channel_config(c.config or {}).get("bot_token", "")
-            if stored:
-                token = send_token = stored
+    for c in existing:
+        stored = decrypt_channel_config(c.config or {}).get("bot_token", "")
+        if stored:
+            if not token:
+                token = stored
+            if not send_token:
+                send_token = stored
+            if token and send_token:
                 break
     if not token:
         print("! SLACK_USER_TOKEN/SLACK_BOT_TOKEN/unlinked bot token unset — Slack channel sync skipped")
@@ -173,9 +176,19 @@ async def main():
             print(f"  {'+' if created else '='} agent {manager.name} (manager)")
 
             from aios.db.models import team_agents as _ta
-            await db.execute(_ta.insert().values(
-                [{"team_id": team.id, "agent_id": a.id} for a in members + [manager]]
-            ))
+            existing_pairs = {
+                (r.team_id, r.agent_id)
+                for r in (await db.execute(
+                    select(_ta.c.team_id, _ta.c.agent_id).where(_ta.c.team_id == team.id)
+                )).all()
+            }
+            rows = [
+                {"team_id": team.id, "agent_id": a.id}
+                for a in members + [manager]
+                if (team.id, a.id) not in existing_pairs
+            ]
+            if rows:
+                await db.execute(_ta.insert().values(rows))
             team.manager_agent_id = manager.id
             await db.flush()
 
