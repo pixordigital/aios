@@ -14,6 +14,7 @@ from aios.channels.base import Channel, OutboundMessage
 logger = logging.getLogger(__name__)
 
 _API = "https://slack.com/api/chat.postMessage"
+_AUTH_TEST = "https://slack.com/api/auth.test"
 
 
 class SlackChannel(Channel):
@@ -83,6 +84,37 @@ class SlackChannel(Channel):
                 f"slack chat.postMessage failed: {data.get('error')} (channel={channel})"
             )
         return data.get("ts")
+
+    async def test(self) -> dict:
+        token = self._ensure_app()
+        if not token:
+            return {"ok": False, "message": "Missing bot token"}
+        channel_id = self._config.get("slack_channel_id", "")
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    _AUTH_TEST,
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            data = resp.json()
+        except Exception as e:
+            return {"ok": False, "message": str(e)}
+        if not data.get("ok"):
+            return {"ok": False, "message": data.get("error", "invalid token")}
+        message = (
+            f"Connected as {data.get('user', 'bot')} in {data.get('team', 'workspace')}"
+        )
+        if channel_id:
+            message += f" — channel {channel_id}"
+        return {
+            "ok": True,
+            "message": message,
+            "details": {
+                "team_id": data.get("team_id"),
+                "user_id": data.get("user_id"),
+                "channel_id": channel_id,
+            },
+        }
 
     async def start(self) -> None:
         self._ensure_app()
