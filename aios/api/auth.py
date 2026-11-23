@@ -369,12 +369,15 @@ async def _issue_refresh(db, user_id: str) -> str:
     from aios.db.models import RefreshToken
 
     jti = _new_jti()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_expire_days)
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(days=settings.jwt_refresh_expire_days)
     token, _ = _create_jwt_token(
-        {"sub": user_id, "jti": jti, "iat": datetime.now(timezone.utc), "exp": expire},
+        {"sub": user_id, "jti": jti, "iat": now, "exp": expire},
         token_type="refresh",
     )
-    db.add(RefreshToken(jti=jti, user_id=user_id, expires_at=expire))
+    # refresh_tokens.expires_at is TIMESTAMP WITHOUT TIME ZONE; strip tzinfo
+    # to match models._now() and avoid PG "can't adapt aware datetime".
+    db.add(RefreshToken(jti=jti, user_id=user_id, expires_at=expire.replace(tzinfo=None)))
     await db.commit()
     return token
 
@@ -404,7 +407,7 @@ async def _revoke_all_for_user(db, user_id: str) -> int:
     res = await db.execute(
         _update(RefreshToken)
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc))
+        .values(revoked_at=datetime.now(timezone.utc).replace(tzinfo=None))
     )
     await db.commit()
     return int(res.rowcount or 0)
@@ -704,7 +707,7 @@ async def refresh_token(request: Request, body: dict, db: DatabaseBackend = Depe
     token = _create_access_token(user.id, user.org_id)
     # Rotate: consume this jti and issue a fresh one.
     refresh = await _issue_refresh(db, user.id)
-    row.revoked_at = now
+    row.revoked_at = now.replace(tzinfo=None)
     row.replaced_by = _new_jti()
     await db.commit()
     return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=user.org_id)

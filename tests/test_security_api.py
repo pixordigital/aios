@@ -460,6 +460,45 @@ async def test_refresh_unknown_jti_records_auth_metric(async_client, test_user, 
         for e in rows
     )
 
+
+async def test_login_refresh_persists_naive_refresh_token_datetimes(async_client, test_user, test_db_session):
+    """Regression: refresh_tokens.expires_at is TIMESTAMP WITHOUT TIME ZONE.
+    Issuance/rotation must store naive UTC datetimes (PG rejects aware)."""
+    from datetime import timezone
+    from sqlalchemy import select
+    from aios.db.models import RefreshToken
+
+    login = await async_client.post("/api/auth/login", json={"email": test_user.email, "password": "testpass123"})
+    assert login.status_code == 200, login.text
+    refresh_token = login.json()["refresh_token"]
+
+    rows = (await test_db_session.execute(
+        select(RefreshToken).where(RefreshToken.user_id == test_user.id)
+    )).scalars().all()
+    assert rows
+    for row in rows:
+        assert row.expires_at.tzinfo is None
+        assert row.created_at.tzinfo is None
+        if row.revoked_at is not None:
+            assert row.revoked_at.tzinfo is None
+
+    resp = await async_client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["access_token"]
+    assert data["refresh_token"]
+
+    rows_after = (await test_db_session.execute(
+        select(RefreshToken).where(RefreshToken.user_id == test_user.id)
+    )).scalars().all()
+    assert len(rows_after) >= 2
+    revoked = [r for r in rows_after if r.revoked_at is not None]
+    assert revoked
+    for row in rows_after:
+        assert row.expires_at.tzinfo is None
+        if row.revoked_at is not None:
+            assert row.revoked_at.tzinfo is None
+
 async def test_preapprovals_require_founder_records_authz_denied(auth_client, test_db_session, test_user):
     from sqlalchemy import select
     from aios.governance.security import SecurityEvent
