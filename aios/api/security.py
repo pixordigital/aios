@@ -320,22 +320,29 @@ async def metrics(
 ):
     since = _now() - timedelta(days=days)
     incident_stmt = (
-        select(SecurityIncident)
+        select(
+            SecurityIncident.status,
+            SecurityIncident.severity,
+            SecurityIncident.detected_at,
+            SecurityIncident.acknowledged_at,
+            SecurityIncident.contained_at,
+            SecurityIncident.recovered_at,
+        )
         .where(SecurityIncident.org_id == org_id, SecurityIncident.created_at >= since)
         .order_by(SecurityIncident.created_at.desc())
         .limit(SECURITY_METRICS_MAX_INCIDENTS)
     )
-    incidents = (await db.execute(incident_stmt)).scalars().all()
+    incidents = (await db.execute(incident_stmt)).all()
     events = []
     events_truncated = False
     try:
         event_stmt = (
-            select(SecurityEvent)
+            select(SecurityEvent.event_type, SecurityEvent.payload)
             .where(SecurityEvent.org_id == org_id, SecurityEvent.created_at >= since)
             .order_by(SecurityEvent.created_at.desc())
             .limit(SECURITY_METRICS_MAX_EVENTS + 1)
         )
-        event_rows = (await db.execute(event_stmt)).scalars().all()
+        event_rows = (await db.execute(event_stmt)).all()
         events_truncated = len(event_rows) > SECURITY_METRICS_MAX_EVENTS
         # desc for bounded latest-N; reverse for chronological stateful metrics (vuln lifecycle)
         events = list(reversed(event_rows[:SECURITY_METRICS_MAX_EVENTS]))

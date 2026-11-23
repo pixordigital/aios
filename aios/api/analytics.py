@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Agent, Conversation, CrmDeal, Message, Organization, Memory, ChannelConnection
@@ -802,15 +802,16 @@ async def _governance_snapshot(db: DatabaseBackend, org_id: str) -> dict:
         )
     ).all()
     decided = [r for r in pa_rows if r.status in {"approved", "rejected"} and r.created_at and r.decided_at]
-    rejected = [r for r in pa_rows if r.status == "rejected"]
+    rejected_count = sum(1 for r in pa_rows if r.status == "rejected")
+    decided_count = sum(1 for r in pa_rows if r.status in {"approved", "rejected"})
     latencies = []
     for r in decided:
         delta = (r.decided_at - r.created_at).total_seconds() / 3600
         if delta >= 0:
             latencies.append(delta)
-    approval_latency_hours = round(sum(latencies) / len(latencies), 4) if latencies else (0.0 if decided == [] and any(r.status in {"approved", "rejected"} for r in pa_rows) else None)
+    approval_latency_hours = round(sum(latencies) / len(latencies), 4) if latencies else (0.0 if decided == [] and decided_count else None)
     # If there are decided rows but no valid timestamps, keep unknown.
-    if decided == [] and any(r.status in {"approved", "rejected"} for r in pa_rows):
+    if decided == [] and decided_count:
         approval_latency_hours = None
 
     open_incidents = None
@@ -820,8 +821,12 @@ async def _governance_snapshot(db: DatabaseBackend, org_id: str) -> dict:
 
         inc_rows = (
             await db.execute(
-                select(SecurityIncident.status, SecurityIncident.detected_at, SecurityIncident.recovered_at, SecurityIncident.closed_at)
-                .where(SecurityIncident.org_id == org_id)
+                select(
+                    SecurityIncident.status,
+                    SecurityIncident.detected_at,
+                    SecurityIncident.recovered_at,
+                    SecurityIncident.closed_at,
+                ).where(SecurityIncident.org_id == org_id)
             )
         ).all()
         open_incidents = sum(1 for r in inc_rows if r.status not in {"closed", "recovered"})
@@ -842,14 +847,28 @@ async def _governance_snapshot(db: DatabaseBackend, org_id: str) -> dict:
     try:
         from aios.governance.privacy import PrivacyRequest
 
-        pr_rows = (
+        pr_row = (
             await db.execute(
-                select(PrivacyRequest.status).where(PrivacyRequest.org_id == org_id)
+                select(
+                    func.count(PrivacyRequest.id),
+                    func.coalesce(
+                        func.sum(case((PrivacyRequest.status == "completed", 1), else_=0)), 0
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (PrivacyRequest.status.notin_(["completed", "rejected"]), 1),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ),
+                ).where(PrivacyRequest.org_id == org_id)
             )
-        ).all()
-        total = len(pr_rows)
-        completed = sum(1 for r in pr_rows if r.status == "completed")
-        open_privacy_requests = sum(1 for r in pr_rows if r.status not in {"completed", "rejected"})
+        ).one()
+        total = int(pr_row[0] or 0)
+        completed = int(pr_row[1] or 0)
+        open_privacy_requests = int(pr_row[2] or 0)
         privacy_completion_rate = round(completed / total, 4) if total else None
     except Exception:
         open_privacy_requests = None
@@ -857,8 +876,8 @@ async def _governance_snapshot(db: DatabaseBackend, org_id: str) -> dict:
 
     snapshot = governance_kpis_snapshot(
         audit_count=audit_count,
-        decided_approvals=len([r for r in pa_rows if r.status in {"approved", "rejected"}]) if pa_rows is not None else None,
-        rejected_approvals=len(rejected),
+        decided_approvals=decided_count if pa_rows is not None else None,
+        rejected_approvals=rejected_count,
         approval_latency_hours=approval_latency_hours,
         open_incidents=open_incidents,
         mttr_hours=mttr_hours,
