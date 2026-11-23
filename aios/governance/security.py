@@ -64,6 +64,7 @@ SECURITY_METRIC_EVENT_TYPES = {
     "false_positive": "security.detection.false_positive",
     "vuln_reported": "security.vuln.reported",
     "vuln_resolved": "security.vuln.resolved",
+    "webhook_anomaly": "security.webhook.anomaly",
 }
 
 AUTHORITY_LEVELS = ("autonomous", "conditional", "human")
