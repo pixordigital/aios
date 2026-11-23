@@ -1,15 +1,46 @@
 """Skills API — CRUD + search for reusable agent patterns."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from aios.api.deps import get_current_user
 from aios.core.skills import skill_store
 from aios.db.backend import DatabaseBackend, get_db_backend
-from aios.db.models import Organization, User
+from aios.db.models import Organization, Skill, User
+from aios.governance.security import record_cross_tenant_block_if_mismatch
 from aios.governance.skill_lifecycle import SkillLifecycleError, transition_skill
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/skills", tags=["skills"])
+
+
+async def _raise_skill_not_found_or_cross_tenant(
+    *,
+    db: DatabaseBackend,
+    skill_id: str,
+    user: User,
+    source: str,
+) -> None:
+    skill = await db.get(Skill, skill_id)
+    try:
+        recorded = await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=str(user.org_id),
+            resource=skill,
+            source=source,
+            actor_type="human",
+            actor_id=str(user.id) if user.id else None,
+            payload={"skill_id": str(skill_id)},
+        )
+        if recorded is not None:
+            await db.commit()
+    except Exception:
+        logger.exception("cross-tenant skill probe failed skill_id=%s", skill_id)
+    raise HTTPException(404, "Skill not found")
 
 
 class SkillCreate(BaseModel):
@@ -71,11 +102,14 @@ async def update_skill(
     skill_id: str,
     body: SkillUpdate,
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
     skill = await skill_store.update(skill_id, org_id=user.org_id, **fields)
     if not skill:
-        raise HTTPException(404, "Skill not found")
+        await _raise_skill_not_found_or_cross_tenant(
+            db=db, skill_id=skill_id, user=user, source="skills.api.update_skill"
+        )
     return skill
 
 
@@ -83,10 +117,13 @@ async def update_skill(
 async def delete_skill(
     skill_id: str,
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
     ok = await skill_store.delete(skill_id, org_id=user.org_id)
     if not ok:
-        raise HTTPException(404, "Skill not found")
+        await _raise_skill_not_found_or_cross_tenant(
+            db=db, skill_id=skill_id, user=user, source="skills.api.delete_skill"
+        )
     return {"ok": True}
 
 
@@ -99,7 +136,9 @@ async def transition_skill_route(
 ):
     skill = await skill_store.get(skill_id, org_id=user.org_id)
     if not skill:
-        raise HTTPException(404, "Skill not found")
+        await _raise_skill_not_found_or_cross_tenant(
+            db=db, skill_id=skill_id, user=user, source="skills.api.transition_skill"
+        )
     org = await db.get(Organization, user.org_id)
     founder = bool(org and ((org.extra_data or {}).get("founder_user_id") == user.id or user.role == "owner"))
     try:
@@ -114,11 +153,14 @@ async def transition_skill_route(
 async def apply_skill(
     skill_id: str,
     user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
 ):
     """Increment usage count and return skill content for injection."""
     skill = await skill_store.get(skill_id, org_id=user.org_id)
     if not skill:
-        raise HTTPException(404, "Skill not found")
+        await _raise_skill_not_found_or_cross_tenant(
+            db=db, skill_id=skill_id, user=user, source="skills.api.apply_skill"
+        )
     await skill_store.increment_usage(skill_id, org_id=user.org_id)
     return {
         "skill_id": skill.id,
