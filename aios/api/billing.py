@@ -20,6 +20,7 @@ from aios.core.limits import get_monthly_usage, get_usage_summary
 from aios.core.whatsapp_pricing import estimate_creation_cost, get_rates
 from aios.db.backend import db_session, get_db_backend, DatabaseBackend
 from aios.db.models import Budget, Organization
+from aios.governance.security import record_cross_tenant_block
 from .deps import get_current_user, get_org_id, verify_org_access_async
 
 logger = logging.getLogger(__name__)
@@ -252,6 +253,20 @@ async def create_checkout(
 
     # only allow checkout for your own org
     if body.org_id != org_id:
+        try:
+            await record_cross_tenant_block(
+                db,
+                org_id=str(org_id),
+                actor_type="human",
+                actor_id=str(getattr(user, "id", "") or "") or None,
+                source="api.billing.create_checkout",
+                payload={
+                    "requested_org_id": str(body.org_id),
+                    "resource_type": "Organization",
+                },
+            )
+        except Exception:
+            logger.warning("cross-tenant metric failed for checkout", exc_info=True)
         raise HTTPException(403, "Não é possível criar o checkout para outra organização")
 
     # verify org exists
@@ -407,6 +422,7 @@ async def stripe_webhook(request: Request):
 @router.post("/create-portal")
 async def create_portal(
     body: PortalRequest,
+    db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
@@ -414,6 +430,20 @@ async def create_portal(
     if not settings.stripe_secret_key:
         raise HTTPException(400, "Stripe not configured")
     if body.org_id != org_id:
+        try:
+            await record_cross_tenant_block(
+                db,
+                org_id=str(org_id),
+                actor_type="human",
+                actor_id=str(getattr(user, "id", "") or "") or None,
+                source="api.billing.create_portal",
+                payload={
+                    "requested_org_id": str(body.org_id),
+                    "resource_type": "Organization",
+                },
+            )
+        except Exception:
+            logger.warning("cross-tenant metric failed for portal", exc_info=True)
         raise HTTPException(403, "Não é possível criar o portal para outra organização")
 
     async with db_session() as db:

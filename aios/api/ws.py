@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from aios.db.backend import db_session
 from aios.db.models import ChannelConnection, Conversation, Message, User
+from aios.governance.security import record_cross_tenant_block_if_mismatch
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,23 @@ async def websocket_workflow(websocket: WebSocket, run_id: str):
             async with db_session() as db:
                 run = await db.get(WorkflowRun, run_id)
                 if not run or run.org_id != user.org_id:
+                    if run and str(getattr(run, "org_id", "")) != str(user.org_id):
+                        try:
+                            await record_cross_tenant_block_if_mismatch(
+                                db,
+                                org_id=str(user.org_id),
+                                resource=run,
+                                actor_type="human",
+                                actor_id=str(getattr(user, "id", "") or "") or None,
+                                source="api.ws.workflow_run",
+                                payload={
+                                    "requested_org_id": str(user.org_id),
+                                    "resource_type": "WorkflowRun",
+                                    "run_id": str(run_id),
+                                },
+                            )
+                        except Exception:
+                            logger.warning("cross-tenant metric failed for workflow ws", exc_info=True)
                     await websocket.send_json(
                         {"type": "error", "error": "run not found"}
                     )
@@ -225,6 +243,23 @@ async def websocket_channel_chat(websocket: WebSocket, channel_connection_id: st
     async with db_session() as db:
         conn = await db.get(ChannelConnection, channel_connection_id)
         if not conn or conn.org_id != user.org_id:
+            if conn and str(getattr(conn, "org_id", "")) != str(user.org_id):
+                try:
+                    await record_cross_tenant_block_if_mismatch(
+                        db,
+                        org_id=str(user.org_id),
+                        resource=conn,
+                        actor_type="human",
+                        actor_id=str(getattr(user, "id", "") or "") or None,
+                        source="api.ws.channel_connection",
+                        payload={
+                            "requested_org_id": str(user.org_id),
+                            "resource_type": "ChannelConnection",
+                            "channel_connection_id": str(channel_connection_id),
+                        },
+                    )
+                except Exception:
+                    logger.warning("cross-tenant metric failed for channel ws", exc_info=True)
             await websocket.send_json({"type": "error", "error": "Channel not found"})
             await websocket.close()
             return
