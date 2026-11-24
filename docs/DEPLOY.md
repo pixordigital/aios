@@ -285,14 +285,34 @@ Two contexts — sign the path you send:
   `/arvo/api/...`: ARVO verifies `request.url.path`, which includes `root_path`
   (`arvo/app/integrations/aios/routes.py:250`). Signing the prefix-free path
   there fails closed with `401`.
-- Internal AIOS client: `AIOS_ARVO_BASE_URL=http://l7p2...sslip.io` is the
-  configured target; code signs/sends prefix-free
-  `/api/v1/integrations/aios/v1/...` (`aios/integrations/arvo/client.py:16,45-47`)
-  and expects forwarding to ARVO `:9777` — code intent, not verified delivery.
-  Signed delivery was not verified locally or in prod. Code-level inference:
-  `root_path` alone does not inject `/arvo` into that client path.
+- Internal AIOS client: `AIOS_ARVO_BASE_URL` may be prefix-free internal host
+  or public origin with `/arvo`; client signs path including configured base
+  path (`aios/integrations/arvo/client.py:21-31`) and `httpx` sends merged path.
+  Local parity tests cover both forms; live signed delivery still unverified.
 
 Secrets stay human-only; print no signature, key or token. Stop on any non-`200`.
+
+```bash
+read -rs -p 'Service key id: ' KID; echo
+read -rs -p 'Service key: ' KEY; echo
+.venv/bin/python - <<'PY'
+import os
+import httpx
+from aios.integrations.arvo.auth import sign_request
+
+probes = (
+    ("https://178.105.181.38/api/integrations/arvo/v1/health", "/api/integrations/arvo/v1/health"),
+    ("https://178.105.181.38/arvo/api/v1/integrations/aios/v1/health", "/arvo/api/v1/integrations/aios/v1/health"),
+)
+with httpx.Client(verify=False) as client:
+    for url, path in probes:
+        r = client.get(url, headers=sign_request("GET", path, None, os.environ["KID"], os.environ["KEY"]))
+        print(url, r.status_code, r.text[:120])
+PY
+unset KID KEY
+```
+
+Both `200` proves signed delivery on those paths; any non-`200` still means unverified.
 
 Verified deployed topology (read-only, 2026-11-24): public `https://178.105.181.38/api/v1/integrations/aios/v1/health` 404; `/arvo/api/...` and sslip `/api/...` 401 unsigned. Those probes show route presence and the auth gate only — not signed delivery or successful peer delivery. No `arvo-ip-strip` definition found in versioned code (`arvo/app/main.py:50-55` registers only CORS); any strip behavior is external and unverified. Signed live smoke stays human-only.
 

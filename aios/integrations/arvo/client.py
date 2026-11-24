@@ -26,7 +26,7 @@ def _headers(
     idempotency_key: str = "",
 ) -> dict[str, str]:
     return sign_request(
-        method, path, body, settings.arvo_service_key_id, settings.arvo_service_key,
+        method, f"{httpx.URL(settings.arvo_base_url).path.rstrip('/')}{path}", body, settings.arvo_service_key_id, settings.arvo_service_key,
         query, idempotency_key,
     )
 

@@ -311,3 +311,11 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - AIOS deploy `#809` `rychgq5mu5yinsboplocxcqf` commit `dcf74b4...` `finished` 2026-11-24T21:27:40Z; image tag `38908ddf-a875-4105-a93f-a4570513911f_app:dcf74b480eb663f6f2a1b8ef7c8eeed811303f5e` in logs. ARVO deploy `#808` `o7eba7gvaec539qjg4slrkfk` commit `09249ba...` `finished` 21:26:28Z; image reused, tag in logs.
 - First AIOS health poll right after finish returned HTTP `000` / connection refused on `8777`; later unsigned checks 200 both peers. AIOS `/health/live` `{"status":"live"}`; `/health/ready` `{"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`. ARVO `/arvo/health/live` `{"status":"live","app":"ARVO"}`; `/arvo/health/ready` `{"status":"ready","checks":{"db":"ok","redis":"ok"}}`.
 - No signed smoke; signed delivery still unverified. OCP default-deny and ICM fingerprint changes deployed but not functionally probed in prod. `graphify-out/` still dirty/uncommitted; no further runtime code edits this turn.
+
+### AIOS↔ARVO signed-delivery readiness — local done, human gate open (2026-11-24)
+
+- [x] `aios/integrations/arvo/client.py:21-31` + `tests/test_suite_integration.py:189-227` — HMAC signs configured base path; prefix-free and `/arvo` parity covered. Pre-fix proof `1 failed`; post-fix targeted `4 passed`; full file `24 passed`; `py_compile` + `git diff --check` OK.
+- [x] `arvo/README.md:60-63` — stale local-only/#805/#798 claims replaced with paired-deploy truth (`#807/#806`, current `#809/#808`); grep clean.
+- [x] `docs/DEPLOY.md:288-315` — current client-path behavior + safe signed-probe command; `KID`/`KEY` via `read -rs`, `unset` after use; stale client-path claim absent.
+- [x] `graphify update .` both repos — AIOS exit 0, `9965 nodes, 24493 edges, 507 communities`; ARVO exit 0, no topology change. Dirty `graphify-out/` expected; community labels stale in AIOS.
+- [ ] Signed prod smoke — human-only with real service keys. Resume from `docs/DEPLOY.md:295-312`; both probes must return `200`. No signed-delivery claim until then. No commit/push/deploy in this turn.

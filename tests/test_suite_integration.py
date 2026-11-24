@@ -186,6 +186,47 @@ async def test_ping_retry_uses_fresh_hmac_nonce(monkeypatch):
     assert len(nonces) == 3 and len(set(nonces)) == 3
 
 
+@pytest.mark.parametrize("base_url,path_prefix", [
+    ("http://peer.test", ""),
+    ("https://public.test/arvo", "/arvo"),
+])
+async def test_client_signs_full_path_for_base_url(monkeypatch, base_url, path_prefix):
+    import httpx
+    from aios.config import settings
+    from aios.integrations.arvo.auth import verify_request, _clear_nonces
+    from aios.integrations.arvo.client import ping, send_event
+
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    class CapturingClient(httpx.AsyncClient):
+        def __init__(self, **kwargs):
+            super().__init__(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", CapturingClient)
+    monkeypatch.setattr(settings, "arvo_base_url", base_url)
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret")
+    _clear_nonces()
+    await ping()
+    await send_event("test.event", {"a": 1}, "idem")
+
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("GET", f"{path_prefix}/api/v1/integrations/aios/v1/health"),
+        ("POST", f"{path_prefix}/api/v1/integrations/aios/v1/events"),
+    ]
+    for r in seen:
+        assert verify_request(
+            "kid", r.headers["X-Service-Timestamp"], r.headers["X-Service-Nonce"],
+            r.method, r.url.path, r.content or None, r.headers["X-Service-Signature"],
+            "secret", idempotency_key=r.headers.get("Idempotency-Key", ""),
+        )
+    _clear_nonces()
+
+
 async def test_commitment_processing_is_org_scoped(test_org, monkeypatch):
     from aios.config import settings
     from sqlalchemy import select
