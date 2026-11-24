@@ -1908,9 +1908,9 @@
     "semantic_hash": "cb6598c38334be2d56f32359886a6dff"
   },
   "aios/dashboard/templates/base.html": {
-    "mtime": 1795395922.2347288,
-    "seen": 1795396656.0899272,
-    "ast_hash": "286edc558dcb9cbd67c02311461f91d8",
+    "mtime": 1795561051.0162916,
+    "seen": 1795561175.854745,
+    "ast_hash": "cc69369bcdda049be41062755742a19e",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/billing.html": {
@@ -1968,9 +1968,9 @@
     "semantic_hash": ""
   },
   "aios/dashboard/templates/dashboard.html": {
-    "mtime": 1795395922.2347288,
-    "seen": 1795396656.0903473,
-    "ast_hash": "8f812a43ab2e82bbaef1d080d98785ec",
+    "mtime": 1795559848.0526173,
+    "seen": 1795561175.856224,
+    "ast_hash": "87193f7386f87ec9a1a48a1dc562e19a",
     "semantic_hash": ""
   },
   "aios/dashboard/templates/dev.html": {
@@ -3150,9 +3150,9 @@
     "semantic_hash": ""
   },
   "pendingwork.md": {
-    "mtime": 1795555776.7844555,
-    "seen": 1795558640.807727,
-    "ast_hash": "8e6f0f0eaa4e39c784426f39d604629f",
+    "mtime": 1795559769.4023159,
+    "seen": 1795561175.8599372,
+    "ast_hash": "188033acdcfadcd3fe963bc84929fb33",
     "semantic_hash": ""
   },
   "aios/core/model_select.py": {
@@ -4374,9 +4374,9 @@
     "semantic_hash": ""
   },
   "docs/DEPLOY.md": {
-    "mtime": 1795558617.0393565,
-    "seen": 1795558640.8071415,
-    "ast_hash": "af9b4f089c42b4d81889e2e124a7b43d",
+    "mtime": 1795558649.6913867,
+    "seen": 1795561175.85923,
+    "ast_hash": "83fb6e9e2b39b7e2cf3adb10b65780cd",
     "semantic_hash": ""
   },
   "docs/PRODUCTION_CONFIG.md": {
