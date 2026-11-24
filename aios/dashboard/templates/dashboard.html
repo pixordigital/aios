@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex-between mb-4">
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
     <div>
         <h1>Dashboard</h1>
         <p class="text-sm text-secondary mt-1">Suas operações de agentes em um relance</p>
     </div>
-    <div class="flex-center gap-2">
+    <div class="flex-center gap-2" style="flex-wrap:wrap">
         <a href="/dashboard" class="btn btn-ghost" style="border-color:var(--accent);color:var(--accent)">🤖 AIOS — Agentes</a>
         <a href="/arvo/control-center" class="btn btn-ghost" style="border-color:var(--accent);color:var(--accent)">📊 ARVO — Revenue</a>
         <a href="/dashboard/automations" class="btn btn-ghost" style="border-color:var(--accent);color:var(--accent)">⚡ Automações</a>
@@ -124,8 +124,8 @@
 {% set mgr = agents | selectattr("id", "equalto", mgr_id) | first %}
 
 <div class="card mb-3">
-    <div class="flex-between mb-2">
-        <div class="flex-center gap-2">
+    <div class="flex-between mb-2" style="flex-wrap:wrap;gap:0.5rem">
+        <div class="flex-center gap-2" style="flex-wrap:wrap">
             <h2>{{ team.name }}</h2>
             <span class="badge" style="color:var(--text-secondary);font-size:0.625rem">{{ strategy_label(team.routing_strategy) }}</span>
             {% if compat.score >= 80 %}
