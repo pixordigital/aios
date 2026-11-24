@@ -365,9 +365,16 @@ class AgentRuntime:
         configured_model = self.agent.llm_config.get("model", "openai/gpt-4o")
         self._assert_model_eligible(configured_model, org_extra, registry_entries)
         ceiling = self.agent.llm_config.get("max_tier") or None
-        floor = self.agent.llm_config.get("min_tier") or floor_from_extra(
-            getattr(self.agent, "extra_data", None)
+        op_floor = self.agent.llm_config.get("min_tier")
+        floor = (
+            op_floor
+            if op_floor and router.is_routable(op_floor)
+            else floor_from_extra(getattr(self.agent, "extra_data", None))
         )
+        role = getattr(self.agent, "agent_type", None)
+        candidates = [f for f in (floor, router.ROLE_MIN_TIER.get(role) if role else None) if f and router.is_routable(f)]
+        if candidates:
+            floor = max(candidates, key=router.TIERS.index)
         if (
             ceiling and router.is_routable(ceiling)
             and floor and router.is_routable(floor)
@@ -376,7 +383,7 @@ class AgentRuntime:
             floor = ceiling
         decision = route(
             configured_model,
-            role=getattr(self.agent, "agent_type", None),
+            role=role,
             context_tokens=_context_tokens(context),
             tools=existing_tools,
             autonomy=self._autonomy,
@@ -452,13 +459,15 @@ class AgentRuntime:
         retried = False
         while True:
             for tc in (response.get("tool_calls") or []):
+                if not isinstance(tc, dict):
+                    continue
                 fn = tc.get("function", {})
-                if fn.get("name") == "_output":
+                if isinstance(fn, dict) and fn.get("name") == "_output":
                     try:
                         result = json.loads(fn.get("arguments", "{}"))
                         end_span(span)
                         return result
-                    except json.JSONDecodeError:
+                    except (TypeError, ValueError):
                         repair = (
                             None if retried else should_escalate(
                                 model, malformed_tool_call=True, max_tier=ceiling
@@ -663,11 +672,17 @@ class AgentRuntime:
             # "short context, no tools" again and put the run straight back on
             # the cheapest rung, so a struggling run oscillated on the bottom
             # tier and the escalation cost an extra call for nothing.
-            # The operator's `min_tier` wins when set; otherwise fall back to
-            # whatever this agent previously learned (and still has grounds for).
-            floor = self.agent.llm_config.get("min_tier") or floor_from_extra(
-                getattr(self.agent, "extra_data", None)
+            # Operator `min_tier` wins when routable; else use learned floor.
+            op_floor = self.agent.llm_config.get("min_tier")
+            floor = (
+                op_floor
+                if op_floor and router.is_routable(op_floor)
+                else floor_from_extra(getattr(self.agent, "extra_data", None))
             )
+            role = getattr(self.agent, "agent_type", None)
+            candidates = [f for f in (floor, router.ROLE_MIN_TIER.get(role) if role else None) if f and router.is_routable(f)]
+            if candidates:
+                floor = max(candidates, key=router.TIERS.index)
             if (
                 ceiling and router.is_routable(ceiling)
                 and floor and router.is_routable(floor)
@@ -683,7 +698,7 @@ class AgentRuntime:
                 # whether this is a lookup or multi-step reasoning.
                 decision = route(
                     model,
-                    role=getattr(self.agent, "agent_type", None),
+                    role=role,
                     context_tokens=_context_tokens(context),
                     tools=tools,
                     autonomy=self._autonomy,

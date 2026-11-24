@@ -73,12 +73,8 @@ def test_every_agent_type_has_a_valid_role_floor():
 
     roles = set(TYPE_PROFILE)
     roles.update(r for r, floor in MODEL_ROLE_MIN_TIER.items() if floor is not None)
-    try:
-        from aios.dashboard.app import AGENT_TYPES
-    except Exception:  # dashboard import is opportunistic: UI startup must not gate this
-        pass
-    else:
-        roles.update(AGENT_TYPES)
+    # known dashboard AGENT_TYPES that must hold floors
+    roles.update(("media_manager", "manager_sales", "lead_finder", "customer_success", "manager_cs", "closer", "prospector"))
 
     for role in sorted(roles):
         assert role in MODEL_ROLE_MIN_TIER, f"{role} has no role floor"
@@ -371,6 +367,29 @@ async def test_agent_type_role_floor_holds_a_short_run_above_nano():
 
 
 @pytest.mark.asyncio
+async def test_role_floor_beats_a_lower_operator_min_tier():
+    """Both floors are merged by picking the highest, not overwritten by the
+    operator's lower value. A support agent must not drop to nano just because
+    someone set `min_tier` to nano."""
+    rt = _runtime(min_tier=TIERS[0])
+    rt.agent.agent_type = "support"
+    calls = _fake_stream(rt, ["hi there"])
+    await _drain(rt)
+    assert calls == [TIERS[1]], f"lower operator floor demoted the role: {calls}"
+
+
+@pytest.mark.asyncio
+async def test_max_tier_clamps_the_role_floor():
+    """The cap is absolute: a support role floor above `max_tier` must come
+    back down to the cap, never outrank it."""
+    rt = _runtime(max_tier=TIERS[0])
+    rt.agent.agent_type = "support"
+    calls = _fake_stream(rt, ["hi there"])
+    await _drain(rt)
+    assert calls == [TIERS[0]], f"role floor beat the cap: {calls}"
+
+
+@pytest.mark.asyncio
 async def test_an_empty_cheap_response_is_repaired_by_escalation():
     """The whole safety claim, end to end: start cheap, detect the failure that
     actually happened, re-run on the next rung.
@@ -433,6 +452,24 @@ async def test_structured_malformed_output_is_repaired_on_the_next_tier():
     rt = _runtime()
     bad = [{"type": "function", "function": {
         "name": "_output", "arguments": '{"answer":'}}]
+    good = [{"type": "function", "function": {
+        "name": "_output", "arguments": '{"answer": "ok"}'}}]
+    calls = _fake_chat(rt, [{"tool_calls": bad}, {"tool_calls": good}])
+    result = await rt.run_structured("c1", "hello", {"type": "object"})
+    assert calls == [TIERS[0], TIERS[1]], f"repair calls were {calls}"
+    assert result == {"answer": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_structured_ignores_non_dict_calls_and_non_str_arguments():
+    """A malformed tool list must not raise: a non-dict entry is skipped and a
+    non-string `arguments` is treated as bad JSON, so the usual repair runs."""
+    rt = _runtime()
+    bad = [
+        "not-a-tool-call",
+        {"type": "function", "function": {
+            "name": "_output", "arguments": {"answer": "dict, not a string"}}},
+    ]
     good = [{"type": "function", "function": {
         "name": "_output", "arguments": '{"answer": "ok"}'}}]
     calls = _fake_chat(rt, [{"tool_calls": bad}, {"tool_calls": good}])
@@ -720,3 +757,37 @@ def test_trimming_leaves_short_results_alone():
     before = [dict(m) for m in ctx]
     _trim_tool_results(ctx)
     assert ctx == before, "short results were mangled"
+
+
+# ─── Reflector routes instead of inheriting the agent's model ─────────────
+
+def test_reflector_uses_role_floor_and_respects_cap(monkeypatch):
+    """Reflection is routed, with the role floor merged in and clamped by the
+    cap — the agent's own frontier model must not leak into every retry."""
+    import types
+
+    import aios.core.providers as providers
+
+    from aios.core.autonomous_agent import Reflector
+    from aios.core.router import remember_floor
+
+    seen = []
+
+    def _provider(model):
+        seen.append(model)
+        return object()
+
+    monkeypatch.setattr(providers, "get_provider", _provider)
+
+    def _fake(extra_data=None, **llm_config):
+        return types.SimpleNamespace(
+            llm_config={"model": FRONTIER, **llm_config},
+            extra_data=extra_data or {}, agent_type="support", id="a1", org_id="o1",
+        )
+
+    assert Reflector(_fake()).model == TIERS[1]
+    assert seen[-1] == TIERS[1]
+    learned = remember_floor({}, TIERS[2], "iteration limit")
+    assert Reflector(_fake(extra_data=learned)).model == TIERS[2]
+    assert Reflector(_fake(max_tier=TIERS[0])).model == TIERS[0]
+    assert seen[-1] == TIERS[0]

@@ -83,19 +83,35 @@ class Reflector:
 
     def __init__(self, agent: AgentModel):
         from aios.core.providers import get_provider
-        from aios.core.router import route
+        from aios.core.router import (
+            ROLE_MIN_TIER,
+            TIERS,
+            floor_from_extra,
+            is_routable,
+            route,
+        )
 
         # A reflection is a fixed-format two-sentence self-critique with no
         # tools and no external effect. It was inheriting the agent's own
         # model, so a gpt-4o agent paid frontier prices for it on every failed
         # run. Routed instead of hardcoded, so it respects `min_tier` when an
         # operator has asked for a quality floor.
+        role = getattr(agent, "agent_type", None)
+        floors = [agent.llm_config.get("min_tier"), floor_from_extra(agent.extra_data)]
+        if role:
+            floors.append(ROLE_MIN_TIER.get(role))
+        routable_floors = [tier for tier in floors if is_routable(tier)]
+        min_tier = max(routable_floors, key=TIERS.index) if routable_floors else None
+        max_tier = agent.llm_config.get("max_tier")
+        if min_tier and is_routable(max_tier) and TIERS.index(min_tier) > TIERS.index(max_tier):
+            min_tier = max_tier
         decision = route(
             agent.llm_config.get("model", "openai/gpt-4o"),
+            role=role,
             context_tokens=_REFLECTION_CTX_TOKENS,
             tools=None,
             autonomy="autonomous",
-            min_tier=agent.llm_config.get("min_tier") or None,
+            min_tier=min_tier,
         )
         self.llm = get_provider(decision.model)
         self.agent = agent

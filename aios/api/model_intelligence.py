@@ -192,9 +192,12 @@ async def recommend_for_agent(
 ):
     from aios.core.model_select import recommend
 
+    raw_limit = body.get("limit", 2)
+    if raw_limit is None:
+        raw_limit = 2
     picks = await recommend(
         str(body.get("agent_type") or "custom"),
-        limit=int(body.get("limit") or 2),
+        limit=max(1, min(int(raw_limit), 20)),
     )
     return {
         "items": [
