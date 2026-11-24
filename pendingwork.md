@@ -1,6 +1,6 @@
 ## pending work handoff
 
-Snapshot: 2026-11-24. Deployed pair AIOS `64ac67a`, ARVO `09249ba`; local `main` matched `origin/main` at deploy time. Review wave below verified before commit; recheck `git status`/`git rev-parse HEAD origin/main` before any push.
+Snapshot: 2026-11-24. Deployed pair AIOS `dcf74b4`, ARVO `09249ba`; local AIOS `main` matched `origin/main` after push. Recheck `git status`/`git rev-parse HEAD origin/main` before any further push.
 
 ### Remaining-gap builder wave — VERIFIED local 2026-11-24
 
@@ -199,7 +199,7 @@ Pending review (still running, do not mark done): `ses_df1039474...` cross-cutti
 ### Prod deploy runbook (historical snapshot; paired deploy executed below)
 - Commit/push both repos separately; deploy both peers together or HMAC returns 401.
 - Coolify env NAMES already present: `AIOS_ARVO_INTEGRATION_ENABLED`, `AIOS_ARVO_BASE_URL`, `AIOS_ARVO_SERVICE_KEY_ID`, `AIOS_ARVO_SERVICE_KEY`; ARVO mirror. Missing names to add by human: `AIOS_ARVO_ALLOWED_ORGS`, `AIOS_ARVO_SERVICE_KEYS`, `ARVO_AIOS_ALLOWED_ORGS`, `ARVO_AIOS_SERVICE_KEYS`. Never print/version values.
-- Prod signed-peer health was 401 before the paired deploy (enabled + keys configured). Current deployed pair: AIOS `#807` (`64ac67a...`), ARVO `#806` (`09249ba...`); both `finished`, unsigned live/ready 200 both. Signed delivery remains unverified and human-only; local HMAC parity verified in final local-verification section. See paired deploy section below for evidence.
+- Prod signed-peer health was 401 before the paired deploy (enabled + keys configured). Current deployed pair: AIOS `#809` (`dcf74b4...`), ARVO `#808` (`09249ba...`); both `finished`, unsigned live/ready 200 both. Signed delivery remains unverified and human-only; local HMAC parity verified in final local-verification section. See paired deploy sections below for evidence.
 - AIOS migration: runbook now `docs/DEPLOY.md:13-26,63-112,162-192`; two distinct paths — readiness repair on current image at committed head `d0e1f2a3b4c5`, full cutover to worktree head `e1f2a3b4c5d6` requires new image containing untracked migrations. No `alembic stamp head`; stop on failure. Migrations already committed in `e46771e`; head reached in app; no `alembic stamp head`.
 - Historical 2026-11-22 smoke under OLD canonical (not current state): AIOS `/health/live` 200 + `/health/ready` 200 `migrations: ok`; ARVO `/arvo/health/live` + `/arvo/health/ready` 200; unsigned peer health 401; signed health 200 both directions (real secrets human-only); `/dashboard/sso/arvo` 303 + `arvo_token`; `/arvo/control-center` 200; three ARVO crons enabled; signed outbox flush 200; CRM deals readable from AIOS source. Current canonical/new-code signed delivery is NOT verified in prod; local HMAC parity verification is in final local-verification section; remains human-only for prod. Do not claim deploy or cutover.
 
@@ -304,3 +304,10 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - `--noconftest` same list → `141 passed, 1 skipped, 5 errors` from missing `test_db_session`/`test_org` fixtures; conftest run authoritative.
 - `py_compile` clean on all changed `aios/`+`scripts/` files; `git diff --check` clean; no new skip/xfail; no literal secrets; deps unchanged.
 - Behavior changes for deploy: OCP strict deny now default-on unless org `extra_data.ocp.strict_default_deny = false`; ICM approval needs explicit `approval_id` plus exact manifest fingerprint; `team_workspaces.py:596` now sets `approval_required = side_effects`, changing fingerprints — stale side-effect approvals fail closed until re-issued.
+- Committed/pushed `dcf74b480eb663f6f2a1b8ef7c8eeed811303f5e` (`64ac67a..dcf74b4 main -> main`); 32 files, `graphify-out/` left uncommitted. ARVO unchanged at `09249ba`.
+
+### Second paired prod deploy 2026-11-24 — EXECUTED, unsigned health verified
+
+- AIOS deploy `#809` `rychgq5mu5yinsboplocxcqf` commit `dcf74b4...` `finished` 2026-11-24T21:27:40Z; image tag `38908ddf-a875-4105-a93f-a4570513911f_app:dcf74b480eb663f6f2a1b8ef7c8eeed811303f5e` in logs. ARVO deploy `#808` `o7eba7gvaec539qjg4slrkfk` commit `09249ba...` `finished` 21:26:28Z; image reused, tag in logs.
+- First AIOS health poll right after finish returned HTTP `000` / connection refused on `8777`; later unsigned checks 200 both peers. AIOS `/health/live` `{"status":"live"}`; `/health/ready` `{"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`. ARVO `/arvo/health/live` `{"status":"live","app":"ARVO"}`; `/arvo/health/ready` `{"status":"ready","checks":{"db":"ok","redis":"ok"}}`.
+- No signed smoke; signed delivery still unverified. OCP default-deny and ICM fingerprint changes deployed but not functionally probed in prod. `graphify-out/` still dirty/uncommitted; no further runtime code edits this turn.

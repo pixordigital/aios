@@ -20,12 +20,12 @@ does not touch prod. No LLM/model call is needed.
 - Repository migration head: `e1f2a3b4c5d6`, via
   `alembic/versions/icm_side_effect_dedupe.py` (`f0e1d2c3b4a5`) and
   `alembic/versions/schema_gaps_creds_crm_kpi.py` (`e1f2a3b4c5d6`); committed
-  in `e46771e`. Integration-wave code committed/pushed as `64ac67a` and deployed
-  in `#807`; build future images from `main`.
-- Current deployed AIOS image: `64ac67a` (Coolify `#807`). Paired ARVO image:
-  `09249ba` (`#806`). Both deployments `finished`; unsigned `/health/ready`
-  200 on each. Signed delivery remains unverified; signed smoke is human-only.
-  Migrations committed in `e46771e` are included in the deployed image.
+  in `e46771e`. Integration wave `64ac67a` (`#807`) and governance/ICM wave
+  `dcf74b4` (`#809`) are committed/pushed and deployed; build from `main`.
+- Current deployed AIOS image: `dcf74b4` (Coolify `#809`). Paired ARVO image:
+  `09249ba` (`#808`). Both deployments `finished`; unsigned `/health/ready`
+  200 on each after startup. Signed delivery remains unverified; signed smoke
+  is human-only. Migrations committed in `e46771e` are included in the image.
 - Current app DB is the Supabase bridge `aios-supabase-db-8778:5432/aios`.
   Alembic head `e1f2a3b4c5d6` reached in app; `/health/ready` `200 migrations:ok`.
   Supabase cutover already applied for this app — no longer a future gate here.
