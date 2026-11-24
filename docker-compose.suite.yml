@@ -11,6 +11,8 @@ services:
       AIOS_ARVO_BASE_URL: http://arvo:9777
       AIOS_ARVO_SERVICE_KEY_ID: suite-kid
       AIOS_ARVO_SERVICE_KEY: suite-secret
+      AIOS_ARVO_ALLOWED_ORGS: ${AIOS_ARVO_ALLOWED_ORGS:-}
+      AIOS_ARVO_SERVICE_KEYS: ${AIOS_ARVO_SERVICE_KEYS:-}
     depends_on:
       - arvo
   arvo:
@@ -24,5 +26,7 @@ services:
       ARVO_AIOS_BASE_URL: http://aios:8777
       ARVO_AIOS_SERVICE_KEY_ID: suite-kid
       ARVO_AIOS_SERVICE_KEY: suite-secret
+      ARVO_AIOS_ALLOWED_ORGS: ${ARVO_AIOS_ALLOWED_ORGS:-}
+      ARVO_AIOS_SERVICE_KEYS: ${ARVO_AIOS_SERVICE_KEYS:-}
 
 # Health: GET /health/live on both, POST /api/.../events HMAC 200

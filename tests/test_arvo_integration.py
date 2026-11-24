@@ -89,12 +89,12 @@ def test_events_idempotency():
         _clear_events()
         path = "/api/integrations/arvo/v1/events"
         body = json.dumps({"type": "action.executed", "payload": {"a": 1}}, separators=(",", ":")).encode()
-        hdr = sign_request("POST", path, body, "kid-1", "secret-1")
+        hdr = sign_request("POST", path, body, "kid-1", "secret-1", idempotency_key="idem-1")
         hdr["Idempotency-Key"] = "idem-1"
         hdr["Content-Type"] = "application/json"
         r = c.post(path, content=body, headers=hdr)
         assert r.status_code == 200 and r.json()["deduplicated"] is False
-        hdr2 = sign_request("POST", path, body, "kid-1", "secret-1")
+        hdr2 = sign_request("POST", path, body, "kid-1", "secret-1", idempotency_key="idem-1")
         hdr2["Idempotency-Key"] = "idem-1"
         hdr2["Content-Type"] = "application/json"
         r2 = c.post(path, content=body, headers=hdr2)
@@ -126,14 +126,14 @@ def test_events_reject_unknown_type_before_idempotency():
         key = "idem-unknown-type"
 
         unknown = json.dumps({"type": "not.a.real.event", "payload": {"a": 1}}, separators=(",", ":")).encode()
-        hdr = sign_request("POST", path, unknown, "kid-1", "secret-1")
+        hdr = sign_request("POST", path, unknown, "kid-1", "secret-1", idempotency_key=key)
         hdr["Idempotency-Key"] = key
         hdr["Content-Type"] = "application/json"
         assert c.post(path, content=unknown, headers=hdr).status_code == 400
 
         # Rejected type must not claim the key: valid event still processes.
         known = json.dumps({"type": "action.executed", "payload": {"action_id": "a-1"}}, separators=(",", ":")).encode()
-        hdr2 = sign_request("POST", path, known, "kid-1", "secret-1")
+        hdr2 = sign_request("POST", path, known, "kid-1", "secret-1", idempotency_key=key)
         hdr2["Idempotency-Key"] = key
         hdr2["Content-Type"] = "application/json"
         r2 = c.post(path, content=known, headers=hdr2)
@@ -186,7 +186,7 @@ async def test_deals_endpoint_auth_and_org_scoping(test_session):
 
             # auth, correct org → returns the deal
             url = f"/api/integrations/arvo/v1/deals?org_id={org.id}"
-            hdr = sign_request("GET", "/api/integrations/arvo/v1/deals", None, "kid-1", "secret-1")
+            hdr = sign_request("GET", "/api/integrations/arvo/v1/deals", None, "kid-1", "secret-1", query=f"org_id={org.id}")
             r = await c.get(url, headers=hdr)
             assert r.status_code == 200
             body = r.json()
@@ -201,7 +201,7 @@ async def test_deals_endpoint_auth_and_org_scoping(test_session):
 
             # different org → empty (no leak)
             url2 = "/api/integrations/arvo/v1/deals?org_id=other-org"
-            hdr2 = sign_request("GET", "/api/integrations/arvo/v1/deals", None, "kid-1", "secret-1")
+            hdr2 = sign_request("GET", "/api/integrations/arvo/v1/deals", None, "kid-1", "secret-1", query="org_id=other-org")
             r3 = await c.get(url2, headers=hdr2)
             assert r3.status_code == 200
             assert r3.json()["count"] == 0
@@ -243,7 +243,7 @@ async def test_action_executed_event_audits(test_session):
             body = {"type": "action.executed", "payload": {"org_id": org.id, "action_id": "act-1", "finding_id": "f-1"}}
             import json
             raw = json.dumps(body, separators=(",", ":")).encode()
-            hdr = sign_request("POST", path, raw, "kid-1", "secret-1")
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key="idem-exec-1")
             hdr["Idempotency-Key"] = "idem-exec-1"
             hdr["Content-Type"] = "application/json"
             r = await c.post(path, content=raw, headers=hdr)
@@ -300,7 +300,7 @@ async def test_action_verified_updates_deal(test_session):
                 "verified_amount": "300.00", "deal_id": deal.id,
             }}
             raw = json.dumps(body, separators=(",", ":")).encode()
-            hdr = sign_request("POST", path, raw, "kid-1", "secret-1")
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key="idem-ver-1")
             hdr["Idempotency-Key"] = "idem-ver-1"
             hdr["Content-Type"] = "application/json"
             r = await c.post(path, content=raw, headers=hdr)
@@ -337,7 +337,7 @@ def test_events_accept_envelope_without_version():
         _clear_events()
         path = "/api/integrations/arvo/v1/events"
         body = json.dumps({"type": "action.executed", "payload": {"action_id": "a-nov", "business_trace_id": "trace-nov"}}, separators=(",", ":")).encode()
-        hdr = sign_request("POST", path, body, "kid-1", "secret-1")
+        hdr = sign_request("POST", path, body, "kid-1", "secret-1", idempotency_key="idem-nov-version")
         hdr["Idempotency-Key"] = "idem-nov-version"
         hdr["Content-Type"] = "application/json"
         r = c.post(path, content=body, headers=hdr)
@@ -387,3 +387,401 @@ async def test_agent_run_persists_business_trace_in_audit(test_session, test_org
     assert row.resource_id == agent.id
     assert row.details["business_trace_id"] == "trace-agent-1"
     assert row.details["finding_id"] == "f-trace"
+
+
+async def test_action_verified_db_failure_does_not_cache_event(test_session, monkeypatch):
+    """Audit commit failure must surface as error and release idempotency."""
+    import json
+    from contextlib import asynccontextmanager
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db import engine as db_engine
+    from aios.db.models import AuditLog, IntegrationEvent, Organization
+    from aios.integrations.arvo.auth import _clear_nonces, sign_request
+    from aios.integrations.arvo.routes import _clear_events, _get_idempotent
+    from aios.main import app
+
+    org = Organization(name="Fail Org", slug="fail-org", extra_data={})
+    test_session.add(org)
+    await test_session.commit()
+
+    real_session = db_engine.async_session
+
+    class FailingCommitSession:
+        def __init__(self, session):
+            self._session = session
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        async def commit(self):
+            if any(isinstance(obj, AuditLog) for obj in self._session.new):
+                raise RuntimeError("audit DB down")
+            await self._session.commit()
+
+    @asynccontextmanager
+    async def failing_async_session():
+        async with real_session() as s:
+            yield FailingCommitSession(s)
+
+    orig_enabled, orig_id, orig_key = (
+        settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key,
+    )
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        path = "/api/integrations/arvo/v1/events"
+        raw = json.dumps({"type": "action.verified", "payload": {
+            "org_id": org.id, "action_id": "act-fail", "verified_amount": "10.00",
+        }}, separators=(",", ":")).encode()
+        key = "idem-ver-db-fail"
+        c = TestClient(app, raise_server_exceptions=False)
+
+        with monkeypatch.context() as m:
+            m.setattr(db_engine, "async_session", failing_async_session)
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+            hdr["Idempotency-Key"] = key
+            hdr["Content-Type"] = "application/json"
+            r = c.post(path, content=raw, headers=hdr)
+        assert r.status_code >= 500
+        assert _get_idempotent(key) is None
+        assert (await test_session.execute(
+            select(IntegrationEvent).where(IntegrationEvent.idempotency_key == key)
+        )).scalar_one_or_none() is None
+        assert (await test_session.execute(
+            select(AuditLog).where(AuditLog.org_id == org.id, AuditLog.action == "action.verified")
+        )).scalars().all() == []
+
+        # Released key must be reusable; retry processes once.
+        hdr2 = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+        hdr2["Idempotency-Key"] = key
+        hdr2["Content-Type"] = "application/json"
+        r2 = c.post(path, content=raw, headers=hdr2)
+        assert r2.status_code == 200 and r2.json()["deduplicated"] is False
+        assert len((await test_session.execute(
+            select(AuditLog).where(AuditLog.org_id == org.id, AuditLog.action == "action.verified")
+        )).scalars().all()) == 1
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
+
+
+async def test_commitment_enqueue_failure_leaves_no_audit(test_session, monkeypatch):
+    """Queue failure must not commit the audit row; ingest releases the key with 503."""
+    import json
+
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db.models import AuditLog, Organization
+    from aios.integrations.arvo.auth import _clear_nonces, sign_request
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    org = Organization(name="Queue Org", slug="queue-org", extra_data={})
+    test_session.add(org)
+    await test_session.commit()
+
+    async def fail_enqueue(*args, **kwargs):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", fail_enqueue)
+
+    orig_enabled, orig_id, orig_key = (
+        settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key,
+    )
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        path = "/api/integrations/arvo/v1/events"
+        raw = json.dumps({"type": "commitment.at_risk", "payload": {
+            "org_id": org.id, "finding_id": "f-queue-fail",
+        }}, separators=(",", ":")).encode()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key="idem-commit-queue-fail")
+            hdr["Idempotency-Key"] = "idem-commit-queue-fail"
+            hdr["Content-Type"] = "application/json"
+            r = await c.post(path, content=raw, headers=hdr)
+        assert r.status_code == 503
+        rows = (await test_session.execute(
+            select(AuditLog).where(AuditLog.org_id == org.id, AuditLog.action == "commitment.at_risk")
+        )).scalars().all()
+        assert rows == []
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
+
+
+async def test_commitment_audit_failure_after_enqueue_keeps_reservation(test_session, monkeypatch):
+    """Enqueue already happened: audit failure stays 5xx but must keep the key claimed."""
+    import json
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db import engine as db_engine
+    from aios.db.models import AuditLog, IntegrationEvent, Organization
+    from aios.integrations.arvo.auth import _clear_nonces, sign_request
+    from aios.integrations.arvo.routes import _clear_events, _get_idempotent
+    from aios.main import app
+
+    org = Organization(name="Audit Fail Org", slug="audit-fail-org", extra_data={})
+    test_session.add(org)
+    await test_session.commit()
+
+    real_session = db_engine.async_session
+
+    class FailingCommitSession:
+        def __init__(self, session):
+            self._session = session
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        async def commit(self):
+            if any(isinstance(obj, AuditLog) for obj in self._session.new):
+                raise RuntimeError("audit DB down")
+            await self._session.commit()
+
+    @asynccontextmanager
+    async def failing_async_session():
+        async with real_session() as s:
+            yield FailingCommitSession(s)
+
+    fake_enqueue = AsyncMock()
+    orig_enabled, orig_id, orig_key = (
+        settings.arvo_integration_enabled, settings.arvo_service_key_id, settings.arvo_service_key,
+    )
+    try:
+        settings.arvo_integration_enabled = True
+        settings.arvo_service_key_id = "kid-1"
+        settings.arvo_service_key = "secret-1"
+        _clear_nonces()
+        _clear_events()
+        path = "/api/integrations/arvo/v1/events"
+        raw = json.dumps({"type": "commitment.at_risk", "payload": {
+            "org_id": org.id, "finding_id": "f-audit-fail",
+        }}, separators=(",", ":")).encode()
+        key = "idem-commit-audit-fail"
+        c = TestClient(app, raise_server_exceptions=False)
+
+        with monkeypatch.context() as m:
+            m.setattr("aios.tasks.queue.enqueue_job", fake_enqueue)
+            m.setattr(db_engine, "async_session", failing_async_session)
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+            hdr["Idempotency-Key"] = key
+            hdr["Content-Type"] = "application/json"
+            r = c.post(path, content=raw, headers=hdr)
+        assert r.status_code >= 500
+        assert fake_enqueue.await_count == 1
+        assert _get_idempotent(key) is None
+        row = (await test_session.execute(
+            select(IntegrationEvent).where(IntegrationEvent.idempotency_key == key)
+        )).scalar_one_or_none()
+        assert row is not None and row.response.get("status") == "processing"
+
+        # Retry sees the still-claimed key; enqueue must not happen twice.
+        hdr2 = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+        hdr2["Idempotency-Key"] = key
+        hdr2["Content-Type"] = "application/json"
+        r2 = c.post(path, content=raw, headers=hdr2)
+        assert r2.status_code == 503
+        assert fake_enqueue.await_count == 1
+        assert (await test_session.execute(
+            select(AuditLog).where(AuditLog.org_id == org.id, AuditLog.action == "commitment.at_risk")
+        )).scalars().all() == []
+    finally:
+        settings.arvo_integration_enabled = orig_enabled
+        settings.arvo_service_key_id = orig_id
+        settings.arvo_service_key = orig_key
+        _clear_nonces()
+        _clear_events()
+
+
+async def test_arvo_allowlist_deals(test_session, monkeypatch):
+    """AIOS_ARVO_ALLOWED_ORGS admits listed org; /deals 403s the rest."""
+    from aios.config import settings
+    from aios.db.models import Organization
+    from aios.integrations.arvo.auth import _clear_nonces, sign_request
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    org = Organization(name="Allow Org", slug="allow-org", extra_data={})
+    test_session.add(org)
+    await test_session.commit()
+
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid-1")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret-1")
+    monkeypatch.setattr(settings, "arvo_allowed_orgs", f" , {org.id}, ")
+    _clear_nonces()
+    _clear_events()
+    try:
+        path = "/api/integrations/arvo/v1/deals"
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            hdr = sign_request("GET", path, None, "kid-1", "secret-1", query=f"org_id={org.id}")
+            r = await c.get(f"{path}?org_id={org.id}", headers=hdr)
+            assert r.status_code == 200
+            assert r.json()["org_id"] == org.id
+
+            hdr2 = sign_request("GET", path, None, "kid-1", "secret-1", query="org_id=blocked-org")
+            r2 = await c.get(f"{path}?org_id=blocked-org", headers=hdr2)
+            assert r2.status_code == 403
+    finally:
+        _clear_nonces()
+        _clear_events()
+
+
+async def test_arvo_allowlist_events(test_session, monkeypatch):
+    """Same allowlist gate on /events payload org_id (action.executed)."""
+    import json
+
+    from aios.config import settings
+    from aios.db.models import Organization
+    from aios.integrations.arvo.auth import _clear_nonces, sign_request
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    org = Organization(name="Allow Event Org", slug="allow-event-org", extra_data={})
+    test_session.add(org)
+    await test_session.commit()
+
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid-1")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret-1")
+    monkeypatch.setattr(settings, "arvo_allowed_orgs", org.id)
+    _clear_nonces()
+    _clear_events()
+    try:
+        path = "/api/integrations/arvo/v1/events"
+
+        async def post_event(org_id: str, key: str):
+            raw = json.dumps(
+                {"type": "action.executed", "payload": {"org_id": org_id, "action_id": key}},
+                separators=(",", ":"),
+            ).encode()
+            hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+            hdr["Idempotency-Key"] = key
+            hdr["Content-Type"] = "application/json"
+            return await c.post(path, content=raw, headers=hdr)
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            r = await post_event(org.id, "idem-allow-org")
+            assert r.status_code == 200
+            assert r.json()["handled"] == "action.executed"
+
+            r2 = await post_event("blocked-org", "idem-blocked-org")
+            assert r2.status_code == 403
+    finally:
+        _clear_nonces()
+        _clear_events()
+
+
+def test_signature_covers_query_and_idempotency_key():
+    """Canonical includes normalized query and idem key; swaps invalidate HMAC."""
+    from aios.integrations.arvo.auth import _normalize_query
+
+    kid, key = "kid-q", "secret-q"
+    assert _normalize_query("") == ""
+    assert _normalize_query("b=2&a=1&empty=") == "a=1&b=2&empty="
+    _clear_nonces()
+    query = "b=2&a=1&empty="
+    hdr = sign_request("GET", PATH, None, kid, key, query=query, idempotency_key="idem-q")
+    common = (kid, hdr["X-Service-Timestamp"], hdr["X-Service-Nonce"], "GET", PATH, None, hdr["X-Service-Signature"], key)
+    assert not verify_request(*common, query="b=3&a=1&empty=", idempotency_key="idem-q")
+    assert not verify_request(*common, query=query, idempotency_key="idem-other")
+    assert verify_request(*common, query=query, idempotency_key="idem-q")
+
+    _clear_nonces()
+    normalized = sign_request("GET", PATH, None, kid, key, query="a=1&b=2&empty=", idempotency_key="idem-q")
+    assert verify_request(
+        kid, normalized["X-Service-Timestamp"], normalized["X-Service-Nonce"], "GET", PATH, None,
+        normalized["X-Service-Signature"], key, query=query, idempotency_key="idem-q",
+    )
+    _clear_nonces()
+
+
+async def test_hmac_rejects_query_and_idempotency_key_tampering(monkeypatch):
+    """Endpoint verification binds query string and Idempotency-Key."""
+    import json
+
+    from aios.config import settings
+    from aios.integrations.arvo.routes import _clear_events
+    from aios.main import app
+    from httpx import ASGITransport, AsyncClient
+
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid-tamper")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret-tamper")
+    _clear_nonces()
+    _clear_events()
+    try:
+        deals = "/api/integrations/arvo/v1/deals"
+        events = "/api/integrations/arvo/v1/events"
+        raw = json.dumps({"type": "action.executed", "payload": {"action_id": "a-tamper"}}, separators=(",", ":")).encode()
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            good = sign_request("GET", deals, None, "kid-tamper", "secret-tamper", query="org_id=org-a&limit=5")
+            assert (await c.get(f"{deals}?org_id=org-a&limit=5", headers=good)).status_code == 200
+
+            swapped = sign_request("GET", deals, None, "kid-tamper", "secret-tamper", query="org_id=org-a&limit=5")
+            assert (await c.get(f"{deals}?org_id=org-b&limit=5", headers=swapped)).status_code == 401
+
+            bad_key = sign_request("POST", events, raw, "kid-tamper", "secret-tamper", idempotency_key="idem-good")
+            bad_key["Idempotency-Key"] = "idem-swapped"
+            bad_key["Content-Type"] = "application/json"
+            assert (await c.post(events, content=raw, headers=bad_key)).status_code == 401
+
+            good_key = sign_request("POST", events, raw, "kid-tamper", "secret-tamper", idempotency_key="idem-good")
+            good_key["Idempotency-Key"] = "idem-good"
+            good_key["Content-Type"] = "application/json"
+            assert (await c.post(events, content=raw, headers=good_key)).status_code == 200
+    finally:
+        _clear_nonces()
+        _clear_events()
+
+
+def test_hmac_key_rotation_map_accepts_secondary_and_primary(monkeypatch):
+    """Map secures rotation: secondary kid, rotated primary secret and legacy primary all verify."""
+    from fastapi.testclient import TestClient
+
+    from aios.config import settings
+    from aios.main import app
+
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid-primary")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret-primary")
+    monkeypatch.setattr(settings, "arvo_service_keys", "kid-secondary:secret-secondary, kid-primary:secret-rotated")
+    _clear_nonces()
+    c = TestClient(app)
+    try:
+        def call(kid: str, secret: str) -> int:
+            return c.get(ROUTE, headers=sign_request("GET", ROUTE, None, kid, secret)).status_code
+
+        assert call("kid-secondary", "secret-secondary") == 200
+        assert call("kid-primary", "secret-rotated") == 200
+        assert call("kid-primary", "secret-primary") == 200
+        assert call("kid-primary", "secret-wrong") == 401
+    finally:
+        _clear_nonces()

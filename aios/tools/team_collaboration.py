@@ -18,6 +18,7 @@ every lookup here is by name/id and a name is guessable.
 import logging
 import re
 from contextvars import ContextVar
+from types import SimpleNamespace
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -60,21 +61,76 @@ async def _resolve_team(sess, org_id: str, ref: str):
     return (await sess.execute(stmt.limit(2))).scalars().first()
 
 
-async def _caller_team(sess, org_id: str, from_team: str, caller_agent_id: str):
-    """Caller identity: explicit from_team, else the team the caller is on."""
+async def _caller_agent(sess, org_id: str, caller_agent_id: str):
+    """The running agent, but only inside this org."""
+    from sqlalchemy import select
+
+    from aios.db.models import Agent
+
+    if not caller_agent_id:
+        return None
+    return (await sess.execute(
+        select(Agent).where(Agent.id == caller_agent_id, Agent.org_id == org_id)
+    )).scalars().first()
+
+
+def _is_org_coordinator(agent) -> bool:
+    """The bootstrap-marked coordinator is teamless on purpose."""
+    from aios.core.org_bootstrap import ORCHESTRATOR_MARKER
+
+    return bool(agent) and (agent.extra_data or {}).get("business_setup") == ORCHESTRATOR_MARKER
+
+
+async def _agent_on_team(sess, team_id: str, agent_id: str) -> bool:
+    from sqlalchemy import select
+
+    from aios.db.models import team_agents
+
+    if not agent_id:
+        return False
+    row = (await sess.execute(
+        select(team_agents.c.agent_id).where(
+            team_agents.c.team_id == team_id,
+            team_agents.c.agent_id == agent_id,
+        ).limit(1)
+    )).first()
+    return row is not None
+
+
+async def _caller_team(
+    sess, org_id: str, from_team: str, caller_agent_id: str, *, org_scoped: bool = False
+):
+    """Return (caller, error). Explicit from_team is caller-reported, so verify it."""
     from sqlalchemy import select
 
     from aios.db.models import Team, team_agents
 
+    agent = await _caller_agent(sess, org_id, caller_agent_id)
+    coordinator = org_scoped and _is_org_coordinator(agent)
+
     if from_team and from_team.strip():
-        return await _resolve_team(sess, org_id, from_team)
+        team = await _resolve_team(sess, org_id, from_team)
+        if team is None:
+            return None, f"from_team not found in this org: {from_team!r}"
+        if not coordinator and not await _agent_on_team(sess, team.id, caller_agent_id):
+            return None, f"from_team {from_team!r} is not your team"
+        return team, None
+
+    if coordinator:
+        # Only the audit metadata and thread key use this id; Conversation.team_id
+        # is the *target* team, so no fake FK is ever written.
+        return SimpleNamespace(id=f"org:{org_id}", name=agent.name or "coordenacao geral"), None
+
     if not caller_agent_id:
-        return None
-    return (await sess.execute(
+        return None, "could not resolve your own team; pass from_team explicitly"
+    team = (await sess.execute(
         select(Team).join(team_agents, team_agents.c.team_id == Team.id)
         .where(Team.org_id == org_id, team_agents.c.agent_id == caller_agent_id)
         .limit(1)
     )).scalars().first()
+    if team is None:
+        return None, "could not resolve your own team; pass from_team explicitly"
+    return team, None
 
 
 async def _collab_thread(sess, *, org_id: str, to_team, from_team, manager):
@@ -165,12 +221,11 @@ class AskTeamManagerTool(BaseTool):
                     "ok": False,
                     "error": f"team {target.name!r} has no manager agent to ask",
                 }
-            caller = await _caller_team(sess, org_id, from_team, self._agent_id)
+            caller, error = await _caller_team(
+                sess, org_id, from_team, self._agent_id, org_scoped=True
+            )
             if caller is None:
-                return {
-                    "ok": False,
-                    "error": "could not resolve your own team; pass from_team explicitly",
-                }
+                return {"ok": False, "error": error}
             if caller.id == target.id:
                 return {
                     "ok": False,
@@ -316,7 +371,7 @@ class NotifyHumanTool(BaseTool):
             # Sign the message with the caller's own team, and target that
             # team's DM — an org-wide send would reach every manager's DM.
             async with async_session() as sess:
-                caller = await _caller_team(sess, org_id, "", self._agent_id)
+                caller, _ = await _caller_team(sess, org_id, "", self._agent_id)
             if caller is not None:
                 team_name = caller.name
 
@@ -580,9 +635,9 @@ class RequestBuildTool(BaseTool):
                 return {"ok": False, "error": f"team not found in this org: {to_team!r}"}
             if not target.manager_agent_id:
                 return {"ok": False, "error": f"team {target.name!r} has no manager agent to ask"}
-            caller = await _caller_team(sess, org_id, "", self._agent_id)
+            caller, error = await _caller_team(sess, org_id, "", self._agent_id)
             if caller is None:
-                return {"ok": False, "error": "could not resolve your own team; pass from_team explicitly"}
+                return {"ok": False, "error": error}
             if caller.id == target.id:
                 return {"ok": False, "error": f"{target.name!r} is your own team"}
 

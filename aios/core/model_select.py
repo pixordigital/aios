@@ -122,6 +122,10 @@ TYPE_PROFILE: dict[str, str] = {
     "performance_watcher": "watcher",
     "marketing": "business",
     "revops": "business",
+    "media_manager": "manager",
+    "market_intelligence": "prospector",
+    "content_strategist": "business",
+    "content_producer": "business",
     "custom": "custom",
 }
 

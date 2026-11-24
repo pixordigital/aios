@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from aios.config import settings
-from .auth import _forget_nonce, verify_request
+from .auth import _forget_nonce, verification_keys, verify_request
 from .events import ArvoEnvelope as ArvoEvent
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,13 @@ def _require_enabled() -> None:
         raise HTTPException(404, "ARVO integration disabled")
 
 
+def _require_org_allowed(org_id: str | None) -> None:
+    """Deny org outside AIOS_ARVO_ALLOWED_ORGS; empty CSV = unrestricted."""
+    allowed = {v.strip() for v in (settings.arvo_allowed_orgs or "").split(",") if v.strip()}
+    if allowed and str(org_id or "") not in allowed:
+        raise HTTPException(403, "ARVO org not allowed")
+
+
 async def _require_auth(request: Request) -> None:
     _require_enabled()
     if not settings.arvo_service_key or not settings.arvo_service_key_id:
@@ -183,10 +190,17 @@ async def _require_auth(request: Request) -> None:
     # receive None.
     if not kid or not ts or not nonce or not sig:
         raise HTTPException(401, "Missing service signature")
-    if kid != settings.arvo_service_key_id:
+    keys = verification_keys(settings.arvo_service_key_id, settings.arvo_service_key, settings.arvo_service_keys, kid)
+    if not keys:
         raise HTTPException(401, "Unknown service key id")
     body = await request.body()
-    if not verify_request(kid, ts, nonce, request.method, request.url.path, body or None, sig, settings.arvo_service_key):
+    for key in keys:
+        if verify_request(
+            kid, ts, nonce, request.method, request.url.path, body or None, sig, key,
+            query=request.url.query, idempotency_key=request.headers.get("Idempotency-Key") or "",
+        ):
+            break
+    else:
         raise HTTPException(401, "Invalid service signature")
     persisted = await _db_persist_nonce(nonce)
     if persisted is False:
@@ -209,6 +223,7 @@ async def health_probe():
 @router.post("/context", dependencies=[Depends(_require_auth)])
 async def get_context(body: ContextRequest):
     """Phase 2 — minimal agent-context per contract. No org leak if unknown."""
+    _require_org_allowed(body.org_id)
     # ponytail: minimal context, reuse existing agents table if org_id provided
     agents_info: list[dict] = []
     plan = "free"
@@ -238,6 +253,7 @@ async def list_deals(request: Request, org_id: str | None = None, limit: int = 1
     (stalled deals, discount exposure, overdue commitments) without owning
     a parallel CRM. org_id is required for any data; without it returns [].
     """
+    _require_org_allowed(org_id)
     if not org_id:
         return {"org_id": None, "deals": [], "count": 0}
     cap = max(1, min(int(limit or 100), 500))
@@ -296,7 +312,8 @@ async def _handle_action_executed(payload: dict, trace_id: str | None, idempoten
                                resource_id=str(action_id), details={"finding_id": finding_id, "payload": payload}))
                 await s.commit()
     except Exception as e:
-        logger.debug("action.executed audit fallback: %s", e)
+        logger.error("action.executed audit failed: %s", e)
+        raise
     return {"handled": "action.executed", "action_id": str(action_id), "business_trace_id": trace_id}
 
 
@@ -336,7 +353,8 @@ async def _handle_action_verified(payload: dict, trace_id: str | None, idempoten
                                resource_id=str(action_id), details=details))
                 await s.commit()
     except Exception as e:
-        logger.debug("action.verified audit/update fallback: %s", e)
+        logger.error("action.verified audit/update failed: %s", e)
+        raise
     return {"handled": "action.verified", "action_id": str(action_id),
             "verified_amount": verified, "deal_updated": updated_deal,
             "business_trace_id": trace_id}
@@ -356,7 +374,8 @@ async def _handle_deal_event(payload: dict, trace_id: str | None, idempotency_ke
                                resource_id=str(deal_id), details={"payload": payload}))
                 await s.commit()
     except Exception as e:
-        logger.debug("%s audit fallback: %s", action, e)
+        logger.error("%s audit failed: %s", action, e)
+        raise
     return {"handled": action, "deal_id": str(deal_id), "business_trace_id": trace_id}
 
 
@@ -364,25 +383,14 @@ async def _handle_commitment_at_risk(
     payload: dict,
     trace_id: str | None,
     idempotency_key: str,
+    enqueue_succeeded: list[bool],
 ) -> dict:
-    """Phase 4 slice: commitment.at_risk → audit + enqueue agent run → outbox agent.action.completed."""
+    """Phase 4 slice: commitment.at_risk → enqueue agent run → audit → outbox agent.action.completed."""
     finding_id = payload.get("finding_id") or payload.get("opportunity_id") or payload.get("id") or "unknown"
     trace_id = trace_id or payload.get("business_trace_id") or str(finding_id)
     extra = {"finding_id": finding_id, "business_trace_id": trace_id, "payload": payload}
-    try:
-        org_id = payload.get("org_id")
-        if org_id:
-            from aios.db.engine import async_session
-            from aios.db.models import AuditLog
-
-            async with async_session() as s:
-                s.add(AuditLog(org_id=org_id, action="commitment.at_risk", resource_type="finding", resource_id=str(finding_id), details=extra))
-                await s.commit()
-        else:
-            logger.info("commitment.at_risk trace %s finding %s (no org_id, skip audit)", trace_id, finding_id)
-    except Exception as e:
-        logger.debug("commitment.at_risk audit fallback: %s", e)
-    # enqueue agent execution via ARQ (non-blocking) + inline fallback if no redis
+    # Enqueue first: audit must not survive a queue failure, otherwise retry
+    # (idempotency released) duplicates the row.
     enqueued = False
     try:
         from aios.tasks.queue import enqueue_job
@@ -393,9 +401,27 @@ async def _handle_commitment_at_risk(
             _job_id=f"commitment:{idempotency_key}",
         )
         enqueued = True
+        # Tell caller before audit: audit failure must not release idempotency.
+        enqueue_succeeded.append(True)
     except Exception:
-        logger.debug("commitment.at_risk queue unavailable; using background fallback", exc_info=True)
-    return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id, "enqueued": enqueued}
+        logger.debug("commitment.at_risk queue unavailable", exc_info=True)
+    if not enqueued:
+        return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id, "enqueued": False}
+    org_id = payload.get("org_id")
+    if org_id:
+        from aios.db.engine import async_session
+        from aios.db.models import AuditLog
+
+        try:
+            async with async_session() as s:
+                s.add(AuditLog(org_id=org_id, action="commitment.at_risk", resource_type="finding", resource_id=str(finding_id), details=extra))
+                await s.commit()
+        except Exception as e:
+            logger.error("commitment.at_risk audit failed: %s", e)
+            raise
+    else:
+        logger.info("commitment.at_risk trace %s finding %s (no org_id, skip audit)", trace_id, finding_id)
+    return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id, "enqueued": True}
 
 
 @router.post("/events", dependencies=[Depends(_require_auth)])
@@ -403,6 +429,7 @@ async def ingest_event(
     body: ArvoEvent,
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
+    _require_org_allowed(body.payload.get("org_id"))
     if body.type not in _ALLOWED_INBOUND_EVENTS:
         raise HTTPException(400, f"Unknown event type: {body.type}")
     if not idempotency_key or len(idempotency_key) > 128:
@@ -427,6 +454,7 @@ async def ingest_event(
         _store_idempotent(idempotency_key, existing)
         return {**existing, "deduplicated": True}
     side_effect_started = False
+    enqueue_succeeded: list[bool] = []
     try:
         extra_resp: dict = {}
         if body.type == "commitment.at_risk":
@@ -434,6 +462,7 @@ async def ingest_event(
                 body.payload,
                 trace_id,
                 idempotency_key,
+                enqueue_succeeded,
             )
             if not extra_resp.get("enqueued"):
                 raise HTTPException(503, "ARVO integration queue unavailable")
@@ -464,13 +493,14 @@ async def ingest_event(
         _store_idempotent(idempotency_key, stripped)
         return resp
     except Exception:
-        if not side_effect_started:
+        if not side_effect_started and not enqueue_succeeded:
             await _db_release_event(idempotency_key)
         raise
 
 @router.post("/sso-ticket", dependencies=[Depends(_require_auth)])
 async def sso_ticket(identity: SsoTicketRequest):
     """Signed SSO ticket carrying asserted user identity, TTL <= 60s."""
+    _require_org_allowed(identity.org_id)
     import json
     import hmac
     import hashlib

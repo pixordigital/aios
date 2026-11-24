@@ -623,6 +623,87 @@ class Credential(Base, TimestampMixin, OrgScopedMixin):
     cred_type: Mapped[str] = mapped_column(String(50))
     data_enc: Mapped[str] = mapped_column(Text, default="")
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Rotation state. Old rows keep working: active/1 needs no backfill.
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active", index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    rotated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Persisted scope hints (e.g. {"agents": [...], "tools": [...]}). Runtime
+    # enforcement is not wired here; an empty scope means legacy behaviour.
+    scope: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
+
+
+class CredentialEvent(Base):
+    """Append-only credential audit: creation, use, rotation, revocation."""
+
+    __tablename__ = "credential_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    credential_id: Mapped[str] = mapped_column(
+        ForeignKey("credentials.id", ondelete="CASCADE"), index=True
+    )
+    event: Mapped[str] = mapped_column(String(30), default="created")
+    actor_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    actor_agent_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    from_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    to_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    details: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    __table_args__ = (
+        Index("ix_credential_events_org_created", "org_id", "created_at"),
+        Index("ix_credential_events_cred_created", "credential_id", "created_at"),
+    )
+
+
+class CredentialScope(Base):
+    """Which subject (agent/team/tool id) may resolve a credential.
+
+    No rows means legacy unscoped access. Empty rows are never implied: a
+    caller that wants to narrow access writes explicit rows.
+    """
+
+    __tablename__ = "credential_scopes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    credential_id: Mapped[str] = mapped_column(
+        ForeignKey("credentials.id", ondelete="CASCADE"), index=True
+    )
+    scope_type: Mapped[str] = mapped_column(String(20))  # agent|team|tool
+    scope_id: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    __table_args__ = (
+        UniqueConstraint(
+            "credential_id", "scope_type", "scope_id", name="uq_credential_scope"
+        ),
+    )
+
+
+class UsageAttribution(Base):
+    """Durable form of the attribution dict passed to track_usage.
+
+    UsageRecord holds aggregate counters only; cost_kind/model/provider detail
+    used to exist solely in logs. Rows here are evidence, not a billing ledger.
+    """
+
+    __tablename__ = "usage_attributions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    cost_kind: Mapped[str] = mapped_column(String(20), default="internal", server_default="internal")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    cost_usd: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    attribution: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
+    created_at: Mapped[datetime] = mapped_column(default=_now, index=True)
+    __table_args__ = (
+        Index("ix_usage_attributions_org_date", "org_id", "date"),
+        Index("ix_usage_attributions_org_model", "org_id", "model"),
+    )
 
 
 class WorkflowExecutionLog(Base, TimestampMixin):
@@ -655,10 +736,21 @@ class CrmDeal(Base, TimestampMixin, OrgScopedMixin):
     # C10: Forecast fields
     close_date: Mapped[datetime | None] = mapped_column(nullable=True, index=True)
     probability: Mapped[float] = mapped_column(default=0.0)
+    # Authoritative links. Legacy extra_data mirrors are left untouched; they
+    # stay readable, but new writes should use these columns. Nullable so old
+    # rows (and ambiguous heuristic matches) are never rewritten by a migration.
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_accounts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    contact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_contacts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     agent = relationship("Agent")
     team = relationship("Team")
+    # No relationship() to Account/Contact: those mappers live in
+    # aios.core.crm_intelligence and importing them here would create a cycle.
 
 
 class CrmDealVersion(Base, TimestampMixin):
@@ -675,6 +767,54 @@ class CrmDealVersion(Base, TimestampMixin):
     extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     deal = relationship("CrmDeal")
+
+
+class KpiTarget(Base, TimestampMixin, OrgScopedMixin):
+    """Authoritative KPI target record (was Organization.extra_data only).
+
+    One target per (org, metric): the legacy JSON store had the same rule.
+    Validation/baseline/evidence guardrails stay in aios.governance.kpi; the
+    schema only guarantees identity, tenant scope and status as a string.
+    """
+
+    __tablename__ = "kpi_targets"
+    __table_args__ = (
+        UniqueConstraint("org_id", "metric_key", name="uq_kpi_target_org_metric"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    metric_key: Mapped[str] = mapped_column(String(100), index=True)
+    target_value: Mapped[float] = mapped_column(default=0.0)
+    baseline_value: Mapped[float] = mapped_column(default=0.0)
+    baseline_window_days: Mapped[int] = mapped_column(Integer, default=0)
+    evidence: Mapped[str] = mapped_column(Text, default="")
+    owner: Mapped[str] = mapped_column(String(255), default="")
+    balancing_metrics: Mapped[list] = mapped_column(JSON, default=list, server_default=text("'[]'"))
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active", index=True)  # active|review|retired
+    provenance: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
+    guardrails: Mapped[dict] = mapped_column(JSON, default=dict, server_default=text("'{}'"))
+
+
+class KpiTargetEvent(Base):
+    """Append-only KPI target history; survives target deletion via SET NULL."""
+
+    __tablename__ = "kpi_target_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    target_id: Mapped[str | None] = mapped_column(
+        ForeignKey("kpi_targets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    event: Mapped[str] = mapped_column(String(30))
+    metric_key: Mapped[str] = mapped_column(String(100), index=True)
+    from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    actor_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    actor_org_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    at: Mapped[datetime] = mapped_column(default=_now)
+    evidence: Mapped[str] = mapped_column(Text, default="")
+    owner: Mapped[str] = mapped_column(String(255), default="")
+    target_value: Mapped[float | None] = mapped_column(nullable=True)
+    baseline_value: Mapped[float | None] = mapped_column(nullable=True)
+    __table_args__ = (Index("ix_kpi_target_events_org_at", "org_id", "at"),)
 
 
 class SalesGoal(Base, TimestampMixin, OrgScopedMixin):

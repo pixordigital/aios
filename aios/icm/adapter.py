@@ -19,6 +19,10 @@ from aios.icm.workspace import WorkspacePaths, load_context_files
 logger = logging.getLogger(__name__)
 
 
+class SideEffectDuplicateError(RuntimeError):
+    """Idempotency key already claimed by another run in the same org."""
+
+
 class ICMStageAdapter:
     """Adapts an AIOS workflow node to an ICM-X stage manifest."""
 
@@ -30,6 +34,7 @@ class ICMStageAdapter:
         run_id: str = "run_default",
         workspace_id: str | None = None,
         preapproved: Any = None,
+        db_session: Any | None = None,
     ):
         self.node = node
         self.paths = WorkspacePaths(Path(storage_root))
@@ -50,6 +55,7 @@ class ICMStageAdapter:
         self.approval_bound: dict[str, Any] | None = None
         self.side_effect_recorded = False
         self._preapproved = preapproved
+        self.db_session = db_session
         from aios.icm.enforcement import StageBudget
 
         self.budget = StageBudget.from_manifest(self.manifest)
@@ -95,6 +101,70 @@ class ICMStageAdapter:
         keys: set[str] = set()
         shared["_icm_side_effect_keys"] = keys
         return keys
+
+    def _claim_side_effect(self, key: str, shared: dict) -> None:
+        """Claim key durably before the side effect runs.
+
+        No session => legacy in-memory dedupe. With a session, a key from a
+        different run fails closed; a same-run retry is a no-op.
+        """
+        session = self.db_session
+        if session is None and isinstance(shared, dict):
+            session = shared.get("icm_db_session")
+        if session is None:
+            return
+
+        import inspect
+
+        from sqlalchemy import select
+        from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+        from aios.icm.dedupe_model import ICMSideEffect
+
+        if inspect.iscoroutinefunction(getattr(session, "execute", None)):
+            raise RuntimeError("ICM durable side-effect dedupe needs a sync SQLAlchemy Session")
+
+        def find_existing():
+            return session.execute(
+                select(ICMSideEffect).where(
+                    ICMSideEffect.org_id == self.org_id,
+                    ICMSideEffect.idempotency_key == key,
+                )
+            ).scalar_one_or_none()
+
+        try:
+            existing = find_existing()
+            if existing is not None:
+                if str(existing.run_id) != self.run_id:
+                    raise SideEffectDuplicateError(
+                        f"ICM side effect '{key}' already claimed by run '{existing.run_id}'"
+                    )
+                return
+            session.add(
+                ICMSideEffect(
+                    org_id=self.org_id,
+                    idempotency_key=key,
+                    stage_id=self.manifest.id,
+                    run_id=self.run_id,
+                )
+            )
+            # Durable before the caller performs the external side effect.
+            session.commit()
+        except SideEffectDuplicateError:
+            raise
+        except IntegrityError:
+            # Concurrent claim won the unique index. Re-read to tell a same-run
+            # retry (idempotent) from a different run (fail closed).
+            session.rollback()
+            existing = find_existing()
+            if existing is not None and str(existing.run_id) == self.run_id:
+                return
+            raise SideEffectDuplicateError(
+                f"ICM side effect '{key}' already claimed"
+            ) from None
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise RuntimeError("ICM side-effect dedupe store unavailable") from exc
 
     def validate_input(self, payload: Any) -> None:
         schema_id = self.manifest.inputs_schema
@@ -276,6 +346,7 @@ class ICMStageAdapter:
             or self.run_id
         )
         key = self.side_effect_key(str(task_id), action=action)
+        self._claim_side_effect(key, shared)
         applied = self._applied_keys(shared)
         if side_effect_already_applied(applied, key):
             self.side_effect_recorded = True

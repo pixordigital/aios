@@ -376,8 +376,12 @@ async def migration_state() -> str:
         root = Path(__file__).resolve().parents[2]
         head = ScriptDirectory.from_config(Config(str(root / "alembic.ini"))).get_current_head()
         async with async_session() as db:
+            # Supabase writes aios.alembic_version_aios; the unqualified name
+            # would hit the legacy aios.alembic_version table instead.
+            is_postgres = db.get_bind().dialect.name == "postgresql"
+            table = "aios.alembic_version_aios" if is_postgres else "alembic_version"
             try:
-                applied = (await db.execute(text("SELECT version_num FROM alembic_version"))).scalar()
+                applied = (await db.execute(text(f"SELECT version_num FROM {table}"))).scalar()
             except Exception:
                 return "unversioned"
         if not applied:

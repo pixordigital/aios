@@ -99,6 +99,21 @@ async def get_metrics(user=Depends(get_superadmin)):
     }
 
 
+@router.get("/routing")
+async def routing_stats(user=Depends(get_superadmin)):
+    from aios.core.router import stats
+
+    return {
+        "scope": "process_global",
+        "tenant_scoped": False,
+        "caveats": [
+            "Process-global counters; not org-scoped and not a tenant KPI.",
+            "Values may include multiple tenants/workers and reset on process restart.",
+        ],
+        "stats": stats(),
+    }
+
+
 # ─── Business outcome analytics ───
 
 # First-response latency needs the first user and first assistant row of each

@@ -65,6 +65,27 @@ def test_ladder_and_prices_come_from_the_registry():
     assert tracing.estimate_cost_detailed("unknown/model", 1000, 1000) > 0
 
 
+def test_every_agent_type_has_a_valid_role_floor():
+    """New concrete agent_types must carry a legal floor, not silently fall
+    back to nano or to a model off the ladder."""
+    from aios.config import MODEL_ROLE_MIN_TIER, MODEL_TIERS
+    from aios.core.model_select import TYPE_PROFILE
+
+    roles = set(TYPE_PROFILE)
+    roles.update(r for r, floor in MODEL_ROLE_MIN_TIER.items() if floor is not None)
+    try:
+        from aios.dashboard.app import AGENT_TYPES
+    except Exception:  # dashboard import is opportunistic: UI startup must not gate this
+        pass
+    else:
+        roles.update(AGENT_TYPES)
+
+    for role in sorted(roles):
+        assert role in MODEL_ROLE_MIN_TIER, f"{role} has no role floor"
+        floor = MODEL_ROLE_MIN_TIER[role]
+        assert floor is None or floor in MODEL_TIERS, f"{role}: {floor}"
+
+
 def test_unknown_workload_is_left_alone():
     """Zero everything. The router has no idea what this is, so it must not
     guess — a router that guesses on missing input is a router that will
@@ -303,12 +324,50 @@ async def _drain(rt):
     return events
 
 
+def _fake_chat(rt, responses):
+    """Async `_llm_chat` stub recording models for the structured path."""
+    calls = []
+    remaining = list(responses)
+
+    async def _chat(*, messages, model, **kw):
+        calls.append(model)
+        return remaining.pop(0)
+
+    rt._llm_chat = _chat
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_a_short_run_is_served_by_the_cheap_model():
     rt = _runtime()
     calls = _fake_stream(rt, ["hi there"])
     await _drain(rt)
     assert calls == [TIERS[0]], f"routed calls were {calls}"
+
+
+@pytest.mark.asyncio
+async def test_max_tier_clamps_a_stale_learned_floor():
+    """A learned floor above the operator's cap must never outrank the cap."""
+    from aios.core.router import remember_floor
+
+    rt = _runtime(max_tier=TIERS[0])
+    rt.agent.extra_data = remember_floor(
+        rt.agent.extra_data, TIERS[2], "iteration limit"
+    )
+    calls = _fake_stream(rt, ["hi there"])
+    await _drain(rt)
+    assert calls == [TIERS[0]], f"stale floor beat the cap: {calls}"
+
+
+@pytest.mark.asyncio
+async def test_agent_type_role_floor_holds_a_short_run_above_nano():
+    """The run loop passes `agent_type` as `role`. A support agent's floor is
+    gpt-4o-mini, so a short no-tool request must not land on nano."""
+    rt = _runtime()
+    rt.agent.agent_type = "support"
+    calls = _fake_stream(rt, ["hi there"])
+    await _drain(rt)
+    assert calls == [TIERS[1]], f"role floor was ignored: {calls}"
 
 
 @pytest.mark.asyncio
@@ -366,6 +425,44 @@ async def test_max_tier_caps_the_escalation():
     calls = _fake_stream(rt, ["", "", ""])
     await _drain(rt)
     assert set(calls) == {TIERS[0]}, f"exceeded the configured cap: {calls}"
+
+
+@pytest.mark.asyncio
+async def test_structured_malformed_output_is_repaired_on_the_next_tier():
+    """A malformed forced `_output` must retry once on the next rung."""
+    rt = _runtime()
+    bad = [{"type": "function", "function": {
+        "name": "_output", "arguments": '{"answer":'}}]
+    good = [{"type": "function", "function": {
+        "name": "_output", "arguments": '{"answer": "ok"}'}}]
+    calls = _fake_chat(rt, [{"tool_calls": bad}, {"tool_calls": good}])
+    result = await rt.run_structured("c1", "hello", {"type": "object"})
+    assert calls == [TIERS[0], TIERS[1]], f"repair calls were {calls}"
+    assert result == {"answer": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_learned_floor_applies_to_structured_path_unless_capped():
+    """run_structured honors the learned floor and clamps it to max_tier."""
+    from aios.core.router import remember_floor
+
+    good = {"tool_calls": [{"type": "function", "function": {
+        "name": "_output", "arguments": '{"answer": "ok"}'}}]}
+
+    rt = _runtime()
+    rt.agent.extra_data = remember_floor(rt.agent.extra_data, TIERS[1], "iteration limit")
+    calls = _fake_chat(rt, [good])
+    result = await rt.run_structured("c1", "hello", {"type": "object"})
+    assert calls == [TIERS[1]], f"learned floor ignored: {calls}"
+    assert result == {"answer": "ok"}
+
+    capped = _runtime(max_tier=TIERS[0])
+    capped.agent.extra_data = remember_floor(
+        capped.agent.extra_data, TIERS[1], "iteration limit"
+    )
+    capped_calls = _fake_chat(capped, [good])
+    await capped.run_structured("c1", "hello", {"type": "object"})
+    assert capped_calls == [TIERS[0]], f"floor beat the cap: {capped_calls}"
 
 
 # ─── the counters must not flatter the number ─────────────────────────────

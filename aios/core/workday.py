@@ -4,10 +4,11 @@ An employee clocks in and knows what is on their plate because the work is
 tracked somewhere durable. Agents had no equivalent: `signals.rank_queue` built
 a "fila do dia" for the dashboard and for an API, and no agent ever worked it.
 
-So the board is not a new table. It is the open deals the agent owns, ranked by
-the timing score that already existed, plus whatever follow-up came due. CRM
-state *is* the memory: yesterday's work shows up as a moved stage, a refreshed
-`last_contacted_at`, or a pushed `next_follow_up`, so tomorrow's board is
+So the board is not a new table. It is durable work the agent can pull: open
+CRM deals it owns and open OCP tasks it owns or that belong to its department,
+ranked by the timing score that already existed. CRM/OCP state *is* the memory:
+yesterday's work shows up as a moved stage, a refreshed `last_contacted_at`, a
+pushed `next_follow_up`, or a task status change, so tomorrow's board is
 different without anything having to remember it.
 
 SDR and support are excluded on purpose. They are reactive: they act when a
@@ -17,8 +18,9 @@ already have a live conversation open.
 """
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from aios.core.signals import OPEN_STAGES, rank_queue
 
@@ -26,6 +28,9 @@ from aios.core.signals import OPEN_STAGES, rank_queue
 REACTIVE_AGENT_TYPES = frozenset({"sdr", "support"})
 
 DEFAULT_BOARD_SIZE = 10
+
+# OCP tasks with a terminal status are not work. Everything else is open.
+CLOSED_TASK_STATUSES = ("completed", "cancelled")
 
 # Org-level master switch, read from Organization.extra_data. Off by default:
 # switching it on starts every eligible agent spending tokens each morning, so
@@ -75,16 +80,26 @@ def _overdue(deal, now: datetime) -> str | None:
     return raw if due <= now else None
 
 
-async def board_for_agent(agent, db, limit: int = DEFAULT_BOARD_SIZE) -> dict:
-    """The agent's board for today: its open deals, best first.
+def _task_due(task, now: datetime) -> str | None:
+    """An OCP task deadline that has passed, as an ISO timestamp."""
+    due = task.deadline
+    if not due:
+        return None
+    if due.tzinfo is None:
+        due = due.replace(tzinfo=timezone.utc)
+    return due.isoformat() if due <= now else None
 
-    Follow-ups that came due are lifted to the front regardless of timing
-    score. A deal the agent promised to call back about today is more urgent
-    than a hot lead that happens to score higher, and burying it under a score
-    sort is how a promise gets missed.
+
+async def board_for_agent(agent, db, limit: int = DEFAULT_BOARD_SIZE) -> dict:
+    """The agent's board for today: open deals and OCP tasks, best first.
+
+    Due follow-ups and deadlines are lifted to the front regardless of timing
+    score. A promise made today outranks a hotter lead that happens to score
+    higher; burying it under a score sort is how a promise gets missed.
     """
     now = datetime.now(timezone.utc)
     from aios.db.models import CrmDeal
+    from aios.governance.ocp import DepartmentMember, SharedTask
 
     rows = (
         await db.execute(
@@ -96,14 +111,72 @@ async def board_for_agent(agent, db, limit: int = DEFAULT_BOARD_SIZE) -> dict:
         )
     ).scalars().all()
 
-    ranked = rank_queue(rows, limit=limit, now=now)
+    # OCP has no team-owned task field: a task reaches a team through the
+    # responsible department, with membership held in department_members.
+    dept_ids = (
+        await db.execute(
+            select(DepartmentMember.department_id).where(
+                DepartmentMember.org_id == agent.org_id,
+                DepartmentMember.member_type == "agent",
+                DepartmentMember.agent_id == agent.id,
+                DepartmentMember.is_active.is_(True),
+            )
+        )
+    ).scalars().all()
+    tasks = (
+        await db.execute(
+            select(SharedTask).where(
+                SharedTask.org_id == agent.org_id,
+                SharedTask.status.not_in(CLOSED_TASK_STATUSES),
+                or_(
+                    and_(SharedTask.owner_type == "agent", SharedTask.owner_id == agent.id),
+                    SharedTask.responsible_department_id.in_(dept_ids),
+                ),
+            )
+        )
+    ).scalars().all()
+    # A task can match both owner and department; it is one item of work.
+    tasks = list({t.id: t for t in tasks}.values())
+
+    # Adapt tasks to the shape rank_queue already scores, so both sources share
+    # one ranking without a second scoring rule. Deals stay ahead on ties.
+    stubs = [
+        SimpleNamespace(
+            id=t.id, stage="opportunity", source="task", value=0,
+            updated_at=t.updated_at, extra_data={}, _task=t,
+        )
+        for t in tasks
+    ]
+    ranked = rank_queue(list(rows) + stubs, limit=limit, now=now)
 
     items = []
     for r in ranked:
-        deal = r["deal"]
+        row = r["deal"]
+        task = getattr(row, "_task", None)
+        if task is not None:
+            items.append(
+                {
+                    "source": "task",
+                    "task_id": task.id,
+                    "lead": task.title,
+                    "title": task.title,
+                    "status": task.status,
+                    "priority": task.priority,
+                    "timing": r["timing"],
+                    "why": r["reasons"],
+                    "hours_since_touch": r["hours_since_touch"],
+                    "objective": task.objective or "",
+                    "expected_deliverable": task.expected_deliverable or "",
+                    "deadline": task.deadline.isoformat() if task.deadline else "",
+                    "due_overdue": _task_due(task, now),
+                }
+            )
+            continue
+        deal = row
         ex = deal.extra_data or {}
         items.append(
             {
+                "source": "crm",
                 "deal_id": deal.id,
                 "lead": deal.lead_name or deal.lead_email or deal.lead_phone or deal.id,
                 "stage": deal.stage,
@@ -118,8 +191,17 @@ async def board_for_agent(agent, db, limit: int = DEFAULT_BOARD_SIZE) -> dict:
             }
         )
 
-    # Due-today first, then keep the timing order within each group.
-    items.sort(key=lambda i: (i["due_overdue"] is None, -i["timing"]))
+    # Due-today first, then keep the timing order within each group. Explicit
+    # ref tie-break keeps identical scores stable across DB row order; deals win
+    # a tie so adding a task cannot change the order of an existing CRM board.
+    items.sort(
+        key=lambda i: (
+            i["due_overdue"] is None,
+            -i["timing"],
+            i["source"] == "task",
+            i.get("task_id") or i["deal_id"],
+        )
+    )
 
     return {
         "agent_id": agent.id,
@@ -149,7 +231,24 @@ def render_board(board: dict) -> str:
     head += ".\n\n"
 
     rows = []
+    has_tasks = False
     for i, it in enumerate(board["items"], 1):
+        if it.get("source") == "task":
+            has_tasks = True
+            bits = [f"status={it['status']}", f"prioridade={it['priority']}"]
+            if it["due_overdue"]:
+                bits.append(f"PRAZO VENCIDO em {it['due_overdue']}")
+            elif it["deadline"]:
+                bits.append(f"prazo {it['deadline']}")
+            if it["hours_since_touch"] is not None:
+                bits.append(f"{it['hours_since_touch']}h sem toque")
+            rows.append(
+                f"{i}. source=task | task_id={it['task_id']} | "
+                f"{it.get('title') or it.get('lead') or it['task_id']} | {' | '.join(bits)}"
+                + (f"\n   objetivo: {it['objective']}" if it["objective"] else "")
+                + (f"\n   entregável: {it['expected_deliverable']}" if it["expected_deliverable"] else "")
+            )
+            continue
         bits = [f"stage={it['stage']}"]
         if it["value"]:
             bits.append(f"R$ {it['value']:.0f}")
@@ -165,12 +264,22 @@ def render_board(board: dict) -> str:
             + (f"\n   resumo anterior: {it['summary']}" if it["summary"] else "")
         )
 
-    return (
-        head
-        + "\n".join(rows)
-        + "\n\nVocê é o responsável por estes deals. Trabalhe-os em ordem: use suas "
+    tail = (
+        "\n\nVocê é o responsável por estes deals. Trabalhe-os em ordem: use suas "
         "ferramentas para contatar, registrar e mover o stage no CRM. Não pergunte "
         "o que fazer — a fila é a sua agenda do dia. Se um deal não precisar de "
         "ação, registre o motivo e siga. Ao terminar, o stage e o next_follow_up "
         "ficam registrados no CRM e a próxima fila é derivada deles."
     )
+    if has_tasks:
+        tail = (
+            "\n\nItens deal_id são deals do CRM; itens source=task são tarefas do OCP. "
+            "Trabalhe tudo em ordem: para deals, contate, registre e mova o stage no "
+            "CRM; para tarefas, entregue o resultado e registre a transição de status "
+            "no OCP. Não pergunte o que fazer — a fila é a sua agenda do dia. Se um "
+            "item não precisar de ação, registre o motivo e siga. Ao terminar, o "
+            "estado de cada item fica registrado na ferramenta de origem e a próxima "
+            "fila é derivada dele."
+        )
+
+    return head + "\n".join(rows) + tail

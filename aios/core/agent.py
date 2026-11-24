@@ -10,6 +10,7 @@ import logging
 import uuid
 
 from typing import AsyncGenerator
+from aios.config import settings
 from aios.db.backend import DatabaseBackend
 
 from aios.core.cache import cache, tool_cache
@@ -235,10 +236,9 @@ class AgentRuntime:
             if self.stage is not None
             else StageBudget(
                 max_llm_calls=self.MAX_ITERATIONS,
-                # No stage manifest means no declared cost ceiling; 0.0 would
-                # block every call, so an unbound run is capped by call count
-                # and tool count only.
-                max_cost_usd=float("inf"),
+                # No stage manifest: use the settings ceiling instead of an
+                # unbounded run. Bound stages still use their manifest cap.
+                max_cost_usd=settings.unbound_agent_max_cost_usd,
                 max_tool_calls=self.MAX_TOOL_CALLS,
             )
         )
@@ -364,12 +364,23 @@ class AgentRuntime:
         registry_entries = await self._load_runtime_registry(db)
         configured_model = self.agent.llm_config.get("model", "openai/gpt-4o")
         self._assert_model_eligible(configured_model, org_extra, registry_entries)
+        ceiling = self.agent.llm_config.get("max_tier") or None
+        floor = self.agent.llm_config.get("min_tier") or floor_from_extra(
+            getattr(self.agent, "extra_data", None)
+        )
+        if (
+            ceiling and router.is_routable(ceiling)
+            and floor and router.is_routable(floor)
+            and router.TIERS.index(floor) > router.TIERS.index(ceiling)
+        ):
+            floor = ceiling
         decision = route(
             configured_model,
+            role=getattr(self.agent, "agent_type", None),
             context_tokens=_context_tokens(context),
             tools=existing_tools,
             autonomy=self._autonomy,
-            min_tier=self.agent.llm_config.get("min_tier") or None,
+            min_tier=floor,
             org_extra=org_extra,
             registry_entries=registry_entries,
         )
@@ -438,25 +449,95 @@ class AgentRuntime:
             end_span(span, error=str(e))
             raise
 
-        for tc in (response.get("tool_calls") or []):
-            fn = tc.get("function", {})
-            if fn.get("name") == "_output":
-                try:
-                    result = json.loads(fn.get("arguments", "{}"))
-                    end_span(span)
-                    return result
-                except json.JSONDecodeError:
-                    end_span(span)
-                    return {"_raw": fn.get("arguments", "")}
-        content = response.get("content", "")
-        if content:
-            try:
+        retried = False
+        while True:
+            for tc in (response.get("tool_calls") or []):
+                fn = tc.get("function", {})
+                if fn.get("name") == "_output":
+                    try:
+                        result = json.loads(fn.get("arguments", "{}"))
+                        end_span(span)
+                        return result
+                    except json.JSONDecodeError:
+                        repair = (
+                            None if retried else should_escalate(
+                                model, malformed_tool_call=True, max_tier=ceiling
+                            )
+                        )
+                        if repair and repair.changed:
+                            retried = True
+                            router.record(repair)
+                            end_span(span)
+                            span = start_span(
+                                "agent_structured", model=repair.model,
+                                org_id=self.agent.org_id or "",
+                            )
+                            model = repair.model
+                            try:
+                                self._assert_model_eligible(repair.model, org_extra, registry_entries)
+                                budget.charge(
+                                    estimate_cost(
+                                        repair.model,
+                                        input_tokens + output_tokens,
+                                        input_tokens=input_tokens,
+                                        output_tokens=output_tokens,
+                                    )
+                                )
+                                response = await self._llm_chat(
+                                    messages=context,
+                                    model=repair.model,
+                                    temperature=self.agent.llm_config.get("temperature", 0.5),
+                                    max_tokens=self.agent.llm_config.get("max_tokens", 4096),
+                                    tools=all_tools,
+                                    tool_choice={"type": "function", "function": {"name": "_output"}},
+                                )
+                                usage = response.get("usage") or {}
+                                if usage:
+                                    span.extra["usage"] = usage
+                                    if db is not None:
+                                        from aios.core.limits import track_usage
+                                        from aios.core.tracing import estimate_cost_detailed
+
+                                        try:
+                                            await track_usage(
+                                                self.agent.org_id,
+                                                db,
+                                                messages=1,
+                                                tokens=usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+                                                llm_calls=1,
+                                                cost_usd=estimate_cost_detailed(
+                                                    repair.model,
+                                                    usage.get("input_tokens", 0),
+                                                    usage.get("output_tokens", 0),
+                                                ),
+                                                model=repair.model,
+                                                input_tokens=usage.get("input_tokens", 0),
+                                                output_tokens=usage.get("output_tokens", 0),
+                                                provider=repair.model.split("/")[0] if "/" in repair.model else None,
+                                                cost_kind="internal",
+                                                attribution={"path": "run_structured", "agent_id": self.agent.id},
+                                            )
+                                        except Exception as _e:
+                                            logger.warning("repair usage tracking failed for agent %s: %s", self.agent.id, _e)
+                            except Exception as e:
+                                logger.exception("Structured repair failed for agent %s", self.agent.id)
+                                end_span(span, error=str(e))
+                                raise
+                            break
+                        end_span(span)
+                        return {"_raw": fn.get("arguments", "")}
+            else:
+                content = response.get("content", "")
+                if content:
+                    try:
+                        result = json.loads(content)
+                    except json.JSONDecodeError:
+                        pass
+                    else:
+                        end_span(span)
+                        return result
                 end_span(span)
-                return json.loads(content)
-            except json.JSONDecodeError:
-                pass
-        end_span(span)
-        return {"_raw": content}
+                return {"_raw": content}
 
     async def run_stream(
         self,
@@ -587,6 +668,12 @@ class AgentRuntime:
             floor = self.agent.llm_config.get("min_tier") or floor_from_extra(
                 getattr(self.agent, "extra_data", None)
             )
+            if (
+                ceiling and router.is_routable(ceiling)
+                and floor and router.is_routable(floor)
+                and router.TIERS.index(floor) > router.TIERS.index(ceiling)
+            ):
+                floor = ceiling
 
             for iteration in range(self.MAX_ITERATIONS):
                 tools = self.tool_engine.schemas() if self.tool_engine.tools else None
@@ -596,6 +683,7 @@ class AgentRuntime:
                 # whether this is a lookup or multi-step reasoning.
                 decision = route(
                     model,
+                    role=getattr(self.agent, "agent_type", None),
                     context_tokens=_context_tokens(context),
                     tools=tools,
                     autonomy=self._autonomy,

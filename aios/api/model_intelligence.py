@@ -185,6 +185,34 @@ async def recommend(
     )
 
 
+@router.post("/recommend-for-agent")
+async def recommend_for_agent(
+    body: dict,
+    user: User = Depends(get_current_user),
+):
+    from aios.core.model_select import recommend
+
+    picks = await recommend(
+        str(body.get("agent_type") or "custom"),
+        limit=int(body.get("limit") or 2),
+    )
+    return {
+        "items": [
+            {
+                "model": p.model,
+                "score": p.score,
+                "price_in": p.price_in,
+                "price_out": p.price_out,
+                "context": p.context,
+                "indices": p.indices,
+                "reason": p.reason,
+            }
+            for p in picks
+        ],
+        "requires_founder_approval": True,
+    }
+
+
 @router.get("/rollback-target")
 async def rollback(
     agent_default_key: str,

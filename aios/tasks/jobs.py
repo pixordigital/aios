@@ -806,6 +806,18 @@ async def proactive_event_job(ctx, payload: dict):
                 out = await runtime.run("", instruction)
                 provenance = getattr(runtime, "stage_provenance", None)
 
+            # Same screening as the inbound path: a failure notice or HITL
+            # reflection is not a result. Publishing it would mark the event
+            # done and wake downstream automations on a run that did nothing.
+            from aios.core.agent import is_failed_run
+
+            if is_failed_run(out):
+                logger.error(
+                    "proactive_event_job: run failed for agent=%s event=%s, not publishing completion: %s",
+                    agent_id, ev.event_type, str(out)[:200],
+                )
+                return {"ok": False, "agent_id": agent_id, "output": str(out)[:2000]}
+
             # Emit what the agent did so downstream automations can react too.
             await publish(
                 "agent.proactive_completed",
@@ -1252,9 +1264,19 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
 
     try:
         from aios.integrations.arvo.publisher import enqueue_outbox
+        completed_payload = {
+            "finding_id": str(finding_id),
+            "org_id": org_id,
+            "output": result_text[:2000],
+            "agent_id": getattr(agent, "id", None) if agent else None,
+        }
+        # Forward only amounts actually received; ARVO cannot recalc without one.
+        for amount_field in ("exposure_amount", "verified_amount", "recovery_amount", "currency"):
+            if amount_field in payload:
+                completed_payload[amount_field] = payload[amount_field]
         await enqueue_outbox(
             "agent.action.completed",
-            {"finding_id": str(finding_id), "org_id": org_id, "output": result_text[:2000], "agent_id": getattr(agent, "id", None) if agent else None},
+            completed_payload,
             business_trace_id=str(business_trace_id),
             idempotency_key=f"agent.action.completed:{business_trace_id}"[:128],
         )

@@ -1,11 +1,13 @@
-"""Idempotent source seed for Phase 1 Media & Growth agents/team.
+"""Idempotent source seed for Media & Growth agents/team.
 
-Default is dry-run. Use --apply to persist.
+Phase 1 seeds by default. Phase 2/3 roles are draft, not-ready specs behind a
+human gate; opt in with --include-later-phases. Default is dry-run.
 
 Usage:
     python3 scripts/seed_media_growth.py --self-check
     python3 scripts/seed_media_growth.py [--org-slug pixor] [--dry-run]
     python3 scripts/seed_media_growth.py --org-slug pixor --apply
+    python3 scripts/seed_media_growth.py --org-slug pixor --apply --include-later-phases
 """
 
 import argparse
@@ -19,7 +21,13 @@ from sqlalchemy import select
 
 from aios.db.backend import db_session
 from aios.db.models import Agent, AgentVersion, Organization, Team, team_agents
-from aios.media_growth import PHASE1_ROLES, agent_config
+from aios.media_growth import (
+    PHASE1_ROLES,
+    PHASE2_ROLES,
+    PHASE3_ROLES,
+    ROLE_PHASES,
+    agent_config,
+)
 
 
 async def main():
@@ -29,6 +37,11 @@ async def main():
     mode.add_argument("--apply", action="store_true", help="persist changes")
     mode.add_argument("--dry-run", action="store_true", help="print planned changes only (default)")
     parser.add_argument("--self-check", action="store_true", help="check media_growth source, no DB")
+    parser.add_argument(
+        "--include-later-phases",
+        action="store_true",
+        help="also seed not-ready Phase 2/3 draft roles",
+    )
     args = parser.parse_args()
 
     if args.self_check:
@@ -51,6 +64,8 @@ async def main():
             return 1
 
         roles = list(PHASE1_ROLES)
+        if args.include_later_phases:
+            roles += list(PHASE2_ROLES) + list(PHASE3_ROLES)
         agents = {}
         created_agents = 0
         created_versions = 0
@@ -71,6 +86,10 @@ async def main():
                 continue
 
             cfg = agent_config(role)
+            phase = ROLE_PHASES[role]
+            extra_data = {"media_growth_role": role, "media_growth_phase": phase}
+            if phase > 1:
+                extra_data["media_growth_workflow"] = "not_ready"
             agent = Agent(
                 org_id=org.id,
                 name=cfg["name"],
@@ -80,7 +99,7 @@ async def main():
                 tools=cfg["tools"],
                 memory_config=cfg["memory_config"],
                 governance_config=cfg["governance_config"],
-                extra_data={"media_growth_role": role, "media_growth_phase": 1},
+                extra_data=extra_data,
                 status=cfg["status"],
             )
             db.add(agent)

@@ -493,9 +493,10 @@ async def logout():
 
 @router.get("/sso/arvo")
 async def sso_arvo(request: Request):
+    from aios.integrations.arvo.routes import _require_enabled, SsoTicketRequest, sso_ticket
+    _require_enabled()
     import httpx
     from aios.integrations.arvo.client import PATH_PREFIX
-    from aios.integrations.arvo.routes import SsoTicketRequest, sso_ticket
 
     async with db_session() as db:
         user = (await db.execute(select(User).where(User.id == request.state.user_id))).scalar_one_or_none()

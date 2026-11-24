@@ -224,3 +224,23 @@ async def test_process_global_metrics_require_superadmin(async_client, test_db_s
     body = resp.json()
     assert body["tenant_scoped"] is False
     assert body["scope"] == "process_global"
+
+
+async def test_routing_stats_requires_superadmin(async_client, auth_headers, test_db_session, test_user):
+    resp = await async_client.get("/api/analytics/routing")
+    assert resp.status_code == 401
+
+    async_client.headers.update(auth_headers)
+    resp = await async_client.get("/api/analytics/routing")
+    assert resp.status_code == 403
+
+    test_user.role = "owner"
+    await test_db_session.commit()
+    resp = await async_client.get("/api/analytics/routing")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert body["scope"] == "process_global"
+    assert body["tenant_scoped"] is False
+    assert body["caveats"]
+    assert {"down_total", "hold_total", "up_total"} <= set(body["stats"])

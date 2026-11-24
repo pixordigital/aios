@@ -304,6 +304,10 @@ async def dispatch_event(ev: EventEnvelope) -> list[str]:
     delivered. Per-agent claims keep the duplicate protection (two racing
     consumers still cannot double-dispatch the same agent) and let a retry
     deliver exactly the subscribers that missed out.
+
+    Raises if any enqueue failed, after every other subscriber was attempted.
+    Without the raise the consumer XACKs the stream entry and the failed agent
+    is never retried. The all-success return value is unchanged.
     """
     agents = await matching_agents(ev.org_id, ev.event_type)
     if not agents:
@@ -313,6 +317,7 @@ async def dispatch_event(ev: EventEnvelope) -> list[str]:
     from aios.tasks.queue import enqueue_job
 
     dispatched: list[str] = []
+    failed: list[str] = []
     for agent in agents:
         key = f"{ev.idempotency_key}:{agent.id}" if ev.idempotency_key else ""
         if key and not await _claim(key):
@@ -337,12 +342,16 @@ async def dispatch_event(ev: EventEnvelope) -> list[str]:
             # entry unacked and retries it, and a stale claim would make that
             # retry look like a duplicate and drop this agent for good.
             logger.exception("dispatch failed agent=%s event=%s", agent.id, ev.event_type)
+            failed.append(str(agent.id))
             if key:
                 await _release(key)
 
     logger.info(
         "dispatched %s to %d agent(s) org=%s", ev.event_type, len(dispatched), ev.org_id
     )
+    if failed:
+        # Consumer must leave the entry unacked so XAUTOCLAIM retries it.
+        raise RuntimeError(f"event dispatch failed for agent(s): {', '.join(failed)}")
     return dispatched
 
 
@@ -385,7 +394,7 @@ async def consume_once(pool=None, block_ms: int = 1000, count: int = 10) -> int:
     # excluding them made a batch of them report 0 — indistinguishable from an
     # idle bus to anything watching the job result.
     try:
-        pending = await pool.xautoclaim(STREAM, GROUP, consumername="dispatcher", min_idle_time=CLAIM_IDLE_MS, count=count, start_id="0-0")
+        pending = await pool.xautoclaim(STREAM, GROUP, consumername=_CONSUMER, min_idle_time=CLAIM_IDLE_MS, count=count, start_id="0-0")
         # redis-py returns (next_id, [(id, fields), ...]).
         stale = pending[1] if isinstance(pending, (list, tuple)) and len(pending) > 1 else []
         for msg_id, fields in stale:
@@ -404,7 +413,7 @@ async def consume_once(pool=None, block_ms: int = 1000, count: int = 10) -> int:
 
     try:
         entries = await pool.xreadgroup(
-            GROUP, "dispatcher", {STREAM: ">"}, count=count, block=block_ms
+            GROUP, _CONSUMER, {STREAM: ">"}, count=count, block=block_ms
         )
     except Exception:
         logger.exception("event read failed")

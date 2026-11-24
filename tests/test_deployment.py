@@ -6,6 +6,8 @@ real function is exercised with a fake provider for the failure paths.
 
 import pytest
 from sqlalchemy import select
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 from aios.core.agent_health import health_tracker
 from aios.core.deployment import (
@@ -266,3 +268,31 @@ async def test_health_rows_are_org_scoped(test_db_session, test_org):
     assert [r["agent_id"] for r in rows] == [mine.id]
     assert rows[0]["deploy_status"] == "verified"
     assert rows[0]["status"] == "no_traffic"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dialect", "table"),
+    [("postgresql", "aios.alembic_version_aios"), ("sqlite", "alembic_version")],
+)
+async def test_migration_state_reads_dialect_version_table(monkeypatch, dialect, table):
+    from aios.core import deployment
+    from aios.db import engine as db_engine
+
+    seen = {}
+
+    class FakeDB:
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name=dialect))
+
+        async def execute(self, stmt):
+            seen["sql"] = str(stmt)
+            return SimpleNamespace(scalar=lambda: "e1f2a3b4c5d6")
+
+    @asynccontextmanager
+    async def fake_session():
+        yield FakeDB()
+
+    monkeypatch.setattr(db_engine, "async_session", fake_session)
+    assert await deployment.migration_state() == "ok"
+    assert table in seen["sql"]

@@ -89,13 +89,13 @@ def test_suite_health_both():
         # events idempotent suite
         import json as _json
 
-        body = _json.dumps({"type": "suite.test", "payload": {"suite": True}}, separators=(",", ":")).encode()
-        hdr2 = sign_request("POST", "/api/integrations/arvo/v1/events", body, "suite-kid", "suite-secret")
+        body = _json.dumps({"type": "deal.created", "payload": {"suite": True}}, separators=(",", ":")).encode()
+        hdr2 = sign_request("POST", "/api/integrations/arvo/v1/events", body, "suite-kid", "suite-secret", idempotency_key="suite-1")
         hdr2["Idempotency-Key"] = "suite-1"
         hdr2["Content-Type"] = "application/json"
         r = c.post("/api/integrations/arvo/v1/events", content=body, headers=hdr2)
         assert r.status_code == 200 and r.json()["deduplicated"] is False
-        hdr3 = sign_request("POST", "/api/integrations/arvo/v1/events", body, "suite-kid", "suite-secret")
+        hdr3 = sign_request("POST", "/api/integrations/arvo/v1/events", body, "suite-kid", "suite-secret", idempotency_key="suite-1")
         hdr3["Idempotency-Key"] = "suite-1"
         hdr3["Content-Type"] = "application/json"
         r2 = c.post("/api/integrations/arvo/v1/events", content=body, headers=hdr3)
@@ -151,6 +151,41 @@ async def test_event_retry_uses_fresh_hmac_nonce(monkeypatch):
     assert len(nonces) == 2 and nonces[0] != nonces[1]
 
 
+async def test_ping_retry_uses_fresh_hmac_nonce(monkeypatch):
+    import httpx
+    from aios.config import settings
+    from aios.integrations.arvo.client import ping
+
+    nonces = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def request(self, method, path, **kwargs):
+            nonces.append(kwargs["headers"]["X-Service-Nonce"])
+            request = httpx.Request(method, f"http://peer.test{path}")
+            status = 503 if len(nonces) < 3 else 200
+            return httpx.Response(status, request=request, json={"status": "ok"})
+
+    async def no_sleep(delay):
+        return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr("aios.integrations.arvo.client.asyncio.sleep", no_sleep)
+    monkeypatch.setattr(settings, "arvo_base_url", "http://peer.test")
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret")
+    await ping()
+    assert len(nonces) == 3 and len(set(nonces)) == 3
+
+
 async def test_commitment_processing_is_org_scoped(test_org, monkeypatch):
     from aios.config import settings
     from sqlalchemy import func, select
@@ -170,6 +205,81 @@ async def test_commitment_processing_is_org_scoped(test_org, monkeypatch):
     async with async_session() as session:
         assert result["skipped"] is True
         assert await session.scalar(select(func.count(IntegrationOutbox.id))) == 0
+
+
+async def test_commitment_forwards_amount_to_action_completed(monkeypatch):
+    """Exposure and currency from ARVO must reach agent.action.completed verbatim."""
+    from types import SimpleNamespace
+
+    from aios.config import settings
+    from aios.core.agent import AgentRuntime
+    import aios.integrations.arvo.publisher as publisher
+    from aios.tasks.jobs import process_commitment_at_risk
+
+    agent = SimpleNamespace(id="agent-amount", governance_config={})
+
+    class FakeResult:
+        def scalars(self):
+            return self
+
+        def first(self):
+            return agent
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def execute(self, *args, **kwargs):
+            return FakeResult()
+
+        def add(self, row):
+            pass
+
+        async def commit(self):
+            pass
+
+    captured = []
+
+    async def fake_enqueue(event_type, payload, **kwargs):
+        captured.append((event_type, payload, kwargs))
+        return "outbox-amount"
+
+    async def fake_run(self, conv_id, msg):
+        return "action plan"
+
+    def fake_init(self, agent, db_session_factory=None):
+        self.agent = agent
+
+    monkeypatch.setattr("aios.db.engine.async_session", lambda: FakeSession())
+    monkeypatch.setattr(AgentRuntime, "__init__", fake_init)
+    monkeypatch.setattr(AgentRuntime, "run", fake_run)
+    monkeypatch.setattr(publisher, "enqueue_outbox", fake_enqueue)
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_base_url", "http://peer.test")
+
+    payload = {
+        "org_id": "org-amount",
+        "finding_id": "finding-amount",
+        "exposure_amount": "1375.50",
+        "currency": "BRL",
+        "business_trace_id": "trace-amount",
+    }
+    result = await process_commitment_at_risk(None, payload, "trace-amount")
+
+    assert result["finding_id"] == "finding-amount"
+    assert len(captured) == 1
+    event_type, event_payload, kwargs = captured[0]
+    assert event_type == "agent.action.completed"
+    assert event_payload["finding_id"] == "finding-amount"
+    assert event_payload["exposure_amount"] == "1375.50"
+    assert event_payload["currency"] == "BRL"
+    assert "verified_amount" not in event_payload
+    assert "recovery_amount" not in event_payload
+    assert kwargs["business_trace_id"] == "trace-amount"
+    assert kwargs["idempotency_key"] == "agent.action.completed:trace-amount"
 
 
 async def test_outbox_single_flush_records_failed_attempts(monkeypatch):
@@ -206,3 +316,31 @@ async def test_outbox_single_flush_records_failed_attempts(monkeypatch):
     finally:
         settings.arvo_integration_enabled = enabled
         settings.arvo_base_url = base_url
+
+
+async def test_dashboard_sso_arvo_disabled_fails_closed(monkeypatch):
+    """Flag off: dashboard SSO fails like ARVO routes, no outbound HTTP."""
+    from types import SimpleNamespace
+
+    import httpx
+    from fastapi import HTTPException
+    from aios.config import settings
+    from aios.dashboard.app import sso_arvo
+
+    outbound = []
+
+    class NoHttpClient:
+        def __init__(self, *args, **kwargs):
+            outbound.append((args, kwargs))
+            raise AssertionError("outbound HTTP attempted while ARVO integration disabled")
+
+    monkeypatch.setattr(httpx, "AsyncClient", NoHttpClient)
+    monkeypatch.setattr(settings, "arvo_integration_enabled", False)
+    request = SimpleNamespace(state=SimpleNamespace(user_id="unused"))
+
+    with pytest.raises(HTTPException) as exc:
+        await sso_arvo(request)
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "ARVO integration disabled"
+    assert outbound == []

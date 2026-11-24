@@ -169,3 +169,43 @@ async def test_model_registry_global_visible_no_cross_tenant_metric(auth_client,
         )
     ).scalars().all()
     assert not any((e.payload or {}).get("resource_id") == global_entry.id for e in events)
+
+
+async def test_recommend_for_agent_returns_picks_without_mutation(
+    monkeypatch, auth_client, test_db_session, test_org
+):
+    from aios.core.model_select import Pick
+
+    picks = [
+        Pick(model="cheap", score=0.9, price_in=1.0, price_out=2.0, context=8000,
+             indices={"speed": 1}, reason="cheap"),
+        Pick(model="safe", score=0.8, price_in=3.0, price_out=4.0, context=16000,
+             indices={"quality": 2}, reason="safe"),
+    ]
+    seen = {}
+
+    async def fake_recommend(agent_type, limit):
+        seen.update(agent_type=agent_type, limit=limit)
+        return picks
+
+    monkeypatch.setattr("aios.core.model_select.recommend", fake_recommend)
+    before = dict(test_org.extra_data or {})
+
+    resp = await auth_client.post(
+        "/api/models/recommend-for-agent",
+        json={"agent_type": "sales", "limit": 2},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert seen == {"agent_type": "sales", "limit": 2}
+    assert set(body) == {"items", "requires_founder_approval"}
+    assert body["requires_founder_approval"] is True
+    assert body["items"] == [
+        {"model": "cheap", "score": 0.9, "price_in": 1.0, "price_out": 2.0,
+         "context": 8000, "indices": {"speed": 1}, "reason": "cheap"},
+        {"model": "safe", "score": 0.8, "price_in": 3.0, "price_out": 4.0,
+         "context": 16000, "indices": {"quality": 2}, "reason": "safe"},
+    ]
+
+    await test_db_session.refresh(test_org)
+    assert (test_org.extra_data or {}) == before  # endpoint is read-only

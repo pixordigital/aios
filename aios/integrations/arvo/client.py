@@ -18,9 +18,16 @@ _TIMEOUT = 5.0
 _RETRIES = 3
 
 
-def _headers(method: str, path: str, body: bytes | None = None) -> dict[str, str]:
+def _headers(
+    method: str,
+    path: str,
+    body: bytes | None = None,
+    query: str = "",
+    idempotency_key: str = "",
+) -> dict[str, str]:
     return sign_request(
-        method, path, body, settings.arvo_service_key_id, settings.arvo_service_key
+        method, path, body, settings.arvo_service_key_id, settings.arvo_service_key,
+        query, idempotency_key,
     )
 
 
@@ -56,7 +63,9 @@ async def _request_with_retry(method: str, path: str, **kw) -> httpx.Response:
 async def ping() -> dict:
     """GET /health do peer. Usa http:// pois sslip https 503 (GAPS §6). Retry 3×."""
     path = f"{PATH_PREFIX}/health"
-    r = await _request_with_retry("GET", path, headers=_headers("GET", path))
+    r = await _request_with_retry(
+        "GET", path, headers_factory=lambda: _headers("GET", path)
+    )
     r.raise_for_status()
     return r.json()
 
@@ -77,7 +86,7 @@ async def send_event(
     key = idempotency_key or str(uuid.uuid4())
 
     def headers_factory():
-        headers = _headers("POST", path, body)
+        headers = _headers("POST", path, body, idempotency_key=key)
         headers["Idempotency-Key"] = key
         headers["Content-Type"] = "application/json"
         return headers

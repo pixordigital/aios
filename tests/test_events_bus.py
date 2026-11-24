@@ -12,6 +12,8 @@ import pytest
 from datetime import datetime, timezone
 
 from aios.core.events import (
+    _CONSUMER,
+    _encode,
     CLAIM_IDLE_MS,
     GROUP,
     STREAM,
@@ -175,13 +177,38 @@ async def test_dispatch_survives_one_bad_subscriber(monkeypatch):
 
     monkeypatch.setattr("aios.tasks.queue.enqueue_job", flaky)
     # Two subscribers: the first fails to enqueue, the second must still be
-    # dispatched, and the failed one must NOT be reported as dispatched.
+    # attempted, and the failed one must not be reported as dispatched.
     second = await _mk_agent(o, ["crm.*"])
-    dispatched = await dispatch_event(EventEnvelope("crm.stage_changed.closed_won", o))
+    with pytest.raises(RuntimeError, match=good):
+        await dispatch_event(EventEnvelope("crm.stage_changed.closed_won", o))
 
     assert len(calls) == 2, "a failed subscriber must not stop the sweep"
     assert set(calls) == {good, second}
-    assert dispatched == [second]
+
+
+async def test_partial_failure_releases_only_the_failed_agents_claim(monkeypatch):
+    """Successful subscribers keep dedupe; the failed one is retryable."""
+    o = await _org("ev-claim-partial")
+    good = await _mk_agent(o, ["crm.*"])
+    bad = await _mk_agent(o, ["crm.*"])
+    pool = _DedupePool()
+
+    async def fake_pool():
+        return pool
+
+    async def flaky_enqueue(func, payload, **kw):
+        if payload["agent_id"] == bad:
+            raise RuntimeError("redis blip")
+
+    monkeypatch.setattr("aios.tasks.queue.get_redis_pool", fake_pool)
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", flaky_enqueue)
+
+    ev = EventEnvelope("crm.stage_changed.won", o, {}, idempotency_key="k-partial-release")
+    with pytest.raises(RuntimeError, match=bad):
+        await dispatch_event(ev)
+
+    assert f"aios:evt:idem:k-partial-release:{good}" in pool.keys
+    assert f"aios:evt:idem:k-partial-release:{bad}" not in pool.keys
 
 
 # ── publish ─────────────────────────────────────────────────────────
@@ -193,6 +220,7 @@ class _FakePool:
     def __init__(self, fail=False):
         self.entries: list[tuple[str, dict]] = []
         self.acked: list[str] = []
+        self.consumers: list[str] = []
         self.group_created = False
         self.fail = fail
         self.n = 0
@@ -214,6 +242,7 @@ class _FakePool:
         self.acked.extend(ids)
 
     async def xreadgroup(self, group, consumer, streams, count=None, block=None):
+        self.consumers.append(consumer)
         pending = [(m, f) for m, f in self.entries if m not in self.acked]
         batch, self.entries = pending[:count or 10], []
         return [(streams and "aios:events", batch)] if batch else []
@@ -308,6 +337,7 @@ async def test_consume_dispatches_then_acks(monkeypatch):
     assert await consume_once(pool) == 1
     assert seen == ["crm.stage_changed.won"]
     assert pool.acked == ["1-0"]
+    assert pool.consumers == [_CONSUMER]
 
 
 async def test_consume_drops_poison_payload_without_crashing(monkeypatch):
@@ -351,6 +381,50 @@ async def test_consume_leaves_failed_dispatch_unacked_for_reclaim(monkeypatch):
     assert pool.acked == []
 
 
+async def test_consume_does_not_ack_partially_failed_dispatch(monkeypatch):
+    """A real partial enqueue failure must leave the stream entry unacked."""
+    class _ClaimingFakePool(_FakePool, _DedupePool):
+        def __init__(self):
+            _FakePool.__init__(self)
+            _DedupePool.__init__(self)
+
+    pool = _ClaimingFakePool()
+
+    async def fake_pool():
+        return pool
+
+    agents = [
+        Agent(id="good-agent", extra_data={"event_subscriptions": ["crm.*"]}),
+        Agent(id="bad-agent", extra_data={"event_subscriptions": ["crm.*"]}),
+    ]
+
+    async def matching(org_id, event_type):
+        return agents
+
+    enqueued = []
+
+    async def flaky_enqueue(func, payload, **kw):
+        enqueued.append(payload["agent_id"])
+        if payload["agent_id"] == "bad-agent":
+            raise RuntimeError("redis blip")
+
+    monkeypatch.setattr("aios.tasks.queue.get_redis_pool", fake_pool)
+    monkeypatch.setattr("aios.core.events.matching_agents", matching)
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", flaky_enqueue)
+
+    ev = EventEnvelope(
+        "crm.stage_changed.won", "o1", {"deal_id": "d1"}, idempotency_key="k-partial-unacked"
+    )
+    pool.entries.append(("6-0", _encode(ev)))
+
+    assert await consume_once(pool, block_ms=0) == 0
+    assert enqueued == ["good-agent", "bad-agent"]
+    assert pool.acked == []
+    # Delivered agent stays deduped; the failed one's claim was released.
+    assert "aios:evt:idem:k-partial-unacked:good-agent" in pool.keys
+    assert "aios:evt:idem:k-partial-unacked:bad-agent" not in pool.keys
+
+
 async def test_consume_reclaims_entries_abandoned_by_a_dead_consumer(monkeypatch):
     pool = _FakePool()
 
@@ -365,7 +439,7 @@ async def test_consume_reclaims_entries_abandoned_by_a_dead_consumer(monkeypatch
     })]
 
     async def xautoclaim(stream, group, **kw):
-        assert kw.get("consumername") == "dispatcher"
+        assert kw.get("consumername") == _CONSUMER
         assert kw.get("min_idle_time") == CLAIM_IDLE_MS
         return ("0-0", claimed)
 
@@ -461,6 +535,36 @@ async def test_proactive_event_job_runs_agent_and_republishes_result(monkeypatch
     # Idempotency key derives from the source event + agent, so a retry of the
     # same event does not emit a second completion.
     assert kw["idempotency_key"] == f"{ev.idempotency_key}:{agent}:done"
+
+
+async def test_proactive_event_job_skips_completion_for_failed_run(monkeypatch):
+    from aios.tasks.jobs import proactive_event_job
+
+    o = await _org("ev-job-failed")
+    agent = await _mk_agent(o, ["crm.*"])
+    ev = EventEnvelope("crm.stage_changed.won", o, {"deal_id": "d10"})
+
+    class FakeAuto:
+        runtime = None
+
+        def __init__(self, a):
+            self.a = a
+
+        async def run(self, conv, msg, db=None):
+            return "⏸️ [HITL] Não consegui resolver autonomamente"
+
+    published = []
+
+    async def fake_publish(*a, **k):
+        published.append(a)
+
+    monkeypatch.setattr("aios.core.autonomous_agent.AutonomousAgent", FakeAuto)
+    monkeypatch.setattr("aios.core.events.publish", fake_publish)
+
+    out = await proactive_event_job(None, {"event": ev.to_dict(), "agent_id": agent, "org_id": o})
+    assert out["ok"] is False
+    assert "HITL" in out["output"]
+    assert published == []
 
 
 def test_render_event_instruction_carries_type_and_payload():
@@ -936,7 +1040,8 @@ async def test_failed_enqueue_releases_the_claim_so_a_retry_still_delivers(monke
     monkeypatch.setattr("aios.tasks.queue.enqueue_job", flaky_enqueue)
 
     ev = EventEnvelope("crm.stage_changed.won", o, {}, idempotency_key="k-release")
-    assert await dispatch_event(ev) == []
+    with pytest.raises(RuntimeError, match=agent):
+        await dispatch_event(ev)
     # Retry of the same entry must still be able to deliver.
     assert await dispatch_event(ev) == [agent]
     assert len(attempts) == 2
@@ -988,7 +1093,8 @@ async def test_partial_failure_retries_only_the_missed_subscriber(monkeypatch):
     monkeypatch.setattr("aios.tasks.queue.enqueue_job", flaky_enqueue)
 
     ev = EventEnvelope("crm.stage_changed.won", o, {}, idempotency_key="k-partial")
-    assert await dispatch_event(ev) == [a1]
+    with pytest.raises(RuntimeError, match=a2):
+        await dispatch_event(ev)
     # Retry: the delivered agent stays suppressed, the missed one dispatches.
     assert await dispatch_event(ev) == [a2]
     # And a third delivery attempt dispatches to nobody.

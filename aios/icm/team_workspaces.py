@@ -30,24 +30,41 @@ AGENT_STAGES: dict[str, tuple[str, str]] = {
     "Data Analyst": ("data_ops", "data_analysis"),
     "Data Scientist": ("data_ops", "data_science"),
     "data-manager": ("data_ops", "data_review"),
+    # Media & Growth
+    "Media Manager": ("media_ops", "media_review"),
+    "Market Intelligence Researcher": ("media_ops", "market_research"),
+    "Content Strategist": ("media_ops", "content_strategy"),
+    "Content Producer": ("media_ops", "content_production"),
+    # Marketing
+    "Marketing": ("marketing_ops", "demand_generation"),
+    "Manager Marketing": ("marketing_ops", "marketing_review"),
+    # Customer Success
+    "Customer Success": ("customer_success_ops", "renewal_follow_up"),
+    "Manager Cs": ("customer_success_ops", "cs_review"),
+    "Support": ("customer_success_ops", "support_reply"),
+    # Revenue & Operations
+    "Revops": ("revops_ops", "revenue_analysis"),
+    "Manager Revops": ("revops_ops", "revops_review"),
+    "Deal Auditor": ("revops_ops", "deal_audit"),
+    "Evidence Compiler": ("revops_ops", "evidence_compile"),
+    "Human Auditor Assistant": ("revops_ops", "human_audit_assist"),
+    "Pricing Guardian": ("revops_ops", "pricing_guard"),
+    "Performance Watcher": ("revops_ops", "performance_watch"),
 }
 
-# Only events with a real producer today. Agents with no entry stay
-# request-driven on purpose; inventing subscriptions would make them wake for
-# events nobody publishes.
+# Only bus events with a real publisher (jobs.py / cron_scheduler.py / crm2.py).
+# Agents with no entry stay request-driven. Audit action names such as
+# agent.deploy_failed / agent.verify_failed are not bus events. The wildcard
+# matches real crm2.STAGES via prefix matching (aios/core/events.py).
 AGENT_EVENTS: dict[str, list[str]] = {
-    "sales-sdr": ["message.received", "crm.stage_changed.new"],
-    "sales-closer": ["crm.stage_changed.qualified", "crm.deal_stalled", "sales.drop_detected"],
-    "sales-manager": [
-        "crm.stage_changed.won",
-        "crm.stage_changed.lost",
-        "crm.deal_stalled",
-        "sales.drop_detected",
+    "sales-sdr": ["message.received"],
+    "sales-closer": [
+        "crm.deal_stalled", "sales.drop_detected", "crm.stage_changed.*",
     ],
-    "dev-manager": ["agent.verify_failed", "agent.deploy_failed"],
-    "red-agent": ["agent.verify_failed"],
-    "blue-agent": ["agent.deploy_failed"],
-    "security-manager": ["agent.verify_failed", "agent.deploy_failed"],
+    "sales-manager": [
+        "crm.deal_stalled", "sales.drop_detected", "crm.stage_changed.*",
+    ],
+    "Support": ["message.received"],
 }
 
 
@@ -72,6 +89,24 @@ def _stage(
         "max_cost_usd": max_cost_usd,
         "side_effects": side_effects,
     }
+
+
+def _role_stage(
+    title: str,
+    description: str,
+    allowed_tools: list[str],
+    denied_tools: list[str] | None = None,
+    **kwargs,
+) -> dict:
+    """Build a role stage without repeating the same context boilerplate."""
+    return _stage(
+        description,
+        f"# Stage Instructions: {title}\n\n{description}\n"
+        "Use only tools declared here; cite the real source for every claim or number.\n",
+        allowed_tools,
+        denied_tools,
+        **kwargs,
+    )
 
 
 TEAM_WORKSPACES: dict[str, dict] = {
@@ -328,6 +363,201 @@ TEAM_WORKSPACES: dict[str, dict] = {
                 ["sql_query", "read_file", "calculator", "rag_search",
                  "current_datetime", "ask_team_manager", "notify_human", "proactive_alerts"],
                 ["python_sandbox"],
+            ),
+        },
+    },
+    "media_ops": {
+        "identity": (
+            "# Media & Growth Workspace\n\n"
+            "- ID: `media_ops`\n- Version: `1.0.0`\n"
+            "- Purpose: research the market, plan reviewed content, and produce "
+            "material without publishing it before approval.\n"
+            "- Authority: public/owned sources are evidence; publishing and spend "
+            "require human approval.\n"
+        ),
+        "routes": (
+            "# Routing Policies\n\n"
+            "- Market signal or competitor fact -> `market_research`.\n"
+            "- Brief, audience, angle, or format -> `content_strategy`.\n"
+            "- Draft/caption from an approved brief -> `content_production`.\n"
+            "- Calendar, campaign, or publication decision -> `media_review`.\n"
+            "- Prohibited: invented cases, metrics, credentials, or publishing without approval.\n"
+        ),
+        "stages": {
+            "market_research": _role_stage(
+                "Market Research",
+                "Collect traceable public signals about audience, competitors, and demand.",
+                ["web_search", "knowledge_search", "rag_search", "current_datetime"],
+            ),
+            "content_strategy": _role_stage(
+                "Content Strategy",
+                "Turn evidence into a brief with exact fields: topic, audience, problem, objective, angle, evidence, format, CTA, success metric.",
+                ["rag_search", "knowledge_search", "current_datetime"],
+            ),
+            "content_production": _role_stage(
+                "Content Production",
+                "Draft the approved brief; never invent personal experience, customer cases, performance numbers, or credentials.",
+                ["rag_search", "knowledge_search", "current_datetime"],
+                side_effects=False,
+            ),
+            "media_review": _role_stage(
+                "Media Review",
+                "Review calendar and campaign fit, demand evidence, and approval state before anything reaches a customer.",
+                ["ask_team_manager", "notify_human", "crm_pipeline_stats",
+                 "crm_list_deals", "current_datetime", "rag_search"],
+                ["crm_create_deal", "crm_update_deal", "crm_merge_deals"],
+                side_effects=False,
+            ),
+        },
+    },
+    "marketing_ops": {
+        "identity": (
+            "# Marketing Workspace\n\n"
+            "- ID: `marketing_ops`\n- Version: `1.0.0`\n"
+            "- Purpose: generate measurable demand and hand sourced leads to Sales.\n"
+            "- Authority: only approved material goes to a customer; the CRM owns lead state.\n"
+        ),
+        "routes": (
+            "# Routing Policies\n\n"
+            "- Campaign or material request -> `demand_generation`.\n"
+            "- Budget, published material, or cross-team dependency -> `marketing_review`.\n"
+            "- Prohibited: invented price, case, deadline, or customer claim.\n"
+        ),
+        "stages": {
+            "demand_generation": _role_stage(
+                "Demand Generation",
+                "Build campaign material for a stated audience, pain, offer, channel, cadence, and decision metric; register sourced leads.",
+                ["web_search", "knowledge_search", "rag_search", "lead_score",
+                 "crm_create_deal", "crm_list_deals", "whatsapp_template_list",
+                 "whatsapp_template_draft", "whatsapp_template_lint", "send_email",
+                 "calendar_create_event", "current_datetime"],
+                ["crm_update_deal", "crm_merge_deals", "crm_delete_deal"],
+                side_effects=True,
+            ),
+            "marketing_review": _role_stage(
+                "Marketing Review",
+                "Check campaign evidence, target, source attribution, and approvals; escalate spend and customer-facing material.",
+                ["ask_team_manager", "request_build", "notify_human", "web_search",
+                 "knowledge_search", "rag_search", "lead_score", "crm_list_deals",
+                 "crm_pipeline_stats", "whatsapp_template_list",
+                 "whatsapp_template_lint", "current_datetime"],
+                ["crm_create_deal", "whatsapp_template_draft", "send_email",
+                 "calendar_create_event", "crm_update_deal", "crm_merge_deals",
+                 "crm_delete_deal"],
+                side_effects=False,
+            ),
+        },
+    },
+    "customer_success_ops": {
+        "identity": (
+            "# Customer Success Workspace\n\n"
+            "- ID: `customer_success_ops`\n- Version: `1.0.0`\n"
+            "- Purpose: support active customers and protect renewal without inventing promises.\n"
+            "- Authority: CRM and the customer conversation are the source of truth; "
+            "discounts and cancellations need human approval.\n"
+        ),
+        "routes": (
+            "# Routing Policies\n\n"
+            "- Inbound customer question -> `support_reply`.\n"
+            "- Stale account or renewal risk -> `renewal_follow_up`.\n"
+            "- Escalation, churn risk, or discount -> `cs_review`.\n"
+            "- Prohibited: claiming new leads, inventing terms, or hiding an angry customer.\n"
+        ),
+        "stages": {
+            "support_reply": _role_stage(
+                "Support Reply",
+                "Answer the customer's actual question from owned documentation; hand off when the issue is unresolved.",
+                ["transcribe", "web_search", "http_request", "read_file"],
+                ["crm_update_deal", "crm_delete_deal"],
+            ),
+            "renewal_follow_up": _role_stage(
+                "Renewal Follow-up",
+                "Use CRM history and silence windows to state risk, value at stake, and a dated next step.",
+                ["crm_list_deals", "crm_stale_deals", "crm_update_deal",
+                 "crm_set_follow_up", "send_email", "calendar_create_event",
+                 "transcribe", "voice_call", "lead_score", "current_datetime", "rag_search"],
+                ["crm_merge_deals", "crm_delete_deal"],
+                side_effects=True,
+            ),
+            "cs_review": _role_stage(
+                "Customer Success Review",
+                "Rank renewal risk with a value and date per account; escalate large discounts and cancellation threats.",
+                ["ask_team_manager", "request_build", "notify_human", "crm_list_deals",
+                 "crm_stale_deals", "crm_pipeline_stats", "transcribe", "lead_score",
+                 "current_datetime", "rag_search"],
+                ["crm_update_deal", "crm_set_follow_up", "send_email",
+                 "calendar_create_event", "voice_call", "crm_merge_deals",
+                 "crm_delete_deal"],
+                side_effects=False,
+            ),
+        },
+    },
+    "revops_ops": {
+        "identity": (
+            "# Revenue & Operations Workspace\n\n"
+            "- ID: `revops_ops`\n- Version: `1.0.0`\n"
+            "- Purpose: report revenue, audit deals, compile evidence, and watch model/agent "
+            "performance from real records.\n"
+            "- Authority: numbers come from CRM/SQL with stated window and method; "
+            "destructive CRM writes need approval.\n"
+        ),
+        "routes": (
+            "# Routing Policies\n\n"
+            "- Forecast, gap, or pipeline hygiene -> `revenue_analysis`.\n"
+            "- Manager review of a projection or duplicate -> `revops_review`.\n"
+            "- Deal policy breach -> `deal_audit`; proof pack -> `evidence_compile`.\n"
+            "- Human deviation -> `human_audit_assist`; price leakage -> `pricing_guard`.\n"
+            "- Quality/performance degradation -> `performance_watch`.\n"
+            "- Prohibited: projecting without a stated rate or presenting an estimate as measured.\n"
+        ),
+        "stages": {
+            "revenue_analysis": _role_stage(
+                "Revenue Analysis",
+                "Report weighted pipeline, goal gap, and closed revenue with source, window, and stated rates.",
+                ["crm_pipeline_stats", "crm_list_deals", "crm_merge_deals",
+                 "calculator", "sql_query", "rag_search", "send_email", "current_datetime"],
+                ["crm_update_deal", "crm_delete_deal"],
+                side_effects=True,
+            ),
+            "revops_review": _role_stage(
+                "Revenue Operations Review",
+                "Reconcile forecast against the prior reading; explain deltas before commenting on results.",
+                ["ask_team_manager", "request_build", "notify_human", "crm_pipeline_stats",
+                 "crm_list_deals", "calculator", "sql_query", "rag_search", "current_datetime"],
+                ["crm_merge_deals", "send_email", "crm_update_deal", "crm_delete_deal"],
+                side_effects=False,
+            ),
+            "deal_audit": _role_stage(
+                "Deal Audit",
+                "Check a CrmDeal against policy using ledger evidence; record findings with source, calculation, and proof.",
+                ["sql_query", "crm_update_deal", "http_request", "calculator", "web_search"],
+                ["crm_merge_deals", "crm_delete_deal"],
+                side_effects=True,
+            ),
+            "evidence_compile": _role_stage(
+                "Evidence Compile",
+                "Assemble the three-layer evidence pack from existing records; never fill gaps with inference.",
+                ["sql_query", "read_file", "http_request"],
+                ["crm_update_deal", "crm_delete_deal"],
+            ),
+            "human_audit_assist": _role_stage(
+                "Human Audit Assist",
+                "Surface human deviations as findings with evidence and a pending action, not as a verdict or punishment.",
+                ["sql_query", "web_search", "http_request"],
+                ["crm_update_deal", "crm_delete_deal"],
+            ),
+            "pricing_guard": _role_stage(
+                "Pricing Guard",
+                "Block out-of-policy proposals with the computed number and the exact rule; force human approval.",
+                ["sql_query", "crm_update_deal", "http_request", "calculator"],
+                ["crm_merge_deals", "crm_delete_deal"],
+                side_effects=True,
+            ),
+            "performance_watch": _role_stage(
+                "Performance Watch",
+                "Detect agent/model degradation from measured telemetry; report severity, evidence, and what remains unknown.",
+                ["sql_query", "web_search", "http_request", "calculator"],
+                ["crm_update_deal", "crm_delete_deal"],
             ),
         },
     },

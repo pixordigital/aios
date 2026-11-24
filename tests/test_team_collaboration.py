@@ -10,10 +10,12 @@ Covers the three things the owner asked for:
 """
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
 from aios.core.agent import is_failed_run
 from aios.core.meetings import report_targets, report_text
+from aios.core.org_bootstrap import ORCHESTRATOR_MARKER
 from aios.db.models import (
     Agent,
     ChannelConnection,
@@ -29,6 +31,27 @@ from aios.tools.team_collaboration import (
     NotifyHumanTool,
     _hops,
 )
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def test_session(monkeypatch):
+    """Self-contained DB: this file also runs under `--noconftest`."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from aios.db.engine import Base
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    # Both import paths create sessions at call time; point both here so no
+    # test in the file can reach the env-configured (possibly live) DB.
+    monkeypatch.setattr("aios.db.engine.async_session", factory)
+    monkeypatch.setattr("aios.db.backends.sqlalchemy_backend.async_session", factory)
+    async with factory() as sess:
+        yield sess
+    await engine.dispose()
+
 
 # ── fixtures ─────────────────────────────────────────────────────────────
 
@@ -66,6 +89,33 @@ async def _agent(session, org, name: str) -> Agent:
 async def _join(session, team, agent) -> None:
     await session.execute(team_agents.insert().values(team_id=team.id, agent_id=agent.id))
     await session.commit()
+
+
+async def _coordinator(session, org) -> Agent:
+    """The bootstrap marker, deliberately with no team_agents link."""
+    agent = Agent(
+        org_id=org.id,
+        name="Orchestrator Business",
+        agent_type="orchestrator",
+        system_prompt="",
+        tools=[],
+        status="active",
+        extra_data={"business_setup": ORCHESTRATOR_MARKER},
+    )
+    session.add(agent)
+    await session.commit()
+    await session.refresh(agent)
+    return agent
+
+
+class _StubRuntime:
+    """No provider call: every manager reply is canned."""
+
+    def __init__(self, agent, _db):
+        self.agent = agent
+
+    async def run(self, conv_id, prompt, db=None):
+        return "resposta de teste"
 
 
 class _Conn:
@@ -214,6 +264,122 @@ async def test_ask_team_manager_refuses_own_team(test_session):
 
     assert out["ok"] is False
     assert "your own team" in out["error"]
+
+
+async def test_coordinator_can_ask_any_team_without_being_a_member(test_session, monkeypatch):
+    """CEO-style coordinator is teamless by design; it speaks for the org."""
+    org = await _org(test_session, "teamless-ceo")
+    sales = await _team(test_session, org, "sales")
+    mgr = await _agent(test_session, org, "sales-manager")
+    sales.manager_agent_id = mgr.id
+    coordinator = await _coordinator(test_session, org)
+    await test_session.commit()
+
+    monkeypatch.setattr(
+        "aios.core.orchestrator._get_runtime", lambda a, db=None: _StubRuntime(a, db)
+    )
+    tool = AskTeamManagerTool()
+    tool._org_id, tool._agent_id = org.id, coordinator.id
+    out = await tool.run(to_team="sales", question="qual o status do time?")
+
+    assert out["ok"] is True
+    assert out["manager"] == "sales-manager"
+    conv = await test_session.get(Conversation, out["conversation_id"])
+    assert conv.team_id == sales.id  # target team owns the thread
+    assert conv.extra_data["collab"]["from_team_id"] == f"org:{org.id}"
+    msgs = (await test_session.execute(
+        select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at)
+    )).scalars().all()
+    assert msgs[0].extra_data["from_team_id"] == f"org:{org.id}"
+    assert msgs[1].agent_id == mgr.id
+
+
+async def test_coordinator_can_name_a_team_without_joining_it(test_session, monkeypatch):
+    """from_team is informational for the coordinator, not a membership proof."""
+    org = await _org(test_session, "ceo-from-team")
+    sales = await _team(test_session, org, "sales")
+    dev = await _team(test_session, org, "dev")
+    sales_mgr = await _agent(test_session, org, "sales-manager")
+    sales.manager_agent_id = sales_mgr.id
+    coordinator = await _coordinator(test_session, org)
+    await test_session.commit()
+
+    monkeypatch.setattr(
+        "aios.core.orchestrator._get_runtime", lambda a, db=None: _StubRuntime(a, db)
+    )
+    tool = AskTeamManagerTool()
+    tool._org_id, tool._agent_id = org.id, coordinator.id
+    out = await tool.run(to_team="sales", question="qual o status?", from_team="dev")
+
+    assert out["ok"] is True
+    conv = await test_session.get(Conversation, out["conversation_id"])
+    assert conv.extra_data["collab"]["from_team_id"] == dev.id
+
+
+async def test_ask_team_manager_rejects_spoofed_from_team(test_session, monkeypatch):
+    """A teamed manager cannot claim another team's identity."""
+    org = await _org(test_session, "spoof")
+    sales = await _team(test_session, org, "sales")
+    dev = await _team(test_session, org, "dev")
+    sales_mgr = await _agent(test_session, org, "sales-manager")
+    dev_mgr = await _agent(test_session, org, "dev-manager")
+    sales.manager_agent_id, dev.manager_agent_id = sales_mgr.id, dev_mgr.id
+    await _join(test_session, sales, sales_mgr)
+    await _join(test_session, dev, dev_mgr)
+    await test_session.commit()
+
+    ran = []
+    monkeypatch.setattr("aios.core.orchestrator._get_runtime", lambda a, db=None: ran.append(a.id))
+
+    tool = AskTeamManagerTool()
+    tool._org_id, tool._agent_id = org.id, sales_mgr.id
+    out = await tool.run(to_team="dev", question="qual o status?", from_team="dev")
+
+    assert out["ok"] is False
+    assert "not your team" in out["error"]
+    assert ran == []
+    assert (await test_session.execute(select(Conversation))).scalars().all() == []
+
+
+async def test_coordinator_still_cannot_ask_its_claimed_own_team(test_session, monkeypatch):
+    """Naming a team as from_team keeps the self-team guard for the coordinator."""
+    org = await _org(test_session, "ceo-self-team")
+    sales = await _team(test_session, org, "sales")
+    coordinator = await _coordinator(test_session, org)
+    sales.manager_agent_id = (await _agent(test_session, org, "sales-manager")).id
+    await test_session.commit()
+
+    ran = []
+    monkeypatch.setattr("aios.core.orchestrator._get_runtime", lambda a, db=None: ran.append(a.id))
+
+    tool = AskTeamManagerTool()
+    tool._org_id, tool._agent_id = org.id, coordinator.id
+    out = await tool.run(to_team="sales", question="qual o status?", from_team="sales")
+
+    assert out["ok"] is False
+    assert "your own team" in out["error"]
+    assert ran == []
+
+
+async def test_unmarked_teamless_agent_cannot_ask_a_manager(test_session, monkeypatch):
+    """Only the bootstrap marker grants org-scoped reach; a random agent does not."""
+    org = await _org(test_session, "unmarked")
+    sales = await _team(test_session, org, "sales")
+    mgr = await _agent(test_session, org, "sales-manager")
+    sales.manager_agent_id = mgr.id
+    rogue = await _agent(test_session, org, "rogue")
+    await test_session.commit()
+
+    ran = []
+    monkeypatch.setattr("aios.core.orchestrator._get_runtime", lambda a, db=None: ran.append(a.id))
+
+    tool = AskTeamManagerTool()
+    tool._org_id, tool._agent_id = org.id, rogue.id
+    out = await tool.run(to_team="sales", question="qual o status?")
+
+    assert out["ok"] is False
+    assert "could not resolve your own team" in out["error"]
+    assert ran == []
 
 
 async def test_ask_team_manager_requires_resolved_org(test_session):

@@ -1,8 +1,10 @@
-# AIOS — Coolify 1-Click (enterprise: app + worker + postgres + redis + otel)
+# AIOS — Coolify 1-Click (enterprise: app + worker + Supabase DB + postgres/evolution + redis + otel)
 # Deploy: Coolify → New Resource → Docker Compose (Raw) → paste this file
 # Docs: COOLIFY_SETUP.md
 
 services:
+  # Standalone Postgres is NOT the AIOS main DB. Kept only for Evolution's
+  # own schema; AIOS app/worker use Supabase via AIOS_SUPABASE_DATABASE_URL.
   postgres:
     image: pgvector/pgvector:pg15
     # Sized for a 4 vCPU / 8GB host shared with Coolify and other apps.
@@ -132,7 +134,8 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in Coolify}
       AIOS_DEBUG: "false"
       AIOS_APP_URL: ${AIOS_APP_URL:-https://178.105.181.38}
-      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}@postgres:5432/${POSTGRES_DB:-aios}"
+      # Supabase is the main DB. Search path/schema are set in aios/db/engine.py.
+      AIOS_DATABASE_URL: ${AIOS_SUPABASE_DATABASE_URL:?Set AIOS_SUPABASE_DATABASE_URL in Coolify (Supabase DSN)}
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in Coolify}@redis:6379/0"
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
       AIOS_ADMIN_MASTER_KEY: ${AIOS_ADMIN_MASTER_KEY:-}
@@ -178,6 +181,13 @@ services:
       AIOS_CALCOM_API_VERSION: ${AIOS_CALCOM_API_VERSION:-2024-08-13}
       AIOS_CALCOM_EVENT_TYPE_ID: ${AIOS_CALCOM_EVENT_TYPE_ID:-0}
       AIOS_CALCOM_TIMEZONE: ${AIOS_CALCOM_TIMEZONE:-America/Sao_Paulo}
+      # ARVO integration: off by default; deploy both peers together; keys via Coolify env.
+      AIOS_ARVO_INTEGRATION_ENABLED: ${AIOS_ARVO_INTEGRATION_ENABLED:-false}
+      AIOS_ARVO_BASE_URL: ${AIOS_ARVO_BASE_URL:-}
+      AIOS_ARVO_SERVICE_KEY_ID: ${AIOS_ARVO_SERVICE_KEY_ID:-}
+      AIOS_ARVO_SERVICE_KEY: ${AIOS_ARVO_SERVICE_KEY:-}
+      AIOS_ARVO_ALLOWED_ORGS: ${AIOS_ARVO_ALLOWED_ORGS:-}
+      AIOS_ARVO_SERVICE_KEYS: ${AIOS_ARVO_SERVICE_KEYS:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel:4318"
       AIOS_LOG_FORMAT: "json"
       AIOS_HTTPS_ONLY: "true"
@@ -216,7 +226,8 @@ services:
       AIOS_LLM_PROVIDER: ${AIOS_LLM_PROVIDER:-openrouter}
       AIOS_LITELLM_BASE_URL: ${AIOS_LITELLM_BASE_URL:-http://litellm:4000}
       AIOS_LITELLM_API_KEY: ${AIOS_LITELLM_API_KEY:-sk-litellm}
-      AIOS_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-aios}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in Coolify}@postgres:5432/${POSTGRES_DB:-aios}"
+      # Same Supabase DSN as app; worker must never fall back to standalone postgres.
+      AIOS_DATABASE_URL: ${AIOS_SUPABASE_DATABASE_URL:?Set AIOS_SUPABASE_DATABASE_URL in Coolify (Supabase DSN)}
       AIOS_REDIS_URL: "redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in Coolify}@redis:6379/0"
       AIOS_JWT_SECRET: ${AIOS_JWT_SECRET}
       AIOS_LOG_FORMAT: "json"
@@ -228,6 +239,13 @@ services:
       AIOS_CALCOM_API_VERSION: ${AIOS_CALCOM_API_VERSION:-2024-08-13}
       AIOS_CALCOM_EVENT_TYPE_ID: ${AIOS_CALCOM_EVENT_TYPE_ID:-0}
       AIOS_CALCOM_TIMEZONE: ${AIOS_CALCOM_TIMEZONE:-America/Sao_Paulo}
+      # ARVO integration: off by default; deploy both peers together; keys via Coolify env.
+      AIOS_ARVO_INTEGRATION_ENABLED: ${AIOS_ARVO_INTEGRATION_ENABLED:-false}
+      AIOS_ARVO_BASE_URL: ${AIOS_ARVO_BASE_URL:-}
+      AIOS_ARVO_SERVICE_KEY_ID: ${AIOS_ARVO_SERVICE_KEY_ID:-}
+      AIOS_ARVO_SERVICE_KEY: ${AIOS_ARVO_SERVICE_KEY:-}
+      AIOS_ARVO_ALLOWED_ORGS: ${AIOS_ARVO_ALLOWED_ORGS:-}
+      AIOS_ARVO_SERVICE_KEYS: ${AIOS_ARVO_SERVICE_KEYS:-}
     volumes:
       - app-data:/data
     depends_on:

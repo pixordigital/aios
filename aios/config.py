@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,11 @@ class Settings(BaseSettings):
     # every cost figure in the product moved with the real exchange rate and
     # nobody could change it without editing a dozen files.
     usd_brl_rate: float = 5.5
+    # Per-run USD ceiling for agents without an ICM stage binding. Stage
+    # manifests stay authoritative; this only replaces the old unbounded
+    # default for the ~2/3 of prod agents that declare no stage cap.
+    # Env: AIOS_UNBOUND_AGENT_MAX_COST_USD (positive, finite only).
+    unbound_agent_max_cost_usd: float = Field(default=1.0, gt=0.0, le=100.0, allow_inf_nan=False)
     crm_webhook_url: str = ""
     database_url: str = "sqlite+aiosqlite:///./aios.db"
     db_pool_size: int = 5
@@ -200,7 +206,13 @@ class Settings(BaseSettings):
     arvo_base_url: str = ""
     arvo_service_key_id: str = ""
     arvo_service_key: str = ""
-
+    # CSV de org ids ARVO permitidos no inbound (context/deals/events/SSO).
+    # Env: AIOS_ARVO_ALLOWED_ORGS. Vazio = sem restrição (comportamento legado).
+    arvo_allowed_orgs: str = ""
+    # Rotação HMAC: CSV `kid:secret,kid2:secret2` aceito no inbound.
+    # Env: AIOS_ARVO_SERVICE_KEYS. Vazio = só a chave primária (comportamento atual).
+    # Assinatura outbound continua usando arvo_service_key_id/arvo_service_key.
+    arvo_service_keys: str = ""
 
 
 settings = Settings()
@@ -237,6 +249,30 @@ MODEL_ROLE_MIN_TIER: dict[str, str | None] = {
     "auditor": "openai/gpt-4o",
     "watcher": "openai/gpt-4o-mini",
     "business": "openai/gpt-4o-mini",
+    "orchestrator_business": "openai/gpt-4o",
+    "manager_sales": "openai/gpt-4o",
+    "manager_dev": "openai/gpt-4o",
+    "manager_red": "openai/gpt-4o",
+    "manager_blue": "openai/gpt-4o",
+    "manager_data": "openai/gpt-4o",
+    "media_manager": "openai/gpt-4o",
+    "red": "openai/gpt-4o",
+    "blue": "openai/gpt-4o",
+    "lead_finder": "openai/gpt-4o-mini",
+    "customer_success": "openai/gpt-4o-mini",
+    "manager_marketing": "openai/gpt-4o-mini",
+    "manager_cs": "openai/gpt-4o-mini",
+    "manager_revops": "openai/gpt-4o-mini",
+    "deal_auditor": "openai/gpt-4o-mini",
+    "pricing_guardian": "openai/gpt-4o-mini",
+    "human_auditor": "openai/gpt-4o-mini",
+    "evidence_compiler": "openai/gpt-4o-mini",
+    "performance_watcher": "openai/gpt-4o-mini",
+    "market_intelligence": "openai/gpt-4o-mini",
+    "content_strategist": "openai/gpt-4o-mini",
+    "content_producer": "openai/gpt-4o-mini",
+    "marketing": "openai/gpt-4o-mini",
+    "revops": "openai/gpt-4o-mini",
     "custom": None,
 }
 

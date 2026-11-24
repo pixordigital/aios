@@ -38,6 +38,17 @@ AUTONOMY_POLICY = {
 }
 
 
+def _agent_extra(agent, workspace_id: str, stage_id: str) -> dict:
+    """Build the agent's extra_data. Rerunning converges on this exact shape."""
+    extra = dict(agent.extra_data or {})
+    extra["icm"] = {"workspace_id": workspace_id, "stage_id": stage_id}
+    if agent.name in AGENT_EVENTS:
+        extra["event_subscriptions"] = AGENT_EVENTS[agent.name]
+    else:
+        extra.pop("event_subscriptions", None)
+    return extra
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org-id", required=True)
@@ -66,11 +77,7 @@ async def main() -> int:
             if args.dry_run:
                 print(f"would bind {agent.name} -> {workspace_id}/{stage_id}")
                 continue
-            extra = dict(agent.extra_data or {})
-            extra["icm"] = {"workspace_id": workspace_id, "stage_id": stage_id}
-            if agent.name in AGENT_EVENTS:
-                extra["event_subscriptions"] = AGENT_EVENTS[agent.name]
-            agent.extra_data = extra
+            agent.extra_data = _agent_extra(agent, workspace_id, stage_id)
             governance = dict(agent.governance_config or {})
             governance.update(AUTONOMY_POLICY)
             agent.governance_config = governance

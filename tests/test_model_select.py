@@ -1,6 +1,6 @@
 """Model selection is a recommendation, so its rules must be testable offline."""
 
-from aios.core.model_select import profile_for, rank
+from aios.core.model_select import TYPE_PROFILE, profile_for, rank
 
 
 def _model(mid, pin, pout, *, ctx=200_000, intel=None, coding=None, agentic=None,
@@ -44,3 +44,11 @@ def test_batch_free_and_tool_less_models_are_not_candidates():
     profile = profile_for("manager")
     assert profile["tools"] is True
     assert [p.model for p in rank("manager", pool)] == ["d/ok"]
+
+
+def test_media_agent_types_keep_their_profiles():
+    """Media roles must not fall back to the generic "custom" profile."""
+    assert TYPE_PROFILE["media_manager"] == "manager"
+    assert TYPE_PROFILE["market_intelligence"] == "prospector"
+    assert TYPE_PROFILE["content_strategist"] == "business"
+    assert TYPE_PROFILE["content_producer"] == "business"

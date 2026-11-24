@@ -56,8 +56,10 @@ async def cron_tick_job(ctx):
 async def telemetry_flush_job(ctx):
     """Flush metrics accumulated in this process; the API loop cannot see them."""
     try:
+        from aios.core.audit_sink import mirror_telemetry
         from aios.core.telemetry import telemetry
 
+        mirror_telemetry(telemetry)  # best-effort; independent sink before DB clears buffer
         await telemetry.flush_to_db()
     except Exception:
         logging.getLogger(__name__).exception("telemetry flush job failed")

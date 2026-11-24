@@ -8,6 +8,17 @@ PHASE1_ROLES = (
     "Content Strategist",
     "Content Producer",
 )
+PHASE2_ROLES = ("Quality & Risk Reviewer", "Distribution & Community Manager")
+PHASE3_ROLES = ("Growth & Performance Analyst",)
+
+ROLE_PHASES = {
+    **{role: 1 for role in PHASE1_ROLES},
+    **{role: 2 for role in PHASE2_ROLES},
+    **{role: 3 for role in PHASE3_ROLES},
+}
+
+# Phase 2/3 specs are drafts behind a human gate: no workflow exists yet.
+_NOT_READY_HUMAN_GATE = {"workflow_status": "not_ready", "human_gate": True}
 
 ROLE_SPECS: dict[str, dict] = {
     "Media Manager": {
@@ -105,6 +116,7 @@ ROLE_SPECS: dict[str, dict] = {
             "episodic": {"enabled": True, "summarize_after": 15},
         },
         "governance_config": {
+            **_NOT_READY_HUMAN_GATE,
             "autonomy": "draft",
             "autonomous": False,
             "max_trials": 3,
@@ -141,6 +153,7 @@ ROLE_SPECS: dict[str, dict] = {
             "episodic": {"enabled": True, "summarize_after": 15},
         },
         "governance_config": {
+            **_NOT_READY_HUMAN_GATE,
             "autonomy": "draft",
             "autonomous": False,
             "max_trials": 3,
@@ -175,6 +188,7 @@ ROLE_SPECS: dict[str, dict] = {
             "episodic": {"enabled": True, "summarize_after": 15},
         },
         "governance_config": {
+            **_NOT_READY_HUMAN_GATE,
             "autonomy": "draft",
             "autonomous": False,
             "max_trials": 3,
@@ -345,6 +359,14 @@ def analyze_performance(rows: list[dict]) -> dict:
 def _self_check() -> None:
     assert len(ROLE_SPECS) == 7
     assert len(PHASE1_ROLES) == 4
+    assert len(PHASE2_ROLES) == 2
+    assert len(PHASE3_ROLES) == 1
+    assert set(ROLE_PHASES) == set(ROLE_SPECS)
+    for role in (*PHASE2_ROLES, *PHASE3_ROLES):
+        gov = agent_config(role)["governance_config"]
+        assert gov["workflow_status"] == "not_ready"
+        assert gov["human_gate"] is True
+        assert gov["autonomous"] is False
     assert [agent_config(role)["agent_type"] for role in PHASE1_ROLES] == [
         "media_manager",
         "market_intelligence",

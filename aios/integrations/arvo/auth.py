@@ -9,6 +9,7 @@ import hmac
 import secrets
 import threading
 import time
+from urllib.parse import parse_qsl, urlencode
 
 _PATH = "/api/integrations"
 _CLOCK_SKEW = 300  # segundos de tolerância de timestamp
@@ -45,16 +46,45 @@ def _body_hash(body: bytes | None) -> str:
     return hashlib.sha256(body or b"").hexdigest()
 
 
-def _canonical(key_id: str, ts: str, nonce: str, method: str, path: str, bhash: str) -> str:
-    return f"{key_id}.{ts}.{nonce}.{method}.{path}.{bhash}"
+def _normalize_query(query: str | None) -> str:
+    """Canonical query: sorted pairs, blank values kept; empty -> ''."""
+    if not query:
+        return ""
+    return urlencode(sorted(parse_qsl(query, keep_blank_values=True)))
 
 
-def sign_request(method: str, path: str, body: bytes | None, key_id: str, key: str) -> dict[str, str]:
+def _canonical(
+    key_id: str,
+    ts: str,
+    nonce: str,
+    method: str,
+    path: str,
+    bhash: str,
+    query: str = "",
+    idempotency_key: str = "",
+) -> str:
+    return f"{key_id}.{ts}.{nonce}.{method}.{path}.{query}.{idempotency_key}.{bhash}"
+
+
+def sign_request(
+    method: str,
+    path: str,
+    body: bytes | None,
+    key_id: str,
+    key: str,
+    query: str = "",
+    idempotency_key: str = "",
+) -> dict[str, str]:
     """Headers de assinatura para request outbound."""
     ts = str(int(time.time()))
     nonce = secrets.token_hex(16)
     sig = hmac.new(
-        key.encode(), _canonical(key_id, ts, nonce, method, path, _body_hash(body)).encode(), hashlib.sha256
+        key.encode(),
+        _canonical(
+            key_id, ts, nonce, method, path, _body_hash(body),
+            _normalize_query(query), idempotency_key or "",
+        ).encode(),
+        hashlib.sha256,
     ).hexdigest()
     return {
         "X-Service-Key-Id": key_id,
@@ -62,6 +92,18 @@ def sign_request(method: str, path: str, body: bytes | None, key_id: str, key: s
         "X-Service-Nonce": nonce,
         "X-Service-Signature": sig,
     }
+
+
+def verification_keys(primary_kid: str, primary_key: str, key_map: str, kid: str) -> list[str]:
+    """Secrets aceitas para `kid`: mapa CSV `kid:secret,...` primeiro, primária depois."""
+    candidates: list[str] = []
+    for entry in (key_map or "").split(","):
+        mapped_kid, sep, secret = entry.strip().partition(":")
+        if sep and mapped_kid == kid and secret:
+            candidates.append(secret)
+    if kid == primary_kid and primary_key and primary_key not in candidates:
+        candidates.append(primary_key)
+    return candidates
 
 
 def verify_request(
@@ -73,6 +115,8 @@ def verify_request(
     body: bytes | None,
     signature: str,
     key: str,
+    query: str = "",
+    idempotency_key: str = "",
 ) -> bool:
     """Valida assinatura inbound. Segurança:
     - comparação constante de tempo contra leak de canal lateral (hmac.compare_digest)
@@ -88,7 +132,10 @@ def verify_request(
 
     expected = hmac.new(
         key.encode(),
-        _canonical(key_id, ts, nonce, method, path, _body_hash(body)).encode(),
+        _canonical(
+            key_id, ts, nonce, method, path, _body_hash(body),
+            _normalize_query(query), idempotency_key or "",
+        ).encode(),
         hashlib.sha256,
     ).hexdigest()
     if not hmac.compare_digest(expected, signature):
