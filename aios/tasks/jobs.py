@@ -4,8 +4,10 @@ Each top-level function is a job ARQ can execute.
 Registered in FUNCTIONS list for the worker to discover.
 """
 
+import hashlib
 import json
 import logging
+import uuid
 
 from aios.core.delivery import deliver_message
 
@@ -14,6 +16,23 @@ logger = logging.getLogger(__name__)
 
 _INBOUND_MAX_RETRIES = 3
 _INBOUND_BASE_DELAY_S = 5.0
+_INBOUND_LOCK_TTL_S = 330
+_INBOUND_LOCK_DEFER_S = 5
+_INBOUND_LOCK_MAX_WAITS = 120
+
+
+def _inbound_lock_key(
+    channel_connection_id: str, contact: str, conversation_id: str, extra: dict
+) -> str:
+    identity = (
+        contact
+        or conversation_id
+        or extra.get("msg_id")
+        or extra.get("message_id")
+        or uuid.uuid4().hex
+    )
+    raw = f"{channel_connection_id}:{identity}".encode("utf-8")
+    return "aios:inbound:lock:" + hashlib.sha256(raw).hexdigest()[:32]
 
 
 async def process_inbound(
@@ -25,6 +44,7 @@ async def process_inbound(
     user_id: str = "",
     extra_data: str = "{}",
     attempt: int = 1,
+    lock_wait: int = 0,
 ):
     """Process an inbound message from any channel, with retry + DLQ.
 
@@ -32,6 +52,54 @@ async def process_inbound(
     Transient failures re-enqueue with backoff; after max attempts the
     message lands in the dead-letter queue.
     """
+    try:
+        extra = json.loads(extra_data) if isinstance(extra_data, str) else extra_data
+    except (json.JSONDecodeError, TypeError):
+        extra = {}
+    if not isinstance(extra, dict):
+        extra = {}
+    contact = extra.get("from_number") or extra.get("email") or user_id or ""
+    lock_key = _inbound_lock_key(channel_connection_id, contact, conversation_id, extra)
+    owner = uuid.uuid4().hex
+
+    pool = None
+    acquired = True
+    try:
+        from aios.tasks.queue import acquire_lease, get_redis_pool, release_lease
+
+        pool = await get_redis_pool()
+        acquired = await acquire_lease(pool, lock_key, owner, _INBOUND_LOCK_TTL_S)
+    except Exception:
+        logger.warning("process_inbound: Redis lease unavailable, processing unlocked")
+        release_lease = None
+
+    wait_count = int(lock_wait or 0)
+    if not acquired:
+        if wait_count >= _INBOUND_LOCK_MAX_WAITS:
+            from aios.core.dead_letter import write_dlq
+
+            await write_dlq(
+                direction="inbound",
+                channel_type=channel_type,
+                job_name="aios.tasks.jobs.process_inbound",
+                payload={
+                    "args": [channel_type, channel_connection_id, conversation_id, text, user_id, extra_data],
+                    "kwargs": {},
+                },
+                error=f"inbound lock wait exhausted after {wait_count} defers",
+                channel_connection_id=channel_connection_id,
+                conversation_id=conversation_id or None,
+            )
+            return
+        logger.info("process_inbound: thread busy, deferring %s", lock_key)
+        await pool.enqueue_job(
+            "aios.tasks.jobs.process_inbound",
+            channel_type, channel_connection_id, conversation_id, text, user_id, extra_data,
+            attempt, wait_count + 1,
+            _defer_by=_INBOUND_LOCK_DEFER_S,
+        )
+        return
+
     try:
         await _process_inbound_once(
             ctx, channel_type, channel_connection_id, conversation_id, text, user_id, extra_data
@@ -41,8 +109,8 @@ async def process_inbound(
                        attempt, _INBOUND_MAX_RETRIES, channel_type, conversation_id[:8], exc)
         if attempt < _INBOUND_MAX_RETRIES:
             from aios.tasks.queue import get_redis_pool
-            pool = await get_redis_pool()
-            await pool.enqueue_job(
+            retry_pool = pool or await get_redis_pool()
+            await retry_pool.enqueue_job(
                 "aios.tasks.jobs.process_inbound",
                 channel_type, channel_connection_id, conversation_id, text, user_id, extra_data,
                 attempt + 1,
@@ -64,6 +132,12 @@ async def process_inbound(
             )
             logger.error("DLQ: inbound %s/%s failed after %d attempts",
                          channel_type, conversation_id[:8], _INBOUND_MAX_RETRIES)
+    finally:
+        if pool is not None and release_lease is not None:
+            try:
+                await release_lease(pool, lock_key, owner)
+            except Exception:
+                logger.warning("process_inbound: could not release lease %s", lock_key)
 
 
 def _reply_meta(agent_or_team) -> dict:
