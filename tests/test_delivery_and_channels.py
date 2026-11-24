@@ -215,19 +215,6 @@ def test_voice_call_meters_a_queued_call():
     )
 
 
-# ─── flow editor offered tools that do not exist ──────────────────────────
-
-def test_flow_palette_only_offers_real_tools():
-    import aios.tools  # noqa: F401
-    from aios.tools.registry import TOOL_REGISTRY
-
-    src = (ROOT / "aios/dashboard/templates/flow_editor.html").read_text()
-    import re
-
-    offered = set(re.findall(r'data-tool="([\w_]+)"', src))
-    missing = sorted(offered - set(TOOL_REGISTRY))
-    assert not missing, f"flow palette offers unregistered tools: {missing}"
-
 # ─── inbound email died on a NameError before dispatching ─────────────────
 
 async def test_inbound_email_dispatches_to_the_explicit_channel(

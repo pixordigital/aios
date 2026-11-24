@@ -308,7 +308,7 @@ async def toggle_view_mode(request: Request):
     current = request.cookies.get(VIEW_MODE_COOKIE, "simple")
     new_mode = "pro" if current == "simple" else "simple"
     referer = request.headers.get("referer") or "/dashboard"
-    if new_mode == "simple" and any(seg in referer for seg in ["/sandbox", "/lab", "/flows", "/contracts", "/control-center"]):
+    if new_mode == "simple" and any(seg in referer for seg in ["/sandbox", "/lab", "/contracts", "/control-center"]):
         referer = "/dashboard"
     resp = RedirectResponse(referer, status_code=303)
     resp.set_cookie(VIEW_MODE_COOKIE, new_mode, max_age=86400 * 365, path="/")
@@ -319,7 +319,7 @@ async def toggle_view_mode(request: Request):
 async def set_view_mode(request: Request, mode: str):
     target_mode = "pro" if mode in ["pro", "advanced", "avancado"] else "simple"
     referer = request.headers.get("referer") or "/dashboard"
-    if target_mode == "simple" and any(seg in referer for seg in ["/sandbox", "/lab", "/flows", "/contracts", "/control-center"]):
+    if target_mode == "simple" and any(seg in referer for seg in ["/sandbox", "/lab", "/contracts", "/control-center"]):
         referer = "/dashboard"
     resp = RedirectResponse(referer, status_code=303)
     resp.set_cookie(VIEW_MODE_COOKIE, target_mode, max_age=86400 * 365, path="/")
@@ -4677,10 +4677,6 @@ async def crm_merge(request: Request):
         keep_deal.value = total_value
         await db.commit()
     return RedirectResponse("/dashboard/crm", status_code=303)
-
-@router.get("/flows", response_class=HTMLResponse)
-async def flows_page(request: Request, wf: str = ""):
-    return await _render("flow_editor.html", request, title="Flow Editor", wf_id=wf)
 
 @router.get("/knowledge", response_class=HTMLResponse)
 async def knowledge_page(request: Request):
