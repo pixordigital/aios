@@ -55,9 +55,21 @@
   #team-map .halo { transition: opacity .3s ease; }
   #team-map .halo.hot { animation: map-pulse 2s ease-in-out infinite; }
   @keyframes map-pulse { 0%, 100% { opacity: .55; } 50% { opacity: .15; } }
+  #team-map .flow { opacity:0;pointer-events:none; }
+  #team-map .flow.live { opacity:.95;animation:map-flow 1.15s linear infinite; }
+  @keyframes map-flow { from { stroke-dashoffset:1; } to { stroke-dashoffset:0; } }
+  #team-map .cross { stroke:var(--amber);stroke-dasharray:5 5;opacity:.6;animation:cross-drift 3s linear infinite; }
+  @keyframes cross-drift { to { stroke-dashoffset:-20; } }
+  #team-map .cross.live { opacity:1;animation:map-pulse 1.6s ease-in-out infinite; }
+  #team-map g.node.working rect.frame { stroke:var(--green);stroke-width:1.8; }
+  #team-map g.node.working .work-dot { animation:work-blink 1.1s ease-in-out infinite; }
+  @keyframes work-blink { 0%,100% { opacity:.35; } 50% { opacity:1; } }
+  #team-map g.ceo rect.frame { stroke:var(--amber);stroke-width:2; }
+  #team-map g.ceo.working rect.frame { animation:map-pulse 2s ease-in-out infinite; }
   @media (prefers-reduced-motion: reduce) {
-    #team-map .connection,#team-map .enter,#team-map .halo.hot { animation:none; }
+    #team-map .connection,#team-map .enter,#team-map .halo.hot,#team-map .flow.live,#team-map .cross,#team-map .cross.live,#team-map g.node.working .work-dot,#team-map g.ceo.working rect.frame { animation:none; }
     #team-map .enter { opacity:1;transform:none; }
+    #team-map .flow.live { opacity:.85; }
     #map-panel { animation:none; }
     #team-map g.dim, #team-map g.node { transition: none; }
   }
@@ -92,8 +104,8 @@
 <section class="map-page" aria-labelledby="map-title">
 <header class="map-heading">
     <div>
-        <h1 id="map-title">Mapa de equipes</h1>
-        <p class="map-description">Veja quem coordena cada equipe, quais assistentes fazem parte dela e onde há pessoas compartilhadas entre times.</p>
+        <h1 id="map-title">Organograma das equipes</h1>
+        <p class="map-description">Organograma ao vivo: a coordenação geral no topo, cada equipe como departamento, seu líder e os assistentes abaixo. Linhas mostram quem trabalha com quem.</p>
     </div>
     <div class="map-heading-actions">
         <span id="map-live" aria-live="polite" class="map-live" title="Atividade recente atualizada automaticamente"><span class="map-live-dot" aria-hidden="true"></span><span id="map-live-label">Conectando…</span></span>
@@ -102,8 +114,8 @@
 <div class="map-stats" aria-label="Resumo da estrutura">
     <div class="map-stat"><span class="map-stat-icon" aria-hidden="true">▦</span><div><div class="map-stat-value" id="stat-teams">0</div><div class="map-stat-label">Equipes</div></div></div>
     <div class="map-stat"><span class="map-stat-icon" aria-hidden="true">◉</span><div><div class="map-stat-value" id="stat-agents">0</div><div class="map-stat-label">Assistentes</div></div></div>
+    <div class="map-stat"><span class="map-stat-icon" aria-hidden="true">●</span><div><div class="map-stat-value" id="stat-active">0</div><div class="map-stat-label">Em atividade agora</div></div></div>
     <div class="map-stat"><span class="map-stat-icon" aria-hidden="true">↔</span><div><div class="map-stat-value" id="stat-shared">0</div><div class="map-stat-label">Em mais de uma equipe</div></div></div>
-    <div class="map-stat"><span class="map-stat-icon" aria-hidden="true">＋</span><div><div class="map-stat-value" id="stat-unassigned">0</div><div class="map-stat-label">Sem equipe</div></div></div>
 </div>
 <div class="map-toolbar">
     <label class="map-search-wrap">
@@ -125,12 +137,15 @@
     <span class="map-legend-item"><span class="map-legend-mark member"></span>Assistente</span>
     <span class="map-legend-item"><span class="map-legend-line shared"></span>Compartilhado</span>
     <span class="map-legend-item"><span class="map-legend-mark activity"></span>Atividade recente</span>
+    <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber)"></span>Coordenação geral</span>
+    <span class="map-legend-item"><span class="map-legend-line" style="border-color:var(--green)"></span>Fluxo ao vivo</span>
 </div>
 <div class="map-flow-guide" aria-label="Como ler o mapa">
     <strong>Como ler:</strong>
-    <span class="map-flow-step"><span class="map-flow-num">1</span>Equipe</span><span aria-hidden="true">→</span>
-    <span class="map-flow-step"><span class="map-flow-num">2</span>Coordenação</span><span aria-hidden="true">→</span>
-    <span class="map-flow-step"><span class="map-flow-num">3</span>Assistentes</span>
+    <span class="map-flow-step"><span class="map-flow-num">1</span>Coordenação geral</span><span aria-hidden="true">→</span>
+    <span class="map-flow-step"><span class="map-flow-num">2</span>Departamento</span><span aria-hidden="true">→</span>
+    <span class="map-flow-step"><span class="map-flow-num">3</span>Líder</span><span aria-hidden="true">→</span>
+    <span class="map-flow-step"><span class="map-flow-num">4</span>Assistentes</span>
 </div>
 <div class="card map-wrap">
     <svg id="team-map" role="group" aria-label="Mapa visual da hierarquia das equipes"></svg>
@@ -167,12 +182,10 @@
     const teams = data.nodes.filter(n => n.kind === "team");
     const agentNodes = data.nodes.filter(n => n.kind === "agent");
     const agentsById = Object.fromEntries(agentNodes.map(n => [n.id, n]));
-    const orphanCount = agentNodes.filter(n => n.orphan).length;
-    const sharedCount = agentNodes.filter(n => n.shared).length;
+    const rawId = id => String(id || "").replace(/^agent:/, "");
     document.getElementById("stat-teams").textContent = teams.length;
     document.getElementById("stat-agents").textContent = agentNodes.length;
-    document.getElementById("stat-shared").textContent = sharedCount;
-    document.getElementById("stat-unassigned").textContent = orphanCount;
+    const activeStat = document.getElementById("stat-active");
     if (!teams.length && !Object.keys(agentsById).length) {
         svg.hidden = true;
         emptyState.hidden = false;
@@ -181,14 +194,18 @@
         return;
     }
 
-    // ── layout: one org-chart column per team (team → orchestrator →
-    // manager → members), orphans in a dashed "Sem equipe" column.
-    // A shared agent gets one instance per team column so every tree is
-    // complete on its own — no tracing dashed lines across the canvas.
-    // NOTE: payload ids arrive already prefixed ("team:t1", "agent:a1") —
-    // use them verbatim. Prefixing again ("team:" + t.id) silently breaks
-    // every edge lookup and strands all members outside their teams.
-    const COL_W = 320, TEAM_W = 278, TEAM_H = 78, AG_W = 260, AG_H = 72, GAP = 13, TOP = 30;
+    // ── layout: business organogram. One coordinator on top, one department
+    // subtree per team below it (department → leader → assistants), joined by
+    // orthogonal bus connectors. Shared agents repeat per subtree so each
+    // branch reads on its own. Ids arrive prefixed ("team:t1", "agent:a1") —
+    // use verbatim; re-prefixing breaks every edge lookup.
+    const CEO_W = 320, CEO_H = 76, TEAM_W = 230, TEAM_H = 72,
+          LEAD_W = 230, LEAD_H = 66, MEM_W = 200, MEM_H = 74,
+          GAP_X = 12, GAP_TEAM = 44, ROW_GAP = 26;
+    const Y_CEO = 30;
+    const Y_TEAM = Y_CEO + CEO_H + 60;
+    const Y_LEAD = Y_TEAM + TEAM_H + ROW_GAP;
+    const Y_MEM = Y_LEAD + LEAD_H + ROW_GAP;
     const orchOf = {}, mgrOf = {}, membersOf = {}, teamsOfAgent = {};
     data.edges.forEach(e => {
         if (e.kind === "orchestrator" && agentsById[e.from]) orchOf[e.to] = e.from;
@@ -198,13 +215,17 @@
         if (agentsById[e.to]) (teamsOfAgent[e.to] = teamsOfAgent[e.to] || []).push(e.from);
     });
     const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
-    const orphans = Object.keys(agentsById).filter(id => !hasOwn(teamsOfAgent, id));
-    // rows per team: [orch?, mgr?, ...members] with leaders deduped out of members
+    const orchCount = {};
+    Object.values(orchOf).forEach(id => { orchCount[id] = (orchCount[id] || 0) + 1; });
+    const topOrch = Object.entries(orchCount).sort((a, b) => b[1] - a[1])[0];
+    const sharedOrch = topOrch && topOrch[1] > 1 ? topOrch[0] : null;
+    document.getElementById("stat-shared").textContent = agentNodes.filter(n => n.shared && n.id !== sharedOrch).length;
+    const orphans = Object.keys(agentsById).filter(id => id !== sharedOrch && !hasOwn(teamsOfAgent, id));
     const cols = teams.map(t => {
         const tid = t.id;
         const rows = [];
         const orch = orchOf[tid], mgr = mgrOf[tid];
-        if (orch) rows.push({ aid: orch, role: "orchestrator" });
+        if (orch && orch !== sharedOrch) rows.push({ aid: orch, role: "orchestrator" });
         if (mgr && mgr !== orch) rows.push({ aid: mgr, role: "manager" });
         for (const aid of membersOf[tid] || []) {
             if (aid === orch || aid === mgr) continue;
@@ -215,28 +236,43 @@
     });
     if (orphans.length) cols.push({ team: null, rows: orphans.map(id => ({ aid: id, role: "none" })) });
 
-    const pos = {}; // instance key ("aid@@tid" or team node id) -> {x, y, w, h}
-    const instOf = {}; // instance key -> {agent, role, team}
-    let maxH = 0;
-    cols.forEach((col, i) => {
-        const x = 20 + i * COL_W;
-        let y = TOP;
-        const tid = col.team ? col.team.id : null;
-        if (tid) {
-            pos[tid] = { x: x + (COL_W - TEAM_W) / 2, y, w: TEAM_W, h: TEAM_H };
-            y += TEAM_H + 28;
-        } else {
-            y += 48;
-        }
-        for (const r of col.rows) {
-            const key = r.aid + "@@" + (tid || "orphan");
-            pos[key] = { x: x + (COL_W - AG_W) / 2, y, w: AG_W, h: AG_H };
-            instOf[key] = { agent: agentsById[r.aid], role: r.role, team: tid };
-            y += AG_H + GAP;
-        }
-        maxH = Math.max(maxH, y);
+    const pos = {}; // key -> {x, y, w, h, cx}
+    const instOf = {}; // key -> {agent, role, team}
+    cols.forEach(col => {
+        col.leafRows = col.rows.filter(r => r.role === "member" || r.role === "none");
+        const inner = col.leafRows.length ? col.leafRows.length * MEM_W + (col.leafRows.length - 1) * GAP_X : 0;
+        col.w = Math.max(TEAM_W, LEAD_W, inner);
     });
-    const fullW = 40 + cols.length * COL_W;
+    const fullW = 40 + cols.reduce((s, c) => s + c.w, 0) + Math.max(cols.length - 1, 0) * GAP_TEAM;
+    const maxH = Y_MEM + MEM_H + 70;
+    if (sharedOrch) pos.ceo = { x: (fullW - CEO_W) / 2, y: Y_CEO, w: CEO_W, h: CEO_H, cx: fullW / 2 };
+    let cursor = 20;
+    cols.forEach(col => {
+        col.x0 = cursor;
+        cursor += col.w + GAP_TEAM;
+        const cx = col.x0 + col.w / 2;
+        const tid = col.team ? col.team.id : null;
+        if (tid) pos[tid] = { x: cx - TEAM_W / 2, y: Y_TEAM, w: TEAM_W, h: TEAM_H, cx };
+        const leadRows = col.rows.filter(r => r.role === "manager" || r.role === "orchestrator");
+        const leadInner = leadRows.length ? leadRows.length * LEAD_W + (leadRows.length - 1) * GAP_X : 0;
+        let lx = cx - leadInner / 2;
+        leadRows.forEach(r => {
+            const key = r.aid + "@@" + (tid || "orphan");
+            pos[key] = { x: lx, y: Y_LEAD, w: LEAD_W, h: LEAD_H, cx: lx + LEAD_W / 2 };
+            instOf[key] = { agent: agentsById[r.aid], role: r.role, team: tid };
+            lx += LEAD_W + GAP_X;
+        });
+        col.parentKey = leadRows.length ? leadRows[leadRows.length - 1].aid + "@@" + (tid || "orphan") : tid;
+        const leafY = tid ? Y_MEM : Y_LEAD;
+        const inner = col.leafRows.length ? col.leafRows.length * MEM_W + (col.leafRows.length - 1) * GAP_X : 0;
+        lx = cx - inner / 2;
+        col.leafRows.forEach(r => {
+            const key = r.aid + "@@" + (tid || "orphan");
+            pos[key] = { x: lx, y: leafY, w: MEM_W, h: MEM_H, cx: lx + MEM_W / 2 };
+            instOf[key] = { agent: agentsById[r.aid], role: r.role, team: tid };
+            lx += MEM_W + GAP_X;
+        });
+    });
 
     const g = document.createElementNS(NS, "g");
     svg.appendChild(g);
@@ -256,38 +292,42 @@
 
     // orphan column header
     if (orphans.length) {
-        const x = 20 + (cols.length - 1) * COL_W + (COL_W - TEAM_W) / 2;
-        el("rect", { x, y: TOP - 4, width: TEAM_W, height: 30, rx: 8, fill: "none", stroke: "var(--border)", "stroke-dasharray": "5 4" });
-        const t = el("text", { x: x + 12, y: TOP + 16, fill: "var(--text-secondary)", "font-size": 12 });
+        const oc = cols[cols.length - 1];
+        const x = oc.x0 + (oc.w - TEAM_W) / 2;
+        el("rect", { x, y: Y_TEAM - 4, width: TEAM_W, height: 30, rx: 8, fill: "none", stroke: "var(--border)", "stroke-dasharray": "5 4" });
+        const t = el("text", { x: x + 12, y: Y_TEAM + 16, fill: "var(--text-secondary)", "font-size": 12 });
         t.textContent = "Sem equipe (" + orphans.length + ")";
     }
 
-    // edges under nodes — always drawn parent(bottom) → child(top).
-    // Draw a short direction cue once on load. Shared memberships stay dashed
-    // and still so the two meanings remain distinct.
+    // edges under nodes — orthogonal org-chart connectors: drop from parent,
+    // run along one shared bus, drop into each child.
     const links = [];
     cols.forEach(col => {
-        if (!col.team) return;
-        const tid = col.team.id;
-        const at = role => col.rows.find(r => r.role === role);
-        const keyOf = r => r.aid + "@@" + tid;
-        const orch = at("orchestrator"), mgr = at("manager");
-        const members = col.rows.filter(r => r.role === "member");
-        if (orch) links.push({ from: tid, to: keyOf(orch), kind: "orchestrator" });
-        if (mgr) links.push({ from: orch ? keyOf(orch) : tid, to: keyOf(mgr), kind: "manager" });
-        const parent = mgr ? keyOf(mgr) : orch ? keyOf(orch) : tid;
-        members.forEach(r => links.push({ from: parent, to: keyOf(r), kind: "member" }));
+        const tid = col.team ? col.team.id : null;
+        if (!tid) return;
+        const top = sharedOrch ? "ceo" : col.parentKey;
+        if (top !== tid) links.push({ from: top, to: tid, kind: "orchestrator" });
+        if (sharedOrch) col.rows.filter(r => r.role === "manager" || r.role === "orchestrator")
+            .forEach(r => links.push({ from: tid, to: r.aid + "@@" + tid, kind: r.role }));
+        col.leafRows.forEach(r => links.push({ from: col.parentKey, to: r.aid + "@@" + tid, kind: "member" }));
     });
     const agentTeams = aid => [...new Set((teamsOfAgent[aid] || []).map(t => t.replace(/^team:/, "")))];
+    const orgPath = (a, b) => {
+        if (!a || !b) return null;
+        const acx = a.cx === undefined ? a.x + a.w / 2 : a.cx;
+        const bcx = b.cx === undefined ? b.x + b.w / 2 : b.cx;
+        const top = a.y + a.h, end = b.y;
+        if (Math.abs(acx - bcx) < 1) return `M ${acx} ${top} V ${end}`;
+        const bus = top + ROW_GAP / 2 + 4;
+        return `M ${acx} ${top} V ${bus} H ${bcx} V ${end}`;
+    };
+    const flowMeta = [];
     links.forEach((e, linkIndex) => {
-        const a = pos[e.from], b = pos[e.to];
-        if (!a || !b) return;
-        const sx = a.x + a.w / 2, sy = a.y + a.h, ex = b.x + b.w / 2, ey = b.y;
-        const my = (sy + ey) / 2;
+        const d = orgPath(pos[e.from], pos[e.to]);
+        if (!d) return;
         const sharedChild = e.kind === "member" && agentTeams(e.to.split("@@")[0]).length > 1;
         const line = el("path", {
-            d: `M ${sx} ${sy} C ${sx} ${my}, ${ex} ${my}, ${ex} ${ey}`,
-            fill: "none", stroke: EDGE_COLOR[e.kind] || "var(--text-tertiary)",
+            d, fill: "none", stroke: EDGE_COLOR[e.kind] || "var(--text-tertiary)",
             "stroke-width": e.kind === "member" ? 1.4 : 2,
             "pathLength": 1,
             "class": "connection" + (sharedChild ? " shared" : ""),
@@ -296,11 +336,43 @@
         const title = document.createElementNS(NS, "title");
         title.textContent = EDGE_LABEL[e.kind] || e.kind;
         line.appendChild(title);
+        const flow = el("path", {
+            d, fill: "none", stroke: "var(--green)", "stroke-width": 2.2,
+            "pathLength": 1, "stroke-dasharray": ".06 .12", "stroke-linecap": "round", "class": "flow",
+        });
+        const aid = e.to.includes("@@") ? rawId(e.to.split("@@")[0]) : null;
+        const inst = instOf[e.to];
+        flowMeta.push({ el: flow, aid, team: aid ? inst && inst.team : e.to });
+    });
+    const sharedAgents = Object.entries(teamsOfAgent)
+        .filter(([aid, ts]) => aid !== sharedOrch && ts.length > 1 && agentsById[aid])
+        .map(([aid, ts]) => ({ aid, teams: [...new Set(ts)] }));
+    sharedAgents.forEach((s, si) => {
+        for (let i = 0; i < s.teams.length; i++) {
+            for (let j = i + 1; j < s.teams.length; j++) {
+                const a = pos[s.aid + "@@" + s.teams[i]], b = pos[s.aid + "@@" + s.teams[j]];
+                if (!a || !b) continue;
+                const bus = maxH - 28 - (si % 3) * 10;
+                const d = `M ${a.cx} ${a.y + a.h} V ${bus} H ${b.cx} V ${b.y + b.h}`;
+                const cross = el("path", { d, fill: "none", "class": "cross", "pathLength": 1, "stroke-width": 1.6 });
+                const ct = document.createElementNS(NS, "title");
+                ct.textContent = agentsById[s.aid].label + " — entre equipes";
+                cross.appendChild(ct);
+                const labelCross = el("text", { x: (a.cx + b.cx) / 2, y: bus - 5, fill: "var(--amber)", "font-size": 9, "text-anchor": "middle" });
+                labelCross.textContent = agentsById[s.aid].label;
+                const flow = el("path", {
+                    d, fill: "none", stroke: "var(--amber)", "stroke-width": 2.4,
+                    "pathLength": 1, "stroke-dasharray": ".06 .12", "stroke-linecap": "round", "class": "flow",
+                });
+                flowMeta.push({ el: flow, aid: rawId(s.aid), team: null });
+            }
+        }
     });
 
-    const label = (x, y, text, size, fill) => {
+    const label = (x, y, text, size, fill, maxLen) => {
         const t = el("text", { x, y, fill: fill || "var(--text)", "font-size": size || 13 });
-        t.textContent = text.length > 30 ? text.slice(0, 29) + "…" : text;
+        const lim = maxLen || 30;
+        t.textContent = text.length > lim ? text.slice(0, lim - 1) + "…" : text;
         const full = document.createElementNS(NS, "title");
         full.textContent = text;
         t.appendChild(full);
@@ -320,6 +392,25 @@
         none: "Sem equipe",
     }[role] || "Assistente");
 
+    let ceoGroup = null;
+    if (sharedOrch && pos.ceo && agentsById[sharedOrch]) {
+        const p = pos.ceo;
+        ceoGroup = el("g", {
+            "class": "node ceo", tabindex: "0", role: "button",
+            "aria-label": "Coordenação geral: " + agentsById[sharedOrch].label + ". Selecione para enquadrar a organização.",
+            style: "cursor:pointer",
+        });
+        el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 14, fill: "var(--bg-elevated)", "class": "frame" }, ceoGroup);
+        el("rect", { x: p.x, y: p.y + 13, width: 3, height: p.h - 26, rx: 2, fill: "var(--amber)" }, ceoGroup);
+        label(p.x + 16, p.y + 19, "COORDENAÇÃO GERAL", 9, "var(--amber)");
+        label(p.x + 16, p.y + 44, agentsById[sharedOrch].label, 15, "var(--text)");
+        label(p.x + 16, p.y + 65, "Acima de todas as equipes", 10, "var(--text-secondary)");
+        ceoGroup.addEventListener("click", () => fit());
+        ceoGroup.addEventListener("keydown", ev => {
+            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); fit(); }
+        });
+    }
+
     // team cards: title, simple routing explanation, and team size.
     const teamGroups = {};
     teams.forEach(t => {
@@ -335,7 +426,7 @@
         el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 13, fill: "var(--bg-elevated)", stroke: "var(--map-team)", "stroke-width": 1.5, "class": "frame" }, grp);
         el("rect", { x: p.x, y: p.y + 13, width: 3, height: p.h - 26, rx: 2, fill: "var(--map-team)" }, grp);
         label(p.x + 16, p.y + 19, "EQUIPE", 9, "var(--map-team)");
-        label(p.x + 16, p.y + 43, t.label, 15, "var(--text)");
+        label(p.x + 16, p.y + 43, t.label, 15, "var(--text)", 20);
         label(p.x + 16, p.y + 64, strategyLabel(t.strategy), 10, "var(--text-secondary)");
         const countText = el("text", { x: p.x + p.w - 13, y: p.y + 20, fill: "var(--text-secondary)", "font-size": 10, "text-anchor": "end" }, grp);
         countText.textContent = count + " " + (count === 1 ? "assistente" : "assistentes");
@@ -370,11 +461,11 @@
         el("circle", { cx, cy, r: 15, fill: "var(--bg-hover)", stroke: active ? "var(--green)" : "var(--text-tertiary)", "stroke-width": 1.5 }, grp);
         const initial = el("text", { x: cx, y: cy + 4.5, fill: "var(--text)", "font-size": 13, "font-weight": 700, "text-anchor": "middle" });
         initial.textContent = (n.label || "?").trim().charAt(0).toUpperCase() || "?";
-        label(p.x + 49, p.y + 25, n.label, 13, "var(--text)");
+        label(p.x + 49, p.y + 25, n.label, 13, "var(--text)", 17);
         label(p.x + 49, p.y + 46, roleLabel(inst.role), 10, inst.role === "member" ? "var(--text-secondary)" : "var(--map-lead)");
         const others = agentTeams(n.id).filter(t => t !== (inst.team || ""));
         const statusColor = active ? "var(--green)" : "var(--text-tertiary)";
-        el("circle", { cx: p.x + 53, cy: p.y + 60, r: 3, fill: statusColor }, grp);
+        el("circle", { cx: p.x + 53, cy: p.y + 60, r: 3, fill: statusColor, "class": "work-dot" }, grp);
         label(p.x + 62, p.y + 64, statusText, 9, "var(--text-secondary)");
         if (others.length) {
             const shared = el("text", { x: p.x + p.w - 12, y: p.y + 19, fill: "var(--amber)", "font-size": 9, "text-anchor": "end" }, grp);
@@ -391,6 +482,11 @@
             if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); window.location.href = n.url; }
         });
         instGroups[key] = grp;
+    });
+    const instByAgent = {};
+    Object.entries(instGroups).forEach(([key, grp]) => {
+        const id = rawId(instOf[key].agent.id);
+        (instByAgent[id] = instByAgent[id] || []).push(grp);
     });
 
     // ── detail panel
@@ -494,13 +590,28 @@
     const fmtClock = () => new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     function paintActivity() {
         const now = Date.now();
+        const minsOf = ts => ts ? (now - new Date(ts).getTime()) / 60000 : Infinity;
         document.querySelectorAll("[data-halo]").forEach(h => {
             const inst = instOf[h.getAttribute("data-halo")];
-            const ts = inst && inst.agent && activity[inst.agent.id];
-            const mins = ts ? (now - new Date(ts).getTime()) / 60000 : Infinity;
+            const mins = minsOf(inst && inst.agent && activity[rawId(inst.agent.id)]);
             h.setAttribute("opacity", mins <= 30 ? "1" : "0");
             h.classList.toggle("hot", mins <= 5);
         });
+        let working = 0;
+        Object.entries(instByAgent).forEach(([aid, groups]) => {
+            const on = minsOf(activity[aid]) <= 15;
+            if (on) working++;
+            groups.forEach(gr => gr.classList.toggle("working", on));
+        });
+        flowMeta.forEach(f => {
+            let on = minsOf(f.aid && activity[f.aid]) <= 15;
+            if (!on && f.team) {
+                on = Object.keys(instOf).some(k => instOf[k].team === f.team && minsOf(activity[rawId(instOf[k].agent.id)]) <= 15);
+            }
+            f.el.classList.toggle("live", on);
+        });
+        if (ceoGroup) ceoGroup.classList.toggle("working", working > 0);
+        activeStat.textContent = working;
     }
     async function poll() {
         if (document.hidden) return;

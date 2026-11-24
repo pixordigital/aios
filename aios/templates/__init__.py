@@ -34,6 +34,12 @@ from aios.templates.team_managers import (
 )
 
 from aios.templates.manager_data import DATA_MANAGER_TEMPLATE
+from aios.templates.media_growth import (
+    MEDIA_MANAGER_TEMPLATE,
+    MARKET_INTELLIGENCE_TEMPLATE,
+    CONTENT_STRATEGIST_TEMPLATE,
+    CONTENT_PRODUCER_TEMPLATE,
+)
 
 _SCAFFOLD_MARKER = "# Camada 1 — Papel e escopo"
 _PROMPT_SCAFFOLD = """
@@ -59,6 +65,10 @@ TEMPLATES = {
     "manager_red": RED_MANAGER_TEMPLATE,
     "manager_blue": BLUE_MANAGER_TEMPLATE,
     "manager_data": DATA_MANAGER_TEMPLATE,
+    "media_manager": MEDIA_MANAGER_TEMPLATE,
+    "market_intelligence": MARKET_INTELLIGENCE_TEMPLATE,
+    "content_strategist": CONTENT_STRATEGIST_TEMPLATE,
+    "content_producer": CONTENT_PRODUCER_TEMPLATE,
     # Cross-team coordination and the three functions a business runs without
     # that Sales, Support, Data and Dev do not cover.
     "orchestrator_business": ORCHESTRATOR_BUSINESS_TEMPLATE,

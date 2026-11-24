@@ -37,13 +37,13 @@ TEAMS = {
 }
 
 
-async def _get_or_create_agent(db, org_id, name, agent_type):
+async def _get_or_create_agent(db, org_id, name, agent_type, template=None):
     existing = (await db.execute(
         select(Agent).where(Agent.org_id == org_id, Agent.name == name)
     )).scalars().first()
     if existing:
         return existing, False
-    tpl = apply_template(agent_type)
+    tpl = apply_template(template or agent_type)
     agent = Agent(
         org_id=org_id,
         name=name,
@@ -172,7 +172,9 @@ async def main():
                 agent, created = await _get_or_create_agent(db, org.id, agent_name, atype)
                 members.append(agent)
                 print(f"  {'+' if created else '='} agent {agent.name}")
-            manager, created = await _get_or_create_agent(db, org.id, f"{team_name}-manager", "manager")
+            manager, created = await _get_or_create_agent(
+                db, org.id, f"{team_name}-manager", "manager", f"manager_{team_name}"
+            )
             print(f"  {'+' if created else '='} agent {manager.name} (manager)")
 
             from aios.db.models import team_agents as _ta

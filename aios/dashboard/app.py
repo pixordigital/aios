@@ -133,6 +133,10 @@ def _compatible_agent_types(agent_type: str) -> list[str]:
         "evidence_compiler": ["deal_auditor", "human_auditor", "manager", "custom"],
         "performance_watcher": ["data_analyst", "data_scientist", "manager", "custom"],
         "human_auditor": ["deal_auditor", "evidence_compiler", "manager", "custom"],
+        "media_manager": ["market_intelligence", "content_strategist", "content_producer", "custom"],
+        "market_intelligence": ["content_strategist", "content_producer", "media_manager", "custom"],
+        "content_strategist": ["content_producer", "market_intelligence", "media_manager", "custom"],
+        "content_producer": ["content_strategist", "media_manager", "market_intelligence", "custom"],
         "custom": ["orchestrator", "manager", "sdr", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"],
     }
     return MAP.get(agent_type, ["custom"])
@@ -231,6 +235,10 @@ def _agent_type_label(value: str) -> str:
         "evidence_compiler": "Evidence Compiler",
         "performance_watcher": "Performance Watcher",
         "human_auditor": "Human Auditor",
+        "media_manager": "Media Manager",
+        "market_intelligence": "Inteligência de Mercado",
+        "content_strategist": "Estrategista de Conteúdo",
+        "content_producer": "Produtor de Conteúdo",
     }
     return LABELS.get(value, value)
 
@@ -918,7 +926,7 @@ async def agent_canvas(request: Request):
 
 # ─── Agent CRUD ───
 
-AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "lead_finder", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor"]
+AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "lead_finder", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor", "media_manager", "market_intelligence", "content_strategist", "content_producer"]
 ROUTING_STRATEGIES = ["supervisor", "round_robin", "broadcast", "semantic"]
 
 
