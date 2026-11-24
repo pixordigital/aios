@@ -50,6 +50,7 @@ class FakeAdapter:
 
     def __init__(self, **kwargs):
         self.node = kwargs["node"]
+        self.manifest = self.node.stage_manifest
         self.budget = StageBudget(
             max_llm_calls=3, max_cost_usd=0.05, max_tool_calls=3
         )
@@ -57,6 +58,12 @@ class FakeAdapter:
         FakeAdapter.instances.append(self)
 
     def pre_execute(self, ctx, shared):
+        pass
+
+    def enforce_execution(self, shared, action=None):
+        pass
+
+    def validate_output(self, output):
         pass
 
     def charge_llm(self, cost_usd=0.0):

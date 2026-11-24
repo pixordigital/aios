@@ -1,8 +1,11 @@
 """Webhook dispatch security telemetry: anomaly registration, 404 preserved, no secrets."""
+import json
+
 import pytest
 from sqlalchemy import select
 
-from aios.db.models import AutomationTrigger, Workflow
+from aios.core.secrets import decrypt_secret, encrypt_secret
+from aios.db.models import AutomationTrigger, Credential, CredentialEvent, Workflow
 from aios.governance.security import SECURITY_METRIC_EVENT_TYPES, SecurityEvent
 
 
@@ -72,3 +75,86 @@ async def test_webhook_dispatch_signature_anomaly_records_event_preserves_404(as
     # 404 behavior preserved for missing webhook
     missing = await async_client.post("/api/automations/webhook/wh_does_not_exist", json={"x": 1})
     assert missing.status_code == 404, missing.text
+
+
+@pytest.mark.asyncio
+async def test_credential_rotate_reencrypts_and_appends_audit_event(auth_client, test_db_session, test_org, test_user):
+    old_secret = "old-rotation-secret"
+    cred = Credential(
+        org_id=test_org.id,
+        name="rotate-me",
+        cred_type="bearer",
+        data_enc=encrypt_secret(json.dumps({"token": old_secret})),
+        version=1,
+    )
+    test_db_session.add(cred)
+    await test_db_session.commit()
+    await test_db_session.refresh(cred)
+
+    new_secret = "new-rotation-secret"
+    resp = await auth_client.post(
+        f"/api/automations/credentials/{cred.id}/rotate",
+        json={"data": {"token": new_secret}, "reason": "scheduled rotation"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == cred.id
+    assert body["version"] == 2
+    assert body["rotated_at"]
+    assert new_secret not in resp.text
+
+    await test_db_session.refresh(cred)
+    assert cred.version == 2
+    assert cred.rotated_at is not None
+    assert decrypt_secret(cred.data_enc) == json.dumps({"token": new_secret})
+
+    events = (
+        await test_db_session.execute(
+            select(CredentialEvent).where(CredentialEvent.credential_id == cred.id)
+        )
+    ).scalars().all()
+    assert len(events) == 1
+    event = events[0]
+    assert event.org_id == test_org.id
+    assert event.event == "rotated"
+    assert event.actor_user_id == test_user.id
+    assert event.from_version == 1
+    assert event.to_version == 2
+    assert event.details == {"reason": "scheduled rotation"}
+
+    audit = await auth_client.get(f"/api/automations/credentials/{cred.id}/events")
+    assert audit.status_code == 200, audit.text
+    rows = audit.json()
+    assert len(rows) == 1
+    assert rows[0]["actor_user_id"] == test_user.id
+    assert rows[0]["from_version"] == 1
+    assert rows[0]["to_version"] == 2
+    assert rows[0]["details"] == {"reason": "scheduled rotation"}
+    assert "data_enc" not in rows[0]
+    assert new_secret not in audit.text
+
+
+@pytest.mark.asyncio
+async def test_credential_rotation_endpoints_are_org_scoped(auth_client, test_db_session, second_org):
+    cred = Credential(
+        org_id=second_org.id,
+        name="other-org-cred",
+        cred_type="bearer",
+        data_enc=encrypt_secret(json.dumps({"token": "other-org-secret"})),
+        version=1,
+    )
+    test_db_session.add(cred)
+    await test_db_session.commit()
+    await test_db_session.refresh(cred)
+
+    rotate = await auth_client.post(
+        f"/api/automations/credentials/{cred.id}/rotate",
+        json={"data": {"token": "replacement"}, "reason": "cross-org attempt"},
+    )
+    assert rotate.status_code == 404, rotate.text
+    audit = await auth_client.get(f"/api/automations/credentials/{cred.id}/events")
+    assert audit.status_code == 404, audit.text
+
+    await test_db_session.refresh(cred)
+    assert cred.version == 1
+    assert decrypt_secret(cred.data_enc) == json.dumps({"token": "other-org-secret"})

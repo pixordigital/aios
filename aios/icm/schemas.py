@@ -90,222 +90,234 @@ def _require_dict(payload: Any, schema_id: str) -> dict[str, Any] | None:
     return d
 
 
-def _require_keys(payload: dict[str, Any], schema_id: str, keys: tuple[str, ...]) -> None:
-    missing = [k for k in keys if k not in payload]
+# Shapes: "str" | "number" | "bool" | "object" | "list";
+# ("list", shape) = list of shape; ("oneof", shape, ...) = union;
+# {key: shape} = object with typed fields (absent/null fields ignored).
+_SPECS: dict[str, dict[str, Any]] = {
+    "lead_research_input.v1": {
+        "nonempty": True,
+        "fields": {
+            "query": "str",
+            "company": "str",
+            "domain": "str",
+            "target": "str",
+            "icp": "str",
+            "name": "str",
+            "source": "str",
+            "lead": {"name": "str", "domain": "str"},
+            "criteria": "object",
+            "companies": ("list", "object"),
+        },
+    },
+    "company_research_output.v1": {
+        "nonempty": True,
+        "fields": {
+            "company_name": "str",
+            "domain": "str",
+            "summary": "str",
+            "result": "str",
+            "status": "str",
+            "company": ("oneof", "str", "object"),
+            "findings": "object",
+            "sources": "list",
+            "contacts": "list",
+            "leads": "list",
+        },
+    },
+    "lead_qualification_output.v1": {
+        "nonempty": True,
+        "fields": {
+            "qualified": "bool",
+            "score": "number",
+            "status": "str",
+            "result": "number",
+            "qualification": "object",
+            "reason": "str",
+            "leads": "list",
+        },
+    },
+    "pet.enquiry.v1": {
+        "nonempty": True,
+        "fields": {
+            "message": "str",
+            "text": "str",
+            "body": "str",
+            "enquiry": "str",
+            "phone": "str",
+            "from": "str",
+            "channel": "str",
+            "contact_id": "str",
+            "name": "str",
+            "contact": "object",
+            "metadata": "object",
+        },
+    },
+    "pet.qualified_lead.v1": {
+        "nonempty": True,
+        "fields": {
+            "qualified": "bool",
+            "status": "str",
+            "next_action": "str",
+            "result": "str",
+            "reason": "str",
+            "lead": "object",
+            "handoff": "object",
+            "contact": "object",
+        },
+    },
+    "pet.lead_context.v1": {
+        "nonempty": True,
+        "fields": {
+            "deal_id": "str",
+            "lead_id": "str",
+            "phone": "str",
+            "status": "str",
+            "name": "str",
+            "lead": "object",
+            "contact": "object",
+            "conversation": "object",
+            "messages": "list",
+        },
+    },
+    "pet.follow_up_result.v1": {
+        "nonempty": True,
+        "fields": {
+            "sent": "bool",
+            "status": "str",
+            "result": "str",
+            "next_action": "str",
+            "message": "str",
+            "reason": "str",
+        },
+    },
+    "tool_call.v1": {
+        "required": {"tool": "str"},
+        "fields": {
+            "args": "object",
+            "input": "object",
+            "call_id": "str",
+            "status": "str",
+        },
+    },
+    "agent_run.v1": {
+        "required": {"agent_id": "str"},
+        "fields": {
+            "run_id": "str",
+            "status": "str",
+            "input": "object",
+            "output": "object",
+            "metadata": "object",
+        },
+    },
+    "memory_candidate.v1": {
+        "required": {"content": "str"},
+        "fields": {
+            "kind": "str",
+            "source": "str",
+            "metadata": "object",
+            "tags": ("list", "str"),
+        },
+    },
+    "handoff.v1": {
+        "required_any": ("target", "to", "reason", "summary"),
+        "fields": {
+            "target": "str",
+            "to": "str",
+            "reason": "str",
+            "summary": "str",
+            "status": "str",
+            "context": "object",
+            "payload": "object",
+        },
+    },
+    "trace.v1": {
+        "required_any": ("event", "name", "span_id", "trace_id", "kind"),
+        "fields": {
+            "event": "str",
+            "name": "str",
+            "span_id": "str",
+            "trace_id": "str",
+            "parent_id": "str",
+            "kind": "str",
+            "status": "str",
+            "attributes": "object",
+            "data": "object",
+        },
+    },
+}
+
+
+def _check_shape(value: Any, shape: Any, schema_id: str, path: str) -> None:
+    if isinstance(shape, tuple) and shape and shape[0] == "list":
+        if not isinstance(value, list):
+            raise SchemaValidationError(f"'{path}' in '{schema_id}' must be a list")
+        for index, item in enumerate(value):
+            _check_shape(item, shape[1], schema_id, f"{path}[{index}]")
+        return
+    if isinstance(shape, tuple) and shape and shape[0] == "oneof":
+        for option in shape[1:]:
+            try:
+                _check_shape(value, option, schema_id, path)
+            except SchemaValidationError:
+                continue
+            return
+        raise SchemaValidationError(f"'{path}' in '{schema_id}' has an invalid type")
+    if isinstance(shape, dict):
+        if not isinstance(value, dict):
+            raise SchemaValidationError(f"'{path}' in '{schema_id}' must be an object")
+        for key, sub_shape in shape.items():
+            if key in value and value[key] is not None:
+                _check_shape(value[key], sub_shape, schema_id, f"{path}.{key}")
+        return
+    if shape == "str":
+        ok = isinstance(value, str)
+    elif shape == "number":
+        ok = not isinstance(value, bool) and isinstance(value, (int, float))
+    elif shape == "bool":
+        ok = isinstance(value, bool)
+    elif shape == "object":
+        ok = isinstance(value, dict)
+    elif shape == "list":
+        ok = isinstance(value, list)
+    else:
+        raise SchemaValidationError(f"invalid shape spec for '{schema_id}'")
+    if not ok:
+        raise SchemaValidationError(f"'{path}' in '{schema_id}' must be {shape}")
+
+
+def _validate_spec(payload: Any, schema_id: str, spec: dict[str, Any]) -> None:
+    d = _require_dict(payload, schema_id)
+    if d is None:
+        return
+    if spec.get("nonempty") and not d:
+        raise SchemaValidationError(f"payload for '{schema_id}' must not be empty")
+    required = spec.get("required", {})
+    missing = [key for key in required if key not in d]
     if missing:
         raise SchemaValidationError(
             f"payload for '{schema_id}' missing required keys: {missing}"
         )
-
-
-def _require_str(payload: dict[str, Any], schema_id: str, key: str, allow_empty: bool = False) -> None:
-    val = payload.get(key)
-    if not isinstance(val, str):
-        raise SchemaValidationError(f"'{key}' in '{schema_id}' must be a string")
-    if not allow_empty and not val.strip():
-        raise SchemaValidationError(f"'{key}' in '{schema_id}' must be non-empty")
-
-
-def _opt_str(payload: dict[str, Any], schema_id: str, key: str) -> None:
-    if key in payload and payload[key] is not None and not isinstance(payload[key], str):
-        raise SchemaValidationError(f"'{key}' in '{schema_id}' must be a string when present")
-
-
-def _opt_number(payload: dict[str, Any], schema_id: str, key: str) -> None:
-    if key in payload and payload[key] is not None:
-        if isinstance(payload[key], bool) or not isinstance(payload[key], (int, float)):
-            raise SchemaValidationError(f"'{key}' in '{schema_id}' must be a number when present")
-
-
-def _opt_dict(payload: dict[str, Any], schema_id: str, key: str) -> None:
-    if key in payload and payload[key] is not None and not isinstance(payload[key], dict):
-        raise SchemaValidationError(f"'{key}' in '{schema_id}' must be an object when present")
-
-
-def _opt_list(payload: dict[str, Any], schema_id: str, key: str) -> None:
-    if key in payload and payload[key] is not None and not isinstance(payload[key], list):
-        raise SchemaValidationError(f"'{key}' in '{schema_id}' must be a list when present")
-
-
-def _lead_research_input_v1(payload: Any) -> None:
-    d = _require_dict(payload, "lead_research_input.v1")
-    if d is None:
-        return
-    if not d:
-        raise SchemaValidationError("payload for 'lead_research_input.v1' must not be empty")
-    for k in ("query", "company", "domain", "target", "icp", "name"):
-        _opt_str(d, "lead_research_input.v1", k, ) if False else None
-    # type-check known keys when present
-    for k in ("query", "company", "domain", "target", "icp", "name", "source"):
-        _opt_str(d, "lead_research_input.v1", k)
-    _opt_dict(d, "lead_research_input.v1", "lead")
-    _opt_dict(d, "lead_research_input.v1", "criteria")
-    _opt_list(d, "lead_research_input.v1", "companies")
-
-
-def _company_research_output_v1(payload: Any) -> None:
-    d = _require_dict(payload, "company_research_output.v1")
-    if d is None:
-        return
-    if not d:
-        raise SchemaValidationError("payload for 'company_research_output.v1' must not be empty")
-    for k in ("company_name", "domain", "summary", "result", "status"):
-        _opt_str(d, "company_research_output.v1", k)
-    if "company" in d and d["company"] is not None and not isinstance(d["company"], (str, dict)):
-        raise SchemaValidationError("'company' in 'company_research_output.v1' must be string/object when present")
-    _opt_dict(d, "company_research_output.v1", "findings")
-    _opt_list(d, "company_research_output.v1", "sources")
-    _opt_list(d, "company_research_output.v1", "contacts")
-    _opt_list(d, "company_research_output.v1", "leads")
-
-
-def _lead_qualification_output_v1(payload: Any) -> None:
-    d = _require_dict(payload, "lead_qualification_output.v1")
-    if d is None:
-        return
-    if not d:
-        raise SchemaValidationError("payload for 'lead_qualification_output.v1' must not be empty")
-    if "qualified" in d and not isinstance(d["qualified"], bool):
-        raise SchemaValidationError("'qualified' in 'lead_qualification_output.v1' must be bool when present")
-    _opt_number(d, "lead_qualification_output.v1", "score")
-    _opt_str(d, "lead_qualification_output.v1", "status")
-    _opt_str(d, "lead_qualification_output.v1", "result")
-    _opt_dict(d, "lead_qualification_output.v1", "qualification")
-    _opt_str(d, "lead_qualification_output.v1", "reason")
-    _opt_list(d, "lead_qualification_output.v1", "leads")
-
-
-def _pet_enquiry_v1(payload: Any) -> None:
-    d = _require_dict(payload, "pet.enquiry.v1")
-    if d is None:
-        return
-    if not d:
-        raise SchemaValidationError("payload for 'pet.enquiry.v1' must not be empty")
-    for k in ("message", "text", "body", "enquiry", "phone", "from", "channel", "contact_id", "name"):
-        _opt_str(d, "pet.enquiry.v1", k)
-    _opt_dict(d, "pet.enquiry.v1", "contact")
-    _opt_dict(d, "pet.enquiry.v1", "metadata")
-
-
-def _pet_qualified_lead_v1(payload: Any) -> None:
-    d = _require_dict(payload, "pet.qualified_lead.v1")
-    if d is None:
-        return
-    if not d:
-        raise SchemaValidationError("payload for 'pet.qualified_lead.v1' must not be empty")
-    if "qualified" in d and not isinstance(d["qualified"], bool):
-        raise SchemaValidationError("'qualified' in 'pet.qualified_lead.v1' must be bool when present")
-    for k in ("status", "next_action", "result", "reason"):
-        _opt_str(d, "pet.qualified_lead.v1", k)
-    _opt_dict(d, "pet.qualified_lead.v1", "lead")
-    _opt_dict(d, "pet.qualified_lead.v1", "handoff")
-    _opt_dict(d, "pet.qualified_lead.v1", "contact")
-
-
-def _pet_lead_context_v1(payload: Any) -> None:
-    d = _require_dict(payload, "pet.lead_context.v1")
-    if d is None:
-        return
-    if not d:
-        raise SchemaValidationError("payload for 'pet.lead_context.v1' must not be empty")
-    for k in ("deal_id", "lead_id", "phone", "status", "name"):
-        _opt_str(d, "pet.lead_context.v1", k)
-    _opt_dict(d, "pet.lead_context.v1", "lead")
-    _opt_dict(d, "pet.lead_context.v1", "contact")
-    _opt_dict(d, "pet.lead_context.v1", "conversation")
-    _opt_list(d, "pet.lead_context.v1", "messages")
-
-
-def _pet_follow_up_result_v1(payload: Any) -> None:
-    d = _require_dict(payload, "pet.follow_up_result.v1")
-    if d is None:
-        return
-    if not d:
-        raise SchemaValidationError("payload for 'pet.follow_up_result.v1' must not be empty")
-    if "sent" in d and not isinstance(d["sent"], bool):
-        raise SchemaValidationError("'sent' in 'pet.follow_up_result.v1' must be bool when present")
-    for k in ("status", "result", "next_action", "message", "reason"):
-        _opt_str(d, "pet.follow_up_result.v1", k)
-
-
-def _tool_call_v1(payload: Any) -> None:
-    d = _require_dict(payload, "tool_call.v1")
-    if d is None:
-        return
-    _require_keys(d, "tool_call.v1", ("tool",))
-    _require_str(d, "tool_call.v1", "tool")
-    _opt_dict(d, "tool_call.v1", "args")
-    _opt_dict(d, "tool_call.v1", "input")
-    _opt_str(d, "tool_call.v1", "call_id")
-    _opt_str(d, "tool_call.v1", "status")
-
-
-def _agent_run_v1(payload: Any) -> None:
-    d = _require_dict(payload, "agent_run.v1")
-    if d is None:
-        return
-    _require_keys(d, "agent_run.v1", ("agent_id",))
-    _require_str(d, "agent_run.v1", "agent_id")
-    _opt_str(d, "agent_run.v1", "run_id")
-    _opt_str(d, "agent_run.v1", "status")
-    _opt_dict(d, "agent_run.v1", "input")
-    _opt_dict(d, "agent_run.v1", "output")
-    _opt_dict(d, "agent_run.v1", "metadata")
-
-
-def _memory_candidate_v1(payload: Any) -> None:
-    d = _require_dict(payload, "memory_candidate.v1")
-    if d is None:
-        return
-    _require_keys(d, "memory_candidate.v1", ("content",))
-    _require_str(d, "memory_candidate.v1", "content")
-    _opt_str(d, "memory_candidate.v1", "kind")
-    _opt_str(d, "memory_candidate.v1", "source")
-    _opt_dict(d, "memory_candidate.v1", "metadata")
-    _opt_list(d, "memory_candidate.v1", "tags")
-
-
-def _handoff_v1(payload: Any) -> None:
-    d = _require_dict(payload, "handoff.v1")
-    if d is None:
-        return
-    if not any(k in d for k in ("target", "to", "reason", "summary")):
+    for key, shape in required.items():
+        _check_shape(d[key], shape, schema_id, key)
+        if shape == "str" and not d[key].strip():
+            raise SchemaValidationError(f"'{key}' in '{schema_id}' must be non-empty")
+    required_any = spec.get("required_any", ())
+    if required_any and not any(key in d for key in required_any):
         raise SchemaValidationError(
-            "payload for 'handoff.v1' must include target/to/reason/summary"
+            f"payload for '{schema_id}' must include {'/'.join(required_any)}"
         )
-    for k in ("target", "to", "reason", "summary", "status"):
-        _opt_str(d, "handoff.v1", k)
-    _opt_dict(d, "handoff.v1", "context")
-    _opt_dict(d, "handoff.v1", "payload")
-
-
-def _trace_v1(payload: Any) -> None:
-    d = _require_dict(payload, "trace.v1")
-    if d is None:
-        return
-    if not any(k in d for k in ("event", "name", "span_id", "trace_id", "kind")):
-        raise SchemaValidationError(
-            "payload for 'trace.v1' must include event/name/span_id/trace_id/kind"
-        )
-    for k in ("event", "name", "span_id", "trace_id", "parent_id", "kind", "status"):
-        _opt_str(d, "trace.v1", k)
-    _opt_dict(d, "trace.v1", "attributes")
-    _opt_dict(d, "trace.v1", "data")
+    for key, shape in spec.get("fields", {}).items():
+        if key in d and d[key] is not None:
+            _check_shape(d[key], shape, schema_id, key)
 
 
 _BUILTIN_SCHEMAS: dict[str, SchemaValidator] = {
-    "lead_research_input.v1": _lead_research_input_v1,
-    "company_research_output.v1": _company_research_output_v1,
-    "lead_qualification_output.v1": _lead_qualification_output_v1,
-    "pet.enquiry.v1": _pet_enquiry_v1,
-    "pet.qualified_lead.v1": _pet_qualified_lead_v1,
-    "pet.lead_context.v1": _pet_lead_context_v1,
-    "pet.follow_up_result.v1": _pet_follow_up_result_v1,
-    "tool_call.v1": _tool_call_v1,
-    "agent_run.v1": _agent_run_v1,
-    "memory_candidate.v1": _memory_candidate_v1,
-    "handoff.v1": _handoff_v1,
-    "trace.v1": _trace_v1,
+    schema_id: (
+        lambda payload, schema_id=schema_id, spec=spec: _validate_spec(
+            payload, schema_id, spec
+        )
+    )
+    for schema_id, spec in _SPECS.items()
 }
 
 # Built-in ids used by seeded manifests/vertical contracts. Explicit registry

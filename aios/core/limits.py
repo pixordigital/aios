@@ -315,7 +315,7 @@ async def track_usage(
 ):
     """Atomically increment usage counters — prevents double-counting on concurrent runs.
 
-    UsageRecord schema is fixed; cost attribution detail is logged/audited only.
+    UsageRecord holds aggregates; detail also persisted in usage_attributions.
     cost_kind: internal|customer|shared — explicit separation flag for downstream billing.
     """
     today = date.today().isoformat()
@@ -338,6 +338,24 @@ async def track_usage(
             tokens=tokens, calls=llm_calls, cost=cost_usd,
         ),
     )
+    if model or provider or attribution or cost_usd or input_tokens is not None or output_tokens is not None:
+        try:
+            from aios.db.models import UsageAttribution
+
+            db.add(UsageAttribution(
+                org_id=org_id,
+                date=today,
+                model=model,
+                provider=provider,
+                cost_kind=cost_kind,
+                input_tokens=input_tokens or 0,
+                output_tokens=output_tokens or 0,
+                total_tokens=tokens,
+                cost_usd=cost_usd,
+                attribution=attribution or {},
+            ))
+        except Exception:
+            logger.warning("usage attribution row failed for org %s", org_id, exc_info=True)
     await db.commit()
 
     try:

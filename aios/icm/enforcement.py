@@ -76,9 +76,9 @@ class StageBudget:
 
 def check_tool(manifest: StageManifest, tool_name: str) -> None:
     if tool_name in (manifest.denied_tools or []):
-        raise ToolDenied(f"tool '{tool_name}' denied by stage '{manifest.id}'")
+        raise ToolDenied(f"Tool '{tool_name}' is explicitly denied by stage '{manifest.id}'")
     if manifest.allowed_tools and tool_name not in manifest.allowed_tools:
-        raise ToolDenied(f"tool '{tool_name}' not in stage '{manifest.id}' allowlist")
+        raise ToolDenied(f"Tool '{tool_name}' is not permitted by stage '{manifest.id}' allowlist")
 
 
 def classify_failure(error_class: str, policy: RetryPolicy, attempt: int) -> str:

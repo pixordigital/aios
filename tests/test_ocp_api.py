@@ -3,7 +3,9 @@
 from aios.governance.ocp import DECISION_PROTOCOL_FIELDS, DecisionRecord, SharedTask
 
 
-async def test_department_and_task_lifecycle(auth_client):
+async def test_department_and_task_lifecycle(auth_client, test_db_session, test_org):
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}}
+    await test_db_session.commit()
     resp = await auth_client.post("/api/ocp/departments", json={"name": "Sales", "slug": "sales"})
     assert resp.status_code == 200, resp.text
     dept_id = resp.json()["id"]
@@ -26,6 +28,8 @@ async def test_department_and_task_lifecycle(auth_client):
 
 
 async def test_decision_requires_full_protocol_and_founder(auth_client, test_db_session, test_org, test_user):
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}}
+    await test_db_session.commit()
     resp = await auth_client.post(
         "/api/ocp/decisions",
         json={"title": "New integration", "change_type": "new_integration", "justification": {"proposal": "x"}},
@@ -38,7 +42,7 @@ async def test_decision_requires_full_protocol_and_founder(auth_client, test_db_
     resp = await auth_client.post(f"/api/ocp/decisions/{body['id']}/decide", json={"approve": True})
     assert resp.status_code == 403  # admin is not automatically the Founder
 
-    test_org.extra_data = {"founder_user_id": test_user.id}
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}, "founder_user_id": test_user.id}
     await test_db_session.commit()
     resp = await auth_client.post(f"/api/ocp/decisions/{body['id']}/decide", json={"approve": True})
     assert resp.status_code == 400  # incomplete protocol still blocked
@@ -93,6 +97,8 @@ async def test_bootstrap_default_departments_founder_only(
 async def test_decision_execute_transitions_linked_task(
     auth_client, test_db_session, test_org, test_user
 ):
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}}
+    await test_db_session.commit()
     task_resp = await auth_client.post(
         "/api/ocp/tasks",
         json={"title": "Wire approval to task"},
@@ -105,7 +111,7 @@ async def test_decision_execute_transitions_linked_task(
     task_check = await test_db_session.get(SharedTask, task_id)
     assert task_check.status == "ready"
 
-    test_org.extra_data = {"founder_user_id": test_user.id}
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}, "founder_user_id": test_user.id}
     await test_db_session.commit()
 
     full = {f: "x" for f in DECISION_PROTOCOL_FIELDS}
@@ -132,7 +138,9 @@ async def test_decision_execute_transitions_linked_task(
     assert task.status == "in_progress"
 
 
-async def test_decision_list_get_and_external_approval_link(auth_client):
+async def test_decision_list_get_and_external_approval_link(auth_client, test_db_session, test_org):
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}}
+    await test_db_session.commit()
     full = {f: "x" for f in DECISION_PROTOCOL_FIELDS}
     resp = await auth_client.post(
         "/api/ocp/decisions",
@@ -189,7 +197,9 @@ async def test_decision_list_get_and_external_approval_link(auth_client):
     assert len(bridge_body["external_approvals"]) == 1
 
 
-async def test_task_approval_links_read_only_bridge(auth_client, test_db_session):
+async def test_task_approval_links_read_only_bridge(auth_client, test_db_session, test_org):
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}}
+    await test_db_session.commit()
     task_resp = await auth_client.post("/api/ocp/tasks", json={"title": "Bridge task"})
     task_id = task_resp.json()["id"]
     full = {f: "x" for f in DECISION_PROTOCOL_FIELDS}
@@ -245,8 +255,8 @@ async def test_ocp_policy_get_put_founder_only(auth_client, test_db_session, tes
     resp = await auth_client.get("/api/ocp/policy")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["strict_default_deny"] is False
-    assert body["mode"] == "policy_if_configured"
+    assert body["strict_default_deny"] is True
+    assert body["mode"] == "strict_default_deny"
     assert body["approval_bridge"]["unified"] is False
     assert body["approval_bridge"]["mode"] == "external_refs_only"
     assert "pending_action" in body["approval_bridge"]["ref_types"]
@@ -281,6 +291,8 @@ async def test_ocp_policy_get_put_founder_only(auth_client, test_db_session, tes
 
 async def test_ocp_track_c_autonomous_mutation_fail_closed(auth_client, test_db_session, test_org, test_user):
     """Narrow latent-fail-open guard: Track C/autonomous markers in mutating OCP payloads."""
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}}
+    await test_db_session.commit()
     base = {"title": "Auto task", "track": "C", "autonomous": True}
 
     resp = await auth_client.post("/api/ocp/tasks", json=base)
@@ -291,7 +303,7 @@ async def test_ocp_track_c_autonomous_mutation_fail_closed(auth_client, test_db_
     assert resp.status_code == 403
     assert "Founder approval" in resp.json()["detail"]
 
-    test_org.extra_data = {"founder_user_id": test_user.id}
+    test_org.extra_data = {"ocp": {"strict_default_deny": False}, "founder_user_id": test_user.id}
     await test_db_session.commit()
     resp = await auth_client.post(
         "/api/ocp/tasks",
@@ -334,3 +346,35 @@ async def test_ocp_policy_put_track_c_autonomous_guard(auth_client, test_db_sess
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["strict_default_deny"] is True
+
+
+async def test_ocp_org_scope_guard_uses_organization_id_only(test_db_session, test_org, second_org):
+    """Organization scoped by .id; arbitrary resources never fall back to .id."""
+    import pytest
+    from fastapi import HTTPException
+    from sqlalchemy import select
+
+    from aios.api.deps import verify_org_access, verify_org_access_async
+    from aios.governance.security import SecurityEvent
+
+    verify_org_access(test_org.id, test_org)
+    await verify_org_access_async(test_org.id, test_org, db=test_db_session)
+
+    class Arbitrary:
+        id = test_org.id
+
+    with pytest.raises(HTTPException) as exc_no_scope:
+        verify_org_access(test_org.id, Arbitrary())
+    assert exc_no_scope.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exc_mismatch:
+        await verify_org_access_async(
+            second_org.id, test_org, db=test_db_session, source="api.ocp.get_policy"
+        )
+    assert exc_mismatch.value.status_code == 404
+    evt = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.source == "api.ocp.get_policy")
+        )
+    ).scalar_one()
+    assert evt.payload["resource_org_id"] == test_org.id

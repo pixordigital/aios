@@ -335,10 +335,10 @@ def grant_is_valid(grant: AuthorityGrant, now: datetime | None = None) -> bool:
 
 
 def ocp_strict_default_deny(org_extra_data: dict | None) -> bool:
-    """Optional OCP strict mode: deny when no relevant grant is configured.
+    """OCP strict mode: deny when no relevant grant is configured.
 
-    Default off for compatibility. Flag lives in org extra_data to avoid schema
-    changes: `{"ocp": {"strict_default_deny": true}}`.
+    Default on. Only explicit boolean False in org extra_data opts out:
+    `{"ocp": {"strict_default_deny": false}}`. No schema change.
     """
     return bool(ocp_policy(org_extra_data).get("strict_default_deny"))
 
@@ -387,12 +387,16 @@ def track_c_autonomous_mutation_guard(
 
 
 def ocp_policy(org_extra_data: dict | None) -> dict:
-    """Normalized OCP policy view over org.extra_data (no schema change)."""
-    extra = org_extra_data or {}
-    ocp_cfg = extra.get("ocp") if isinstance(extra, dict) else None
+    """Normalized OCP policy view over org.extra_data (no schema change).
+
+    Strict default-deny is on unless explicitly disabled with boolean False.
+    Malformed config fails closed.
+    """
+    extra = org_extra_data if isinstance(org_extra_data, dict) else {}
+    ocp_cfg = extra.get("ocp")
     if not isinstance(ocp_cfg, dict):
         ocp_cfg = {}
-    return {"strict_default_deny": bool(ocp_cfg.get("strict_default_deny"))}
+    return {"strict_default_deny": ocp_cfg.get("strict_default_deny", True) is not False}
 
 
 def set_ocp_policy(org_extra_data: dict | None, *, strict_default_deny: bool) -> dict:

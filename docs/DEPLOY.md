@@ -20,18 +20,18 @@ does not touch prod. No LLM/model call is needed.
 - Repository migration head: `e1f2a3b4c5d6`, via
   `alembic/versions/icm_side_effect_dedupe.py` (`f0e1d2c3b4a5`) and
   `alembic/versions/schema_gaps_creds_crm_kpi.py` (`e1f2a3b4c5d6`); committed
-  in `e46771e`. Commit/push any pending integration-wave code before building a
-  future image.
-- Committed AIOS HEAD / current deployed image: `3aa2db5` (Coolify `#805`,
-  routing fix only). Integration-wave code remains uncommitted locally: not
-  deployed, signed delivery unverified. Migrations committed in `e46771e`
-  must still be included in any future image.
+  in `e46771e`. Integration-wave code committed/pushed as `64ac67a` and deployed
+  in `#807`; build future images from `main`.
+- Current deployed AIOS image: `64ac67a` (Coolify `#807`). Paired ARVO image:
+  `09249ba` (`#806`). Both deployments `finished`; unsigned `/health/ready`
+  200 on each. Signed delivery remains unverified; signed smoke is human-only.
+  Migrations committed in `e46771e` are included in the deployed image.
 - Current app DB is the Supabase bridge `aios-supabase-db-8778:5432/aios`.
   Alembic head `e1f2a3b4c5d6` reached in app; `/health/ready` `200 migrations:ok`.
   Supabase cutover already applied for this app — no longer a future gate here.
   Section 0a is conditional/historical: use only if readiness regresses.
-  Remaining human gate: integration-wave code if still uncommitted. Migrations
-  committed in `e46771e` must still be included in any future image.
+  Remaining human gate: signed smoke with real secrets. Migrations committed in
+  `e46771e` must still be included in any future image.
 - AIOS engine sets `search_path = aios, public, extensions`; Alembic version
   table is `aios.alembic_version_aios`.
 

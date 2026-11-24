@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Workflow, WorkflowRun, Credential
+from aios.db.models import Workflow, WorkflowRun, Credential, CredentialEvent
 from aios.core.secrets import encrypt_secret
 from aios.governance.security import record_security_event
 from .deps import get_current_user, get_org_id, verify_org_access_async
@@ -422,6 +422,56 @@ async def delete_credential(cred_id: str, db: DatabaseBackend = Depends(get_db_b
     await db.delete(cred)
     await db.commit()
     return {"ok": True}
+
+@router.post("/credentials/{cred_id}/rotate")
+async def rotate_credential(cred_id: str, body: dict, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    _require_role(user, ["admin","org_admin"])
+    cred = await db.get(Credential, cred_id)
+    await verify_org_access_async(org_id, cred, db=db, actor_id=user.id, source="api.automations.rotate_credential")
+    data = body.get("data")
+    reason = body.get("reason")
+    if not isinstance(data, dict) or not isinstance(reason, str) or not reason.strip():
+        raise HTTPException(400, "data object and reason required")
+    from_version = cred.version or 1
+    to_version = from_version + 1
+    cred.data_enc = encrypt_secret(json.dumps(data))
+    cred.version = to_version
+    cred.rotated_at = datetime.now(timezone.utc)
+    db.add(CredentialEvent(
+        org_id=org_id,
+        credential_id=cred.id,
+        event="rotated",
+        actor_user_id=user.id,
+        from_version=from_version,
+        to_version=to_version,
+        details={"reason": reason},
+    ))
+    await db.commit()
+    await db.refresh(cred)
+    return {"id": cred.id, "version": cred.version, "rotated_at": cred.rotated_at}
+
+@router.get("/credentials/{cred_id}/events")
+async def credential_events(cred_id: str, db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), user=Depends(get_current_user)):
+    cred = await db.get(Credential, cred_id)
+    await verify_org_access_async(org_id, cred, db=db, actor_id=user.id, source="api.automations.credential_events")
+    res = await db.execute(
+        select(CredentialEvent)
+        .where(CredentialEvent.credential_id == cred_id, CredentialEvent.org_id == org_id)
+        .order_by(CredentialEvent.created_at.asc())
+    )
+    return [
+        {
+            "id": e.id,
+            "event": e.event,
+            "actor_user_id": e.actor_user_id,
+            "actor_agent_id": e.actor_agent_id,
+            "from_version": e.from_version,
+            "to_version": e.to_version,
+            "details": e.details,
+            "created_at": str(e.created_at),
+        }
+        for e in res.scalars().all()
+    ]
 
 @router.get("/executions")
 async def list_executions(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id), limit: int = 20):

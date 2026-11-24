@@ -2,7 +2,7 @@
 
 import pytest
 
-from aios.icm.contracts import RetryPolicy, StageManifest
+from aios.icm.contracts import RetryPolicy, StageManifest, manifest_fingerprint
 from aios.icm.enforcement import (
     BudgetExceeded,
     StageBudget,
@@ -110,22 +110,28 @@ def test_adapter_approval_required_fails_closed():
 def test_adapter_injects_explicit_preapproved_marker():
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter
-    from aios.icm.contracts import manifest_fingerprint
 
     manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
     node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
     adapter = ICMStageAdapter(
         node=node,
         storage_root="data",
         org_id="o",
         run_id="r",
-        preapproved={"approved": True, "actions": ["company_lookup"]},
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-42",
+            "approved_fingerprint": fp,
+            "actions": ["company_lookup"],
+        },
     )
     shared = {}
     adapter.enforce_execution(shared, action="company_lookup")
     assert shared["icm_approval"]["source"] == "icm_preapproved"
-    assert shared["icm_approval"]["approved_fingerprint"] == manifest_fingerprint(manifest)
-    assert adapter.approval_bound["approval_id"].startswith("preapproved:")
+    assert shared["icm_approval"]["approval_id"] == "appr-42"
+    assert shared["icm_approval"]["approved_fingerprint"] == fp
+    assert adapter.approval_bound["approval_id"] == "appr-42"
 
 
 def test_adapter_rejects_preapproved_wrong_action_or_fingerprint():
@@ -133,23 +139,61 @@ def test_adapter_rejects_preapproved_wrong_action_or_fingerprint():
     from aios.icm.adapter import ICMStageAdapter
 
     manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
     node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
-    adapter = ICMStageAdapter(
-        node=node,
-        storage_root="data",
-        org_id="o",
-        run_id="r",
-        preapproved={"approved": True, "actions": ["other_tool"]},
-    )
-    with pytest.raises(PermissionError, match="requires approval"):
-        adapter.enforce_execution({}, action="company_lookup")
 
-    adapter2 = ICMStageAdapter(
-        node=node,
-        storage_root="data",
-        org_id="o",
-        run_id="r",
-        preapproved={"approved": True, "actions": ["company_lookup"], "approved_fingerprint": "bad"},
+    def adapter_with(marker):
+        return ICMStageAdapter(
+            node=node,
+            storage_root="data",
+            org_id="o",
+            run_id="r",
+            preapproved=marker,
+        )
+
+    markers = [
+        {"approved": True, "approval_id": "appr-1", "approved_fingerprint": fp, "actions": ["other_tool"]},
+        {"approved": True, "approval_id": "appr-1", "approved_fingerprint": "bad", "actions": ["company_lookup"]},
+        {"approved": True, "approved_fingerprint": fp, "actions": ["company_lookup"]},
+        {"approved": True, "approval_id": "appr-1", "actions": ["company_lookup"]},
+        {"approved": True, "actions": ["company_lookup"]},
+    ]
+    for marker in markers:
+        with pytest.raises(PermissionError, match="requires approval"):
+            adapter_with(marker).enforce_execution({}, action="company_lookup")
+
+
+def test_adapter_fails_closed_on_unsupported_context_layers(tmp_path):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+    from aios.icm.workspace import WorkspacePaths
+
+    WorkspacePaths(tmp_path).ensure_workspace_scaffold("o", "b2b_lead_research")
+    manifest = _manifest(context={"layers": ["identity", "dynamic_references"]})
+    node = WorkflowNode(
+        id="n1", tool_name="company_lookup", stage_id="stage",
+        workspace_id="b2b_lead_research", stage_manifest=manifest,
     )
-    with pytest.raises(PermissionError, match="requires approval"):
-        adapter2.enforce_execution({}, action="company_lookup")
+    adapter = ICMStageAdapter(node=node, storage_root=tmp_path, org_id="o", run_id="r")
+    with pytest.raises(ValueError, match="unsupported context layers"):
+        adapter.pre_execute({}, {})
+
+
+def test_adapter_post_execute_reports_disk_write_failure(tmp_path, monkeypatch, caplog):
+    import logging
+
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+    from aios.icm.workspace import WorkspacePaths
+
+    node = WorkflowNode(id="n1", stage_id="stage", stage_manifest=_manifest())
+    adapter = ICMStageAdapter(node=node, storage_root=tmp_path, org_id="o", run_id="r")
+
+    def fail(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(WorkspacePaths, "ensure_run_directories", fail)
+    with caplog.at_level(logging.WARNING, logger="aios.icm.adapter"):
+        prov = adapter.post_execute("ok", {})
+    assert prov["disk_write_error"] == "disk full"
+    assert "Failed saving ICM-X provenance files" in caplog.text

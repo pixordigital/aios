@@ -5,6 +5,7 @@ import json
 import pytest
 
 from aios.core import audit_sink
+from aios.governance.security import record_security_event
 
 
 @pytest.fixture
@@ -58,6 +59,61 @@ def test_mirror_telemetry_snapshot(sink):
     assert len(rows) == 1
     assert rows[0]["data"]["agent_id"] == "agent-a"
     assert "org_id" not in rows[0]["data"]
+
+
+class _FlushingDB:
+    def __init__(self):
+        self.added = []
+
+    def add(self, obj):
+        self.added.append(obj)
+
+    async def flush(self):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_record_security_event_mirrors_sanitized_fields(sink):
+    db = _FlushingDB()
+    evt = await record_security_event(
+        db,
+        org_id="org-a",
+        source="api.test",
+        event_type="security.auth.failure",
+        severity="high",
+        incident_id="inc-1",
+        actor_type="human",
+        actor_id="u-1",
+        payload={"secret": "do-not-mirror"},
+    )
+    assert evt is not None
+    rows = audit_sink.read(org_id="org-a")
+    assert len(rows) == 1
+    assert rows[0]["event"] == "security.auth.failure"
+    assert rows[0]["data"] == {
+        "event_type": "security.auth.failure",
+        "severity": "high",
+        "source": "api.test",
+        "incident_id": "inc-1",
+        "actor_type": "human",
+        "actor_id": "u-1",
+        "org_id": "org-a",
+    }
+    assert "do-not-mirror" not in sink.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_record_security_event_mirror_failure_never_raises(sink, monkeypatch):
+    def boom(*args, **kwargs):
+        raise OSError("sink down")
+
+    monkeypatch.setattr(audit_sink, "append", boom)
+    db = _FlushingDB()
+    evt = await record_security_event(
+        db, org_id="org-a", source="api.test", event_type="security.auth.failure"
+    )
+    assert evt is not None
+    assert audit_sink.read() == []
 
 
 def test_append_after_rotation_starts_new_chain(sink):

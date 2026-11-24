@@ -1061,11 +1061,21 @@ class AgentRuntime:
         return await self._build_context(conversation_id, user_message, db)
 
     def _icm_execution_shared(self, conversation_id: str = "") -> dict:
-        shared = {
-            "run_id": conversation_id or f"agent-{self.agent.id}",
-            "task_id": conversation_id or f"agent-{self.agent.id}",
-            "conversation_id": conversation_id,
-        }
+        run_key = conversation_id or f"agent-{self.agent.id}"
+        cache = getattr(self, "_icm_execution_shared_cache", None)
+        if cache is None:
+            cache = {}
+            self._icm_execution_shared_cache = cache
+        shared = cache.get(run_key)
+        if shared is None:
+            shared = {
+                "run_id": run_key,
+                "task_id": run_key,
+                "conversation_id": conversation_id,
+            }
+            cache[run_key] = shared
+        shared.pop("icm_approval", None)
+        shared.pop("icm_preapproved", None)
         extra = getattr(self.agent, "extra_data", None) or {}
         cfg = extra.get("icm") if isinstance(extra.get("icm"), dict) else {}
         gov = getattr(self.agent, "governance_config", None) or {}

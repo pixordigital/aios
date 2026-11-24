@@ -30,7 +30,7 @@ async def test_skipped_step_is_reported():
     assert any("skipped steps" in f for f in report["findings"])
 
 
-async def test_missing_stage_approval_is_policy_violation():
+async def test_missing_stage_approval_blocks_execution():
     manifest = StageManifest(
         id="approval-stage", version="1.0.0", mode="deterministic",
         approval_required=True, allowed_tools=["calculator"],
@@ -43,7 +43,7 @@ async def test_missing_stage_approval_is_policy_violation():
 
     result = await WorkflowEngine().run(wf, f"conv-{uuid.uuid4()}", "hello")
 
-    assert result.ok(), result.errors
-    report = _conformance(result)
-    assert report["deviation"] == "policy_violation"
-    assert "missing approval" in report["findings"]
+    assert not result.ok()
+    assert "requires approval" in result.errors["n1"]
+    assert result.node_status["n1"] == "failed"
+    assert "n1" not in result.outputs

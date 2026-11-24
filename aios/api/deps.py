@@ -8,7 +8,7 @@ from fastapi import Request as FastAPIRequest
 
 from aios.api.auth import _is_login_allowed, _verify_jwt_token, _create_jwt_token
 from aios.db.backend import DatabaseBackend, get_db_backend
-from aios.db.models import User
+from aios.db.models import Organization, User
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,8 @@ async def get_superadmin(user: User = Depends(get_current_user)) -> User:
 
 
 def verify_org_access(org_id: str, resource) -> None:
-    if not resource or getattr(resource, "org_id", None) != org_id:
+    org_attr = "id" if isinstance(resource, Organization) else "org_id"
+    if not resource or getattr(resource, org_attr, None) != org_id:
         raise HTTPException(404)
 
 
@@ -114,7 +115,8 @@ async def verify_org_access_async(
     Use this async variant where db is available so cross-tenant 404 mismatches
     produce deterministic security telemetry without leaking resource existence.
     """
-    resource_org = getattr(resource, "org_id", None) if resource else None
+    org_attr = "id" if isinstance(resource, Organization) else "org_id"
+    resource_org = getattr(resource, org_attr, None) if resource else None
     if not resource or resource_org != org_id:
         if (
             db is not None
@@ -129,6 +131,7 @@ async def verify_org_access_async(
                     db,
                     org_id=str(org_id),
                     resource=resource,
+                    resource_org_attr=org_attr,
                     source=source,
                     actor_type=actor_type,
                     actor_id=actor_id,

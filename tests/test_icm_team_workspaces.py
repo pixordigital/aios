@@ -1,10 +1,14 @@
 """ICM coverage for business teams outside the original sales/dev/security fleet."""
 import importlib.util
+import json
 import re
 from pathlib import Path
 from types import SimpleNamespace
 
-from aios.icm.contracts import load_stage_manifest
+import pytest
+
+from aios.icm.adapter import ICMStageAdapter
+from aios.icm.contracts import load_stage_manifest, manifest_fingerprint
 from aios.icm.team_workspaces import (
     AGENT_EVENTS,
     AGENT_STAGES,
@@ -88,6 +92,24 @@ def _load_provisioner():
     return module
 
 
+def _side_effect_adapter(tmp_path: Path, manifest, marker=None):
+    workspace_id, stage_id = AGENT_STAGES["sales-closer"]
+    node = SimpleNamespace(
+        id=stage_id,
+        stage_id=stage_id,
+        workspace_id=workspace_id,
+        stage_manifest=manifest,
+    )
+    return ICMStageAdapter(
+        node,
+        storage_root=str(tmp_path),
+        org_id="org-1",
+        run_id="approval-test",
+        workspace_id=workspace_id,
+        preapproved=marker,
+    )
+
+
 def test_four_business_workspaces_seed(tmp_path: Path):
     written = seed_team_workspaces(tmp_path, "org-1")
 
@@ -128,6 +150,21 @@ def test_new_stage_manifests_valid_and_tools_match_agents(tmp_path: Path):
         assert not set(manifest.allowed_tools) & set(manifest.denied_tools)
         configured = set(apply_template(template_key)["tools"])
         assert set(manifest.allowed_tools) <= configured, name
+
+
+def test_side_effecting_stages_declare_approval_required(tmp_path: Path):
+    seed_team_workspaces(tmp_path, "org-1")
+
+    checked = 0
+    for workspace_id, workspace in TEAM_WORKSPACES.items():
+        for stage_id, stage in workspace["stages"].items():
+            if not stage["side_effects"]:
+                continue
+            manifest = load_stage_manifest(_stage_path(tmp_path, workspace_id, stage_id))
+            assert manifest.side_effects is True
+            assert manifest.approval_required is True, (workspace_id, stage_id)
+            checked += 1
+    assert checked == 7
 
 
 def test_event_subscriptions_have_real_publishers():
@@ -192,3 +229,134 @@ def test_provisioner_extra_data_converges():
             stage_id,
         )
         assert subscribed["event_subscriptions"] == AGENT_EVENTS[name]
+
+
+def test_provisioner_accepts_supplied_fingerprint_matched_approval(tmp_path: Path):
+    seed_team_workspaces(tmp_path, "org-1")
+    workspace_id, stage_id = AGENT_STAGES["sales-closer"]
+    manifest = load_stage_manifest(_stage_path(tmp_path, workspace_id, stage_id))
+    fingerprint = manifest_fingerprint(manifest)
+    approvals_file = tmp_path / "approvals.json"
+    approvals_file.write_text(
+        json.dumps({
+            "sales-closer": {
+                "approval_id": "appr-founder-1",
+                "approved_fingerprint": fingerprint,
+                "actions": [stage_id],
+                "approved_by": "founder",
+            },
+            "sales-sdr": {
+                "approval_id": "appr-other",
+                "approved_fingerprint": "not-this-stage",
+                "actions": [stage_id],
+                "approved_by": "founder",
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    provisioner = _load_provisioner()
+    approvals = provisioner._load_approvals(str(approvals_file))
+    extra = provisioner._agent_extra(
+        SimpleNamespace(name="sales-closer", extra_data={}),
+        workspace_id,
+        stage_id,
+        approvals,
+        fingerprint,
+    )
+    marker = extra["icm"]["preapproved"]
+
+    assert marker["approval_id"] == "appr-founder-1"
+    assert marker["approved_by"] == "founder"
+    assert marker["approved_fingerprint"] == fingerprint
+    assert marker["actions"] == [stage_id]
+    other = provisioner._agent_extra(
+        SimpleNamespace(name="sales-sdr", extra_data={}),
+        workspace_id,
+        stage_id,
+        approvals,
+        fingerprint,
+    )
+    assert "preapproved" not in other["icm"]
+
+    adapter = _side_effect_adapter(tmp_path, manifest, marker)
+    adapter.enforce_execution({}, action="agent_run")
+    assert adapter.approval_bound["approval_id"] == "appr-founder-1"
+
+
+def test_provisioner_without_approvals_scrubs_marker_and_blocks_side_effects(tmp_path: Path):
+    seed_team_workspaces(tmp_path, "org-1")
+    workspace_id, stage_id = AGENT_STAGES["sales-closer"]
+    manifest = load_stage_manifest(_stage_path(tmp_path, workspace_id, stage_id))
+    stale = {
+        "icm": {
+            "workspace_id": workspace_id,
+            "stage_id": stage_id,
+            "preapproved": {
+                "approved": True,
+                "approval_id": "fabricated",
+                "approved_fingerprint": manifest_fingerprint(manifest),
+                "actions": [stage_id],
+            },
+        },
+        "keep": True,
+    }
+
+    provisioner = _load_provisioner()
+    extra = provisioner._agent_extra(
+        SimpleNamespace(name="sales-closer", extra_data=stale),
+        workspace_id,
+        stage_id,
+        provisioner._load_approvals(None),
+        None,
+    )
+
+    assert "preapproved" not in extra["icm"]
+    assert extra["keep"] is True
+    with pytest.raises(FileNotFoundError):
+        provisioner._load_approvals(str(tmp_path / "missing.json"))
+    with pytest.raises(PermissionError, match="requires approval"):
+        _side_effect_adapter(
+            tmp_path, manifest, extra["icm"].get("preapproved")
+        ).enforce_execution({}, action="agent_run")
+
+
+def test_provisioner_rejects_wrong_fingerprint_approval(tmp_path: Path):
+    seed_team_workspaces(tmp_path, "org-1")
+    workspace_id, stage_id = AGENT_STAGES["sales-closer"]
+    manifest = load_stage_manifest(_stage_path(tmp_path, workspace_id, stage_id))
+    approvals_file = tmp_path / "wrong-fingerprint.json"
+    approvals_file.write_text(
+        json.dumps({
+            "sales-closer": {
+                "approval_id": "appr-wrong",
+                "approved_fingerprint": "0" * 64,
+                "actions": [stage_id],
+                "approved_by": "founder",
+            }
+        }),
+        encoding="utf-8",
+    )
+    stale = {
+        "icm": {
+            "workspace_id": workspace_id,
+            "stage_id": stage_id,
+            "preapproved": {"approval_id": "fabricated"},
+        }
+    }
+
+    provisioner = _load_provisioner()
+    extra = provisioner._agent_extra(
+        SimpleNamespace(name="sales-closer", extra_data=stale),
+        workspace_id,
+        stage_id,
+        provisioner._load_approvals(str(approvals_file)),
+        manifest_fingerprint(manifest),
+    )
+
+    assert "preapproved" not in extra["icm"]
+    assert "fabricated" not in json.dumps(extra)
+    with pytest.raises(PermissionError, match="requires approval"):
+        _side_effect_adapter(
+            tmp_path, manifest, extra["icm"].get("preapproved")
+        ).enforce_execution({}, action="agent_run")

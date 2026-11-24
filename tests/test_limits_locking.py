@@ -14,6 +14,7 @@ from every local test run.
 
 import asyncio
 import warnings
+from datetime import date
 
 import pytest
 
@@ -37,9 +38,12 @@ class _FakeSess:
 
 
 class _FakeDB:
-    def __init__(self, dialect_name="postgresql"):
+    def __init__(self, dialect_name="postgresql", add_error=None):
         self._dialect_name = dialect_name
         self.statements = []
+        self.added = []
+        self.add_error = add_error
+        self.commits = 0
 
     async def _sess(self):
         return _FakeSess(self._dialect_name)
@@ -53,8 +57,13 @@ class _FakeDB:
             raise _Stop()
         return _Permissive()
 
+    def add(self, row):
+        if self.add_error:
+            raise self.add_error
+        self.added.append(row)
+
     async def commit(self):
-        pass
+        self.commits += 1
 
     async def get(self, model, ident):
         class _Org:
@@ -145,3 +154,30 @@ def test_no_never_awaited_coroutine_warning(monkeypatch):
 
         asyncio.run(run())
     assert not [w for w in caught if "never awaited" in str(w.message)]
+
+
+@pytest.mark.asyncio
+async def test_track_usage_persists_attribution_row():
+    db = _FakeDB()
+    await limits.track_usage(
+        "org-1", db, tokens=10, cost_usd=0.01,
+        model="openai/gpt-4o-mini", provider="openai",
+        input_tokens=6, output_tokens=4,
+        attribution={"path": "test"},
+    )
+    row, = db.added
+    assert (row.org_id, row.date) == ("org-1", date.today().isoformat())
+    assert (row.model, row.provider, row.cost_kind) == ("openai/gpt-4o-mini", "openai", "internal")
+    assert (row.input_tokens, row.output_tokens, row.total_tokens) == (6, 4, 10)
+    assert row.cost_usd == 0.01
+    assert row.attribution == {"path": "test"}
+    assert db.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_track_usage_attribution_failure_keeps_counting():
+    db = _FakeDB(add_error=RuntimeError("missing table"))
+    await limits.track_usage("org-1", db, model="openai/gpt-4o-mini")
+    assert db.added == []
+    assert db.statements, "aggregate upsert must still run"
+    assert db.commits == 1

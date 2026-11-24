@@ -198,6 +198,40 @@ def test_known_schema_validation_rejects_wrong_types_and_empty_objects():
         validate_schema("lead_research_input.v1", {})
 
 
+def test_schema_spec_missing_required_key():
+    from aios.icm.schemas import SchemaValidationError, validate_schema
+
+    with pytest.raises(SchemaValidationError, match="missing required keys"):
+        validate_schema("tool_call.v1", {"args": {}})
+
+
+def test_schema_spec_wrong_primitive_type():
+    from aios.icm.schemas import SchemaValidationError, validate_schema
+
+    with pytest.raises(SchemaValidationError, match="'score'.*must be number"):
+        validate_schema("lead_qualification_output.v1", {"score": "80"})
+    with pytest.raises(SchemaValidationError, match="'qualified'.*must be bool"):
+        validate_schema("lead_qualification_output.v1", {"qualified": 1})
+
+
+def test_schema_spec_nested_item_type():
+    from aios.icm.schemas import SchemaValidationError, validate_schema
+
+    with pytest.raises(SchemaValidationError, match="'tags\\[1\\]'"):
+        validate_schema("memory_candidate.v1", {"content": "note", "tags": ["ok", 7]})
+    with pytest.raises(SchemaValidationError, match="'companies\\[0\\]'"):
+        validate_schema("lead_research_input.v1", {"companies": ["acme"]})
+    with pytest.raises(SchemaValidationError, match="'lead.name'"):
+        validate_schema("lead_research_input.v1", {"lead": {"name": 7}})
+
+
+def test_schema_spec_unknown_id_fail_closed():
+    from aios.icm.schemas import SchemaValidationError, validate_schema
+
+    with pytest.raises(SchemaValidationError, match="no registered validator"):
+        validate_schema("never_registered.v1", {"anything": 1})
+
+
 def test_adapter_known_schema_validation_fail_closed(tmp_path: Path):
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter

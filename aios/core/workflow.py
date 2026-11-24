@@ -486,7 +486,12 @@ class WorkflowEngine:
                     storage_root=shared.get("workspace_root") or "data",
                     org_id=shared.get("org_id") or "default",
                     run_id=shared.get("run_id") or conv_id,
+                    db_session=shared.get("icm_db_session"),
                 )
+                preapproved = shared.get("preapproved")
+                if isinstance(preapproved, dict) and "icm_approval" not in shared:
+                    shared.setdefault("icm_preapproved", preapproved)
+                    stage_adapter.check_approval(shared)
                 stage_adapter.pre_execute(ctx, shared)
                 # Approval/side-effect gate before any execution. Duplicate side
                 # effects are skipped when a prior output exists.
@@ -608,11 +613,13 @@ class WorkflowEngine:
                     raise
             if stage_adapter is not None:
                 try:
-                    _rb = getattr(runtime, "_icm_budget", None)
+                    _rb = getattr(getattr(runtime, "runtime", runtime), "_icm_budget", None)
                     if _rb is not None:
                         stage_adapter.charge_llm(_rb.cost_usd)
                 except Exception as e:
                     logger.warning("ICM stage cost attribution failed for %s: %s", node.id, e)
+            if stage_adapter is not None:
+                stage_adapter.validate_output(output)
             result.outputs[node.id] = output or ""
             result.node_status[node.id] = "done"
             try:
@@ -645,6 +652,8 @@ class WorkflowEngine:
                         items = []
                 if not isinstance(items, list):
                     items = [items]
+                if stage_adapter is not None:
+                    stage_adapter.validate_output(json.dumps(items))
                 result.outputs[node.id] = json.dumps(items)
                 result.node_status[node.id] = "done"
                 try:
@@ -688,6 +697,8 @@ class WorkflowEngine:
                         output = await asyncio.wait_for(
                             engine.execute(node.tool_name, args_json), timeout=node.timeout
                         )
+                    if stage_adapter is not None:
+                        stage_adapter.validate_output(output)
                     result.outputs[node.id] = output or ""
                     result.node_status[node.id] = "done"
                     try:

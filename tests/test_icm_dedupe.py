@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from aios.db.engine import Base
 from aios.db.models import Organization
 from aios.icm.adapter import ICMStageAdapter, SideEffectDuplicateError
-from aios.icm.contracts import StageManifest
+from aios.icm.contracts import StageManifest, manifest_fingerprint
 from aios.icm.dedupe_model import ICMSideEffect
 
 REPO = Path(__file__).resolve().parents[1]
@@ -35,7 +35,12 @@ def _adapter(session=None, *, org_id="org-1", run_id="run-1"):
         storage_root="data",
         org_id=org_id,
         run_id=run_id,
-        preapproved={"approved": True},
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-1",
+            "approved_fingerprint": manifest_fingerprint(manifest),
+            "actions": ["send_email"],
+        },
         db_session=session,
     )
 

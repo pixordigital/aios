@@ -150,7 +150,7 @@ async def _require_grant_if_policy(
 
     If subject has active grants in the action domain, a matching grant is required.
     If no relevant grants are configured, behavior depends on org policy:
-    `extra_data.ocp.strict_default_deny` (default false for compat).
+    `extra_data.ocp.strict_default_deny` (default true; explicit false opts out).
 
     `founder_bypass` preserves explicit Founder-gated endpoints: Founder may pass
     without an OCP grant, but policy is still evaluated for non-founders.
@@ -236,7 +236,7 @@ async def put_ocp_policy(
     _require_track_c_autonomous_guard(body, action="policy:update", org=org, user=user)
     if not _is_founder(user, org):
         raise HTTPException(403, "Founder/owner required")
-    strict = bool(body.get("strict_default_deny", False))
+    strict = bool(body.get("strict_default_deny", True))
     org.extra_data = set_ocp_policy(getattr(org, "extra_data", None), strict_default_deny=strict)
     record_org_event(
         db,

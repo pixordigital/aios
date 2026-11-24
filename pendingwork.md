@@ -1,19 +1,19 @@
 ## pending work handoff
 
-Snapshot: 2026-11-24. AIOS HEAD `e46771e` verified; ARVO HEAD `534154f` verified (read-only `git rev-parse`). Local `main` may be ahead of `origin/main`; current check shows AIOS `main` and `origin/main` both at `e46771e`; recheck `git status`/`git rev-parse origin/main` if needed.
+Snapshot: 2026-11-24. Deployed pair AIOS `64ac67a`, ARVO `09249ba`; local `main` matched `origin/main` at deploy time. Review wave below verified before commit; recheck `git status`/`git rev-parse HEAD origin/main` before any push.
 
-### Remaining-gap builder wave — IN PROGRESS 2026-11-24
+### Remaining-gap builder wave — VERIFIED local 2026-11-24
 
-Spawned 8 local code-only builders; no prod/deploy/push/secrets. Do not mark done until each reports tests + main-thread re-read confirms diff.
+Spawned 8 local code-only builders plus 2 OCP follow-ups; all receipts landed, main-thread re-read OK, targeted suites green. No prod/deploy/push/secrets.
 
-- [ ] `ses_df0b84e81ffe35zxmPuu45GpII` — ICM declarative schema checks. Files `aios/icm/schemas.py`, `tests/test_icm_x.py`.
-- [ ] `ses_df0b84e80ffe0wAA2tvs0scH5l` — HITL approval provisioning CLI. Files `scripts/provision_icm_fleet.py`, `tests/test_icm_team_workspaces.py`.
-- [ ] `ses_df0b84e7bffenGvoWnAlsWPLpY` — OCP strict default-deny. Files `aios/governance/ocp.py`, `tests/test_ocp.py`.
-- [ ] `ses_df0b84e7affetBg4iud5oOTS1U` — security event sink mirror. Files `aios/governance/security.py`, `tests/test_audit_sink.py`.
-- [ ] `ses_df0b84e79ffep4L50WwUFGpL5d` — credential rotation/audit API. Files `aios/api/automations.py`, `tests/test_automations_webhook_security.py`.
-- [ ] `ses_df0b84e73ffe496yZm0ud6DJwB` — usage attribution persistence. Files `aios/core/limits.py`, `tests/test_limits_locking.py`.
-- [ ] `ses_df0b84e65ffe400JOYfGxQSKai` — media phase 2/3 workflow specs. Files `aios/media_growth.py`, `tests/test_media_growth.py`.
-- [ ] `ses_df0b84e5fffeYI7rwqiZy8J8Kl` — ICM workflow preapproval binding. Files `aios/core/workflow.py`, `tests/test_e2e_icm_resume.py`.
+- [x] `ses_df0b84e81ffe35zxmPuu45GpII` — ICM declarative schema checks. Files `aios/icm/schemas.py:93-326`, `tests/test_icm_x.py:201-232`. Landed: `_SPECS` + `_check_shape` for required keys, primitives, nested list/object shapes; legacy plain-string pass-through and unknown-id fail-closed kept. Agent targeted `23 passed`; main-thread re-read OK. Risk: mixed-type `tags`/`companies`/nested `lead` items now reject where old checks allowed them.
+- [x] `ses_df0b84e80ffe0wAA2tvs0scH5l` — HITL approval provisioning CLI. Files `scripts/provision_icm_fleet.py:15-27,43-96,104-138`, `tests/test_icm_team_workspaces.py:2-13,95-110,234-362`. Landed: `--approvals-file` only writes fingerprint-matched explicit markers; stale markers scrubbed; side-effecting stages fail closed. Agent `9 passed`, diff check clean; main-thread re-read OK. Risk: side-effect stages stay blocked until valid approval file supplied; DB-backed `main()` not exercised.
+- [x] `ses_df0b84e7bffenGvoWnAlsWPLpY` — OCP strict default-deny. Landed default-on + explicit false opt-out in `aios/governance/ocp.py:337-343,389-399`, tests `tests/test_ocp.py:77-115`. Follow-ups: `aios/api/ocp.py:153,239` docstring/PUT default; `aios/api/deps.py:11,96-99,118-120,130-139` Organization.id scope guard only; `tests/test_ocp_api.py` stale assertions + org-scope/mismatch metric test `:351-380`. Final targeted `tests/test_ocp.py tests/test_ocp_api.py` `27 passed`; main-thread re-read OK. Risk: graph stale; arbitrary `.id` resources still fail closed by design.
+- [x] `ses_df0b84e7affetBg4iud5oOTS1U` — security event sink mirror. Files `aios/governance/security.py:274-295`, `tests/test_audit_sink.py:8,64-116`. Landed: successful `SecurityEvent` flush best-effort mirrors allowlisted fields to append-only sink; payload/secrets excluded, mirror failure never raises. Agent `6+17 passed`; main-thread re-read OK. Risk: sync fsync latency; graph stale.
+- [x] `ses_df0b84e79ffep4L50WwUFGpL5d` — credential rotation/audit API. Files `aios/api/automations.py:10,426-474`, `tests/test_automations_webhook_security.py:4-9,80-160`. Landed: admin rotate re-encrypts secret, bumps version, appends `CredentialEvent`; org-scoped audit read, no secret in responses. Agent targeted `4 passed`, diff check clean; main-thread re-read OK. Risk: concurrent rotations may reuse version; no lock added.
+- [x] `ses_df0b84e73ffe496yZm0ud6DJwB` — usage attribution persistence. Files `aios/core/limits.py:318,341-359`, `tests/test_limits_locking.py:17,40-66,159-183`. Landed: `UsageAttribution` row added before existing commit; failure best-effort, aggregate counting preserved. Agent targeted `7 passed` (`--noconftest`); main-thread re-read OK. Risk: graph stale; detail row flushes in existing commit.
+- [x] `ses_df0b84e65ffe400JOYfGxQSKai` — media phase 2/3 workflow specs. Files `aios/media_growth.py:359-387`, `tests/test_media_growth.py:16-28,70-111`. Landed: draft reviewer and distribution/analytics specs reuse existing helpers, keep human gate, no external side effects. Agent 4 direct checks PASS; main-thread re-read OK. Risk: conftest paths untested (`aioprometheus` missing).
+- [x] `ses_df0b84e5fffeYI7rwqiZy8J8Kl` — ICM workflow preapproval binding. Files `aios/core/workflow.py:491-495`, `tests/test_e2e_icm_resume.py:12,127-189`. Landed: explicit `shared['preapproved']` mapped to `icm_preapproved` and checked before `pre_execute`; adapter fingerprint checks remain authoritative. Agent `5 passed`; main-thread re-read OK. Risk: keyed mapping shape fails closed.
 
 Excluded human gates: LLM key, agent activation, stale fake subscriptions cleanup, HMAC/env secret writes, signed dual deploy, token rotation, Founder activation, Slack migration map, LGPD/LIA review, dealership pilot data.
 
@@ -196,11 +196,11 @@ Local full suites green; deployed prod NOT verified. No prod claim until dual de
 
 Pending review (still running, do not mark done): `ses_df1039474...` cross-cutting diff review; `ses_df1034686...` smoke-gate route inventory; `ses_df1031e08...` outbound HTTP construction parity.
 
-### Prod deploy runbook (manual; not executed)
+### Prod deploy runbook (historical snapshot; paired deploy executed below)
 - Commit/push both repos separately; deploy both peers together or HMAC returns 401.
 - Coolify env NAMES already present: `AIOS_ARVO_INTEGRATION_ENABLED`, `AIOS_ARVO_BASE_URL`, `AIOS_ARVO_SERVICE_KEY_ID`, `AIOS_ARVO_SERVICE_KEY`; ARVO mirror. Missing names to add by human: `AIOS_ARVO_ALLOWED_ORGS`, `AIOS_ARVO_SERVICE_KEYS`, `ARVO_AIOS_ALLOWED_ORGS`, `ARVO_AIOS_SERVICE_KEYS`. Never print/version values.
-- Prod signed-peer health currently 401 (enabled + keys configured), not 404 (flag off) or 503 (missing key config). Latest verified prod deploy: AIOS `#805` (`3aa2db5...` routing fix only; integration code NOT in it); ARVO last recorded here `l7p2wj6ysq…` deploy `#798`. Integration wave code is local/uncommitted, not deployed; local HMAC parity verified in final local-verification section; prod signed delivery remains unverified and human-only.
-- AIOS migration: runbook now `docs/DEPLOY.md:13-26,63-112,162-192`; two distinct paths — readiness repair on current image at committed head `d0e1f2a3b4c5`, full cutover to worktree head `e1f2a3b4c5d6` requires new image containing untracked migrations. No `alembic stamp head`; stop on failure. Human gate: untracked migrations must be committed/pushed and image built before runbook step 1 can pass.
+- Prod signed-peer health was 401 before the paired deploy (enabled + keys configured). Current deployed pair: AIOS `#807` (`64ac67a...`), ARVO `#806` (`09249ba...`); both `finished`, unsigned live/ready 200 both. Signed delivery remains unverified and human-only; local HMAC parity verified in final local-verification section. See paired deploy section below for evidence.
+- AIOS migration: runbook now `docs/DEPLOY.md:13-26,63-112,162-192`; two distinct paths — readiness repair on current image at committed head `d0e1f2a3b4c5`, full cutover to worktree head `e1f2a3b4c5d6` requires new image containing untracked migrations. No `alembic stamp head`; stop on failure. Migrations already committed in `e46771e`; head reached in app; no `alembic stamp head`.
 - Historical 2026-11-22 smoke under OLD canonical (not current state): AIOS `/health/live` 200 + `/health/ready` 200 `migrations: ok`; ARVO `/arvo/health/live` + `/arvo/health/ready` 200; unsigned peer health 401; signed health 200 both directions (real secrets human-only); `/dashboard/sso/arvo` 303 + `arvo_token`; `/arvo/control-center` 200; three ARVO crons enabled; signed outbox flush 200; CRM deals readable from AIOS source. Current canonical/new-code signed delivery is NOT verified in prod; local HMAC parity verification is in final local-verification section; remains human-only for prod. Do not claim deploy or cutover.
 
 ### Prior-snapshot final local verification 2026-11-24 — agent `ses_df105d6c6...`, sequential run (OLDER SNAPSHOT; results do NOT apply to current uncommitted tree)
@@ -209,7 +209,7 @@ Pending review (still running, do not mark done): `ses_df1039474...` cross-cutti
 - `git diff --check` both repos → no output, exit 0.
 - Verdict (OLD SNAPSHOT ONLY): final local integration verification green. No deploy/push. These results do NOT apply to current uncommitted tree; current-tree verification is recorded in final local-verification section.
 
-Still queued (prod/human): readiness migration deploy (manual/Coolify); final dual-peer deploy + signed smoke tests.
+Still queued (prod/human): signed smoke with real secrets; optional readiness recheck only if regression. Paired deploy done.
 
 ### Open blockers / not closed
 
@@ -288,3 +288,19 @@ Still queued (prod/human): readiness migration deploy (manual/Coolify); final du
 - Prod untouched; no push, signed-probe, or cutover claim; human gates unchanged from `pendingwork.md:169-182`.
 
 No prod deploy, no signed delivery verification, no cutover claim.
+
+### Paired prod deploy 2026-11-24 — EXECUTED, unsigned verified only
+
+- Commit/push: AIOS `64ac67aea2ea196ae575f591779a8dde49143e84`, ARVO `09249ba5c9d5d435cfa735ca3a710668aeb48c6b`; both `origin/main` matched local HEAD after push.
+- Coolify env preflight no secret values printed: integration enabled true both peers; service key ID + secret values match across peers; AIOS DSN host `aios-supabase-db-8778:5432/aios`; rotation/allowlist names present on AIOS but empty by design, absent on ARVO (default empty by design).
+- Deploy `#807` `omszvnx4deptydmomadockqz` AIOS `finished` 2026-11-24T20:44:24Z; image tags app+worker `64ac67aea2ea196ae575f591779a8dde49143e84` in logs. Deploy `#806` `yiancb7qf0c9v660zqsovmiq` ARVO `finished` 20:48:47Z; image tag `09249ba5c9d5d435cfa735ca3a710668aeb48c6b` in logs. No failed/cancelled deploy.
+- Unsigned health raw: AIOS `/health/live` 200 `{"status":"live"}`; `/health/ready` 200 `{"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`. ARVO `/arvo/health/live` 200 `{"status":"live","app":"ARVO"}`; `/arvo/health/ready` 200 `{"status":"ready","checks":{"db":"ok","redis":"ok"}}`. restart_count=0 both. Coolify status lagged (`running:unknown` AIOS health check disabled, `running:starting` ARVO) despite 200s.
+- Signed delivery NOT verified. Signed smoke remains human-only with real secrets. No signed-probe claim. No other prod writes by this session.
+
+### Pre-deploy review wave 2026-11-24 — VERIFIED local
+
+- Scope: all 32 changed AIOS files reviewed (15 source, 16 tests, `docs/DEPLOY.md`, `pendingwork.md`); `graphify-out/` excluded. ARVO clean except untracked `.opencode/`/`graphify-out/`; no ARVO commit needed.
+- Main-thread conftest run `PYTEST_XDIST_WORKER=commitreviewB .venv/bin/python -m pytest -q` over 15 changed test files → `158 passed, 1 skipped, 66 warnings in 507.97s`. Warnings = short test JWT keys + slowapi deprecation; no failures.
+- `--noconftest` same list → `141 passed, 1 skipped, 5 errors` from missing `test_db_session`/`test_org` fixtures; conftest run authoritative.
+- `py_compile` clean on all changed `aios/`+`scripts/` files; `git diff --check` clean; no new skip/xfail; no literal secrets; deps unchanged.
+- Behavior changes for deploy: OCP strict deny now default-on unless org `extra_data.ocp.strict_default_deny = false`; ICM approval needs explicit `approval_id` plus exact manifest fingerprint; `team_workspaces.py:596` now sets `approval_required = side_effects`, changing fingerprints — stale side-effect approvals fail closed until re-issued.

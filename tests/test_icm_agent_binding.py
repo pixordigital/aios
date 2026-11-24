@@ -4,7 +4,7 @@ from pathlib import Path
 from aios.config import settings
 from aios.core.agent import AgentRuntime
 from aios.db.models import Agent
-from aios.icm.contracts import load_stage_manifest
+from aios.icm.contracts import load_stage_manifest, manifest_fingerprint
 from aios.icm.team_workspaces import (
     AGENT_STAGES,
     TEAM_WORKSPACES,
@@ -103,11 +103,17 @@ def _approval_manifest():
 
 def test_agent_binding_injects_explicit_icm_preapproved(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    manifest = _approval_manifest()
     agent = _agent(extra_data={
         "icm": {
             "workspace_id": "sales_ops",
-            "stage_manifest": _approval_manifest().model_dump(mode="json"),
-            "preapproved": {"approved": True, "actions": ["approval_stage"]},
+            "stage_manifest": manifest.model_dump(mode="json"),
+            "preapproved": {
+                "approved": True,
+                "approval_id": "approval-explicit",
+                "approved_fingerprint": manifest_fingerprint(manifest),
+                "actions": ["approval_stage"],
+            },
         }
     })
 
@@ -118,6 +124,43 @@ def test_agent_binding_injects_explicit_icm_preapproved(tmp_path: Path, monkeypa
     assert runtime.stage.approval_bound["source"] == "icm_preapproved"
     # execution gate should pass for allowed tool
     runtime._icm_enforce_tool("lead_score", conversation_id="conv-1")
+
+
+def test_agent_tool_side_effect_key_reused_within_run(tmp_path: Path, monkeypatch):
+    from aios.icm import enforcement
+    from aios.icm.contracts import manifest_fingerprint
+
+    monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
+    manifest = _approval_manifest().model_copy(update={"side_effects": True})
+    agent = _agent(extra_data={
+        "icm": {
+            "workspace_id": "sales_ops",
+            "stage_manifest": manifest.model_dump(mode="json"),
+            "preapproved": {
+                "approved": True,
+                "approval_id": "approval-dedupe",
+                "approved_fingerprint": manifest_fingerprint(manifest),
+                "actions": ["approval_stage"],
+            },
+        }
+    })
+    runtime = AgentRuntime(agent)
+
+    original = enforcement.side_effect_already_applied
+    checks = []
+
+    def spy(applied, key):
+        checks.append((set(applied), key))
+        return original(applied, key)
+
+    monkeypatch.setattr(enforcement, "side_effect_already_applied", spy)
+    runtime._icm_enforce_tool("lead_score", conversation_id="conv-dedupe")
+    runtime._icm_enforce_tool("lead_score", conversation_id="conv-dedupe")
+
+    assert len(checks) == 2
+    assert checks[0][1] == checks[1][1]
+    assert checks[0][0] == set()
+    assert checks[1][0] == {checks[1][1]}
 
 
 def test_agent_binding_fails_closed_without_explicit_preapproved(tmp_path: Path, monkeypatch):

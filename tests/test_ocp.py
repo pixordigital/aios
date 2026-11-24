@@ -77,17 +77,42 @@ def test_authorize_respects_validity_scope_and_revocation():
 def test_ocp_strict_default_deny_flag():
     from aios.governance.ocp import ocp_policy, ocp_strict_default_deny, set_ocp_policy
 
-    assert ocp_strict_default_deny(None) is False
-    assert ocp_strict_default_deny({}) is False
+    # Strict default-deny on by default; only explicit boolean False opts out.
+    assert ocp_strict_default_deny(None) is True
+    assert ocp_strict_default_deny({}) is True
+    assert ocp_strict_default_deny({"ocp": {}}) is True
     assert ocp_strict_default_deny({"ocp": {"strict_default_deny": True}}) is True
     assert ocp_strict_default_deny({"ocp": {"strict_default_deny": False}}) is False
 
-    assert ocp_policy(None) == {"strict_default_deny": False}
+    assert ocp_policy(None) == {"strict_default_deny": True}
+    assert ocp_policy({}) == {"strict_default_deny": True}
     assert ocp_policy({"ocp": {"strict_default_deny": True}}) == {"strict_default_deny": True}
+    assert ocp_policy({"ocp": {"strict_default_deny": False}}) == {"strict_default_deny": False}
+
     merged = set_ocp_policy({"other": 1, "ocp": {"x": "keep"}}, strict_default_deny=True)
     assert merged["other"] == 1
     assert merged["ocp"]["strict_default_deny"] is True
     assert merged["ocp"]["x"] == "keep"
+    disabled = set_ocp_policy(merged, strict_default_deny=False)
+    assert ocp_policy(disabled) == {"strict_default_deny": False}
+
+
+def test_ocp_policy_malformed_extra_data_fails_closed():
+    from aios.governance.ocp import ocp_policy, ocp_strict_default_deny
+
+    malformed = (
+        "not-a-dict",
+        [],
+        42,
+        {"ocp": "not-a-dict"},
+        {"ocp": []},
+        {"ocp": {"strict_default_deny": "false"}},
+        {"ocp": {"strict_default_deny": 0}},
+        {"ocp": {"strict_default_deny": None}},
+    )
+    for extra in malformed:
+        assert ocp_policy(extra) == {"strict_default_deny": True}
+        assert ocp_strict_default_deny(extra) is True
 
 
 def test_link_external_approval_bridge():

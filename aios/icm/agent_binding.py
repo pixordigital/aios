@@ -124,6 +124,7 @@ def bind_agent_stage(agent, storage_root: str | None = None, run_id: str | None 
         run_id=rid,
         workspace_id=node.workspace_id,
         preapproved=preapproved,
+        db_session=cfg.get("icm_db_session"),
     )
     # Loads bounded layered context and caps the node timeout to the manifest.
     shared = {"icm_input": "", "run_id": rid, "task_id": rid}

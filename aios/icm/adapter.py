@@ -95,7 +95,9 @@ class ICMStageAdapter:
     def _applied_keys(self, shared: dict) -> set[str]:
         raw = shared.get("_icm_side_effect_keys")
         if isinstance(raw, list):
-            return {str(k) for k in raw}
+            keys = {str(k) for k in raw}
+            shared["_icm_side_effect_keys"] = keys
+            return keys
         if isinstance(raw, set):
             return {str(k) for k in raw}
         keys: set[str] = set()
@@ -106,7 +108,7 @@ class ICMStageAdapter:
         """Claim key durably before the side effect runs.
 
         No session => legacy in-memory dedupe. With a session, a key from a
-        different run fails closed; a same-run retry is a no-op.
+        different run fails closed; a same-run retry is recorded as applied.
         """
         session = self.db_session
         if session is None and isinstance(shared, dict):
@@ -139,6 +141,7 @@ class ICMStageAdapter:
                     raise SideEffectDuplicateError(
                         f"ICM side effect '{key}' already claimed by run '{existing.run_id}'"
                     )
+                self._applied_keys(shared).add(key)
                 return
             session.add(
                 ICMSideEffect(
@@ -158,6 +161,7 @@ class ICMStageAdapter:
             session.rollback()
             existing = find_existing()
             if existing is not None and str(existing.run_id) == self.run_id:
+                self._applied_keys(shared).add(key)
                 return
             raise SideEffectDuplicateError(
                 f"ICM side effect '{key}' already claimed"
@@ -217,12 +221,15 @@ class ICMStageAdapter:
             return None
         if src.get("node_id") not in (None, getattr(self.node, "id", None)):
             return None
+        approval_id = src.get("approval_id")
+        if not str(approval_id or "").strip():
+            return None
         fp = manifest_fingerprint(self.manifest)
         approval_fp = src.get("approved_fingerprint") or src.get("manifest_fingerprint")
-        if approval_fp not in (None, fp):
+        if approval_fp != fp:
             return None
         return {
-            "approval_id": str(src.get("approval_id") or f"preapproved:{self.manifest.id}:{fp[:12]}"),
+            "approval_id": str(approval_id),
             "approved_fingerprint": fp,
             "stage_id": self.manifest.id,
             "node_id": getattr(self.node, "id", None),
@@ -265,22 +272,23 @@ class ICMStageAdapter:
         # 1. Tool Governance validation
         tool_name = getattr(self.node, "tool_name", None)
         if tool_name:
-            if self.manifest.denied_tools and tool_name in self.manifest.denied_tools:
-                raise PermissionError(
-                    f"Tool '{tool_name}' is explicitly denied by stage '{self.manifest.id}'"
-                )
-            if self.manifest.allowed_tools and tool_name not in self.manifest.allowed_tools:
-                raise PermissionError(
-                    f"Tool '{tool_name}' is not permitted by stage '{self.manifest.id}' allowlist"
-                )
+            from aios.icm.enforcement import check_tool
+
+            check_tool(self.manifest, tool_name)
 
         # 2. Timeout bounds
         if hasattr(self.node, "timeout"):
             self.node.timeout = min(float(self.node.timeout), float(self.manifest.timeout_seconds))
 
         # 3. Layered Context Loading
+        declared_layers = list(self.manifest.context.layers)
+        unsupported_layers = set(declared_layers) - {"identity", "routing", "stage", "static_references"}
+        if unsupported_layers:
+            raise ValueError(
+                f"ICM unsupported context layers: {', '.join(sorted(unsupported_layers))}"
+            )
         ws_dir = self.paths.workspace(self.org_id, self.workspace_id)
-        required_layers = list(self.manifest.context.layers)
+        required_layers = list(declared_layers)
         if required_layers and not ws_dir.is_dir():
             if self._manifest_from_workspace:
                 raise FileNotFoundError(
@@ -391,7 +399,8 @@ class ICMStageAdapter:
                 artifact_file = run_dir / "artifacts" / f"{self.manifest.id}_output.txt"
                 artifact_file.write_text(str(output), encoding="utf-8")
         except Exception as e:
-            logger.debug("Failed saving ICM-X provenance files to disk: %s", e)
+            provenance["disk_write_error"] = str(e)
+            logger.warning("Failed saving ICM-X provenance files to disk: %s", e)
 
         # Store in shared memory for persistence in WorkflowRun.outputs
         if "_icm_provenance" not in shared:

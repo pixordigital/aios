@@ -20,6 +20,11 @@ from aios.media_growth import (
     ROLE_PHASES,
     _self_check,
     agent_config,
+    analyze_performance,
+    phase2_review_workflow_spec,
+    phase3_distribution_analytics_workflow_spec,
+    prepare_distribution,
+    review_content,
 )
 from aios.tools.registry import TOOL_REGISTRY
 
@@ -60,6 +65,50 @@ def test_later_phase_specs_are_not_ready_and_use_existing_tools():
 
 def test_media_growth_self_check():
     _self_check()
+
+
+def test_phase2_review_workflow_nodes_and_approval_gate():
+    spec = phase2_review_workflow_spec()
+
+    assert spec == phase2_review_workflow_spec()  # deterministic
+    assert spec["status"] == "draft"
+    assert spec["workflow_status"] == "not_ready"
+    assert spec["human_gate"] is True
+    assert spec["autonomous"] is False
+    assert spec["external_side_effects"] == []
+
+    nodes = {n["id"]: n for n in spec["nodes"]}
+    assert set(nodes) == {"review_draft", "human_approval"}
+    assert nodes["review_draft"]["handler"] is review_content
+    assert nodes["human_approval"]["handler"] is None
+    assert nodes["human_approval"]["depends_on"] == ["review_draft"]
+
+
+def test_phase3_distribution_analytics_workflow_has_no_side_effects():
+    spec = phase3_distribution_analytics_workflow_spec()
+
+    assert spec == phase3_distribution_analytics_workflow_spec()  # deterministic
+    assert spec["status"] == "draft"
+    assert spec["workflow_status"] == "not_ready"
+    assert spec["human_gate"] is True
+    assert spec["autonomous"] is False
+    assert spec["external_side_effects"] == []
+
+    nodes = {n["id"]: n for n in spec["nodes"]}
+    assert set(nodes) == {"prepare_distribution", "human_approval", "analyze_performance"}
+    assert nodes["prepare_distribution"]["handler"] is prepare_distribution
+    assert nodes["analyze_performance"]["handler"] is analyze_performance
+    assert nodes["human_approval"]["handler"] is None
+    assert nodes["human_approval"]["depends_on"] == ["prepare_distribution"]
+    assert nodes["analyze_performance"]["depends_on"] == ["human_approval"]
+    assert not any(token in n["id"] for n in spec["nodes"] for token in ("publish", "send", "dm"))
+
+    artifact = nodes["prepare_distribution"]["handler"](
+        "x", {"approved_by": "ana", "approved_at": "2026-01-01"}
+    )
+    assert artifact["external_side_effects"] == []
+    assert nodes["prepare_distribution"]["handler"]("x", {})["ok"] is False
+    assert "qualified" in nodes["analyze_performance"]["handler"]([])["recommendation"]
 
 
 @pytest.mark.asyncio

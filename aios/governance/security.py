@@ -271,6 +271,27 @@ async def record_security_event(
         )
         db.add(evt)
         await db.flush()
+        try:
+            from aios.core.audit_sink import append
+
+            append(
+                evt.org_id,
+                evt.event_type,
+                {
+                    key: getattr(evt, key, None)
+                    for key in (
+                        "event_type",
+                        "severity",
+                        "source",
+                        "incident_id",
+                        "actor_type",
+                        "actor_id",
+                        "org_id",
+                    )
+                },
+            )
+        except Exception as exc:
+            log.warning("security event audit mirror failed: %s", type(exc).__name__)
         return evt
     except Exception:
         log.exception("security event write failed: %s", event_type)

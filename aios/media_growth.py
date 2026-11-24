@@ -17,7 +17,7 @@ ROLE_PHASES = {
     **{role: 3 for role in PHASE3_ROLES},
 }
 
-# Phase 2/3 specs are drafts behind a human gate: no workflow exists yet.
+# Phase 2/3 specs are drafts behind a human gate: no runnable workflow exists.
 _NOT_READY_HUMAN_GATE = {"workflow_status": "not_ready", "human_gate": True}
 
 ROLE_SPECS: dict[str, dict] = {
@@ -353,6 +353,37 @@ def analyze_performance(rows: list[dict]) -> dict:
         "cost_per_approved_post": cost_per_approved_post,
         "qualified_conversation_rate": qualified_conversation_rate,
         "recommendation": recommendation,
+    }
+
+
+def phase2_review_workflow_spec() -> dict:
+    """Deterministic draft spec: review draft, then require human approval."""
+    return {
+        "name": "phase2_review",
+        "status": "draft",
+        **_NOT_READY_HUMAN_GATE,
+        "autonomous": False,
+        "external_side_effects": [],
+        "nodes": [
+            {"id": "review_draft", "label": "Revisar rascunho", "handler": review_content, "output_key": "review"},
+            {"id": "human_approval", "label": "Aprovação humana", "handler": None, "depends_on": ["review_draft"]},
+        ],
+    }
+
+
+def phase3_distribution_analytics_workflow_spec() -> dict:
+    """Deterministic draft spec: prepare distribution, gate, then analyze."""
+    return {
+        "name": "phase3_distribution_analytics",
+        "status": "draft",
+        **_NOT_READY_HUMAN_GATE,
+        "autonomous": False,
+        "external_side_effects": [],
+        "nodes": [
+            {"id": "prepare_distribution", "label": "Preparar distribuição (sem publicar)", "handler": prepare_distribution, "output_key": "distribution"},
+            {"id": "human_approval", "label": "Aprovação humana", "handler": None, "depends_on": ["prepare_distribution"]},
+            {"id": "analyze_performance", "label": "Analisar performance", "handler": analyze_performance, "depends_on": ["human_approval"], "output_key": "analytics"},
+        ],
     }
 
 

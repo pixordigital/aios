@@ -593,7 +593,7 @@ def seed_team_workspaces(
                 "allowed_tools": stage["allowed_tools"],
                 "denied_tools": stage["denied_tools"],
                 "side_effects": stage["side_effects"],
-                "approval_required": False,
+                "approval_required": stage["side_effects"],
             }
             (stage_dir / "stage.yaml").write_text(
                 yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8"

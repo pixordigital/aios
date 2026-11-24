@@ -8,7 +8,8 @@ import uuid
 
 import pytest
 
-from aios.core.workflow import WorkflowDef, WorkflowEngine, WorkflowNode
+from aios.core.workflow import WorkflowDef, WorkflowEngine, WorkflowNode, WorkflowResult
+from aios.icm.contracts import StageManifest, manifest_fingerprint
 
 
 @pytest.mark.asyncio
@@ -97,6 +98,95 @@ async def test_e2e_icm_resume_with_approvals():
     assert "manifest_fingerprint" in attempts["n1"], "Missing manifest_fingerprint"
 
     print("E2E ICM-X stage attempt recording: PASS")
+
+
+@pytest.mark.asyncio
+async def test_e2e_icm_output_schema_failure_fails_node():
+    manifest = StageManifest(
+        id="bad_output",
+        version="1.0.0",
+        mode="deterministic",
+        outputs_schema="handoff.v1",
+        allowed_tools=["calculator"],
+    )
+    node = WorkflowNode(
+        id="n1",
+        tool_name="calculator",
+        tool_args={"expression": "2+2"},
+        stage_manifest=manifest,
+    )
+    result = WorkflowResult()
+
+    with pytest.raises(ValueError, match="ICM output schema validation failed"):
+        await WorkflowEngine()._execute_node(node, "conv-bad-output", {}, result)
+
+    assert result.node_status["n1"] == "failed"
+    assert "_icm_stage_attempts" not in result.outputs
+
+
+@pytest.mark.asyncio
+async def test_workflow_explicit_preapproved_populates_icm_approval():
+    manifest = StageManifest(
+        id="approved_stage",
+        version="1.0.0",
+        mode="deterministic",
+        approval_required=True,
+        allowed_tools=["calculator"],
+    )
+    fp = manifest_fingerprint(manifest)
+    node = WorkflowNode(
+        id="n1",
+        tool_name="calculator",
+        tool_args={"expression": "2+2"},
+        stage_manifest=manifest,
+    )
+    shared = {
+        "preapproved": {
+            "approved": True,
+            "approval_id": "appr-valid",
+            "approved_fingerprint": fp,
+            "actions": ["calculator"],
+        }
+    }
+    result = WorkflowResult()
+
+    await WorkflowEngine()._execute_node(node, "conv-preapproved-valid", shared, result)
+
+    assert result.node_status["n1"] == "done"
+    assert shared["icm_approval"]["approval_id"] == "appr-valid"
+    assert shared["icm_approval"]["approved_fingerprint"] == fp
+
+
+@pytest.mark.asyncio
+async def test_workflow_preapproved_wrong_fingerprint_fails():
+    manifest = StageManifest(
+        id="approved_stage",
+        version="1.0.0",
+        mode="deterministic",
+        approval_required=True,
+        allowed_tools=["calculator"],
+    )
+    node = WorkflowNode(
+        id="n1",
+        tool_name="calculator",
+        tool_args={"expression": "2+2"},
+        stage_manifest=manifest,
+    )
+    shared = {
+        "preapproved": {
+            "approved": True,
+            "approval_id": "appr-bad",
+            "approved_fingerprint": "bad-fingerprint",
+            "actions": ["calculator"],
+        }
+    }
+    result = WorkflowResult()
+
+    with pytest.raises(PermissionError):
+        await WorkflowEngine()._execute_node(node, "conv-preapproved-bad", shared, result)
+
+    assert result.node_status["n1"] == "failed"
+    assert "icm_approval" not in shared
 
 
 if __name__ == "__main__":
