@@ -66,6 +66,7 @@
   @keyframes work-blink { 0%,100% { opacity:.35; } 50% { opacity:1; } }
   #team-map g.ceo rect.frame { stroke:var(--amber);stroke-width:2; }
   #team-map g.ceo.working rect.frame { animation:map-pulse 2s ease-in-out infinite; }
+  #team-map g.sec-group.working rect.frame { stroke:var(--green); }
   @media (prefers-reduced-motion: reduce) {
     #team-map .connection,#team-map .enter,#team-map .halo.hot,#team-map .flow.live,#team-map .cross,#team-map .cross.live,#team-map g.node.working .work-dot,#team-map g.ceo.working rect.frame { animation:none; }
     #team-map .enter { opacity:1;transform:none; }
@@ -138,6 +139,7 @@
     <span class="map-legend-item"><span class="map-legend-line shared"></span>Compartilhado</span>
     <span class="map-legend-item"><span class="map-legend-mark activity"></span>Atividade recente</span>
     <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber)"></span>Coordenação geral</span>
+    <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber);opacity:.45"></span>Segurança (red + blue)</span>
     <span class="map-legend-item"><span class="map-legend-line" style="border-color:var(--green)"></span>Fluxo ao vivo</span>
 </div>
 <div class="map-flow-guide" aria-label="Como ler o mapa">
@@ -146,6 +148,7 @@
     <span class="map-flow-step"><span class="map-flow-num">2</span>Departamento</span><span aria-hidden="true">→</span>
     <span class="map-flow-step"><span class="map-flow-num">3</span>Líder</span><span aria-hidden="true">→</span>
     <span class="map-flow-step"><span class="map-flow-num">4</span>Assistentes</span>
+    <span class="map-flow-step">· Segurança reúne red + blue sob um líder</span>
 </div>
 <div class="card map-wrap">
     <svg id="team-map" role="group" aria-label="Mapa visual da hierarquia das equipes"></svg>
@@ -220,7 +223,8 @@
     const topOrch = Object.entries(orchCount).sort((a, b) => b[1] - a[1])[0];
     const sharedOrch = topOrch && topOrch[1] > 1 ? topOrch[0] : null;
     document.getElementById("stat-shared").textContent = agentNodes.filter(n => n.shared && n.id !== sharedOrch).length;
-    const orphans = Object.keys(agentsById).filter(id => id !== sharedOrch && !hasOwn(teamsOfAgent, id));
+    const orphans = Object.keys(agentsById).filter(id => id !== sharedOrch && !hasOwn(teamsOfAgent, id)
+        && agentsById[id].status !== "archived");
     const cols = teams.map(t => {
         const tid = t.id;
         const rows = [];
@@ -235,6 +239,17 @@
         return { team: t, rows };
     });
     if (orphans.length) cols.push({ team: null, rows: orphans.map(id => ({ aid: id, role: "none" })) });
+    // red + blue are one security department: place them side by side and show
+    // a shared lead above both when the same agent manages them.
+    const secCols = cols.filter(c => c.team && ["red", "blue"].includes(String(c.team.label || "").toLowerCase()));
+    const secPair = secCols.length === 2 ? secCols : null;
+    const secShared = secPair && mgrOf[secPair[0].team.id] && mgrOf[secPair[0].team.id] === mgrOf[secPair[1].team.id]
+        ? mgrOf[secPair[0].team.id] : null;
+    const secIds = secPair ? secPair.map(c => c.team.id) : [];
+    if (secPair && cols.indexOf(secPair[1]) !== cols.indexOf(secPair[0]) + 1) {
+        cols.splice(cols.indexOf(secPair[1]), 1);
+        cols.splice(cols.indexOf(secPair[0]) + 1, 0, secPair[1]);
+    }
 
     const pos = {}; // key -> {x, y, w, h, cx}
     const instOf = {}; // key -> {agent, role, team}
@@ -253,7 +268,8 @@
         const cx = col.x0 + col.w / 2;
         const tid = col.team ? col.team.id : null;
         if (tid) pos[tid] = { x: cx - TEAM_W / 2, y: Y_TEAM, w: TEAM_W, h: TEAM_H, cx };
-        const leadRows = col.rows.filter(r => r.role === "manager" || r.role === "orchestrator");
+        const leadRows = col.rows.filter(r => (r.role === "manager" || r.role === "orchestrator")
+            && !(secShared && secPair.includes(col) && r.aid === secShared));
         const leadInner = leadRows.length ? leadRows.length * LEAD_W + (leadRows.length - 1) * GAP_X : 0;
         let lx = cx - leadInner / 2;
         leadRows.forEach(r => {
@@ -274,6 +290,14 @@
         });
     });
 
+    let secGroup = null;
+    if (secPair) {
+        const x = Math.min(secPair[0].x0, secPair[1].x0);
+        const w = Math.max(secPair[0].x0 + secPair[0].w, secPair[1].x0 + secPair[1].w) - x;
+        secGroup = { x, y: Y_CEO + CEO_H + 12, w, h: 32, cx: x + w / 2 };
+        pos.secGroup = secGroup;
+    }
+
     const g = document.createElementNS(NS, "g");
     svg.appendChild(g);
     const el = (tag, attrs, parent) => {
@@ -287,8 +311,8 @@
     const pat = el("pattern", { id: "map-grid", width: 28, height: 28, patternUnits: "userSpaceOnUse" }, defs);
     el("circle", { cx: 1.2, cy: 1.2, r: 1.2, fill: "rgba(255,255,255,0.07)" }, pat);
     el("rect", { x: -2000, y: -2000, width: 8000, height: 8000, fill: "url(#map-grid)" }, g);
-    const EDGE_COLOR = { orchestrator: "var(--amber)", manager: "var(--accent)", member: "var(--text-tertiary)" };
-    const EDGE_LABEL = { orchestrator: "orquestra", manager: "gerencia", member: "membro de" };
+    const EDGE_COLOR = { orchestrator: "var(--amber)", manager: "var(--accent)", member: "var(--text-tertiary)", group: "var(--amber)" };
+    const EDGE_LABEL = { orchestrator: "orquestra", manager: "gerencia", member: "membro de", group: "coordena segurança" };
 
     // orphan column header
     if (orphans.length) {
@@ -302,10 +326,11 @@
     // edges under nodes — orthogonal org-chart connectors: drop from parent,
     // run along one shared bus, drop into each child.
     const links = [];
+    if (secGroup && sharedOrch) links.push({ from: "ceo", to: "secGroup", kind: "group" });
     cols.forEach(col => {
         const tid = col.team ? col.team.id : null;
         if (!tid) return;
-        const top = sharedOrch ? "ceo" : col.parentKey;
+        const top = sharedOrch ? (secIds.includes(tid) ? "secGroup" : "ceo") : col.parentKey;
         if (top !== tid) links.push({ from: top, to: tid, kind: "orchestrator" });
         if (sharedOrch) col.rows.filter(r => r.role === "manager" || r.role === "orchestrator")
             .forEach(r => links.push({ from: tid, to: r.aid + "@@" + tid, kind: r.role }));
@@ -341,8 +366,11 @@
             "pathLength": 1, "stroke-dasharray": ".06 .12", "stroke-linecap": "round", "class": "flow",
         });
         const aid = e.to.includes("@@") ? rawId(e.to.split("@@")[0]) : null;
-        const inst = instOf[e.to];
-        flowMeta.push({ el: flow, aid, team: aid ? inst && inst.team : e.to });
+        if (e.to === "secGroup") flowMeta.push({ el: flow, aid: secShared ? rawId(secShared) : null, team: null });
+        else {
+            const inst = instOf[e.to];
+            flowMeta.push({ el: flow, aid, team: aid ? inst && inst.team : e.to });
+        }
     });
     const sharedAgents = Object.entries(teamsOfAgent)
         .filter(([aid, ts]) => aid !== sharedOrch && ts.length > 1 && agentsById[aid])
@@ -392,6 +420,29 @@
         none: "Sem equipe",
     }[role] || "Assistente");
 
+    let secGroupEl = null;
+    if (secGroup) {
+        el("rect", {
+            x: secGroup.x - 10, y: Y_TEAM - 14, width: secGroup.w + 20,
+            height: maxH - (Y_TEAM - 14) - 24, rx: 18,
+            fill: "color-mix(in srgb, var(--amber) 6%, transparent)",
+            stroke: "var(--border)", "stroke-dasharray": "6 5",
+        });
+        secGroupEl = el("g", {
+            "class": "node sec-group", tabindex: "0", role: "button",
+            "aria-label": "Departamento de segurança: red e blue" + (secShared && agentsById[secShared] ? ", liderado por " + agentsById[secShared].label : "") + ". Selecione para enquadrar.",
+            style: "cursor:pointer",
+        });
+        el("rect", { x: secGroup.x, y: secGroup.y, width: secGroup.w, height: secGroup.h, rx: 9, fill: "var(--bg-elevated)", stroke: "var(--amber)", "stroke-width": 1.5, "class": "frame" }, secGroupEl);
+        label(secGroup.x + 14, secGroup.y + 21,
+            "SEGURANÇA · " + (secShared && agentsById[secShared] ? agentsById[secShared].label : "red + blue"),
+            11, "var(--amber)");
+        secGroupEl.addEventListener("click", () => fit());
+        secGroupEl.addEventListener("keydown", ev => {
+            if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); fit(); }
+        });
+    }
+
     let ceoGroup = null;
     if (sharedOrch && pos.ceo && agentsById[sharedOrch]) {
         const p = pos.ceo;
@@ -417,7 +468,7 @@
         const p = pos[t.id];
         if (!p) return;
         const col = cols.find(c => c.team && c.team.id === t.id);
-        const count = col ? col.rows.length : 0;
+        const count = col ? col.rows.filter(r => !(secShared && secPair.includes(col) && r.aid === secShared)).length : 0;
         const grp = el("g", {
             "class": "node" + (reduceMotion ? "" : " enter"),
             tabindex: "0", role: "button",
@@ -611,6 +662,7 @@
             f.el.classList.toggle("live", on);
         });
         if (ceoGroup) ceoGroup.classList.toggle("working", working > 0);
+        if (secGroupEl && secShared) secGroupEl.classList.toggle("working", minsOf(activity[rawId(secShared)]) <= 15);
         activeStat.textContent = working;
     }
     async function poll() {
