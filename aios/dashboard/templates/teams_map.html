@@ -139,7 +139,7 @@
     <span class="map-legend-item"><span class="map-legend-line shared"></span>Compartilhado</span>
     <span class="map-legend-item"><span class="map-legend-mark activity"></span>Atividade recente</span>
     <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber)"></span>Coordenação geral</span>
-    <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber);opacity:.45"></span>Segurança (red + blue)</span>
+    <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber);opacity:.45"></span>Security (Red + Blue)</span>
     <span class="map-legend-item"><span class="map-legend-line" style="border-color:var(--green)"></span>Fluxo ao vivo</span>
 </div>
 <div class="map-flow-guide" aria-label="Como ler o mapa">
@@ -148,7 +148,7 @@
     <span class="map-flow-step"><span class="map-flow-num">2</span>Departamento</span><span aria-hidden="true">→</span>
     <span class="map-flow-step"><span class="map-flow-num">3</span>Líder</span><span aria-hidden="true">→</span>
     <span class="map-flow-step"><span class="map-flow-num">4</span>Assistentes</span>
-    <span class="map-flow-step">· Segurança reúne red + blue sob um líder</span>
+    <span class="map-flow-step">· Security groups Red + Blue under one lead</span>
 </div>
 <div class="card map-wrap">
     <svg id="team-map" role="group" aria-label="Mapa visual da hierarquia das equipes"></svg>
@@ -182,8 +182,37 @@
     const panel = document.getElementById("map-panel");
     const emptyState = document.getElementById("map-empty");
     const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const teams = data.nodes.filter(n => n.kind === "team");
-    const agentNodes = data.nodes.filter(n => n.kind === "agent");
+    // Display labels only — canonical names stay as keys for routing and ICM.
+    const TEAM_LABELS = {
+        sales: "Sales", dev: "Engineering", data: "Data & Analytics", media: "Media & Growth",
+        red: "Security · Red", blue: "Security · Blue", Marketing: "Marketing",
+        "Customer Success": "Customer Success", "Receita e Operações": "Revenue & Operations",
+    };
+    const AGENT_LABELS = {
+        "Orchestrator Business": "Executive — General Coordinator",
+        "sales-manager": "Sales — Lead", "sales-sdr": "Sales — SDR",
+        "sales-closer": "Sales — Closer", "Prospector de Leads": "Sales — Lead Finder",
+        "dev-manager": "Engineering — Lead", "dev-frontend": "Engineering — Frontend Engineer",
+        "dev-backend": "Engineering — Backend Engineer", "Performance Watcher": "Engineering — Performance Watcher",
+        "data-manager": "Data & Analytics — Lead", "Data Analyst": "Data & Analytics — Analyst",
+        "Data Scientist": "Data & Analytics — Scientist", "Media Manager": "Media & Growth — Lead",
+        "Market Intelligence Researcher": "Media & Growth — Market Intelligence",
+        "Content Strategist": "Media & Growth — Content Strategist",
+        "Content Producer": "Media & Growth — Content Producer",
+        "Manager Marketing": "Marketing — Lead", "Marketing": "Marketing — Specialist",
+        "Manager Cs": "Customer Success — Lead", "Customer Success": "Customer Success — Specialist",
+        "Support": "Customer Success — Support Specialist", "Manager Revops": "Revenue & Operations — Lead",
+        "Revops": "Revenue & Operations — Specialist", "Deal Auditor": "Revenue & Operations — Deal Auditor",
+        "Pricing Guardian": "Revenue & Operations — Pricing Guardian",
+        "Evidence Compiler": "Revenue & Operations — Evidence Compiler",
+        "Human Auditor Assistant": "Revenue & Operations — Human Auditor",
+        "security-manager": "Security — Lead", "red-agent": "Security — Red Analyst",
+        "blue-agent": "Security — Blue Engineer",
+    };
+    const teams = data.nodes.filter(n => n.kind === "team")
+        .map(n => ({ ...n, key: String(n.label || ""), label: TEAM_LABELS[n.label] || n.label }));
+    const agentNodes = data.nodes.filter(n => n.kind === "agent")
+        .map(n => ({ ...n, label: AGENT_LABELS[n.label] || n.label }));
     const agentsById = Object.fromEntries(agentNodes.map(n => [n.id, n]));
     const rawId = id => String(id || "").replace(/^agent:/, "");
     document.getElementById("stat-teams").textContent = teams.length;
@@ -202,8 +231,8 @@
     // orthogonal bus connectors. Shared agents repeat per subtree so each
     // branch reads on its own. Ids arrive prefixed ("team:t1", "agent:a1") —
     // use verbatim; re-prefixing breaks every edge lookup.
-    const CEO_W = 320, CEO_H = 76, TEAM_W = 230, TEAM_H = 72,
-          LEAD_W = 230, LEAD_H = 66, MEM_W = 200, MEM_H = 74,
+    const CEO_W = 380, CEO_H = 76, TEAM_W = 230, TEAM_H = 72,
+          LEAD_W = 300, LEAD_H = 66, MEM_W = 360, MEM_H = 74,
           GAP_X = 12, GAP_TEAM = 44, ROW_GAP = 26;
     const Y_CEO = 30;
     const Y_TEAM = Y_CEO + CEO_H + 60;
@@ -241,7 +270,7 @@
     if (orphans.length) cols.push({ team: null, rows: orphans.map(id => ({ aid: id, role: "none" })) });
     // red + blue are one security department: place them side by side and show
     // a shared lead above both when the same agent manages them.
-    const secCols = cols.filter(c => c.team && ["red", "blue"].includes(String(c.team.label || "").toLowerCase()));
+    const secCols = cols.filter(c => c.team && ["red", "blue"].includes(String(c.team.key || "").toLowerCase()));
     const secPair = secCols.length === 2 ? secCols : null;
     const secShared = secPair && mgrOf[secPair[0].team.id] && mgrOf[secPair[0].team.id] === mgrOf[secPair[1].team.id]
         ? mgrOf[secPair[0].team.id] : null;
@@ -312,7 +341,7 @@
     el("circle", { cx: 1.2, cy: 1.2, r: 1.2, fill: "rgba(255,255,255,0.07)" }, pat);
     el("rect", { x: -2000, y: -2000, width: 8000, height: 8000, fill: "url(#map-grid)" }, g);
     const EDGE_COLOR = { orchestrator: "var(--amber)", manager: "var(--accent)", member: "var(--text-tertiary)", group: "var(--amber)" };
-    const EDGE_LABEL = { orchestrator: "orquestra", manager: "gerencia", member: "membro de", group: "coordena segurança" };
+    const EDGE_LABEL = { orchestrator: "orquestra", manager: "gerencia", member: "membro de", group: "coordinates security" };
 
     // orphan column header
     if (orphans.length) {
@@ -430,12 +459,12 @@
         });
         secGroupEl = el("g", {
             "class": "node sec-group", tabindex: "0", role: "button",
-            "aria-label": "Departamento de segurança: red e blue" + (secShared && agentsById[secShared] ? ", liderado por " + agentsById[secShared].label : "") + ". Selecione para enquadrar.",
+            "aria-label": "Security department: Red and Blue" + (secShared && agentsById[secShared] ? ", led by " + agentsById[secShared].label : "") + ". Select to frame.",
             style: "cursor:pointer",
         });
         el("rect", { x: secGroup.x, y: secGroup.y, width: secGroup.w, height: secGroup.h, rx: 9, fill: "var(--bg-elevated)", stroke: "var(--amber)", "stroke-width": 1.5, "class": "frame" }, secGroupEl);
         label(secGroup.x + 14, secGroup.y + 21,
-            "SEGURANÇA · " + (secShared && agentsById[secShared] ? agentsById[secShared].label : "red + blue"),
+            "SECURITY · " + (secShared && agentsById[secShared] ? agentsById[secShared].label : "Red + Blue"),
             11, "var(--amber)");
         secGroupEl.addEventListener("click", () => fit());
         secGroupEl.addEventListener("keydown", ev => {
@@ -454,7 +483,7 @@
         el("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 14, fill: "var(--bg-elevated)", "class": "frame" }, ceoGroup);
         el("rect", { x: p.x, y: p.y + 13, width: 3, height: p.h - 26, rx: 2, fill: "var(--amber)" }, ceoGroup);
         label(p.x + 16, p.y + 19, "COORDENAÇÃO GERAL", 9, "var(--amber)");
-        label(p.x + 16, p.y + 44, agentsById[sharedOrch].label, 15, "var(--text)");
+        label(p.x + 16, p.y + 44, agentsById[sharedOrch].label, 15, "var(--text)", 34);
         label(p.x + 16, p.y + 65, "Acima de todas as equipes", 10, "var(--text-secondary)");
         ceoGroup.addEventListener("click", () => fit());
         ceoGroup.addEventListener("keydown", ev => {
@@ -512,7 +541,7 @@
         el("circle", { cx, cy, r: 15, fill: "var(--bg-hover)", stroke: active ? "var(--green)" : "var(--text-tertiary)", "stroke-width": 1.5 }, grp);
         const initial = el("text", { x: cx, y: cy + 4.5, fill: "var(--text)", "font-size": 13, "font-weight": 700, "text-anchor": "middle" });
         initial.textContent = (n.label || "?").trim().charAt(0).toUpperCase() || "?";
-        label(p.x + 49, p.y + 25, n.label, 13, "var(--text)", 17);
+        label(p.x + 49, p.y + 25, n.label, 13, "var(--text)", 42);
         label(p.x + 49, p.y + 46, roleLabel(inst.role), 10, inst.role === "member" ? "var(--text-secondary)" : "var(--map-lead)");
         const others = agentTeams(n.id).filter(t => t !== (inst.team || ""));
         const statusColor = active ? "var(--green)" : "var(--text-tertiary)";
