@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/integrations/arvo/v1", tags=["arvo-integration"]
 _events: dict[str, tuple[float, dict]] = {}
 _events_lock = threading.Lock()
 _EVENTS_TTL = 86400
+# Claim covers only pre-side-effect window (503 <=60s); handlers commit their done marker with the side effect for _EVENTS_TTL.
 _PROCESSING_TTL = 60
 
 # Fail-closed: only events with a handler may be claimed/deduplicated.
@@ -119,6 +120,17 @@ async def _db_complete_event(key: str, response: dict) -> None:
             row.response = response
             row.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_EVENTS_TTL)
             await s.commit()
+
+
+async def _db_mark_done_in_session(s, key: str, response: dict) -> None:
+    """Mark event done inside the caller's side-effect transaction; caller commits."""
+    from aios.db.models import IntegrationEvent
+
+    with s.no_autoflush:  # marker read must not flush side effects before caller's commit
+        row = await s.get(IntegrationEvent, key)
+    if row:
+        row.response = response
+        row.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_EVENTS_TTL)
 
 
 async def _db_release_event(key: str) -> None:
@@ -296,12 +308,15 @@ async def list_deals(request: Request, org_id: str | None = None, limit: int = 1
         return {"org_id": org_id, "deals": [], "count": 0, "error": str(e)[:200]}
 
 
-async def _handle_action_executed(payload: dict, trace_id: str | None, idempotency_key: str) -> dict:
+async def _handle_action_executed(payload: dict, trace_id: str | None, idempotency_key: str, response: dict | None = None) -> dict:
     """ARVO action executed -> audit + (optional) deal stage nudge."""
     org_id = payload.get("org_id")
     action_id = payload.get("action_id") or payload.get("id") or "unknown"
     finding_id = payload.get("finding_id")
     trace_id = trace_id or payload.get("business_trace_id") or str(action_id)
+    extra_resp = {"handled": "action.executed", "action_id": str(action_id), "business_trace_id": trace_id}
+    if response is not None:
+        response.update(extra_resp)
     try:
         if org_id:
             from aios.db.engine import async_session
@@ -310,14 +325,16 @@ async def _handle_action_executed(payload: dict, trace_id: str | None, idempoten
             async with async_session() as s:
                 s.add(AuditLog(org_id=org_id, action="action.executed", resource_type="arvo_action",
                                resource_id=str(action_id), details={"finding_id": finding_id, "payload": payload}))
+                if response is not None:
+                    await _db_mark_done_in_session(s, idempotency_key, response)
                 await s.commit()
     except Exception as e:
         logger.error("action.executed audit failed: %s", e)
         raise
-    return {"handled": "action.executed", "action_id": str(action_id), "business_trace_id": trace_id}
+    return extra_resp
 
 
-async def _handle_action_verified(payload: dict, trace_id: str | None, idempotency_key: str) -> dict:
+async def _handle_action_verified(payload: dict, trace_id: str | None, idempotency_key: str, response: dict | None = None) -> dict:
     """ARVO verified recovery -> audit + update CrmDeal if deal_id provided."""
     org_id = payload.get("org_id")
     action_id = payload.get("action_id") or "unknown"
@@ -332,6 +349,11 @@ async def _handle_action_verified(payload: dict, trace_id: str | None, idempoten
         except (InvalidOperation, ValueError):
             recovered = False
     updated_deal = False
+    extra_resp = {"handled": "action.verified", "action_id": str(action_id),
+                  "verified_amount": verified, "deal_updated": updated_deal,
+                  "business_trace_id": trace_id}
+    if response is not None:
+        response.update(extra_resp)
     try:
         if org_id:
             from aios.db.engine import async_session
@@ -351,19 +373,24 @@ async def _handle_action_verified(payload: dict, trace_id: str | None, idempoten
                         details["deal_org_mismatch"] = True
                 s.add(AuditLog(org_id=org_id, action="action.verified", resource_type="arvo_action",
                                resource_id=str(action_id), details=details))
+                extra_resp["deal_updated"] = updated_deal
+                if response is not None:
+                    response.update(extra_resp)
+                    await _db_mark_done_in_session(s, idempotency_key, response)
                 await s.commit()
     except Exception as e:
         logger.error("action.verified audit/update failed: %s", e)
         raise
-    return {"handled": "action.verified", "action_id": str(action_id),
-            "verified_amount": verified, "deal_updated": updated_deal,
-            "business_trace_id": trace_id}
+    return extra_resp
 
 
-async def _handle_deal_event(payload: dict, trace_id: str | None, idempotency_key: str, action: str) -> dict:
+async def _handle_deal_event(payload: dict, trace_id: str | None, idempotency_key: str, action: str, response: dict | None = None) -> dict:
     org_id = payload.get("org_id")
     deal_id = payload.get("deal_id") or payload.get("id") or "unknown"
     trace_id = trace_id or payload.get("business_trace_id") or str(deal_id)
+    extra_resp = {"handled": action, "deal_id": str(deal_id), "business_trace_id": trace_id}
+    if response is not None:
+        response.update(extra_resp)
     try:
         if org_id:
             from aios.db.engine import async_session
@@ -372,11 +399,13 @@ async def _handle_deal_event(payload: dict, trace_id: str | None, idempotency_ke
             async with async_session() as s:
                 s.add(AuditLog(org_id=org_id, action=action, resource_type="crm_deal",
                                resource_id=str(deal_id), details={"payload": payload}))
+                if response is not None:
+                    await _db_mark_done_in_session(s, idempotency_key, response)
                 await s.commit()
     except Exception as e:
         logger.error("%s audit failed: %s", action, e)
         raise
-    return {"handled": action, "deal_id": str(deal_id), "business_trace_id": trace_id}
+    return extra_resp
 
 
 async def _handle_commitment_at_risk(
@@ -384,6 +413,7 @@ async def _handle_commitment_at_risk(
     trace_id: str | None,
     idempotency_key: str,
     enqueue_succeeded: list[bool],
+    response: dict | None = None,
 ) -> dict:
     """Phase 4 slice: commitment.at_risk → enqueue agent run → audit → outbox agent.action.completed."""
     finding_id = payload.get("finding_id") or payload.get("opportunity_id") or payload.get("id") or "unknown"
@@ -391,6 +421,7 @@ async def _handle_commitment_at_risk(
     extra = {"finding_id": finding_id, "business_trace_id": trace_id, "payload": payload}
     # Enqueue first: audit must not survive a queue failure, otherwise retry
     # (idempotency released) duplicates the row.
+    # Residual: audit failure after enqueue leaves claim 503 for <=60s; later retry may re-enqueue but _job_id dedupes.
     enqueued = False
     try:
         from aios.tasks.queue import enqueue_job
@@ -407,6 +438,8 @@ async def _handle_commitment_at_risk(
         logger.debug("commitment.at_risk queue unavailable", exc_info=True)
     if not enqueued:
         return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id, "enqueued": False}
+    success_resp = {"handled": "commitment.at_risk", "finding_id": str(finding_id),
+                    "business_trace_id": trace_id, "enqueued": True}
     org_id = payload.get("org_id")
     if org_id:
         from aios.db.engine import async_session
@@ -415,13 +448,18 @@ async def _handle_commitment_at_risk(
         try:
             async with async_session() as s:
                 s.add(AuditLog(org_id=org_id, action="commitment.at_risk", resource_type="finding", resource_id=str(finding_id), details=extra))
+                if response is not None:
+                    response.update(success_resp)
+                    await _db_mark_done_in_session(s, idempotency_key, response)
                 await s.commit()
         except Exception as e:
             logger.error("commitment.at_risk audit failed: %s", e)
             raise
     else:
         logger.info("commitment.at_risk trace %s finding %s (no org_id, skip audit)", trace_id, finding_id)
-    return {"handled": "commitment.at_risk", "finding_id": str(finding_id), "business_trace_id": trace_id, "enqueued": True}
+        if response is not None:
+            response.update(success_resp)
+    return success_resp
 
 
 @router.post("/events", dependencies=[Depends(_require_auth)])
@@ -455,6 +493,13 @@ async def ingest_event(
         return {**existing, "deduplicated": True}
     side_effect_started = False
     enqueue_succeeded: list[bool] = []
+    resp_base = {
+        "status": "processed",
+        "idempotency_key": idempotency_key,
+        "type": body.type,
+        "business_trace_id": trace_id,
+        "event_version": body.event_version or "1",
+    }
     try:
         extra_resp: dict = {}
         if body.type == "commitment.at_risk":
@@ -463,31 +508,24 @@ async def ingest_event(
                 trace_id,
                 idempotency_key,
                 enqueue_succeeded,
+                resp_base,
             )
             if not extra_resp.get("enqueued"):
                 raise HTTPException(503, "ARVO integration queue unavailable")
             side_effect_started = True
         elif body.type == "action.executed":
-            extra_resp = await _handle_action_executed(body.payload, trace_id, idempotency_key)
+            extra_resp = await _handle_action_executed(body.payload, trace_id, idempotency_key, resp_base)
             side_effect_started = True
         elif body.type == "action.verified":
-            extra_resp = await _handle_action_verified(body.payload, trace_id, idempotency_key)
+            extra_resp = await _handle_action_verified(body.payload, trace_id, idempotency_key, resp_base)
             side_effect_started = True
         elif body.type == "deal.created":
-            extra_resp = await _handle_deal_event(body.payload, trace_id, idempotency_key, "deal.created")
+            extra_resp = await _handle_deal_event(body.payload, trace_id, idempotency_key, "deal.created", resp_base)
             side_effect_started = True
         elif body.type == "deal.stage_changed":
-            extra_resp = await _handle_deal_event(body.payload, trace_id, idempotency_key, "deal.stage_changed")
+            extra_resp = await _handle_deal_event(body.payload, trace_id, idempotency_key, "deal.stage_changed", resp_base)
             side_effect_started = True
-        resp = {
-            "status": "processed",
-            "idempotency_key": idempotency_key,
-            "type": body.type,
-            "business_trace_id": trace_id,
-            "event_version": body.event_version or "1",
-            "deduplicated": False,
-            **extra_resp,
-        }
+        resp = {**resp_base, "deduplicated": False, **extra_resp}
         stripped = {k: v for k, v in resp.items() if k != "deduplicated"}
         await _db_complete_event(idempotency_key, stripped)
         _store_idempotent(idempotency_key, stripped)
@@ -495,6 +533,9 @@ async def ingest_event(
     except Exception:
         if not side_effect_started and not enqueue_succeeded:
             await _db_release_event(idempotency_key)
+        elif side_effect_started:
+            # Marker committed with the side effect is DB authority; cache it here too.
+            _store_idempotent(idempotency_key, resp_base)
         raise
 
 @router.post("/sso-ticket", dependencies=[Depends(_require_auth)])

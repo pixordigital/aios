@@ -99,6 +99,7 @@ def verification_keys(primary_kid: str, primary_key: str, key_map: str, kid: str
     candidates: list[str] = []
     for entry in (key_map or "").split(","):
         mapped_kid, sep, secret = entry.strip().partition(":")
+        mapped_kid, secret = mapped_kid.strip(), secret.strip()
         if sep and mapped_kid == kid and secret:
             candidates.append(secret)
     if kid == primary_kid and primary_key and primary_key not in candidates:

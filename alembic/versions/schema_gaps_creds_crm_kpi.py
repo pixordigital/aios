@@ -6,9 +6,14 @@ existing KPI JSON into typed rows; it never deletes or rewrites the old keys.
 
 SQLite cannot add a FK with ALTER TABLE. There the columns and indexes exist
 and the ORM/model defines the FK; PostgreSQL gets the named FK constraints.
+
+Downgrade drops only objects recorded in _aios_migration_owned_objects by this
+revision. Schema provisioned by create_all is never recorded, so rollback
+cannot delete pre-existing tables, columns or their data.
 """
 
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 
@@ -33,6 +38,7 @@ CRM_LINKS = (
     ("account_id", "crm_accounts", "fk_crm_deals_account_id"),
     ("contact_id", "crm_contacts", "fk_crm_deals_contact_id"),
 )
+OWNED_TABLE = "_aios_migration_owned_objects"
 
 
 def _inspector():
@@ -65,9 +71,27 @@ def _fk_names(table: str) -> set[str]:
     return {fk["name"] for fk in _inspector().get_foreign_keys(table) if fk.get("name")}
 
 
-def _add_column(table: str, column: sa.Column) -> None:
-    if column.name not in _columns(table):
-        op.add_column(table, column)
+def _unique_names(table: str) -> set[str]:
+    if not _has_table(table):
+        return set()
+    return {u["name"] for u in _inspector().get_unique_constraints(table) if u.get("name")}
+
+
+def _create_unique(name: str, table: str, columns: list[str]) -> None:
+    if name in _unique_names(table):
+        return
+    if _is_sqlite():
+        with op.batch_alter_table(table) as batch:
+            batch.create_unique_constraint(name, columns)
+    else:
+        op.create_unique_constraint(name, table, columns)
+
+
+def _add_column(table: str, column: sa.Column) -> bool:
+    if column.name in _columns(table):
+        return False
+    op.add_column(table, column)
+    return True
 
 
 def _create_index(name: str, table: str, columns: list[str], *, unique: bool = False) -> None:
@@ -88,6 +112,49 @@ def _drop_column(table: str, name: str) -> None:
             batch.drop_column(name)
     else:
         op.drop_column(table, name)
+
+
+def _owned_table() -> sa.Table:
+    return sa.table(
+        OWNED_TABLE,
+        sa.column("revision", sa.String(36)),
+        sa.column("object_key", sa.String(255)),
+    )
+
+
+def _ensure_owned_table() -> None:
+    if _has_table(OWNED_TABLE):
+        return
+    op.create_table(
+        OWNED_TABLE,
+        sa.Column("revision", sa.String(36), nullable=False),
+        sa.Column("object_key", sa.String(255), nullable=False),
+        sa.UniqueConstraint("revision", "object_key", name="uq_migration_owned_object"),
+    )
+
+
+def _owned(rev: str) -> set[str]:
+    if not _has_table(OWNED_TABLE):
+        return set()
+    marker = _owned_table()
+    rows = op.get_bind().execute(sa.select(marker.c.object_key).where(marker.c.revision == rev))
+    return {row[0] for row in rows}
+
+
+def _record(rev: str, key: str) -> None:
+    _ensure_owned_table()
+    if key in _owned(rev):
+        return
+    op.get_bind().execute(_owned_table().insert().values(revision=rev, object_key=key))
+
+
+def _drop_owned_table_if_empty() -> None:
+    if not _has_table(OWNED_TABLE):
+        return
+    marker = _owned_table()
+    if op.get_bind().execute(sa.select(sa.literal(1)).select_from(marker)).first():
+        return
+    op.drop_table(OWNED_TABLE)
 
 
 def _json(raw):
@@ -115,27 +182,28 @@ def _dt(raw):
     return None
 
 
-def _number(raw):
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return 0.0
-
-
+# bool is an int subclass; JSON true/false must not become metric numbers.
 def _optional_number(raw):
-    if raw is None:
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, str) and raw.lower() in ("true", "false"):
         return None
     try:
-        return float(raw)
+        value = float(raw)
     except (TypeError, ValueError):
         return None
+    return value if math.isfinite(value) else None
 
 
-def _integer(raw):
+def _optional_integer(raw):
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, str) and raw.lower() in ("true", "false"):
+        return None
     try:
         return int(raw)
-    except (TypeError, ValueError):
-        return 0
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _table(name: str, *columns: sa.Column) -> sa.Table:
@@ -159,17 +227,23 @@ def _backfill_crm_links(conn) -> None:
     account_org = {r.id: r.org_id for r in conn.execute(sa.select(accounts.c.id, accounts.c.org_id))}
     contact_org = {r.id: r.org_id for r in conn.execute(sa.select(contacts.c.id, contacts.c.org_id))}
 
-    for deal in conn.execute(sa.select(deals.c.id, deals.c.org_id, deals.c.extra_data)).mappings():
+    rows = sa.select(
+        deals.c.id, deals.c.org_id, deals.c.extra_data, deals.c.account_id, deals.c.contact_id
+    )
+    for deal in conn.execute(rows).mappings():
         extra = _json(deal["extra_data"])
         values = {}
         account_id = extra.get("account_id") if isinstance(extra, dict) else None
         contact_id = extra.get("contact_id") if isinstance(extra, dict) else None
-        if account_id and account_org.get(account_id) == deal["org_id"]:
+        if deal["account_id"] is None and account_id and account_org.get(account_id) == deal["org_id"]:
             values["account_id"] = account_id
-        if contact_id and contact_org.get(contact_id) == deal["org_id"]:
+        if deal["contact_id"] is None and contact_id and contact_org.get(contact_id) == deal["org_id"]:
             values["contact_id"] = contact_id
         if values:
-            conn.execute(deals.update().where(deals.c.id == deal["id"]).values(**values))
+            stmt = deals.update().where(deals.c.id == deal["id"])
+            for column in values:
+                stmt = stmt.where(deals.c[column].is_(None))
+            conn.execute(stmt.values(**values))
 
 
 def _backfill_kpi(conn) -> None:
@@ -225,13 +299,18 @@ def _backfill_kpi(conn) -> None:
             ).first()
             if existing:
                 continue
+            target_value = _optional_number(raw.get("target_value"))
+            baseline_value = _optional_number(raw.get("baseline_value"))
+            window_days = _optional_integer(raw.get("baseline_window_days"))
+            if target_value is None or baseline_value is None or window_days is None:
+                continue  # no fake metrics: skip targets without real numbers
             conn.execute(targets.insert().values(
                 id=str(raw["id"]),
                 org_id=org["id"],
                 metric_key=str(raw["metric_key"])[:100],
-                target_value=_number(raw.get("target_value")),
-                baseline_value=_number(raw.get("baseline_value")),
-                baseline_window_days=_integer(raw.get("baseline_window_days")),
+                target_value=target_value,
+                baseline_value=baseline_value,
+                baseline_window_days=window_days,
                 evidence=str(raw.get("evidence") or ""),
                 owner=str(raw.get("owner") or "")[:255],
                 balancing_metrics=raw.get("balancing_metrics") if isinstance(raw.get("balancing_metrics"), list) else [],
@@ -272,12 +351,14 @@ def upgrade() -> None:
     conn = op.get_bind()
     if _has_table("credentials"):
         for name, col_type, default in CREDENTIAL_COLUMNS:
-            _add_column("credentials", sa.Column(
+            if _add_column("credentials", sa.Column(
                 name, col_type, nullable=default is None, server_default=default
-            ))
-        _add_column("credentials", sa.Column(
+            )):
+                _record(revision, f"column:credentials.{name}")
+        if _add_column("credentials", sa.Column(
             "scope", sa.JSON, nullable=False, server_default=text_default
-        ))
+        )):
+            _record(revision, "column:credentials.scope")
         _create_index("ix_credentials_status", "credentials", ["status"])
 
     if not _has_table("credential_events"):
@@ -294,6 +375,7 @@ def upgrade() -> None:
             sa.Column("details", sa.JSON, nullable=False, server_default=text_default),
             sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
         )
+        _record(revision, "table:credential_events")
     _create_index("ix_credential_events_org_id", "credential_events", ["org_id"])
     _create_index("ix_credential_events_credential_id", "credential_events", ["credential_id"])
     _create_index("ix_credential_events_org_created", "credential_events", ["org_id", "created_at"])
@@ -310,6 +392,8 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
             sa.UniqueConstraint("credential_id", "scope_type", "scope_id", name="uq_credential_scope"),
         )
+        _record(revision, "table:credential_scopes")
+    _create_unique("uq_credential_scope", "credential_scopes", ["credential_id", "scope_type", "scope_id"])
     _create_index("ix_credential_scopes_org_id", "credential_scopes", ["org_id"])
     _create_index("ix_credential_scopes_credential_id", "credential_scopes", ["credential_id"])
 
@@ -329,6 +413,7 @@ def upgrade() -> None:
             sa.Column("attribution", sa.JSON, nullable=False, server_default=text_default),
             sa.Column("created_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
         )
+        _record(revision, "table:usage_attributions")
     for name, cols in (
         ("ix_usage_attributions_org_id", ["org_id"]),
         ("ix_usage_attributions_date", ["date"]),
@@ -341,8 +426,8 @@ def upgrade() -> None:
 
     if _has_table("crm_deals"):
         for column, _target, _fk in CRM_LINKS:
-            _add_column("crm_deals", sa.Column(column, sa.String(36), nullable=True))
-        for column, _target, _fk in CRM_LINKS:
+            if _add_column("crm_deals", sa.Column(column, sa.String(36), nullable=True)):
+                _record(revision, f"column:crm_deals.{column}")
             _create_index(f"ix_crm_deals_{column}", "crm_deals", [column])
         _backfill_crm_links(conn)
         if not _is_sqlite():
@@ -351,6 +436,7 @@ def upgrade() -> None:
                     op.create_foreign_key(
                         fk_name, "crm_deals", target, [column], ["id"], ondelete="SET NULL"
                     )
+                    _record(revision, f"fk:{fk_name}")
 
     if not _has_table("kpi_targets"):
         op.create_table(
@@ -371,6 +457,8 @@ def upgrade() -> None:
             sa.Column("updated_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
             sa.UniqueConstraint("org_id", "metric_key", name="uq_kpi_target_org_metric"),
         )
+        _record(revision, "table:kpi_targets")
+    _create_unique("uq_kpi_target_org_metric", "kpi_targets", ["org_id", "metric_key"])
     _create_index("ix_kpi_targets_org_id", "kpi_targets", ["org_id"])
     _create_index("ix_kpi_targets_metric_key", "kpi_targets", ["metric_key"])
     _create_index("ix_kpi_targets_status", "kpi_targets", ["status"])
@@ -394,6 +482,7 @@ def upgrade() -> None:
             sa.Column("target_value", sa.Float, nullable=True),
             sa.Column("baseline_value", sa.Float, nullable=True),
         )
+        _record(revision, "table:kpi_target_events")
     for name, cols in (
         ("ix_kpi_target_events_org_id", ["org_id"]),
         ("ix_kpi_target_events_target_id", ["target_id"]),
@@ -405,23 +494,35 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    owned = _owned(revision)
+    if not owned:  # no marker: this revision created nothing (or already rolled back)
+        return
+
     if not _is_sqlite():
         for _column, _target, fk_name in CRM_LINKS:
-            if fk_name in _fk_names("crm_deals"):
+            if f"fk:{fk_name}" in owned and fk_name in _fk_names("crm_deals"):
                 op.drop_constraint(fk_name, "crm_deals", type_="foreignkey")
+
     for column, _target, _fk in CRM_LINKS:
-        _drop_index(f"ix_crm_deals_{column}", "crm_deals")
-        _drop_column("crm_deals", column)
+        if f"column:crm_deals.{column}" in owned:
+            _drop_index(f"ix_crm_deals_{column}", "crm_deals")
+            _drop_column("crm_deals", column)
+
+    if "column:credentials.status" in owned:
+        _drop_index("ix_credentials_status", "credentials")
+    for name, _col_type, _default in reversed(CREDENTIAL_COLUMNS):
+        if f"column:credentials.{name}" in owned:
+            _drop_column("credentials", name)
+    if "column:credentials.scope" in owned:
+        _drop_column("credentials", "scope")
 
     for table in (
         "kpi_target_events", "kpi_targets", "usage_attributions",
         "credential_scopes", "credential_events",
     ):
-        if _has_table(table):
+        if f"table:{table}" in owned and _has_table(table):
             op.drop_table(table)
 
-    if _has_table("credentials"):
-        _drop_index("ix_credentials_status", "credentials")
-        for name, _col_type, _default in reversed(CREDENTIAL_COLUMNS):
-            _drop_column("credentials", name)
-        _drop_column("credentials", "scope")
+    marker = _owned_table()
+    op.get_bind().execute(marker.delete().where(marker.c.revision == revision))
+    _drop_owned_table_if_empty()

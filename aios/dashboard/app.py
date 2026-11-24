@@ -4340,9 +4340,9 @@ async def crm_create(request: Request, lead_name: str = Form(...), lead_email: s
                 extra[key] = form.get(key)
         d = CrmDeal(org_id=org_id, lead_name=lead_name, lead_email=lead_email, lead_phone=lead_phone, value=value, stage="prospection", agent_id=agent_id or None, pipeline=pipeline or "default", score=score, extra_data=extra)
         db.add(d)
-        await db.commit()
-        await db.refresh(d)
-        # Bridge to ARVO: new deal -> detection/audit peer.
+        await db.flush()
+        # Bridge to ARVO: new deal -> detection/audit peer. Enqueue shares the
+        # domain transaction so commit publishes both or neither.
         try:
             from aios.integrations.arvo.publisher import enqueue_outbox
             await enqueue_outbox(
@@ -4350,10 +4350,16 @@ async def crm_create(request: Request, lead_name: str = Form(...), lead_email: s
                 {"org_id": org_id, "deal_id": d.id, "lead_name": lead_name,
                  "value": value, "stage": "prospection", "pipeline": pipeline or "default"},
                 business_trace_id=d.id, idempotency_key=f"deal.created:{d.id}",
+                session=db,
             )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).debug("arvo outbox enqueue skipped: %s", e)
+            logging.getLogger(__name__).warning(
+                "arvo outbox enqueue failed; deal.created event will not be published: %s", type(e).__name__
+            )
+            raise
+        await db.commit()
+        await db.refresh(d)
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.post("/crm/{deal_id}/move")
@@ -4368,7 +4374,6 @@ async def crm_move(request: Request, deal_id: str, stage: str = Form(...)):
         if d and d.org_id==org_id and stage in _CRM_BOARD_STAGES:
             old_stage = d.stage
             d.stage = stage
-            await db.commit()
             try:
                 from aios.integrations.arvo.publisher import enqueue_outbox
                 await enqueue_outbox(
@@ -4376,10 +4381,15 @@ async def crm_move(request: Request, deal_id: str, stage: str = Form(...)):
                     {"org_id": org_id, "deal_id": d.id, "old_stage": old_stage,
                      "new_stage": stage, "value": d.value},
                     business_trace_id=d.id, idempotency_key=f"deal.stage:{d.id}:{stage}",
+                    session=db,
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).debug("arvo outbox enqueue skipped: %s", e)
+                logging.getLogger(__name__).warning(
+                    "arvo outbox enqueue failed; deal.stage_changed event will not be published: %s", type(e).__name__
+                )
+                raise
+            await db.commit()
     return RedirectResponse("/dashboard/crm", status_code=303)
 
 @router.post("/crm/{deal_id}/delete")

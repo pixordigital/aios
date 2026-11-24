@@ -1,11 +1,12 @@
 """Outbox publisher — pending → HTTP to ARVO with retry."""
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 
 from aios.config import settings
 from aios.db.engine import async_session
@@ -16,18 +17,65 @@ from .events import ArvoEnvelope
 logger = logging.getLogger(__name__)
 
 
+async def schedule_flush(outbox_id: str) -> None:
+    """Best-effort immediate flush; row stays pending if scheduling fails."""
+    try:
+        from aios.tasks.queue import enqueue_job
+
+        await enqueue_job("integration_outbox_flush_job", outbox_id=outbox_id)
+    except Exception:
+        logger.warning(
+            "outbox %s immediate flush unavailable; fallback requires arq worker cron "
+            "OR external scheduler/manual flush; row remains pending",
+            outbox_id[:8],
+            exc_info=True,
+        )
+
+
 async def enqueue_outbox(
     event_type: str,
     payload: dict,
     business_trace_id: str | None = None,
     peer: str = "arvo",
     idempotency_key: str | None = None,
+    session=None,
 ) -> str:
-    """Insert durable pending row and best-effort schedule immediate flush."""
+    """Insert durable pending row; flush scheduled after caller's commit."""
     envelope = ArvoEnvelope(
         type=event_type, payload=payload, business_trace_id=business_trace_id
     )
     key = idempotency_key or str(uuid.uuid4())
+    if session is not None:
+        # Callers may pass the db.backends wrapper; it holds the AsyncSession.
+        session = getattr(session, "_session", None) or session
+        existing = await session.scalar(
+            select(IntegrationOutbox).where(IntegrationOutbox.idempotency_key == key)
+        )
+        if existing:
+            return existing.id
+        row = IntegrationOutbox(
+            peer=peer,
+            event_type=envelope.type,
+            payload=envelope.payload,
+            business_trace_id=envelope.business_trace_id,
+            idempotency_key=key,
+            status="pending",
+        )
+        # Savepoint keeps caller's domain transaction usable if outbox insert fails.
+        async with session.begin_nested():
+            session.add(row)
+            await session.flush()
+        sync_session = getattr(session, "sync_session", None)
+        if sync_session is not None:
+            def _flush_after_commit(_session):
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    return
+                loop.create_task(schedule_flush(row.id))
+
+            event.listen(sync_session, "after_commit", _flush_after_commit, once=True)
+        return row.id
     async with async_session() as session:
         existing = await session.scalar(
             select(IntegrationOutbox).where(IntegrationOutbox.idempotency_key == key)
@@ -46,16 +94,7 @@ async def enqueue_outbox(
         await session.commit()
         await session.refresh(row)
         outbox_id = row.id
-    try:
-        from aios.tasks.queue import enqueue_job
-
-        await enqueue_job("integration_outbox_flush_job", outbox_id=outbox_id)
-    except Exception:
-        logger.debug(
-            "outbox %s immediate flush unavailable; cron will retry",
-            outbox_id[:8],
-            exc_info=True,
-        )
+    await schedule_flush(outbox_id)
     return outbox_id
 
 
@@ -143,9 +182,10 @@ async def _deliver(row: IntegrationOutbox, raise_errors: bool) -> bool:
             business_trace_id=row.business_trace_id,
         )
     except Exception as error:
+        # ARVO 422 means handled:false (transient peer state), not terminal.
         retryable = (
             not isinstance(error, httpx.HTTPStatusError)
-            or error.response.status_code in (408, 429)
+            or error.response.status_code in (408, 422, 429)
             or error.response.status_code >= 500
         )
         status = "pending" if retryable and row.attempts < 5 else "failed"

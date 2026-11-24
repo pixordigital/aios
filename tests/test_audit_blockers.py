@@ -16,6 +16,11 @@ class TestPublicClaimsRegistry:
 
     ROOT = Path(__file__).resolve().parents[1]
     _CLAIM = re.compile(r"(\d[\d.]*\s*(?:msgs/dia|tokens/mês|min voz|minutos? de voz))", re.I)
+    # voice_minutes does not exist; ban every numeric spelling, not the one
+    # exact string registered in the docs.
+    _VOICE_MIN_CLAIM = re.compile(
+        r"\d[\d.k]*(?:\s*mil)?\s*min(?:ut[oa]s?)?(?:\s+de)?\s*voz", re.I
+    )
 
     def _registry(self) -> dict[str, tuple[str, str]]:
         text = (self.ROOT / "docs/PRINCIPIO_VERDADE.md").read_text()
@@ -35,16 +40,36 @@ class TestPublicClaimsRegistry:
         registry = self._registry()
         assert registry, "empty claims registry"
         html = (self.ROOT / "website/index.html").read_text()
-        for raw in self._CLAIM.findall(html):
+        # Force the claim branch: live site may carry no numeric claim.
+        for raw in self._CLAIM.findall(html) + ["500 msgs/dia"]:
             claim = raw.lower().strip()
             assert claim in registry, f"unregistered public claim: {raw}"
             source, kind = registry[claim]
             assert kind == "enforced", f"{raw} must be enforced or marked estimate"
             path, _, snippet = source.partition(":")
-            assert snippet.strip("`,") in (self.ROOT / path).read_text(), source
+            assert snippet.strip("`,") in (self.ROOT / path.strip("`")).read_text(), source
         assert PLANS["starter"]["max_messages_per_day"] == 500
         assert PLANS["starter"]["max_tokens_per_month"] == 5_000_000
         assert "voice_minutes" not in str(PLANS)
+
+    def test_registry_enforced_sources_are_grounded(self):
+        enforced = [s for s, k in self._registry().values() if k == "enforced"]
+        assert enforced, "empty enforced registry"
+        for source in enforced:
+            path, _, snippet = source.partition(":")
+            body = (self.ROOT / path.strip("`")).read_text()
+            assert snippet.strip("`,") in body, source
+
+    def test_banned_claims_are_absent_from_public_site(self):
+        html = (self.ROOT / "website/index.html").read_text()
+        banned = [c for c, (_, kind) in self._registry().items() if kind == "banned"]
+        assert banned, "empty banned registry"
+        # Prove the detector matches the registered claim and its variants;
+        # otherwise this test passes vacuously.
+        for sample in banned + ["10 min voz", "10 minutos de voz", "5 min de voz"]:
+            assert self._VOICE_MIN_CLAIM.search(sample), f"detector misses {sample!r}"
+        found = self._VOICE_MIN_CLAIM.findall(html)
+        assert not found, f"banned voice-minute claim on site: {found}"
 
     def test_banned_claims_stay_banned(self):
         registry = self._registry()

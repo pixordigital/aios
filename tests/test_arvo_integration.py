@@ -1,6 +1,8 @@
 """Fase 1 — ARVO integration config + auth self-check. Fase 2 — HMAC + nonce + routes."""
 import sys
 
+import pytest
+
 from aios.integrations.arvo.auth import _clear_nonces, sign_request, verify_request
 
 PATH = "/api/v1/integrations/aios/v1/health"
@@ -785,3 +787,191 @@ def test_hmac_key_rotation_map_accepts_secondary_and_primary(monkeypatch):
         assert call("kid-primary", "secret-wrong") == 401
     finally:
         _clear_nonces()
+
+
+def test_hmac_key_map_strips_entries_and_skips_malformed():
+    """CSV tolerates outer spaces; blank/malformed stay skipped; primary fallback kept."""
+    from aios.integrations.arvo.auth import verification_keys
+
+    primary_kid, primary_key = "kid-primary", "secret-primary"
+    malformed = " kid-bad , :secret-no-kid, kid-no-secret:, kid-blank:   "
+    assert verification_keys(primary_kid, primary_key, " kid-spaced : secret-spaced ", "kid-spaced") == ["secret-spaced"]
+    assert verification_keys(primary_kid, primary_key, malformed, "kid-bad") == []
+    assert verification_keys(primary_kid, primary_key, malformed, "kid-primary") == [primary_key]
+    assert verification_keys(primary_kid, primary_key, " kid-primary : secret-rotated ", "kid-primary") == ["secret-rotated", primary_key]
+
+
+def test_hmac_key_map_spaced_entry_verifies_and_tamper_rejected():
+    from aios.integrations.arvo.auth import _clear_nonces, verification_keys, verify_request
+
+    _clear_nonces()
+    try:
+        hdr = sign_request("GET", PATH, None, "kid-spaced", "secret-spaced")
+        keys = verification_keys("kid-primary", "secret-primary", " kid-spaced : secret-spaced ", "kid-spaced")
+        assert keys == ["secret-spaced"]
+        common = (
+            "kid-spaced", hdr["X-Service-Timestamp"], hdr["X-Service-Nonce"],
+            "GET", PATH, None, hdr["X-Service-Signature"],
+        )
+        assert not verify_request(*common, keys[0], query="tampered=1")
+        assert verify_request(*common, keys[0])
+    finally:
+        _clear_nonces()
+
+
+@pytest.mark.parametrize("with_org", [True, False])
+async def test_completion_failure_marker_survives_past_60s(test_session, monkeypatch, with_org):
+    """Side effect commits its own done marker; completion-write failure still dedups past 60s."""
+    import json
+    from datetime import datetime as real_datetime, timedelta, timezone
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db.models import AuditLog, IntegrationEvent, Organization
+    from aios.integrations.arvo import routes
+    from aios.integrations.arvo.auth import _clear_nonces, sign_request
+    from aios.main import app
+
+    org = None
+    if with_org:
+        org = Organization(name="Replay Org", slug="replay-org", extra_data={})
+        test_session.add(org)
+        await test_session.commit()
+    org_id = org.id if org else None
+
+    key = f"idem-complete-fail-replay-{int(with_org)}"
+    handler_calls: list[str] = []
+    clock = [0]
+
+    class ShiftedDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            return real_datetime.now(tz) + timedelta(seconds=clock[0])
+
+    real_handler = routes._handle_action_executed
+
+    async def counted_handler(payload, trace_id, idempotency_key, response=None):
+        handler_calls.append(idempotency_key)
+        return await real_handler(payload, trace_id, idempotency_key, response)
+
+    async def fail_complete(event_key, response):
+        raise RuntimeError("completion write down")
+
+    monkeypatch.setattr(routes, "_handle_action_executed", counted_handler)
+    monkeypatch.setattr(routes, "_db_complete_event", fail_complete)
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid-1")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret-1")
+    _clear_nonces()
+    routes._clear_events()
+
+    path = "/api/integrations/arvo/v1/events"
+    payload = {"action_id": "act-replay"}
+    if org_id:
+        payload["org_id"] = org_id
+    raw = json.dumps({"type": "action.executed", "payload": payload}, separators=(",", ":")).encode()
+    c = TestClient(app, raise_server_exceptions=False)
+    try:
+        hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+        hdr["Idempotency-Key"] = key
+        hdr["Content-Type"] = "application/json"
+        first = c.post(path, content=raw, headers=hdr)
+        assert first.status_code >= 500
+        assert handler_calls == [key]
+
+        row = (await test_session.execute(
+            select(IntegrationEvent).where(IntegrationEvent.idempotency_key == key)
+        )).scalar_one()
+        if with_org:
+            assert row.response["status"] == "processed"
+            assert row.response["handled"] == "action.executed"
+            assert row.expires_at > real_datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=60)
+        else:
+            assert row.response["status"] == "processing"
+
+        # No sleeps: move the route clock past the old 60s claim window.
+        clock[0] = 61
+        monkeypatch.setattr(routes, "datetime", ShiftedDatetime)
+        if with_org:
+            # In-memory cache would mask DB authority; clear it to force DB dedup.
+            routes._clear_events()
+        hdr2 = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+        hdr2["Idempotency-Key"] = key
+        hdr2["Content-Type"] = "application/json"
+        retry = c.post(path, content=raw, headers=hdr2)
+        assert retry.status_code == 200 and retry.json()["deduplicated"] is True
+        assert retry.json()["handled"] == "action.executed"
+        assert handler_calls == [key]
+
+        await test_session.rollback()
+        if with_org:
+            audits = (await test_session.execute(
+                select(AuditLog).where(AuditLog.org_id == org_id, AuditLog.action == "action.executed")
+            )).scalars().all()
+            assert len(audits) == 1
+    finally:
+        _clear_nonces()
+        routes._clear_events()
+
+
+async def test_commitment_no_org_completion_failure_caches_full_response(test_session, monkeypatch):
+    """No-org success must update resp_base before completion write, so failure cache keeps handled/enqueued."""
+    import json
+    from unittest.mock import AsyncMock
+
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    from aios.config import settings
+    from aios.db.models import IntegrationEvent
+    from aios.integrations.arvo import routes
+    from aios.integrations.arvo.auth import _clear_nonces, sign_request
+    from aios.main import app
+
+    key = "idem-commit-no-org-complete-fail"
+    finding_id = "f-no-org-complete-fail"
+    fake_enqueue = AsyncMock()
+
+    async def fail_complete(event_key, response):
+        raise RuntimeError("completion write down")
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", fake_enqueue)
+    monkeypatch.setattr(routes, "_db_complete_event", fail_complete)
+    monkeypatch.setattr(settings, "arvo_integration_enabled", True)
+    monkeypatch.setattr(settings, "arvo_service_key_id", "kid-1")
+    monkeypatch.setattr(settings, "arvo_service_key", "secret-1")
+    _clear_nonces()
+    routes._clear_events()
+
+    path = "/api/integrations/arvo/v1/events"
+    raw = json.dumps({"type": "commitment.at_risk", "payload": {"finding_id": finding_id}}, separators=(",", ":")).encode()
+    c = TestClient(app, raise_server_exceptions=False)
+    try:
+        hdr = sign_request("POST", path, raw, "kid-1", "secret-1", idempotency_key=key)
+        hdr["Idempotency-Key"] = key
+        hdr["Content-Type"] = "application/json"
+        r = c.post(path, content=raw, headers=hdr)
+        assert r.status_code >= 500
+        assert fake_enqueue.await_count == 1
+
+        cached = routes._get_idempotent(key)
+        assert cached == {
+            "status": "processed",
+            "idempotency_key": key,
+            "type": "commitment.at_risk",
+            "business_trace_id": finding_id,
+            "event_version": "1",
+            "handled": "commitment.at_risk",
+            "finding_id": finding_id,
+            "enqueued": True,
+        }
+
+        row = (await test_session.execute(
+            select(IntegrationEvent).where(IntegrationEvent.idempotency_key == key)
+        )).scalar_one()
+        assert row.response == {"status": "processing"}
+    finally:
+        _clear_nonces()
+        routes._clear_events()

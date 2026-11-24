@@ -1,27 +1,37 @@
 # Deploy: Supabase as AIOS main DB (cutover runbook)
 
-Scope: repoint AIOS **app + worker** from standalone `postgres:5432/aios` to
-Supabase DB `aios`, schema `aios`, through bridge `aios-supabase-db-8778:5432`.
-ARVO keeps its own DSN/schema (`arvo`) and SSO ticket bridge. Standalone
-Postgres stays alive for Evolution only.
+Scope: historical runbook to repoint AIOS **app + worker** from standalone
+`postgres:5432/aios` to Supabase DB `aios`, schema `aios`, through bridge
+`aios-supabase-db-8778:5432`. Cutover already applied for current app; steps
+below are reference/recovery unless a future wave needs them. ARVO keeps its
+own DSN/schema (`arvo`) and SSO ticket bridge. Standalone Postgres stays alive
+for Evolution only.
 
 This runbook writes to prod when a human executes it. The repo change itself
 does not touch prod. No LLM/model call is needed.
 
 ## Known facts / targets
 
-- Current live AIOS DSN host: record in step 0; below called "the DB the app
-  points to". Do not assume a host.
+- Current live AIOS DSN host (verified): `aios-supabase-db-8778:5432/aios`,
+  the Supabase bridge; below called "the DB the app points to". Step 0 still
+  records it before any change; never print credentials.
 - Supabase service: `x7cec17of43bremk02s521wj`, DB `aios`, schema `aios`.
 - Supabase `aios` pre-cutover revision: `e7f8a9b0c1d2`.
-- Repository migration head in this worktree: `e1f2a3b4c5d6`, via untracked
+- Repository migration head: `e1f2a3b4c5d6`, via
   `alembic/versions/icm_side_effect_dedupe.py` (`f0e1d2c3b4a5`) and
-  `alembic/versions/schema_gaps_creds_crm_kpi.py` (`e1f2a3b4c5d6`). Commit/push
-  both before building any image for this runbook.
-- Committed HEAD / current deployed image head: `d0e1f2a3b4c5`. The current
-  image does not contain the two migrations above.
-- Current `/health/ready`: `503 behind:b8c9d0e1f2a3->d0e1f2a3b4c5`; the DB the
-  app points to is behind the current image head.
+  `alembic/versions/schema_gaps_creds_crm_kpi.py` (`e1f2a3b4c5d6`); committed
+  in `e46771e`. Commit/push any pending integration-wave code before building a
+  future image.
+- Committed AIOS HEAD / current deployed image: `3aa2db5` (Coolify `#805`,
+  routing fix only). Integration-wave code remains uncommitted locally: not
+  deployed, signed delivery unverified. Migrations committed in `e46771e`
+  must still be included in any future image.
+- Current app DB is the Supabase bridge `aios-supabase-db-8778:5432/aios`.
+  Alembic head `e1f2a3b4c5d6` reached in app; `/health/ready` `200 migrations:ok`.
+  Supabase cutover already applied for this app — no longer a future gate here.
+  Section 0a is conditional/historical: use only if readiness regresses.
+  Remaining human gate: integration-wave code if still uncommitted. Migrations
+  committed in `e46771e` must still be included in any future image.
 - AIOS engine sets `search_path = aios, public, extensions`; Alembic version
   table is `aios.alembic_version_aios`.
 
@@ -60,17 +70,19 @@ does not touch prod. No LLM/model call is needed.
 
    Record the actual value; do not assume a host.
 
-6. Commit/push the code and both migration files first (human gate). Build an
-   image from that commit and note its tag as `<migration_image>`. It must
-   contain `alembic/versions/icm_side_effect_dedupe.py` and
+6. If integration-wave code/migrations are still uncommitted, commit/push them
+   first (human gate). Build an image from that commit and note its tag as
+   `<migration_image>`. It must contain
+   `alembic/versions/icm_side_effect_dedupe.py` and
    `alembic/versions/schema_gaps_creds_crm_kpi.py`. Do not restart app/worker
    on it until step 4 finishes.
 
 ## 0a. Immediate readiness repair on current deployed image (human gate)
 
-Separate from the Supabase cutover. `/health/ready` is `503
-behind:b8c9d0e1f2a3->d0e1f2a3b4c5`: apply committed head `d0e1f2a3b4c5` to the
-DB the app actually uses. Do not change DSNs here.
+Only if readiness regresses: separate from the Supabase cutover. Previously
+observed `/health/ready` `503 behind:b8c9d0e1f2a3->d0e1f2a3b4c5`; apply
+committed head `d0e1f2a3b4c5` to the DB the app actually uses. Do not change
+DSNs here.
 
 Human gate: confirm a dump of the DB the app points to exists. Then use the
 currently deployed image and the app container's existing `AIOS_DATABASE_URL`
@@ -89,9 +101,9 @@ needs the new image.
 ## 1. Dry-run preflight (read-only)
 
 Run the guard from `<migration_image>` (step 0, item 6), not the current
-deployed image: its code head is `d0e1f2a3b4c5`. Mount the guard read-only and
-pass the DSN on stdin so it never appears in `ps` or logs. `--entrypoint bash`
-bypasses the image's default `deploy/entrypoint.sh` auto-migration:
+deployed image. Mount the guard read-only and pass the DSN on stdin so it never
+appears in `ps` or logs. `--entrypoint bash` bypasses the image's default
+`deploy/entrypoint.sh` auto-migration:
 
 ```bash
 docker run --rm -i --network coolify --entrypoint bash \
@@ -159,9 +171,10 @@ SQL
 
 Same command after cutover → `aios_rls_after.txt`; `diff` must be empty.
 
-## 4. Upgrade Supabase `aios` schema BEFORE switching DSN
+## 4. Upgrade Supabase `aios` schema BEFORE switching DSN (historical for current app)
 
-App still points at the DB recorded in step 0. Run migration from a shell in
+Already applied for current app; use only for a future target. In that case app
+still points at the DB recorded in step 0. Run migration from a shell in
 `<migration_image>` (step 0, item 6) against the Supabase DSN only.
 `--entrypoint bash` avoids the image's default `deploy/entrypoint.sh`, which
 would auto-run `alembic upgrade head` against the container's own
@@ -211,8 +224,9 @@ curl -sS -o /tmp/aios_ready.json -w '%{http_code}\n' https://178.105.181.38/heal
 cat /tmp/aios_live.json /tmp/aios_ready.json
 ```
 
-Expect `200` for both; ready JSON needs `db: ok` and `migrations: ok`. If
-`migrations: unversioned` appears, do not call it healthy: re-run step 1 and
+Expect `200` for both; ready JSON nests checks under `checks`: need
+`checks.db == "ok"` and `checks.migrations == "ok"`. If
+`checks.migrations` is `unversioned`, do not call it healthy: re-run step 1 and
 check `aios.alembic_version_aios` directly before escalating. `migration_state()`
 reads the schema-qualified table on Postgres; the legacy `alembic_version` table
 is not authoritative.
@@ -249,6 +263,41 @@ unset ARVO_TOKEN
 ```
 
 Expect `200` both. ARVO must still use schema `arvo`; do not change its DSN.
+
+### Signed peer probes: in-app path vs public origin
+
+ARVO in-app routes are `/api/v1/integrations/aios/v1/*` (`arvo/app/api/router.py:5,26`);
+the public origin mounts ARVO under `/arvo` (`arvo/app/main.py:37`). Use these
+exact paths:
+
+- AIOS signed health: `/api/integrations/arvo/v1/health` (GET/POST),
+  HMAC-protected on AIOS (`aios/integrations/arvo/routes.py:18,225,230`).
+- ARVO signed health: in-app `/api/v1/integrations/aios/v1/health`, public
+  `/arvo/api/v1/integrations/aios/v1/health` (GET/POST)
+  (`arvo/app/integrations/aios/routes.py:18,264,269`).
+- ARVO outbox flush: in-app `POST /api/v1/integrations/aios/v1/outbox/flush`,
+  public `POST /arvo/api/v1/integrations/aios/v1/outbox/flush`
+  (`arvo/app/integrations/aios/routes.py:751`).
+
+Two contexts — sign the path you send:
+
+- Public-origin probe via `https://178.105.181.38/arvo/api/...` must sign
+  `/arvo/api/...`: ARVO verifies `request.url.path`, which includes `root_path`
+  (`arvo/app/integrations/aios/routes.py:250`). Signing the prefix-free path
+  there fails closed with `401`.
+- Internal AIOS client: `AIOS_ARVO_BASE_URL=http://l7p2...sslip.io` is the
+  configured target; code signs/sends prefix-free
+  `/api/v1/integrations/aios/v1/...` (`aios/integrations/arvo/client.py:16,45-47`)
+  and expects forwarding to ARVO `:9777` — code intent, not verified delivery.
+  Signed delivery was not verified locally or in prod. Code-level inference:
+  `root_path` alone does not inject `/arvo` into that client path.
+
+Secrets stay human-only; print no signature, key or token. Stop on any non-`200`.
+
+Verified deployed topology (read-only, 2026-11-24): public `https://178.105.181.38/api/v1/integrations/aios/v1/health` 404; `/arvo/api/...` and sslip `/api/...` 401 unsigned. Those probes show route presence and the auth gate only — not signed delivery or successful peer delivery. No `arvo-ip-strip` definition found in versioned code (`arvo/app/main.py:50-55` registers only CORS); any strip behavior is external and unverified. Signed live smoke stays human-only.
+
+Browser smoke auth context: `/dashboard/sso/arvo` needs `aios_token`;
+`/arvo/control-center` needs `arvo_token` (set by the SSO cookie above).
 
 ### RLS / org scoping
 
@@ -290,9 +339,9 @@ during the window need explicit human reconciliation before reusing that DSN.
 - Secret manager supplies Supabase DSN/password; nothing invented or committed.
 - Bridge attached to `coolify`; preflight guard exit `0`.
 - Both dumps non-empty, hashes recorded.
-- Code + both migrations committed/pushed; `<migration_image>` contains head
-  `e1f2a3b4c5d6`, not current image head `d0e1f2a3b4c5`.
-- Readiness repair (`d0e1f2a3b4c5`) and/or Supabase cutover
-  (`e1f2a3b4c5d6`) completed; guard re-run passes at head.
+- Integration-wave code committed/pushed if still pending; `<migration_image>`
+  contains head `e1f2a3b4c5d6`.
+- Readiness repair historical; Supabase cutover already applied for current
+  app; guard re-run passes at head for any future wave.
 - Health/ready, auth, SSO cookie, ARVO, RLS baseline diff, worker checked.
 - Rollback approved and executed if any gate fails.

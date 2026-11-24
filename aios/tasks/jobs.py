@@ -1214,6 +1214,21 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
     finding_id = payload.get("finding_id") or payload.get("opportunity_id") or payload.get("id") or "unknown"
     business_trace_id = business_trace_id or payload.get("business_trace_id") or str(finding_id)
 
+    failed_payload = {
+        "finding_id": str(finding_id),
+        "org_id": org_id,
+        "output": "",
+        "reason": "",
+        "status": "failed",
+        "source_amounts": {},
+    }
+    # Bound trace before appending ":failed:" so truncation cannot collide with success key.
+    failed_base = f"agent.action.completed:{str(business_trace_id)[:80]}"[:128]
+    # ARVO reads top-level amounts as verified recovery; failure must not feed it.
+    for amount_field in ("exposure_amount", "verified_amount", "recovery_amount", "currency"):
+        if amount_field in payload:
+            failed_payload["source_amounts"][amount_field] = payload[amount_field]
+
     agent = None
     if org_id:
         try:
@@ -1228,6 +1243,19 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
             "commitment.at_risk skipped: no active agent for organization %s",
             org_id,
         )
+        failed_payload["output"] = "no agent executed"
+        failed_payload["reason"] = "no active agent"
+        try:
+            from aios.integrations.arvo.publisher import enqueue_outbox
+            await enqueue_outbox(
+                "agent.action.completed",
+                failed_payload,
+                business_trace_id=str(business_trace_id),
+                idempotency_key=f"{failed_base}:failed:{failed_payload['reason']}"[:128],
+            )
+        except Exception:
+            logger.exception("publish failed agent.action.completed for no active agent failed")
+            raise
         return {"skipped": True, "reason": "no active agent"}
 
     try:
@@ -1245,6 +1273,19 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
             result_text = await rt.run(conv_id, msg)
     except Exception:
         logger.exception("commitment.at_risk agent execution failed")
+        failed_payload["output"] = "agent execution failed"
+        failed_payload["reason"] = "agent execution failed"
+        try:
+            from aios.integrations.arvo.publisher import enqueue_outbox
+            await enqueue_outbox(
+                "agent.action.completed",
+                failed_payload,
+                business_trace_id=str(business_trace_id),
+                idempotency_key=f"{failed_base}:failed:{failed_payload['reason']}"[:128],
+            )
+        except Exception:
+            logger.exception("publish failed agent.action.completed after agent failure failed")
+            raise
         raise
 
     try:
