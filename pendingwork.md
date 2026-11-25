@@ -648,3 +648,12 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - Post-deploy verification: `/health/live` 200 `{"status":"live"}`; `/health/ready` 200 all checks ok; homepage 200 size 97549 with 2 `aios_lang` hits and 2 `>ES<` hits; `/dashboard/login` 200 size 5329 with 1 `aios_lang` hit. No gate weakening, no fabricated approval.
 - Tests: `tests/test_icm_x.py` → `25 passed, 1 warning in 77.08s`; diff-check clean; py_compile OK. No runtime change.
 - Ambiguity for human decision: broadened legacy lock from `company_research_output.v1` only to all 12 registered stage schemas via same validator path; if adapter-boundary scope intended, follow-up cheap.
+
+### Stale landed-state docs probe/fix — DONE (2026-11-25)
+
+- Subagent task: stale docs probe (task `ses_dcef5c9effeBMZhdcjNki1pKT`) → truth-only fixes.
+- Files: `website/index.html` (+4/−4 PT/ES), `docs/DEPLOY.md` (+14/−14), `docs/PRODUCTION_CONFIG.md` (+1/−1); `arvo/README.md` (+1/−1, arvo repo).
+- Fixes: integration-round copy "locais e aguardam deploy" → deployed + signed delivery verified 2026-11-25; migration head `e1f2a3b4c5d6` → `b2c3d4e5f6a7`; deployed AIOS image `2e38e91` (Coolify #827) / paired ARVO `e619d220` (#813); signed delivery verified (smoke real secrets, values never printed).
+- Verification: `git diff --check` clean; HTML parse clean; post-deploy homepage served corrected copy (new strings present, size 97389), `/health/live`/`/health/ready`/`/dashboard/login` all 200.
+- Ambiguities for human decision: human gate status line reworded to "verified" (human confirm gate closure record); cutover-guard `DEFAULT_HEAD` still old head (future-cutover human call); `docs/ICM_X_ARCHITECTURE.md` persist-claims left.
+- Commits: AIOS `f87338d`; ARVO `cc72235` (`docs(readme): sync paired-deploy truth for deploy #827`). Coolify deploy #828 `phjsxsvv91kkwhemj43q7gtf` for `f87338d` finished `2026-11-25T16:33:04Z`.
