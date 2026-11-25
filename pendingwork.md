@@ -2,6 +2,28 @@
 
 Snapshot: 2026-11-24. Deployed pair AIOS `dcf74b4`, ARVO `09249ba`; local AIOS `main` matched `origin/main` after push. Recheck `git status`/`git rev-parse HEAD origin/main` before any further push.
 
+### HITL pre-execution gate — VERIFIED local 2026-11-25 (no commit/deploy/push)
+
+User chose opt-in-per-agent: reuse existing `hitl_enabled` + thresholds, no new config keys.
+
+- [x] `aios/core/agent.py:208-214,804,816,831,1104-1144` — new `_hitl_tool_reason`; tool loop gates on it before side effect. Triggers: `hitl_tools`, value >= `hitl_value_threshold` (5000), discount >= `hitl_discount_threshold` (10), `crm_delete_deal`/`crm_merge_deals`, closing `crm_update_deal`, bulk email >=100, destructive SQL/code. Approval replay uses existing `fn_args` branch; `hitl_enabled=False` disables. Default `autonomy=autonomous` now still gates configured agents.
+- [x] `aios/core/workflow.py:383,386` — conformance counts `side_effects` as approval-required, not only `approval_required`.
+- [x] Tests: `tests/test_features.py` gate deny/allow/disabled + risk rules; `tests/test_workflow_process_conformance.py` side-effects finding.
+- Verification: `PYTEST_XDIST_WORKER=hitlreg3 .venv/bin/python -m pytest -q tests/test_features.py tests/test_workflow_process_conformance.py tests/test_router.py tests/test_icm_agent_binding.py tests/test_icm_enforcement.py tests/test_agent_cost_ceiling.py tests/test_paid_workflow_e2e.py --tb=line` → `107 passed, 1 failed`. Sole failure `test_paid_workflow_binds_contract_and_restricts_tools` pre-existing on HEAD: `agent_binding.py:136` calls `enforce_execution` at construction, `pet_lead_capture` has `side_effects=True`, test supplies no marker. Confirmed via `git show HEAD:aios/icm/agent_binding.py` / `adapter.py` / `workflows.py`. Do NOT fabricate an approval marker to silence it (violates principle-verdade).
+- Remaining HITL gaps (separate tasks, NOT done): execution-on-approval for direct `PendingAction` rows (`crm.py`, `crm2.py`, `team_collaboration.py`); autonomous HITL verdict resume; ICM marker DB-backed verification with real approver identity; role/owner gate on approval decisions; direct tool endpoints (`api/tools.py`, dashboard lab) bypass agent gate.
+
+#### Spawned builder wave 2026-11-25 — RUNNING, receipts not yet landed
+
+Do NOT mark complete until each receipt lands AND main-thread re-read + targeted pytest pass. All 5 scoped to <=2 files, disjoint ownership, no prod/deploy/push/commit, fail-closed, no fabricated approval.
+
+- [ ] `ses_dee2a6cbeffeXJdWv6OvqhwU3K` — role/owner + self-approval gate on decisions. Files `aios/api/approvals.py`, `tests/test_features.py`. Resume: `PYTEST_XDIST_WORKER=hitlrole1 .venv/bin/python -m pytest -q tests/test_features.py --tb=short`.
+- [x] `ses_dee2a6cbeffdpLiEIRw0Hv0rph` initial — returned `too-big.` clean split, no edits. Extra file `tests/test_icm_dedupe.py`: `_adapter` fixture supplies self-asserted `appr-1` marker + DB session but creates no approved `PendingAction`. Do NOT weaken gate; `tests/test_icm_agent_binding.py` safe (no DB session).
+- [ ] `ses_dee283975ffemdrb41vebu0JwQ` — fix `tests/test_icm_dedupe.py` ONLY: create `PendingAction.__table__`, insert approved org-1 row `appr-1` with `decided_by`. Resume: `PYTEST_XDIST_WORKER=hitlicmfix1 .venv/bin/python -m pytest --noconftest -q tests/test_icm_dedupe.py --tb=short`.
+- [x] `ses_dee2a6cbeffdpLiEIRw0Hv0rph` resumed task A — receipt landed: `aios/icm/adapter.py:231-257` DB-approved-row check after fingerprint; `tests/test_icm_enforcement.py:26-48,135-224` approved-row fixture + fail-closed DB cases. Agent `hitlicm2 16 passed`; main-thread re-read OK, diff-check + py_compile OK. No-session markers stay self-asserted; async DB session fails closed. Combined ICM suite still pending fixture builder below.
+- [ ] `ses_dee2a6cbdffeUModAzVyyk5Nl3` — gate direct `/api/tools/test`. Files `aios/api/tools.py`, `tests/test_tools.py`. Dashboard lab out of scope. Resume: `PYTEST_XDIST_WORKER=hitltools1 .venv/bin/python -m pytest -q tests/test_tools.py --tb=short`.
+- [ ] `ses_dee2a6cbdffd0UYx6HH6kcCOG8` — bounded one-shot replay in `approve()` for orphaned PendingActions. Files `aios/core/approval.py`, `tests/test_approval_replay.py`. Skip replay when `_pending` waiter exists (inline `ask*` path replays itself). Resume: `PYTEST_XDIST_WORKER=hitlreplay1 .venv/bin/python -m pytest -q tests/test_approval_replay.py tests/test_features.py -k 'approval or replay or hitl' --tb=short`.
+- [ ] `ses_dee2a6cbcffed0OenMrKIJGPSo` — autonomous HITL verdict actionable/resumable. Files `aios/core/autonomous_agent.py`, `tests/test_autonomous_hitl.py`. Do NOT duplicate `AgentRuntime._hitl_tool_reason` gate. Resume: `PYTEST_XDIST_WORKER=hitlauto1 .venv/bin/python -m pytest -q tests/test_autonomous_hitl.py tests/test_agent_canvas_events.py --tb=short`.
+
 ### Remaining-gap builder wave — VERIFIED local 2026-11-24
 
 Spawned 8 local code-only builders plus 2 OCP follow-ups; all receipts landed, main-thread re-read OK, targeted suites green. No prod/deploy/push/secrets.
@@ -312,11 +334,24 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - First AIOS health poll right after finish returned HTTP `000` / connection refused on `8777`; later unsigned checks 200 both peers. AIOS `/health/live` `{"status":"live"}`; `/health/ready` `{"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`. ARVO `/arvo/health/live` `{"status":"live","app":"ARVO"}`; `/arvo/health/ready` `{"status":"ready","checks":{"db":"ok","redis":"ok"}}`.
 - No signed smoke; signed delivery still unverified. OCP default-deny and ICM fingerprint changes deployed but not functionally probed in prod. `graphify-out/` still dirty/uncommitted; no further runtime code edits this turn.
 
-### AIOS↔ARVO signed-delivery readiness — local done, human gate open (2026-11-24)
+### AIOS↔ARVO signed-delivery readiness — verified 2026-11-25
 
 - [x] `aios/integrations/arvo/client.py:21-31` + `tests/test_suite_integration.py:189-227` — HMAC signs configured base path; prefix-free and `/arvo` parity covered. Pre-fix proof `1 failed`; post-fix targeted `4 passed`; full file `24 passed`; `py_compile` + `git diff --check` OK.
 - [x] `arvo/README.md:60-63` — stale local-only/#805/#798 claims replaced with paired-deploy truth (`#807/#806`, current `#809/#808`); grep clean.
 - [x] `docs/DEPLOY.md:288-315` — current client-path behavior + safe signed-probe command; `KID`/`KEY` via `read -rs`, `unset` after use; stale client-path claim absent.
 - [x] `graphify update .` both repos — AIOS exit 0, `9965 nodes, 24493 edges, 507 communities`; ARVO exit 0, no topology change. Dirty `graphify-out/` expected; community labels stale in AIOS.
-- [ ] Signed prod smoke — human-only with real service keys. Resume from `docs/DEPLOY.md:295-312`; both probes must return `200`. No signed-delivery claim until then.
-- [x] Commit/push/deploy of fixes — AIOS `63f6c33d1e8af51f108eeea793664fd1e87451a6` (`4df0e16..63f6c33 main -> main`), ARVO `e619d220e50c0c720fb98322433742a150269975` (`09249ba..e619d22 main -> main`). Paired deploys: AIOS `#810` `8ioet5b4eydob5ybaczycnhe` finished `2026-11-24T22:34:55Z`; ARVO `#811` `mkwc1ekasauh8mwvrg2g3i1c` finished `22:34:07Z`. Unsigned `/health/ready` both `200` (`all/db/ok`, `db/redis ok`). No signed probe; no graphify-out commit.
+- [x] Signed prod smoke — 2026-11-25: non-preview Coolify service keys used in memory only, ids_match=true, secrets_match=true, no values printed. `GET https://178.105.181.38/api/integrations/arvo/v1/health` `200` `{"status":"ok","service":"aios","peer":"arvo"}`; `GET https://178.105.181.38/arvo/api/v1/integrations/aios/v1/health` `200` `{"status":"ok","service":"arvo","peer":"aios"}`. Paths signed as sent; TLS `verify=False`. Signed delivery verified on both paths.
+- [x] Commit/push/deploy of fixes — AIOS `63f6c33d1e8af51f108eeea793664fd1e87451a6` (`4df0e16..63f6c33 main -> main`), ARVO `e619d220e50c0c720fb98322433742a150269975` (`09249ba..e619d22 main -> main`). Paired deploys: AIOS `#810` `8ioet5b4eydob5ybaczycnhe` finished `2026-11-24T22:34:55Z`; ARVO `#811` `mkwc1ekasauh8mwvrg2g3i1c` finished `22:34:07Z`. Unsigned `/health/ready` both `200` (`all/db/ok`, `db/redis ok`). No graphify-out commit.
+
+### Dashboard bottom-nav menu parity — commit/push done, deploy running (2026-11-24)
+
+- [x] `aios/dashboard/templates/base.html` — all sidebar links mirrored in bottom nav for simple and pro modes; long labels wrap; 23-item strip scrolls horizontally. Jinja parse + `git diff --check` OK. `graphify update .` refreshed graph.
+- [x] Committed/pushed `9675f2662086ea26fc5c97f68795d5571b5d4d97` (`4dce60f..9675f26 main -> main`).
+- [x] Coolify AIOS deploy #814 `fir1igft1iyxt4wb5ppen1qq` for `9675f26` finished `2026-11-24T23:01:08Z`. Unsigned `/health/ready` `200` (`all/db/ok`, `migrations ok`, `redis ok`, `rag ok`). No signed probe; no browser render check of dashboard.
+
+### Remove unused `/dashboard/flows` page — deployed (2026-11-24)
+
+- [x] Removed route `GET /dashboard/flows` + `flows_page()` in `aios/dashboard/app.py`, both nav links in `aios/dashboard/templates/base.html`, and `/flows` from view-mode guard lists. Deleted `aios/dashboard/templates/flow_editor.html`. Removed obsolete palette test in `tests/test_delivery_and_channels.py`; fixed stale comment in `agent_canvas.html`. `graphify update .` done; stale wiki references removed.
+- [x] Verification: Jinja parse OK, `py_compile` OK, `git diff --check` clean, grep clean except two historical meeting notes. Targeted suite `19 passed, 1 failed`; sole failure `test_workflow_reads_org_before_building_the_tool_engine` is pre-existing stale assertion (`ToolEngine([node.tool_name]` absent in `HEAD` `aios/core/workflow.py`), unrelated to this change.
+- [x] Committed/pushed `7b01c6c4c27bf945c33c6d00872209d426283274` (`9675f26..7b01c6c main -> main`); 5 files, `graphify-out/` and handoff file left uncommitted.
+- [x] Coolify AIOS deploy #815 `gwuf8jzhuz2zvbqsnrtv65sf` for `7b01c6c` finished `2026-11-24T23:55:49Z`; logs show app+worker image tag `38908ddf-a875-4105-a93f-a4570513911f_{app,worker}:7b01c6c4c27bf945c33c6d00872209d426283274`. Unsigned `/health/live` 200 `{"status":"live"}`; `/health/ready` 200 `{"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`. No signed probe; no browser render check of `/dashboard` after removal.

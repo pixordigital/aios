@@ -288,7 +288,7 @@ Two contexts — sign the path you send:
 - Internal AIOS client: `AIOS_ARVO_BASE_URL` may be prefix-free internal host
   or public origin with `/arvo`; client signs path including configured base
   path (`aios/integrations/arvo/client.py:21-31`) and `httpx` sends merged path.
-  Local parity tests cover both forms; live signed delivery still unverified.
+  Local parity tests cover both forms; live signed delivery verified 2026-11-25.
 
 Secrets stay human-only; print no signature, key or token. Stop on any non-`200`.
 
@@ -314,7 +314,7 @@ unset KID KEY
 
 Both `200` proves signed delivery on those paths; any non-`200` still means unverified.
 
-Verified deployed topology (read-only, 2026-11-24): public `https://178.105.181.38/api/v1/integrations/aios/v1/health` 404; `/arvo/api/...` and sslip `/api/...` 401 unsigned. Those probes show route presence and the auth gate only — not signed delivery or successful peer delivery. No `arvo-ip-strip` definition found in versioned code (`arvo/app/main.py:50-55` registers only CORS); any strip behavior is external and unverified. Signed live smoke stays human-only.
+Verified deployed topology (read-only, 2026-11-24): public `https://178.105.181.38/api/v1/integrations/aios/v1/health` 404; `/arvo/api/...` and sslip `/api/...` 401 unsigned. Those probes show route presence and the auth gate only — not signed delivery or successful peer delivery. No `arvo-ip-strip` definition found in versioned code (`arvo/app/main.py:50-55` registers only CORS); any strip behavior is external and unverified. Signed live smoke executed 2026-11-25 with non-preview Coolify service keys (never printed): peer key ids and secrets matched; both signed health probes returned `200` (`{"status":"ok","service":"aios","peer":"arvo"}` and `{"status":"ok","service":"arvo","peer":"aios"}`); TLS `verify=False`.
 
 Browser smoke auth context: `/dashboard/sso/arvo` needs `aios_token`;
 `/arvo/control-center` needs `arvo_token` (set by the SSO cookie above).
