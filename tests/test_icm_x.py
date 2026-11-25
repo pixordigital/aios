@@ -239,6 +239,28 @@ def test_company_research_output_accepts_legacy_opaque_payloads():
         assert validate_schema("company_research_output.v1", payload) is None
 
 
+def test_legacy_stage_boundaries_accept_absent_and_opaque_payloads():
+    from aios.icm.schemas import validate_schema
+
+    legacy_payloads = (None, "", "legacy plain text")
+    for schema_id in (
+        "lead_research_input.v1",
+        "company_research_output.v1",
+        "lead_qualification_output.v1",
+        "pet.enquiry.v1",
+        "pet.qualified_lead.v1",
+        "pet.lead_context.v1",
+        "pet.follow_up_result.v1",
+        "tool_call.v1",
+        "agent_run.v1",
+        "memory_candidate.v1",
+        "handoff.v1",
+        "trace.v1",
+    ):
+        for payload in legacy_payloads:
+            assert validate_schema(schema_id, payload) is None
+
+
 def test_adapter_known_schema_validation_fail_closed(tmp_path: Path):
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter
