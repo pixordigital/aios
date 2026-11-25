@@ -270,3 +270,45 @@ class AgentScheduler:
 
 # Global scheduler
 scheduler = AgentScheduler()
+
+
+async def wakeup_agent(agent_id, org_id, instruction, *, event_id=None, priority="normal"):
+    """Wake an agent (AIOS business OS): enqueue a proactive event job.
+
+    Budget-first: refuses to enqueue while the org is over its monthly limit.
+    """
+    import uuid as _uuid
+
+    from aios.tasks.queue import enqueue_job
+
+    try:
+        from aios.core.limits import get_monthly_usage
+        from aios.db.backend import db_session
+
+        async with db_session() as db:
+            usage = await get_monthly_usage(org_id, db)
+        if isinstance(usage, dict):
+            exceeded = bool(
+                usage.get("over_limit") or usage.get("over_budget")
+            )
+            if exceeded:
+                logger.info("wakeup_agent: org over budget org=%s agent=%s", org_id, agent_id)
+                return {"ok": False, "skipped": "over_budget", "agent_id": agent_id}
+    except Exception:
+        logger.debug("wakeup_agent: budget check failed (enqueue anyway)", exc_info=True)
+
+    eid = event_id or f"wakeup-{_uuid.uuid4().hex[:12]}"
+    await enqueue_job(
+        "aios.tasks.jobs.proactive_event_job",
+        {
+            "event": {
+                "event_type": "agent.wakeup",
+                "event_id": eid,
+                "payload": {"instruction": instruction},
+            },
+            "agent_id": agent_id,
+            "org_id": org_id,
+        },
+        priority=priority,
+    )
+    return {"ok": True, "agent_id": agent_id, "event_id": eid}
