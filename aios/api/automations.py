@@ -348,6 +348,13 @@ async def webhook_dispatch(path: str, request: Request):
             )
             raise
 
+        # Business OS: proactive event — subscribed autonomous agents act.
+        try:
+            from aios.core.events import publish as _publish
+            await _publish("automations.webhook", trig.org_id, {"webhook_path": path, "payload": payload})
+        except Exception:
+            pass
+
         try:
             from aios.tasks.queue import enqueue_job
             await enqueue_job("aios.tasks.jobs.workflow_run_job", {"workflow_id": wf.id, "run_id": run.id})
