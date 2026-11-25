@@ -125,6 +125,40 @@ async def test_dashboard_knowledge_page_shows_governed_record_and_promote(
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_dashboard_knowledge_pagination_uses_visible_total(
+    async_client, test_session, test_org, test_user
+):
+    for index in range(3):
+        test_session.add(KnowledgeRecord(
+            org_id=test_org.id, title=f"Visible {index}", content="alpha", kind="statement",
+            classification="internal", source_type="meeting", source_id=f"m{index}",
+            provenance={"src": f"m{index}"}, search_text="alpha",
+        ))
+    test_session.add(KnowledgeRecord(
+        org_id=test_org.id, title="Hidden restricted", content="secret", kind="statement",
+        classification="restricted", source_type="meeting", source_id="hidden",
+        provenance={"src": "hidden"}, search_text="secret",
+    ))
+    await test_session.commit()
+    async_client.cookies.set("aios_token", _cookie_for(test_user))
+
+    page1 = await async_client.get("/dashboard/knowledge?limit=2&offset=0")
+    assert page1.status_code == 200
+    assert "Registros (3)" in page1.text
+    assert sum(f"Visible {i}" in page1.text for i in range(3)) == 2
+    assert "Hidden restricted" not in page1.text
+    assert "/dashboard/knowledge?offset=2&limit=2" in page1.text
+
+    page2 = await async_client.get("/dashboard/knowledge?limit=2&offset=2")
+    assert page2.status_code == 200
+    assert "Registros (3)" in page2.text
+    assert sum(f"Visible {i}" in page2.text for i in range(3)) == 1
+    assert "Hidden restricted" not in page2.text
+    assert "/dashboard/knowledge?offset=0&limit=2" in page2.text
+    assert ">Próxima</a>" not in page2.text
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_dashboard_promote_requires_authenticated_founder(
     async_client, test_session, test_org, test_user
 ):

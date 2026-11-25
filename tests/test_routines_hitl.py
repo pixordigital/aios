@@ -391,7 +391,8 @@ async def test_approval_dispatch_enqueues_whitelisted_job(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_approval_dispatch_rejects_unknown_job(monkeypatch):
+@pytest.mark.parametrize("bad_job", ["evil_job", "evil.workday_job"])
+async def test_approval_dispatch_rejects_unknown_job(monkeypatch, bad_job):
     from aios.api import approvals as approvals_api
     from aios.core.approval import ApprovalManager
 
@@ -401,7 +402,7 @@ async def test_approval_dispatch_rejects_unknown_job(monkeypatch):
     # create row directly with bad dispatch marker
     row = SimpleNamespace(
         id="ap1", org_id="o1", tool_name=ROUTINE_SIDE_EFFECT_APPROVAL_TOOL, status="pending", decided_by=None,
-        tool_args={"_routine_approved_action": {"org_id": "o1", "routine_id": "r1", "action": "a", "idempotency_key": "k", "dispatch_job": "evil_job", "dispatch_payload": {}}}
+        tool_args={"_routine_approved_action": {"org_id": "o1", "routine_id": "r1", "action": "a", "idempotency_key": "k", "dispatch_job": bad_job, "dispatch_payload": {}}}
     )
     db.add(row)
 

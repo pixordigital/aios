@@ -40,7 +40,10 @@
 </div>
 
 <div class="card">
-  <h2>Registros ({{ records|length }})</h2>
+  {% set total = knowledge_total|default(records|length)|int %}
+  {% set page_offset = knowledge_offset|default(0)|int %}
+  {% set page_limit = knowledge_limit|default(50)|int %}
+  <h2>Registros ({{ total }})</h2>
   <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.5rem">
     {% for item in records %}
     {% set r = item.record %}
@@ -73,6 +76,17 @@
     <div class="text-sm text-tertiary">Nenhum registro visível para seu escopo.</div>
     {% endfor %}
   </div>
+  {% if page_offset > 0 or page_offset + page_limit < total %}
+  <div style="display:flex;gap:0.5rem;justify-content:flex-end;margin-top:0.75rem">
+    {% if page_offset > 0 %}
+    {% set prev_offset = page_offset - page_limit if page_offset > page_limit else 0 %}
+    <a class="btn btn-ghost btn-sm" href="/dashboard/knowledge?offset={{ prev_offset }}&limit={{ page_limit }}">Anterior</a>
+    {% endif %}
+    {% if page_offset + page_limit < total %}
+    <a class="btn btn-ghost btn-sm" href="/dashboard/knowledge?offset={{ page_offset + page_limit }}&limit={{ page_limit }}">Próxima</a>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 
 <script>
@@ -117,6 +131,8 @@ window.aiosI18n.register({
   'fato': 'hecho',
   'Provenance / escopo': 'Provenance / ámbito',
   'Nenhum registro visível para seu escopo.': 'Ningún registro visible para su ámbito.',
+  'Anterior': 'Anterior',
+  'Próxima': 'Siguiente',
   'Sem resultados': 'Sin resultados',
   '(sem título)': '(sin título)'
 });

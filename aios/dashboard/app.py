@@ -4942,11 +4942,22 @@ async def _dashboard_knowledge_actor(db, user):
 @router.get("/knowledge", response_class=HTMLResponse)
 async def knowledge_page(request: Request):
     from aios.api.deps import get_dashboard_user
+    from aios.api.knowledge import KNOWLEDGE_RECORD_SCAN_LIMIT
     from aios.governance.knowledge import KnowledgeGrant, KnowledgeRecord, can_retrieve, knowledge_citation
 
     user = await get_dashboard_user(request)
     if not user:
         return RedirectResponse("/dashboard/login", status_code=303)
+    try:
+        offset = int(request.query_params.get("offset", 0))
+    except (TypeError, ValueError):
+        offset = 0
+    try:
+        limit = int(request.query_params.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    offset = max(offset, 0)
+    limit = min(max(limit, 1), 100)
     org_id = user.org_id
     async with db_session() as db:
         actor = await _dashboard_knowledge_actor(db, user)
@@ -4954,11 +4965,11 @@ async def knowledge_page(request: Request):
             await db.execute(
                 select(KnowledgeRecord)
                 .where(KnowledgeRecord.org_id == org_id)
-                .order_by(KnowledgeRecord.created_at.desc())
-                .limit(200)
+                .order_by(KnowledgeRecord.created_at.desc(), KnowledgeRecord.id.desc())
+                .limit(KNOWLEDGE_RECORD_SCAN_LIMIT)
             )
         ).scalars().all()
-        visible = []
+        visible_rows = []
         for r in rows:
             allowed, reason = can_retrieve(
                 r,
@@ -4967,8 +4978,11 @@ async def knowledge_page(request: Request):
                 is_founder=actor["is_founder"],
                 granted_record_ids=actor["granted_record_ids"],
             )
-            if not allowed:
-                continue
+            if allowed:
+                visible_rows.append((r, reason))
+        knowledge_total = len(visible_rows)
+        visible = []
+        for r, reason in visible_rows[offset : offset + limit]:
             grants = (
                 await db.execute(
                     select(KnowledgeGrant).where(
@@ -4991,6 +5005,9 @@ async def knowledge_page(request: Request):
         request,
         title="Base Conhecimento Governada",
         records=visible,
+        knowledge_total=knowledge_total,
+        knowledge_offset=offset,
+        knowledge_limit=limit,
         is_founder=actor["is_founder"],
     )
 

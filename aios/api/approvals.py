@@ -145,7 +145,7 @@ async def _dispatch_routine_side_effect_approval(
                         user_id=decided_by, resource_id=action_id,
                         details={"reason": "no_dispatch_job"})
         return {"dispatched": False, "reason": "no_dispatch_job"}
-    if dispatch_job not in {j.rsplit(".", 1)[-1] for j in ROUTINE_SIDE_EFFECT_DISPATCH_WHITELIST}:
+    if dispatch_job not in ROUTINE_SIDE_EFFECT_DISPATCH_WHITELIST:
         await log_audit(db, row.org_id, "routine_side_effect.dispatch.denied", "pending_action",
                         user_id=decided_by, resource_id=action_id,
                         details={"reason": "job_not_whitelisted", "dispatch_job": dispatch_job})
