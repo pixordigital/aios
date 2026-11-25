@@ -1920,7 +1920,7 @@ def _slack_workspace_channels(connections) -> list[dict]:
                 "archived": bool(c.get("is_archived")),
                 "members": c.get("num_members", 0),
             }
-            for c in data.get("channels", [])
+            for c in sorted(data.get("channels", []), key=lambda c: c["name"])
         ]
     except Exception as exc:
         logger.warning("Slack channel inventory unavailable: %s", exc)
@@ -1931,7 +1931,7 @@ def _slack_workspace_channels(connections) -> list[dict]:
 async def channel_list(request: Request, msg: str = ""):
     org_id = await _org_filter(request)
     async with db_session() as db:
-        channels = (await db.execute(select(ChannelConnection).where(ChannelConnection.org_id == org_id).order_by(ChannelConnection.created_at.desc()))).scalars().all()
+        channels = (await db.execute(select(ChannelConnection).where(ChannelConnection.org_id == org_id).order_by(ChannelConnection.label.asc(), ChannelConnection.created_at.asc()))).scalars().all()
     return await _render("channels.html", request, title="Canais", channels=channels, msg=msg,
                          slack_channels=_slack_workspace_channels(channels))
 
