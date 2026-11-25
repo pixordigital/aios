@@ -272,14 +272,35 @@ class AgentScheduler:
 scheduler = AgentScheduler()
 
 
-async def wakeup_agent(agent_id, org_id, instruction, *, event_id=None, priority="normal"):
+_DEFAULT_COALESCE_WINDOW_S = 30.0
+_pending_wakeups: dict = {}
+
+
+async def wakeup_agent(agent_id, org_id, instruction, *, event_id=None, priority="normal",
+                       coalesce_key=None, window_seconds=_DEFAULT_COALESCE_WINDOW_S):
     """Wake an agent (AIOS business OS): enqueue a proactive event job.
 
     Budget-first: refuses to enqueue while the org is over its monthly limit.
+    Coalesce: within `window_seconds`, repeated calls with the same
+    `coalesce_key` update the instruction and return without enqueueing —
+    one LLM run per window instead of per event.
     """
+    import time as _time
     import uuid as _uuid
 
     from aios.tasks.queue import enqueue_job
+
+    now = _time.monotonic()
+    if coalesce_key:
+        ent = _pending_wakeups.get(coalesce_key)
+        if ent and ent[0] > now:
+            d, ent_org, count, latest = ent
+            merged = f"{latest}\n---\n{instruction}" if latest else instruction
+            _pending_wakeups[coalesce_key] = (d, org_id or ent_org, count + 1, merged)
+            return {"ok": True, "coalesced": True, "count": count + 1, "agent_id": agent_id}
+        if ent:
+            # Expired: flush before new window starts.
+            _pending_wakeups.pop(coalesce_key, None)
 
     try:
         from aios.core.limits import get_monthly_usage
@@ -297,6 +318,17 @@ async def wakeup_agent(agent_id, org_id, instruction, *, event_id=None, priority
     except Exception:
         logger.debug("wakeup_agent: budget check failed (enqueue anyway)", exc_info=True)
 
+    count = 0
+    if coalesce_key:
+        # Consume the pending entry so no double-fire on flush.
+        ent = _pending_wakeups.pop(coalesce_key, None)
+        if ent and ent[0] > now:
+            _, org_id, count, latest = ent
+            if latest:
+                instruction = latest
+            if count > 1:
+                instruction = f"[{count} wakeups coalesced within {window_seconds:g}s]\n{instruction}"
+
     eid = event_id or f"wakeup-{_uuid.uuid4().hex[:12]}"
     await enqueue_job(
         "aios.tasks.jobs.proactive_event_job",
@@ -311,4 +343,8 @@ async def wakeup_agent(agent_id, org_id, instruction, *, event_id=None, priority
         },
         priority=priority,
     )
-    return {"ok": True, "agent_id": agent_id, "event_id": eid}
+    if coalesce_key:
+        # Store the pending entry so subsequent calls within the window coalesce.
+        _pending_wakeups[coalesce_key] = (now + window_seconds, org_id, count or 1, instruction)
+    return {"ok": True, "coalesced": bool(coalesce_key and count > 1),
+            "agent_id": agent_id, "event_id": eid, "count": count or 0}
