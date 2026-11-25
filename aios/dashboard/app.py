@@ -789,24 +789,42 @@ async def approvals_page(request: Request, status: str = "pending"):
     )
 
 
-@router.post("/approvals/{action_id}/approve", response_class=HTMLResponse)
-async def approvals_approve(request: Request, action_id: str):
+async def _dashboard_decision(request: Request, action_id: str, *, approve: bool, source: str) -> RedirectResponse:
+    """Dashboard HITL decision — same authority gate as /api/approvals.
+
+    Reuses the API approval authority loader instead of calling the manager
+    raw, so member-role and self-approval denials cannot be bypassed via the
+    dashboard HTML path.
+    """
+    from aios.api.approvals import _load_approval_or_404
     from aios.core.approval import approval_manager
 
     user_id = getattr(request.state, "user_id", "") or ""
     org_id = await _org_filter(request)
-    await approval_manager.approve(action_id, decided_by=user_id, org_id=org_id)
+    async with db_session() as db:
+        user = await db.get(User, user_id) if user_id else None
+        if not user:
+            return RedirectResponse("/dashboard/approvals", status_code=303)
+        try:
+            await _load_approval_or_404(db, action_id=action_id, org_id=org_id, user=user, source=source)
+        except HTTPException:
+            # Fail closed: authority/self-approval denied — no decision written.
+            return RedirectResponse("/dashboard/approvals", status_code=303)
+        if approve:
+            await approval_manager.approve(action_id, decided_by=user.id, org_id=org_id)
+        else:
+            await approval_manager.reject(action_id, decided_by=user.id, org_id=org_id)
     return RedirectResponse("/dashboard/approvals", status_code=303)
+
+
+@router.post("/approvals/{action_id}/approve", response_class=HTMLResponse)
+async def approvals_approve(request: Request, action_id: str):
+    return await _dashboard_decision(request, action_id, approve=True, source="dashboard.approvals.approve")
 
 
 @router.post("/approvals/{action_id}/reject", response_class=HTMLResponse)
 async def approvals_reject(request: Request, action_id: str):
-    from aios.core.approval import approval_manager
-
-    user_id = getattr(request.state, "user_id", "") or ""
-    org_id = await _org_filter(request)
-    await approval_manager.reject(action_id, decided_by=user_id, org_id=org_id)
-    return RedirectResponse("/dashboard/approvals", status_code=303)
+    return await _dashboard_decision(request, action_id, approve=False, source="dashboard.approvals.reject")
 
 
 @router.get("/security/preapprovals", response_class=HTMLResponse)

@@ -305,6 +305,107 @@ async def test_approve_cannot_cross_tenant(auth_client, test_session, test_user)
     assert row.decided_by is None
 
 
+# ─── dashboard approval authority ───
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_dashboard_member_cannot_approve(auth_client, test_session, test_org, test_user):
+    from aios.api.auth import _hash_password
+
+    member = User(
+        email="member-approver@example.com",
+        hashed_password=_hash_password("testpass123"),
+        org_id=test_org.id,
+        role="member",
+    )
+    test_session.add(member)
+    await test_session.commit()
+
+    action = PendingAction(
+        org_id=test_org.id,
+        agent_id="agent-paid-1",
+        conversation_id="conv-1",
+        tool_name="notify_human",
+        tool_args={"reason": "clinically sensitive"},
+    )
+    test_session.add(action)
+    await test_session.commit()
+    action_id = action.id
+
+    async with _cookie(auth_client, member):
+        resp = await auth_client.post(
+            f"/dashboard/approvals/{action_id}/approve",
+            headers={"referer": "http://test/dashboard/approvals"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+    async with async_session() as sess:
+        row = await sess.get(PendingAction, action_id)
+    assert row.status == "pending"
+    assert row.decided_by is None
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_dashboard_self_approval_blocked(auth_client, test_session, test_org, test_user):
+    action = PendingAction(
+        org_id=test_org.id,
+        agent_id="agent-paid-1",
+        conversation_id="conv-1",
+        tool_name="notify_human",
+        tool_args={"requested_by": test_user.id},
+        status="pending",
+    )
+    test_session.add(action)
+    await test_session.commit()
+    action_id = action.id
+
+    async with _cookie(auth_client, test_user):
+        resp = await auth_client.post(
+            f"/dashboard/approvals/{action_id}/approve",
+            headers={"referer": "http://test/dashboard/approvals"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+    async with async_session() as sess:
+        row = await sess.get(PendingAction, action_id)
+    assert row.status == "pending"
+    assert row.decided_by is None
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_dashboard_founder_approve_still_allowed(auth_client, test_session, test_org, test_user):
+    test_user.role = "owner"
+    test_org.extra_data = {**(test_org.extra_data or {}), "founder_user_id": test_user.id}
+    await test_session.commit()
+
+    action = PendingAction(
+        org_id=test_org.id,
+        agent_id="agent-paid-1",
+        conversation_id="conv-1",
+        tool_name="notify_human",
+        tool_args={"reason": "clinically sensitive"},
+        status="pending",
+    )
+    test_session.add(action)
+    await test_session.commit()
+    action_id = action.id
+
+    async with _cookie(auth_client, test_user):
+        resp = await auth_client.post(
+            f"/dashboard/approvals/{action_id}/approve",
+            headers={"referer": "http://test/dashboard/approvals"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+
+    async with async_session() as sess:
+        row = await sess.get(PendingAction, action_id)
+    assert row.status == "approved"
+    assert row.decided_by == test_user.id
+
+
 # ─── contract viewer ───
 
 

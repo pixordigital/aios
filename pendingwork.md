@@ -626,3 +626,11 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - [x] Verification: Jinja parse OK, `py_compile` OK, `git diff --check` clean, grep clean except two historical meeting notes. Targeted suite `19 passed, 1 failed`; sole failure `test_workflow_reads_org_before_building_the_tool_engine` is pre-existing stale assertion (`ToolEngine([node.tool_name]` absent in `HEAD` `aios/core/workflow.py`), unrelated to this change.
 - [x] Committed/pushed `7b01c6c4c27bf945c33c6d00872209d426283274` (`9675f26..7b01c6c main -> main`); 5 files, `graphify-out/` and handoff file left uncommitted.
 - [x] Coolify AIOS deploy #815 `gwuf8jzhuz2zvbqsnrtv65sf` for `7b01c6c` finished `2026-11-24T23:55:49Z`; logs show app+worker image tag `38908ddf-a875-4105-a93f-a4570513911f_{app,worker}:7b01c6c4c27bf945c33c6d00872209d426283274`. Unsigned `/health/live` 200 `{"status":"live"}`; `/health/ready` 200 `{"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`. No signed probe; no browser render check of `/dashboard` after removal.
+### Dashboard approval workflow bypass fix — DONE locally, uncommitted (2026-11-25)
+
+- Subagent task: enforce dashboard approval path authority — member denial + self-approval denial; reuse API authority, no new policy layer.
+- Fix: `aios/dashboard/app.py` — new `_dashboard_decision()` helper routes POST `/dashboard/approvals/{id}/{approve|reject}` through API loader `_load_approval_or_404` (org access + `_require_decision_authority` + `_is_self_approval`); denials fail closed (redirect 303, no decision written); approve/reject via `approval_manager`.
+- Tests: `tests/test_paid_workflow_e2e.py` — added `test_dashboard_member_cannot_approve`, `test_dashboard_self_approval_blocked`, `test_dashboard_founder_approve_still_allowed`; file `14 passed, 28 warnings in 51.42s` (11 pre-existing + 3 new, all green).
+- Verified: `git diff --check` clean; `py_compile` OK on both changed files.
+- NOT done (by design): commit/push/deploy — agents must not commit/push/deploy; changes left uncommitted in working tree.
+- Judgment call for human decision: denial now returns redirect `303` (fail-closed, matches cross-tenant no-leak contract) instead of surfacing `403`; member-reject denial also enforced symmetrically with approve.
