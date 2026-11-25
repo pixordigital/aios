@@ -1,0 +1,20 @@
+template: kpi-template
+kpis:
+  sold_qty:
+    descricao: Quantidade de vendas (deals fechados won)
+    unidade: unidades
+  sold_value_brl:
+    descricao: Valor total vendido em BRL (deals fechados won)
+    unidade: BRL
+  new_clients:
+    descricao: Clientes novos fechados
+    unidade: unidades
+  happy_clients_pct:
+    descricao: Percentual de clientes que indicam satisfação (pesquisa/feedback)
+    unidade: pct
+  tickets_closed:
+    descricao: Tickets de suporte fechados no período
+    unidade: unidades
+  sale_time_day:
+    descricao: Tempo médio de venda de leads novos até closed won, em dias
+    unidade: dias
