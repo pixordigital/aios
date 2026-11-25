@@ -637,3 +637,14 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - Commit `d2774f3c5eb649947decf51f930ed9c9dda9e62d` (`bbebb6e..d2774f3 main -> main`); 3 files, `137 insertions(+)`, `10 deletions(-)`; graphify-out/ and handoff file excluded from commit.
 - Coolify AIOS deploy #826 `wprvo9cs78c5zvu5nr0huvbu` for `d2774f3` finished `2026-11-25T15:54:26Z`.
 - Post-deploy verification: `/health/live` 200 `{"status":"live"}`; `/health/ready` 200 all checks ok; homepage 200 size 97549 with 2 `aios_lang` hits and 2 `>ES<` hits; `/dashboard/login` 200 size 5329 with 1 `aios_lang` hit. No gate weakening, no fabricated approval.
+- Commit `553e3df` docs: record post-deploy verification receipt (`bbebb6e..553e3df main -> main`).
+- Commit `713cc63` docs: close dashboard approval bypass fix, record final receipt (`553e3df..713cc63 main -> main`).
+
+### ICM legacy truth regression — DONE test-only (2026-11-25)
+
+- Subagent task: add regression test locking legacy acceptance (`None`/empty/plain text) at stage boundaries; test-only, no schema/doc/runtime change.
+- Commit `2e38e91` test(governance): lock ICM legacy acceptance at stage boundaries (`713cc63..2e38e91 main -> main`).
+- Coolify AIOS deploy #827 `jxk9xe1ttpopy3emzrfjxmic` for `2e38e91` finished `2026-11-25T16:03:32Z`.
+- Post-deploy verification: `/health/live` 200 `{"status":"live"}`; `/health/ready` 200 all checks ok; homepage 200 size 97549 with 2 `aios_lang` hits and 2 `>ES<` hits; `/dashboard/login` 200 size 5329 with 1 `aios_lang` hit. No gate weakening, no fabricated approval.
+- Tests: `tests/test_icm_x.py` → `25 passed, 1 warning in 77.08s`; diff-check clean; py_compile OK. No runtime change.
+- Ambiguity for human decision: broadened legacy lock from `company_research_output.v1` only to all 12 registered stage schemas via same validator path; if adapter-boundary scope intended, follow-up cheap.
