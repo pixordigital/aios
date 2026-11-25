@@ -1,4 +1,5 @@
 """Business OS decision ledger + AgentDB-backed context wiring."""
+import os
 import pytest
 from types import SimpleNamespace
 
@@ -41,3 +42,16 @@ async def test_second_brain_includes_decisions(monkeypatch):
     monkeypatch.setattr(second_brain, "agent_db", fake)
     out = await second_brain.get_second_brain_injections("a1", "org-1", "q")
     assert any("Decisão" in m["content"] or "Decisão" in (m["content"] or "") for m in out)
+
+
+def test_scaffold_returns_six_dirs_and_files_exist(tmp_path):
+    out = business_os.scaffold_business_os(str(tmp_path))
+    assert len(out) == 6
+    for d in out:
+        assert os.path.isdir(d)
+    for f in ["MISSION.md", os.path.join("Context", "BUYER.md"),
+              os.path.join("Context", "PRICING_LIST.md"),
+              os.path.join("Context", "STRATEGY.md"),
+              os.path.join("Context", "prompts", "voice-answer-system.md"),
+              os.path.join("Inbox_Support", "prompts", "voice-answer-system.md")]:
+        assert (tmp_path / f).is_file()

@@ -6,10 +6,24 @@ only explicitly whitelisted (side-effectful, idempotent) decisions record
 unconditionally.
 """
 import logging
+import os
+import shutil
+from pathlib import Path
 
 from aios.core.agent_db import agent_db
 
 logger = logging.getLogger(__name__)
+
+TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "templates" / "business_os"
+
+# Six dirs the scaffold creates: the root plus these five.
+BUSINESS_OS_DIRS = [
+    "Context",
+    "Context/prompts",
+    "Inbox_Support",
+    "Inbox_Support/prompts",
+    "Team",
+]
 
 # Decisions that are safe to record automatically (mirror of automation dispatch gates).
 AUTO_RECORD_ALLOWLIST = {
@@ -47,3 +61,22 @@ async def load_decisions(org_id, agent_id="", limit=10):
     return [k for k in await agent_db.search_knowledge(
         org_id=org_id, agent_id=agent_id, knowledge_type="decision", limit=limit
     ) if k.value]
+
+
+def scaffold_business_os(path: str) -> list[str]:
+    """Create the business_os skeleton under path; copy template files in.
+
+    Returns the six dirs created: path + the five in BUSINESS_OS_DIRS.
+    """
+    out = [path]
+    for d in BUSINESS_OS_DIRS:
+        p = os.path.join(path, d)
+        os.makedirs(p, exist_ok=True)
+        out.append(p)
+    if TEMPLATE_DIR.is_dir():
+        for src in sorted(TEMPLATE_DIR.rglob("*")):
+            if src.is_file():
+                dst = os.path.join(path, src.relative_to(TEMPLATE_DIR))
+                os.makedirs(os.path.dirname(dst) or path, exist_ok=True)
+                shutil.copyfile(src, dst)
+    return out

@@ -33,3 +33,19 @@ def sdr_prompt(profile=None):
         "follow_ups": ["recusar com cortesia", "redirecionar para humano"],
         "risks": _duplicated_number_risks(profile),
     }
+
+
+def modern_prospecting_brief(profile=None):
+    """Modern daily prospecting brief: watchwords for the morning send.
+
+    Built from the SDR profile doc (aios.core.business_sdr
+    .profile_doc_from_extra_data) plus the sdr_prompt() subject.
+    """
+    p = profile or {}
+    watchwords = p.get("watchwords") or [
+        f"captar lead {p.get('lead_company') or ''}".rstrip(),
+        f"validar lead {p.get('lead_name') or ''}".rstrip(),
+    ]
+    lines = [f"# {sdr_prompt(p)['subject']}", "Watchwords:"]
+    lines += [f"- {w}" for w in watchwords]
+    return "\n".join(lines)
