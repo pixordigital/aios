@@ -27,6 +27,13 @@ async def get_second_brain_injections(agent_id, org_id, query, top_k=3):
     except Exception:
         logger.debug("second_brain: reflection retrieval failed", exc_info=True)
     try:
+        for k in await agent_db.search_knowledge(
+            org_id=org_id, agent_id=agent_id, knowledge_type="decision", limit=5
+        ):
+            lines.append(f"- Decisão registrada: {_trim(k.value)}")
+    except Exception:
+        logger.debug("second_brain: decision retrieval failed", exc_info=True)
+    try:
         for l in await agent_db.list_learnings(org_id=org_id, agent_id=agent_id, limit=5):
             if l.success:
                 t = _trim(l.outcome or l.action_taken)
