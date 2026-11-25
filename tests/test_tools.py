@@ -136,6 +136,81 @@ async def test_tools_test_endpoint_wires_actor_context(monkeypatch):
     assert captured["kwargs"]["granted_record_ids"] == {"kr1"}
 
 
+async def _run_gated_tool(monkeypatch, *, tool_name="rag_search", args=None, org_extra=None, org_id="org1"):
+    from aios.api import tools as tools_api
+    from aios.db.models import Tool
+
+    executed = []
+
+    class _FakeToolEngine:
+        def __init__(self, names, **kwargs):
+            pass
+
+        async def execute(self, name, args_json):
+            executed.append((name, args_json))
+            return '{"ok":true}'
+
+    class _Tool:
+        id = "t1"
+        org_id = "org1"
+        name = tool_name
+        code_reference = ""
+
+    org = _FakeOrg()
+    org.extra_data = org_extra or {}
+
+    class _DB(_FakeDB):
+        async def get(self, model, _id):
+            return _Tool() if model is Tool else org
+
+    monkeypatch.setattr(tools_api, "ToolEngine", _FakeToolEngine)
+    monkeypatch.setattr("aios.core.tools.ToolEngine", _FakeToolEngine)
+    out = await tools_api.test_tool(
+        "t1",
+        {"args": args or {"query": "pricing"}},
+        db=_DB(org=org),
+        org_id=org_id,
+        user=_FakeUser(),
+    )
+    return out, executed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name,args,org_extra,expected", [
+    ("crm_update_deal", {"amount": 6000}, {}, "amount=6000"),
+    ("crm_update_deal", {"discount": 15}, {}, "discount=15"),
+    ("crm_delete_deal", {}, {}, "destructive tool"),
+    ("crm_update_deal", {"stage": "closed_won"}, {}, "closing deal"),
+    ("send_email", {"to": ["a"] * 100}, {}, "bulk email"),
+    ("sql_query", {"query": "DELETE FROM deals"}, {}, "destructive sql_query"),
+    ("rag_search", {}, {"governance_config": {"hitl_tools": ["rag_search"]}}, "requires approval by agent policy"),
+])
+async def test_tools_test_endpoint_blocks_risky_tools(monkeypatch, tool_name, args, org_extra, expected):
+    out, executed = await _run_gated_tool(
+        monkeypatch, tool_name=tool_name, args=args, org_extra=org_extra
+    )
+    assert out["ok"] is False
+    assert out["requires_approval"] is True
+    assert expected in out["error"]
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_tools_test_endpoint_blocks_missing_org_context(monkeypatch):
+    out, executed = await _run_gated_tool(monkeypatch, org_id="")
+    assert out["ok"] is False
+    assert out["requires_approval"] is True
+    assert out["error"] == "HITL: org context missing"
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_tools_test_endpoint_allows_read_only_tool(monkeypatch):
+    out, executed = await _run_gated_tool(monkeypatch)
+    assert out["ok"] is True
+    assert executed == [("rag_search", '{"query": "pricing"}')]
+
+
 @pytest.mark.asyncio
 async def test_tool_actor_context_best_effort_from_user_and_org():
     from aios.api.tools import _tool_actor_context

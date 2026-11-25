@@ -380,10 +380,10 @@ class WorkflowEngine:
             for node in workflow.nodes.values():
                 manifest = getattr(node, "stage_manifest", None)
                 if isinstance(manifest, dict):
-                    required = bool(manifest.get("approval_required"))
+                    required = bool(manifest.get("approval_required") or manifest.get("side_effects"))
                     allowed = list(manifest.get("allowed_tools") or [])
                 else:
-                    required = bool(getattr(manifest, "approval_required", False))
+                    required = bool(getattr(manifest, "approval_required", False) or getattr(manifest, "side_effects", False))
                     allowed = list(getattr(manifest, "allowed_tools", None) or [])
                 approvals_required += int(required)
                 if node.tool_name and allowed and result.node_status.get(node.id) not in not_executed:

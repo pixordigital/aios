@@ -208,6 +208,12 @@ class AgentRuntime:
         self._max_tokens = gov.get("max_tokens_per_run", 500_000)
         self.MAX_ITERATIONS = gov.get("max_iterations", 10) or 10
         self.MAX_TOOL_CALLS = gov.get("max_tool_calls_per_run", 25) or 25
+        # HITL opt-in: per-agent tool list plus the same value/discount ceilings
+        # AutonomousAgent already uses. Empty list = only threshold hits block.
+        self._hitl_enabled = gov.get("hitl_enabled", True) is not False
+        self._hitl_value_threshold = float(gov.get("hitl_value_threshold", 5000) or 0)
+        self._hitl_discount_threshold = float(gov.get("hitl_discount_threshold", 10) or 0)
+        self._hitl_tools = set(gov.get("hitl_tools") or [])
 
         # ICM-X stage binding: opt-in via extra_data["icm"]. The manifest's
         # allowlist narrows the agent's tools and its timeout caps the run.
@@ -798,6 +804,7 @@ class AgentRuntime:
                         fn = tc.get("function", {})
                         fn_name = fn.get("name", "")
                         fn_args = fn.get("arguments", "{}")
+                        hitl_reason = self._hitl_tool_reason(fn_name, fn_args)
 
                         # governance check — deny tool if blocked
                         if fn_name in self._denied_tools:
@@ -806,8 +813,8 @@ class AgentRuntime:
                         elif self._allowed_tools != "__all__" and fn_name not in self._allowed_tools:
                             result = f"Tool '{fn_name}' is not in the allowed list."
                             logger.warning("Governance blocked tool '%s' (not in allow-list) for agent %s", fn_name, self.agent.id)
-                        elif self._autonomy in ("ask", "ask_tools", "ask_all"):
-                            # approval mode — block until human decides
+                        elif self._autonomy in ("ask", "ask_tools", "ask_all") or hitl_reason:
+                            # approval mode — block before the side effect runs
                             from aios.core.approval import approval_manager
                             action_id = str(uuid.uuid4())
                             hooks.fire(HookPoint.APPROVAL_REQUESTED, HookContext(
@@ -821,7 +828,7 @@ class AgentRuntime:
                                 conversation_id=conversation_id,
                                 tool_name=fn_name,
                                 tool_args=json.loads(fn_args) if isinstance(fn_args, str) else fn_args,
-                                context_summary=response_content[:200],
+                                context_summary=f"HITL: {hitl_reason}" if hitl_reason else response_content[:200],
                                 # Without this the row lands with org_id="" and
                                 # the approvals API filters it out for every
                                 # tenant, so nobody could ever approve it — the
@@ -1096,6 +1103,46 @@ class AgentRuntime:
                 shared["icm_preapproved"] = src
                 break
         return shared
+
+    def _hitl_tool_reason(self, fn_name: str, fn_args) -> str:
+        """Why this tool call needs a human, empty when it does not.
+
+        Pure policy on tool args, not on model prose: the prose check in
+        AutonomousAgent runs after the side effect and can only file a report.
+        """
+        if not self._hitl_enabled:
+            return ""
+        if fn_name in self._hitl_tools:
+            return f"tool '{fn_name}' requires approval by agent policy"
+        if fn_name in ("crm_delete_deal", "crm_merge_deals"):
+            return f"destructive tool '{fn_name}' requires approval"
+        if isinstance(fn_args, str):
+            try:
+                fn_args = json.loads(fn_args)
+            except (TypeError, ValueError):
+                return ""
+        args = fn_args if isinstance(fn_args, dict) else None
+        if not isinstance(args, dict):
+            return ""
+        if fn_name == "crm_update_deal" and str(args.get("stage", "")).lower() in ("closed_won", "closed_lost"):
+            return f"closing deal at {args['stage']} requires approval"
+        if fn_name == "send_email":
+            recipients = args.get("to", args.get("to_emails", []))
+            if isinstance(recipients, (list, tuple, set)) and len(recipients) >= 100:
+                return f"bulk email to {len(recipients)} recipients requires approval"
+        if fn_name in ("code", "python_sandbox", "sql_query"):
+            payload = str(args).upper()
+            if any(word in payload for word in ("DELETE ", "DROP ", "TRUNCATE ", "PG_")):
+                return f"destructive {fn_name} call requires approval"
+        for key in ("value", "amount", "valor"):
+            val = args.get(key)
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and val >= self._hitl_value_threshold:
+                return f"{key}={val} at or above HITL ceiling {self._hitl_value_threshold}"
+        for key in ("discount", "desconto"):
+            pct = args.get(key)
+            if isinstance(pct, (int, float)) and not isinstance(pct, bool) and pct >= self._hitl_discount_threshold:
+                return f"{key}={pct}% at or above HITL ceiling {self._hitl_discount_threshold}%"
+        return ""
 
     def _icm_enforce_tool(self, fn_name: str, conversation_id: str = "") -> None:
         stage = self.stage

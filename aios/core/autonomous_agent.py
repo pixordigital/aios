@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 MAX_TRIALS = 3
 HITL_VALUE_THRESHOLD = 5000  # R$5k
 HITL_CONFIDENCE_THRESHOLD = 0.4
+_HITL_RESUME_KEY = "autonomous_hitl_resumed"  # durable one-shot claim
 
 
 class Evaluator:
@@ -415,9 +416,9 @@ class AutonomousAgent:
             action_id = str(uuid.uuid4())
             # request_approval BLOCKS until a human decides (or the 300s timeout
             # expires). It was awaited here on the hot path of every HITL reply,
-            # so creating the approval parked the agent run for five minutes,
-            # and its return value — the actual verdict — was discarded. Return
-            # the id immediately and let the row be decided out of band.
+            # so creating the approval parked the agent run for five minutes.
+            # Return the id immediately; the detached waiter resumes once on
+            # approval, reject/timeout leave the run parked.
             import asyncio as _aio
 
             _aio.create_task(self._await_hitl_decision(
@@ -432,7 +433,11 @@ class AutonomousAgent:
         self, action_id: str, conversation_id: str,
         user_message: str, response: str, reason: str,
     ) -> None:
-        """Persist the HITL row and wait for the verdict. Never raises."""
+        """Wait for the verdict; resume once only on a real approval.
+
+        Side effects stay behind AgentRuntime's own pre-execution HITL gate.
+        This handler never replays tools or treats reject/timeout as consent.
+        """
         try:
             from aios.core.approval import approval_manager
 
@@ -452,6 +457,35 @@ class AutonomousAgent:
             logger.info("HITL %s decided: approved=%s", action_id, ok)
         except Exception:
             logger.exception("HITL %s could not be recorded", action_id)
+            return
+        if not ok:
+            return
+        if not self.agent.org_id:
+            logger.warning("HITL %s approved without org — no resume", action_id)
+            return
+        try:
+            from aios.db.backend import db_session
+            from aios.db.models import Conversation
+
+            async with db_session() as db:
+                conv = await db.get(Conversation, conversation_id, with_for_update=True)
+                if conv is None or conv.org_id != self.agent.org_id:
+                    logger.warning("HITL %s org/conversation mismatch — no resume", action_id)
+                    return
+                extra = dict(conv.extra_data or {})
+                prior = extra.get(_HITL_RESUME_KEY)
+                claimed = list(prior) if isinstance(prior, list) else []
+                if action_id in claimed:
+                    return
+                extra[_HITL_RESUME_KEY] = [*claimed[-9:], action_id]
+                conv.extra_data = extra
+                await db.commit()
+                # One bounded runtime pass. No autonomous loop, no tool replay
+                # here: AgentRuntime gates side effects before executing them.
+                await self.runtime.run(conversation_id, user_message, db)
+                logger.info("HITL %s resumed once", action_id)
+        except Exception:
+            logger.exception("HITL %s could not resume", action_id)
 
     async def _extract_skill(self, user_message: str, trajectory: List[dict], reflections: List[str], db):
         """Extrai skill de trajetória de sucesso (ELL)."""

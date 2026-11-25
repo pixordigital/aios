@@ -158,6 +158,30 @@ async def _tool_actor_context(db: DatabaseBackend, user) -> dict:
     }
 
 
+async def _direct_tool_hitl_reason(db: DatabaseBackend, user, org_id: str, tool_name: str, args) -> str:
+    """Agent HITL policy for direct tool calls; no org context blocks execution."""
+    if not org_id or str(getattr(user, "org_id", "") or "") != str(org_id):
+        return "org context missing"
+    try:
+        org = await db.get(Organization, org_id)
+        extra = org.extra_data if isinstance(getattr(org, "extra_data", None), dict) else {}
+        gov = extra.get("governance_config")
+        cfg = {**extra, **(gov if isinstance(gov, dict) else {})}
+        from types import SimpleNamespace
+        from aios.core.agent import AgentRuntime
+
+        # Direct calls have no agent opt-out; baseline thresholds always apply.
+        policy = SimpleNamespace(
+            _hitl_enabled=True,
+            _hitl_tools=set(cfg.get("hitl_tools") or []),
+            _hitl_value_threshold=float(cfg.get("hitl_value_threshold", 5000) or 0),
+            _hitl_discount_threshold=float(cfg.get("hitl_discount_threshold", 10) or 0),
+        )
+        return AgentRuntime._hitl_tool_reason(policy, tool_name, args)
+    except Exception:
+        return "org policy unavailable"
+
+
 def registry_entries() -> list[dict]:
     """Code registry as builder metadata: name, description, input schema.
 
@@ -204,8 +228,11 @@ async def test_tool(
     user=Depends(get_current_user),
 ):
     tool = await db.get(Tool, tool_id)
-    await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.test_tool")
     args = body.get("args") or body.get("arguments") or {}
+    reason = await _direct_tool_hitl_reason(db, user, org_id, tool.name if tool else "", args)
+    if reason:
+        return {"ok": False, "error": f"HITL: {reason}", "requires_approval": True}
+    await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.test_tool")
     import json
     from aios.core.tools import ToolEngine
     if tool.code_reference and tool.code_reference.startswith("code:"):

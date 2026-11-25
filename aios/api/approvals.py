@@ -3,11 +3,39 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from aios.api.deps import get_current_user, verify_org_access_async
+from aios.api.security import _require_founder
 from aios.core.approval import approval_manager
 from aios.db.backend import DatabaseBackend, get_db_backend
-from aios.db.models import PendingAction as DBAction, User
+from aios.db.models import Organization, PendingAction as DBAction, User
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
+
+_APPROVER_ROLES = {"admin", "org_admin", "superadmin"}
+_REQUESTER_KEYS = ("requested_by", "created_by", "actor_user_id", "human_id")
+
+
+async def _require_decision_authority(
+    db: DatabaseBackend, user: User, org_id: str, *, source: str
+) -> None:
+    # Founder authority needs the org row; missing/unreadable org must deny.
+    try:
+        org = await db.get(Organization, org_id)
+    except Exception:
+        org = None
+    if org is None or str(getattr(org, "id", "")) != str(org_id):
+        raise HTTPException(403, "approval authority cannot be established")
+    role = str(getattr(user, "role", "") or "").strip().lower()
+    if role in _APPROVER_ROLES:
+        return
+    await _require_founder(user, org, db=db, org_id=org_id, source=source)
+
+
+def _is_self_approval(row: DBAction, user_id: str) -> bool:
+    args = row.tool_args if isinstance(row.tool_args, dict) else {}
+    requester = getattr(row, "requested_by", None) or getattr(row, "created_by", None)
+    if not requester:
+        requester = next((args[k] for k in _REQUESTER_KEYS if args.get(k)), None)
+    return bool(requester) and str(requester) == str(user_id)
 
 
 @router.get("")
@@ -56,7 +84,7 @@ async def list_approvals(
 
 
 async def _load_approval_or_404(
-    db: DatabaseBackend, *, action_id: str, org_id: str, actor_id: str | None, source: str
+    db: DatabaseBackend, *, action_id: str, org_id: str, user: User, source: str
 ) -> DBAction:
     from sqlalchemy import select
 
@@ -65,10 +93,13 @@ async def _load_approval_or_404(
         org_id,
         row,
         db=db,
-        actor_id=actor_id,
+        actor_id=user.id,
         source=source,
         payload={"action_id": str(action_id), "resource_type": "PendingAction"},
     )
+    await _require_decision_authority(db, user, org_id, source=source)
+    if _is_self_approval(row, user.id):
+        raise HTTPException(403, "cannot decide own approval request")
     return row
 
 
@@ -80,7 +111,7 @@ async def approve_action(
 ):
     """Approve a pending tool call."""
     await _load_approval_or_404(
-        db, action_id=action_id, org_id=user.org_id, actor_id=user.id, source="api.approvals.approve"
+        db, action_id=action_id, org_id=user.org_id, user=user, source="api.approvals.approve"
     )
     ok = await approval_manager.approve(action_id, decided_by=user.id, org_id=user.org_id)
     if not ok:
@@ -96,7 +127,7 @@ async def reject_action(
 ):
     """Reject a pending tool call."""
     await _load_approval_or_404(
-        db, action_id=action_id, org_id=user.org_id, actor_id=user.id, source="api.approvals.reject"
+        db, action_id=action_id, org_id=user.org_id, user=user, source="api.approvals.reject"
     )
     ok = await approval_manager.reject(action_id, decided_by=user.id, org_id=user.org_id)
     if not ok:

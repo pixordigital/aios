@@ -7,11 +7,16 @@ ponytail: in-memory event dict. Swap for Redis pub/sub when multi-process.
 """
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+# Directly-persisted HITL rows (crm.py / team_collaboration.py) name a real
+# registry tool. Alert-only Deal Desk rows are deliberately absent.
+_REPLAY_TOOLS = frozenset({"crm_update_deal", "request_build"})
 
 
 @dataclass
@@ -193,7 +198,11 @@ class ApprovalManager:
         404 "already decided" while the write was still in flight — and if the
         process was busy, the write never happened at all.
         """
-        return await self._decide(action_id, "approved", decided_by, org_id)
+        had_waiter = action_id in self._pending
+        ok = await self._decide(action_id, "approved", decided_by, org_id)
+        if ok and not had_waiter and action_id not in self._pending:
+            await self._replay_orphan(action_id, decided_by, org_id)
+        return ok
 
     async def reject(self, action_id: str, decided_by: str = "", org_id: str = "") -> bool:
         return await self._decide(action_id, "rejected", decided_by, org_id)
@@ -228,33 +237,76 @@ class ApprovalManager:
         return True
 
     @staticmethod
+    async def _replay_orphan(action_id: str, decided_by: str, org_id: str) -> None:
+        """Execute an orphaned approval once, using the approver's context."""
+        if not decided_by or not org_id:
+            return
+        try:
+            import aios.tools  # noqa: F401 — populates TOOL_REGISTRY
+            from sqlalchemy import select as _sel
+
+            from aios.core.tools import ToolEngine
+            from aios.db.engine import async_session as _sess
+            from aios.db.models import PendingAction as DBAction
+            from aios.tools.registry import TOOL_REGISTRY
+
+            async with _sess() as sess:
+                row = (await sess.execute(
+                    _sel(DBAction).where(
+                        DBAction.id == action_id,
+                        DBAction.org_id == org_id,
+                        DBAction.status == "approved",
+                        DBAction.decided_by == decided_by,
+                    )
+                )).scalar_one_or_none()
+                if not row or row.tool_name not in _REPLAY_TOOLS:
+                    return
+                if row.tool_name not in TOOL_REGISTRY:
+                    return
+                args = row.tool_args
+                if not isinstance(args, dict):
+                    return
+                tool_name = row.tool_name
+                agent_id = row.agent_id or ""
+
+            engine = ToolEngine(
+                [tool_name], org_id=org_id, agent_id=agent_id,
+                actor_user_id=decided_by,
+            )
+            await engine.execute(tool_name, json.dumps(args))
+            logger.info("Replayed approved action %s via %s", action_id, tool_name)
+        except Exception:
+            logger.exception("approval replay failed for %s", action_id)
+
+    @staticmethod
     async def _write_db_status(
         action_id: str, status: str, decided_by: str, org_id: str
     ) -> bool:
         from datetime import datetime, timezone
 
-        from sqlalchemy import select as _sel
+        from sqlalchemy import update as _upd
 
         from aios.db.engine import async_session as _sess
         from aios.db.models import PendingAction as DBAction
 
         try:
             async with _sess() as sess:
-                # Scope by org: an unscoped get() here is what made approve() a
-                # cross-tenant write.
+                # Conditional UPDATE is the compare-and-set: concurrent
+                # approvers cannot both flip the same pending row.
+                stmt = (
+                    _upd(DBAction)
+                    .where(DBAction.id == action_id, DBAction.status == "pending")
+                    .values(
+                        status=status,
+                        decided_by=decided_by,
+                        decided_at=datetime.now(timezone.utc),
+                    )
+                )
                 if org_id:
-                    db_pa = (await sess.execute(
-                        _sel(DBAction).where(
-                            DBAction.id == action_id, DBAction.org_id == org_id
-                        )
-                    )).scalar_one_or_none()
-                else:
-                    db_pa = await sess.get(DBAction, action_id)
-                if not db_pa or db_pa.status != "pending":
+                    stmt = stmt.where(DBAction.org_id == org_id)
+                result = await sess.execute(stmt)
+                if result.rowcount != 1:
                     return False
-                db_pa.status = status
-                db_pa.decided_by = decided_by
-                db_pa.decided_at = datetime.now(timezone.utc)
                 await sess.commit()
                 return True
         except Exception:

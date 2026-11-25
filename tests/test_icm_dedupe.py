@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from aios.db.engine import Base
-from aios.db.models import Organization
+from aios.db.models import Organization, PendingAction
 from aios.icm.adapter import ICMStageAdapter, SideEffectDuplicateError
 from aios.icm.contracts import StageManifest, manifest_fingerprint
 from aios.icm.dedupe_model import ICMSideEffect
@@ -37,7 +37,7 @@ def _adapter(session=None, *, org_id="org-1", run_id="run-1"):
         run_id=run_id,
         preapproved={
             "approved": True,
-            "approval_id": "appr-1",
+            "approval_id": "appr-1" if org_id == "org-1" else "appr-2",
             "approved_fingerprint": manifest_fingerprint(manifest),
             "actions": ["send_email"],
         },
@@ -49,11 +49,28 @@ def _adapter(session=None, *, org_id="org-1", run_id="run-1"):
 def db(tmp_path):
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'dedupe.db'}")
     Base.metadata.create_all(
-        engine, tables=[Organization.__table__, ICMSideEffect.__table__]
+        engine,
+        tables=[
+            Organization.__table__,
+            PendingAction.__table__,
+            ICMSideEffect.__table__,
+        ],
     )
     with Session(engine) as session:
         session.add(Organization(id="org-1", name="Org 1", slug="org-1"))
         session.add(Organization(id="org-2", name="Org 2", slug="org-2"))
+        for idx, org in enumerate(("org-1", "org-2"), 1):
+            session.add(
+                PendingAction(
+                    id=f"appr-{idx}",
+                    org_id=org,
+                    agent_id="a1",
+                    conversation_id="c1",
+                    tool_name="send_email",
+                    status="approved",
+                    decided_by="user-1",
+                )
+            )
         session.commit()
         yield session
     engine.dispose()
@@ -141,6 +158,10 @@ def test_unique_race_resolves_by_run_id():
             self.rolled_back = False
 
         def execute(self, *args, **kwargs):
+            if "pending_actions" in str(args[0] if args else ""):
+                return SimpleNamespace(
+                    scalar_one_or_none=lambda: SimpleNamespace(decided_by="user-1")
+                )
             row = None
             if self.rolled_back:
                 row = SimpleNamespace(run_id=self.winner_run)
@@ -170,6 +191,10 @@ def test_unique_race_resolves_by_run_id():
 def test_store_error_fails_closed():
     class BrokenSession:
         def execute(self, *args, **kwargs):
+            if "pending_actions" in str(args[0] if args else ""):
+                return SimpleNamespace(
+                    scalar_one_or_none=lambda: SimpleNamespace(decided_by="user-1")
+                )
             raise SQLAlchemyError("down")
 
         def rollback(self):

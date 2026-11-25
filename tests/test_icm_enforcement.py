@@ -23,6 +23,31 @@ def _manifest(**overrides):
     return StageManifest.model_validate(data)
 
 
+def _approved_session(tmp_path, *, approval_id="appr-42", org_id="o", status="approved", decided_by="founder-1"):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from aios.db.models import PendingAction
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'approvals.db'}")
+    PendingAction.__table__.create(engine)
+    session = Session(engine)
+    session.add(
+        PendingAction(
+            id=approval_id,
+            org_id=org_id,
+            agent_id="agent-1",
+            conversation_id="conv-1",
+            tool_name="company_lookup",
+            tool_args={},
+            status=status,
+            decided_by=decided_by,
+        )
+    )
+    session.commit()
+    return session
+
+
 def test_budget_blocks_before_exceeding_calls():
     budget = StageBudget.from_manifest(_manifest())
     budget.charge(0.005)
@@ -107,13 +132,14 @@ def test_adapter_approval_required_fails_closed():
         adapter.enforce_execution({}, action="company_lookup")
 
 
-def test_adapter_injects_explicit_preapproved_marker():
+def test_adapter_injects_explicit_preapproved_marker(tmp_path):
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter
 
     manifest = _manifest(approval_required=True, id="needs_approval")
     fp = manifest_fingerprint(manifest)
     node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    session = _approved_session(tmp_path)
     adapter = ICMStageAdapter(
         node=node,
         storage_root="data",
@@ -125,6 +151,7 @@ def test_adapter_injects_explicit_preapproved_marker():
             "approved_fingerprint": fp,
             "actions": ["company_lookup"],
         },
+        db_session=session,
     )
     shared = {}
     adapter.enforce_execution(shared, action="company_lookup")
@@ -132,15 +159,17 @@ def test_adapter_injects_explicit_preapproved_marker():
     assert shared["icm_approval"]["approval_id"] == "appr-42"
     assert shared["icm_approval"]["approved_fingerprint"] == fp
     assert adapter.approval_bound["approval_id"] == "appr-42"
+    session.close()
 
 
-def test_adapter_rejects_preapproved_wrong_action_or_fingerprint():
+def test_adapter_rejects_preapproved_wrong_action_or_fingerprint(tmp_path):
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter
 
     manifest = _manifest(approval_required=True, id="needs_approval")
     fp = manifest_fingerprint(manifest)
     node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    session = _approved_session(tmp_path, approval_id="appr-1")
 
     def adapter_with(marker):
         return ICMStageAdapter(
@@ -149,6 +178,7 @@ def test_adapter_rejects_preapproved_wrong_action_or_fingerprint():
             org_id="o",
             run_id="r",
             preapproved=marker,
+            db_session=session,
         )
 
     markers = [
@@ -161,6 +191,37 @@ def test_adapter_rejects_preapproved_wrong_action_or_fingerprint():
     for marker in markers:
         with pytest.raises(PermissionError, match="requires approval"):
             adapter_with(marker).enforce_execution({}, action="company_lookup")
+    session.close()
+
+
+@pytest.mark.parametrize(
+    "row_kwargs",
+    [{"org_id": "other"}, {"status": "pending"}, {"decided_by": None}],
+)
+def test_adapter_rejects_unbacked_db_approval_marker(tmp_path, row_kwargs):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    session = _approved_session(tmp_path, approval_id="appr-db", **row_kwargs)
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root="data",
+        org_id="o",
+        run_id="r",
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-db",
+            "approved_fingerprint": fp,
+            "actions": ["company_lookup"],
+        },
+        db_session=session,
+    )
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter.enforce_execution({}, action="company_lookup")
+    session.close()
 
 
 def test_adapter_fails_closed_on_unsupported_context_layers(tmp_path):

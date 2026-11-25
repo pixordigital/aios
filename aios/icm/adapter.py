@@ -228,6 +228,33 @@ class ICMStageAdapter:
         approval_fp = src.get("approved_fingerprint") or src.get("manifest_fingerprint")
         if approval_fp != fp:
             return None
+        session = self.db_session
+        if session is None and isinstance(shared, dict):
+            session = shared.get("icm_db_session")
+        if session is not None:
+            import inspect
+
+            from sqlalchemy import select
+            from sqlalchemy.exc import SQLAlchemyError
+
+            from aios.db.models import PendingAction
+
+            if inspect.iscoroutinefunction(getattr(session, "execute", None)):
+                return None
+            try:
+                row = session.execute(
+                    select(PendingAction).where(
+                        PendingAction.id == str(approval_id),
+                        PendingAction.org_id == self.org_id,
+                        PendingAction.status == "approved",
+                        PendingAction.decided_by.is_not(None),
+                    )
+                ).scalar_one_or_none()
+            except SQLAlchemyError:
+                logger.warning("ICM approval lookup unavailable", exc_info=True)
+                return None
+            if row is None or not str(row.decided_by or "").strip():
+                return None
         return {
             "approval_id": str(approval_id),
             "approved_fingerprint": fp,

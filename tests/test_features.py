@@ -5,6 +5,7 @@ Pure-logic tests (no DB) where possible; API tests for CRUD.
 """
 
 import asyncio
+import json
 
 import pytest
 
@@ -107,6 +108,119 @@ async def test_approval_timeout():
     assert am.get_pending("t3") == []
 
 
+def _hitl_runtime(governance_config: dict):
+    """Agent that requests one high-value tool call on its first LLM turn."""
+    import types
+    import uuid
+
+    from aios.core.agent import AgentRuntime
+
+    uid = str(uuid.uuid4())
+    agent = types.SimpleNamespace(
+        id=f"hitl-agent-{uid}", org_id=f"hitl-org-{uid}", tools=["crm_update_deal"],
+        llm_config={"model": "openai/gpt-4o", "temperature": 0.7, "max_tokens": 4096},
+        governance_config=governance_config, name="t", system_prompt="hi",
+        memory_config={}, extra_data={},
+    )
+    rt = AgentRuntime(agent)
+    turns = []
+
+    async def _stream(*, messages, model, **kw):
+        turns.append(model)
+        if len(turns) == 1:
+            yield {"type": "tool_call", "tool_calls": [{
+                "id": "c1", "function": {
+                    "name": "crm_update_deal", "arguments": '{"value": 9000}',
+                },
+            }]}
+        else:
+            yield {"type": "token", "content": "done"}
+        yield {"type": "done"}
+
+    executed = []
+
+    async def _execute(name, args):
+        executed.append((name, args))
+        return "ok"
+
+    rt._llm_chat_stream = _stream
+    rt.tool_engine.execute = _execute
+    return rt, executed
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_hitl_gate_blocks_tool_until_human_approves(monkeypatch):
+    from aios.core import approval as approval_module
+
+    seen = []
+
+    async def _request(**kwargs):
+        seen.append(kwargs)
+        return False
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime({
+        "autonomy": "autonomous", "hitl_enabled": True, "hitl_value_threshold": 5000,
+    })
+    [ev async for ev in rt.run_stream("c-hitl-deny", "update deal")]
+
+    assert len(seen) == 1
+    assert seen[0]["tool_name"] == "crm_update_deal"
+    assert seen[0]["org_id"] == rt.agent.org_id
+    assert seen[0]["tool_args"] == {"value": 9000}
+    assert "HITL:" in seen[0]["context_summary"]
+    assert executed == []
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_hitl_gate_executes_approved_tool(monkeypatch):
+    from aios.core import approval as approval_module
+
+    async def _request(**kwargs):
+        return True
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime({
+        "autonomy": "autonomous", "hitl_enabled": True, "hitl_value_threshold": 5000,
+    })
+    [ev async for ev in rt.run_stream("c-hitl-ok", "update deal")]
+
+    assert executed == [("crm_update_deal", '{"value": 9000}')]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_hitl_disabled_does_not_gate_tool(monkeypatch):
+    from aios.core import approval as approval_module
+
+    seen = []
+
+    async def _request(**kwargs):
+        seen.append(kwargs)
+        return True
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime({
+        "autonomy": "autonomous", "hitl_enabled": False, "hitl_value_threshold": 5000,
+    })
+    [ev async for ev in rt.run_stream("c-hitl-off", "update deal")]
+
+    assert seen == []
+    assert executed == [("crm_update_deal", '{"value": 9000}')]
+
+
+@pytest.mark.parametrize("tool,args,needs_hitl", [
+    ("crm_delete_deal", '{"deal_id": "d1"}', True),
+    ("crm_update_deal", '{"deal_id": "d1", "stage": "closed_won"}', True),
+    ("sql_query", '{"query": "DELETE FROM crm_deals"}', True),
+    ("send_email", json.dumps({"to": [f"u{i}@x.com" for i in range(100)]}), True),
+    ("sql_query", '{"query": "SELECT * FROM crm_deals"}', False),
+    ("calculator", '{"expression": "2+2"}', False),
+])
+def test_hitl_risk_rules(tool, args, needs_hitl):
+    rt, _ = _hitl_runtime({"hitl_enabled": True, "hitl_value_threshold": 5000})
+    assert bool(rt._hitl_tool_reason(tool, args)) is needs_hitl
+
+
 # ─── Rubric scoring ───
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -198,3 +312,91 @@ async def test_rubrics_api(auth_client):
     })
     assert r.status_code == 200
     assert r.json()["total_score"] >= 0
+
+
+# ─── API: approval decision authorization ───
+
+async def _seed_action(test_session, org_id, *, action_id, tool_args=None):
+    from aios.db.models import PendingAction
+
+    row = PendingAction(
+        id=action_id, org_id=org_id, agent_id="agent-x", conversation_id="conv-x",
+        tool_name="crm_update_deal", tool_args=tool_args or {}, status="pending",
+    )
+    test_session.add(row)
+    await test_session.commit()
+    await test_session.refresh(row)
+    return row
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_approval_decision_requires_privileged_role(auth_client, test_org, test_user, test_session):
+    test_user.role = "member"
+    await test_session.commit()
+    row = await _seed_action(test_session, test_org.id, action_id="role-denied")
+    for verb in ("approve", "reject"):
+        r = await auth_client.post(f"/api/approvals/{row.id}/{verb}")
+        assert r.status_code == 403, r.text
+    await test_session.refresh(row)
+    assert row.status == "pending"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_approval_decision_owner_can_approve(auth_client, test_org, test_user, test_session):
+    test_user.role = "owner"
+    await test_session.commit()
+    row = await _seed_action(test_session, test_org.id, action_id="owner-approve")
+    r = await auth_client.post(f"/api/approvals/{row.id}/approve")
+    assert r.status_code == 200, r.text
+    await test_session.refresh(row)
+    assert row.status == "approved"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_approval_decision_founder_id_can_reject(auth_client, test_org, test_user, test_session):
+    test_user.role = "member"
+    test_org.extra_data = {**(test_org.extra_data or {}), "founder_user_id": test_user.id}
+    await test_session.commit()
+    row = await _seed_action(test_session, test_org.id, action_id="founder-reject")
+    r = await auth_client.post(f"/api/approvals/{row.id}/reject")
+    assert r.status_code == 200, r.text
+    await test_session.refresh(row)
+    assert row.status == "rejected"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_approval_decision_blocks_self_approval(auth_client, test_org, test_user, test_session):
+    test_user.role = "owner"
+    await test_session.commit()
+    mine = await _seed_action(
+        test_session, test_org.id, action_id="self-approve",
+        tool_args={"requested_by": test_user.id},
+    )
+    r = await auth_client.post(f"/api/approvals/{mine.id}/approve")
+    assert r.status_code == 403, r.text
+    own = await _seed_action(
+        test_session, test_org.id, action_id="self-reject",
+        tool_args={"created_by": test_user.id},
+    )
+    r = await auth_client.post(f"/api/approvals/{own.id}/reject")
+    assert r.status_code == 403, r.text
+    await test_session.refresh(mine)
+    await test_session.refresh(own)
+    assert mine.status == own.status == "pending"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_approval_decision_org_scope_and_missing_org_fail_closed(
+    auth_client, test_org, second_org, test_user, test_session
+):
+    row = await _seed_action(test_session, second_org.id, action_id="other-org")
+    r = await auth_client.post(f"/api/approvals/{row.id}/approve")
+    assert r.status_code == 404, r.text
+
+    test_user.org_id = "missing-org"
+    await test_session.commit()
+    row = await _seed_action(test_session, "missing-org", action_id="no-org")
+    r = await auth_client.post(f"/api/approvals/{row.id}/approve")
+    assert r.status_code == 403, r.text
+    await test_session.refresh(row)
+    assert row.status == "pending"
