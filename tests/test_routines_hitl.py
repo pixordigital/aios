@@ -25,6 +25,9 @@ class _Result:
     def scalars(self):
         return _Scalars(self._rows)
 
+    def scalar_one_or_none(self):
+        return self._rows[0] if self._rows else None
+
 
 class _FakeDB:
     def __init__(self, rows=None):
@@ -33,7 +36,17 @@ class _FakeDB:
         self.commits = 0
         self.rollbacks = 0
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
+        try:
+            compiled = stmt.compile(compile_kwargs={"literal_binds": True})
+            s = str(compiled)
+        except Exception:
+            s = str(stmt)
+        import re
+        m = re.search(r"pending_actions\.id\s*=\s*'([^']+)'", s)
+        if m:
+            want = m.group(1)
+            return _Result([r for r in self.rows if str(getattr(r, "id", "")) == want])
         return _Result(self.rows)
 
     def add(self, row):
@@ -314,3 +327,145 @@ class _Ctx:
 
     async def __aexit__(self, exc_type, exc, tb):
         return False
+
+
+@pytest.mark.asyncio
+async def test_approval_dispatch_enqueues_whitelisted_job(monkeypatch):
+    from aios.api import approvals as approvals_api
+    from aios.core.approval import ApprovalManager
+    from aios.db.models import PendingAction as DBAction
+    from aios.db.models import User
+
+    mgr = ApprovalManager(timeout=1)
+    monkeypatch.setattr(approvals_api, "approval_manager", mgr)
+
+    db = _FakeDB([])
+    req = await request_routine_side_effect_approval(
+        db,
+        org_id="o1",
+        routine_id="r1",
+        action="proactive_event_dispatch",
+        idempotency_key="idem-d1",
+        side_effects=["external_send"],
+        mode="proactive",
+        source_type="event_subscription",
+        context_summary="ctx",
+        dispatch_job="proactive_event_job",
+        dispatch_payload={"agent_id": "a1", "org_id": "o1", "event": {"event_type": "x"}},
+    )
+    row = db.added[0]
+    row.id = req["approval_id"]
+    row.org_id = "o1"
+    row.status = "pending"
+    row.decided_by = None
+
+    async def _fake_write(action_id, status, decided_by, org_id):
+        row.status = status
+        row.decided_by = decided_by
+        row.org_id = org_id
+        return True
+
+    monkeypatch.setattr(ApprovalManager, "_write_db_status", staticmethod(_fake_write))
+
+    enqueued = []
+
+    async def _fake_enqueue(name, payload):
+        enqueued.append((name, payload))
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", _fake_enqueue)
+    async def _ok(*a, **k):
+        return None
+    monkeypatch.setattr(approvals_api, "verify_org_access_async", _ok)
+    async def _allow(*a, **k):
+        return None
+
+    monkeypatch.setattr(approvals_api, "_require_decision_authority", _allow)
+    monkeypatch.setattr(approvals_api, "_is_self_approval", lambda *a, **k: False)
+
+    user = SimpleNamespace(id="u1", org_id="o1", role="admin")
+    res = await approvals_api.approve_action(req["approval_id"], db=db, user=user)
+    assert res["status"] == "approved"
+    assert res["dispatch"]["dispatched"] is True
+    assert enqueued[0][0] == "aios.tasks.jobs.proactive_event_job"
+    assert enqueued[0][1]["routine"]["approved"] is True
+
+
+@pytest.mark.asyncio
+async def test_approval_dispatch_rejects_unknown_job(monkeypatch):
+    from aios.api import approvals as approvals_api
+    from aios.core.approval import ApprovalManager
+
+    mgr = ApprovalManager(timeout=1)
+    monkeypatch.setattr(approvals_api, "approval_manager", mgr)
+    db = _FakeDB([])
+    # create row directly with bad dispatch marker
+    row = SimpleNamespace(
+        id="ap1", org_id="o1", tool_name=ROUTINE_SIDE_EFFECT_APPROVAL_TOOL, status="pending", decided_by=None,
+        tool_args={"_routine_approved_action": {"org_id": "o1", "routine_id": "r1", "action": "a", "idempotency_key": "k", "dispatch_job": "evil_job", "dispatch_payload": {}}}
+    )
+    db.add(row)
+
+    async def _fake_write(action_id, status, decided_by, org_id):
+        row.status = status
+        row.decided_by = decided_by
+        return True
+
+    monkeypatch.setattr(ApprovalManager, "_write_db_status", staticmethod(_fake_write))
+    called = []
+
+    async def _fake_enqueue(*a, **k):
+        called.append((a, k))
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", _fake_enqueue)
+    async def _ok(*a, **k):
+        return None
+    monkeypatch.setattr(approvals_api, "verify_org_access_async", _ok)
+    async def _allow(*a, **k):
+        return None
+    monkeypatch.setattr(approvals_api, "_require_decision_authority", _allow)
+    monkeypatch.setattr(approvals_api, "_is_self_approval", lambda *a, **k: False)
+
+    user = SimpleNamespace(id="u1", org_id="o1", role="admin")
+    res = await approvals_api.approve_action("ap1", db=db, user=user)
+    assert res["status"] == "approved"
+    assert res["dispatch"]["dispatched"] is False
+    assert res["dispatch"]["reason"] == "job_not_whitelisted"
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_reject_does_not_dispatch(monkeypatch):
+    from aios.api import approvals as approvals_api
+    from aios.core.approval import ApprovalManager
+
+    mgr = ApprovalManager(timeout=1)
+    monkeypatch.setattr(approvals_api, "approval_manager", mgr)
+    db = _FakeDB([])
+    row = SimpleNamespace(
+        id="ap2", org_id="o1", tool_name=ROUTINE_SIDE_EFFECT_APPROVAL_TOOL, status="pending", decided_by=None,
+        tool_args={"_routine_approved_action": {"org_id": "o1", "routine_id": "r1", "action": "a", "idempotency_key": "k", "dispatch_job": "proactive_event_job", "dispatch_payload": {}}}
+    )
+    db.add(row)
+
+    async def _fake_write(action_id, status, decided_by, org_id):
+        row.status = status
+        row.decided_by = decided_by
+        return True
+
+    monkeypatch.setattr(ApprovalManager, "_write_db_status", staticmethod(_fake_write))
+    called = []
+    async def _fake_enqueue(*a, **k):
+        called.append((a, k))
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", _fake_enqueue)
+    async def _ok(*a, **k):
+        return None
+    monkeypatch.setattr(approvals_api, "verify_org_access_async", _ok)
+    async def _allow(*a, **k):
+        return None
+    monkeypatch.setattr(approvals_api, "_require_decision_authority", _allow)
+    monkeypatch.setattr(approvals_api, "_is_self_approval", lambda *a, **k: False)
+
+    user = SimpleNamespace(id="u1", org_id="o1", role="admin")
+    res = await approvals_api.reject_action("ap2", db=db, user=user)
+    assert res["status"] == "rejected"
+    assert called == []

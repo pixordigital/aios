@@ -509,3 +509,124 @@ def test_unknown_key_or_missing_config_fail_closed(tmp_path: Path, monkeypatch: 
     insp2 = inspect_bundle(bundle)
     assert insp2["trust"] == "unsigned"
     assert any("unknown signing key_id" in r.lower() for r in insp2["trust_reasons"])
+
+
+def test_old_trusted_key_format_still_works(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    bundle = _export_bundle(tmp_path, "codex")
+    priv = Ed25519PrivateKey.generate()
+    priv_pem = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    pub_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    _sign_bundle_dir(bundle, key_id="old-key", priv_pem=priv_pem)
+    # Old format: {key_id: pem}
+    monkeypatch.setenv("AIOS_AGENT_PACK_TRUSTED_KEYS", json.dumps({"old-key": pub_pem}))
+    insp = inspect_bundle(bundle)
+    assert insp["trust"] == "trusted"
+    assert insp["key_id"] == "old-key"
+    assert insp["trusted_key_count"] == 1
+
+
+def test_revoked_key_in_trusted_config_not_trusted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    bundle = _export_bundle(tmp_path, "codex")
+    priv = Ed25519PrivateKey.generate()
+    priv_pem = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    pub_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    _sign_bundle_dir(bundle, key_id="k-rev", priv_pem=priv_pem)
+    monkeypatch.setenv("AIOS_AGENT_PACK_TRUSTED_KEYS", json.dumps({
+        "k-rev": {"public_key_pem": pub_pem, "revoked": True, "purpose": "agent_pack_bundle"}
+    }))
+    insp = inspect_bundle(bundle)
+    assert insp["trust"] != "trusted"
+    assert any("revoked" in r.lower() for r in insp["trust_reasons"])
+    with pytest.raises(AgentPackValidationError):
+        plan_install(bundle, "codex", target_root=tmp_path / "t", records_dir=tmp_path / "r")
+
+
+def test_expired_key_not_trusted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    bundle = _export_bundle(tmp_path, "codex")
+    priv = Ed25519PrivateKey.generate()
+    priv_pem = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    pub_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    _sign_bundle_dir(bundle, key_id="k-exp", priv_pem=priv_pem)
+    monkeypatch.setenv("AIOS_AGENT_PACK_TRUSTED_KEYS", json.dumps({
+        "k-exp": {
+            "public_key_pem": pub_pem,
+            "not_after": "2000-01-01T00:00:00Z",
+            "purpose": "agent_pack_bundle",
+        }
+    }))
+    insp = inspect_bundle(bundle)
+    assert insp["trust"] != "trusted"
+    assert any("expired" in r.lower() for r in insp["trust_reasons"])
+    with pytest.raises(AgentPackValidationError):
+        plan_install(bundle, "codex", target_root=tmp_path / "t", records_dir=tmp_path / "r")
+
+
+def test_revocation_file_blocks_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    bundle = _export_bundle(tmp_path, "codex")
+    priv = Ed25519PrivateKey.generate()
+    priv_pem = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    pub_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    _sign_bundle_dir(bundle, key_id="k-file-rev", priv_pem=priv_pem)
+    rev_file = tmp_path / "revoked.json"
+    rev_file.write_text(json.dumps(["k-file-rev"]), encoding="utf-8")
+    monkeypatch.setenv("AIOS_AGENT_PACK_TRUSTED_KEYS", json.dumps({"k-file-rev": pub_pem}))
+    monkeypatch.setenv("AIOS_AGENT_PACK_REVOKED_KEYS_FILE", str(rev_file))
+    insp = inspect_bundle(bundle)
+    assert insp["trust"] != "trusted"
+    assert any("revoked" in r.lower() for r in insp["trust_reasons"])
+    assert insp["revocation_checked"] is True
+
+
+def test_trust_log_appended_when_env_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    bundle = _export_bundle(tmp_path, "codex")
+    priv = Ed25519PrivateKey.generate()
+    priv_pem = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    pub_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    _sign_bundle_dir(bundle, key_id="k-log", priv_pem=priv_pem)
+    log_path = tmp_path / "trust-log.jsonl"
+    monkeypatch.setenv("AIOS_AGENT_PACK_TRUSTED_KEYS", json.dumps({"k-log": pub_pem}))
+    monkeypatch.setenv("AIOS_AGENT_PACK_TRUST_LOG", str(log_path))
+
+    insp = inspect_bundle(bundle)
+    assert insp["trust"] == "trusted"
+    assert insp["transparency_logged"] is True
+    assert log_path.exists()
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows
+    assert any(r.get("key_id") == "k-log" and r.get("trust") == "trusted" for r in rows)
+    assert all("bundle_sha256" in r and "fingerprint" in r and "ts" in r for r in rows)

@@ -115,6 +115,8 @@ def _sha256_json(data: Any) -> str:
 _SIGNATURE_ALG_ED25519 = "ed25519"
 _TRUSTED_KEYS_ENV = "AIOS_AGENT_PACK_TRUSTED_KEYS"
 _TRUSTED_KEYS_FILE_ENV = "AIOS_AGENT_PACK_TRUSTED_KEYS_FILE"
+_REVOKED_KEYS_FILE_ENV = "AIOS_AGENT_PACK_REVOKED_KEYS_FILE"
+_TRUST_LOG_ENV = "AIOS_AGENT_PACK_TRUST_LOG"
 _SIGNING_PRIVATE_KEY_FILE_ENV = "AIOS_AGENT_PACK_SIGNING_PRIVATE_KEY_FILE"
 
 
@@ -162,48 +164,88 @@ def _public_key_pem(key: "Ed25519PublicKey") -> str:
     ).decode("utf-8")
 
 
-def _normalize_trusted_keys_obj(obj: Any, *, field: str) -> dict[str, str]:
-    out: dict[str, str] = {}
+def _parse_iso8601_utc(value: Any, *, field: str) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise AgentPackValidationError("invalid ISO8601 timestamp", field=field)
+    s = value.strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except Exception as exc:
+        raise AgentPackValidationError("invalid ISO8601 timestamp", field=field) from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _normalize_trusted_key_record(item: Any, *, field: str, key_id: str | None = None) -> tuple[str, dict[str, Any]]:
+    if isinstance(item, str):
+        pem = item
+        kid = key_id
+        rec: dict[str, Any] = {}
+    elif isinstance(item, dict):
+        kid = item.get("key_id", key_id)
+        pem = item.get("public_key_pem") or item.get("pem") or item.get("public_key")
+        rec = dict(item)
+    else:
+        raise AgentPackValidationError("trusted key entry must be object/string", field=field)
+
+    if not isinstance(kid, str) or not kid.strip():
+        raise AgentPackValidationError("trusted key missing key_id", field=f"{field}.key_id")
+    kid = kid.strip()
+    if not isinstance(pem, str) or not pem.strip():
+        raise AgentPackValidationError("trusted key missing public key PEM", field=f"{field}.public_key_pem")
+    pem = pem.strip()
+    _load_pem_public_key(pem, field=f"{field}.public_key_pem")
+
+    revoked = rec.get("revoked", False)
+    if not isinstance(revoked, bool):
+        raise AgentPackValidationError("trusted key revoked must be bool", field=f"{field}.revoked")
+    purpose = rec.get("purpose")
+    if purpose is not None and (not isinstance(purpose, str) or not purpose.strip()):
+        raise AgentPackValidationError("trusted key purpose must be string", field=f"{field}.purpose")
+    not_before = _parse_iso8601_utc(rec.get("not_before"), field=f"{field}.not_before")
+    not_after = _parse_iso8601_utc(rec.get("not_after"), field=f"{field}.not_after")
+    if not_before and not_after and not_before > not_after:
+        raise AgentPackValidationError("trusted key not_before after not_after", field=f"{field}.not_before")
+
+    return kid, {
+        "key_id": kid,
+        "public_key_pem": pem,
+        "revoked": revoked,
+        "not_before": not_before.isoformat().replace("+00:00", "Z") if not_before else None,
+        "not_after": not_after.isoformat().replace("+00:00", "Z") if not_after else None,
+        "purpose": purpose.strip() if isinstance(purpose, str) else None,
+    }
+
+
+def _normalize_trusted_keys_obj(obj: Any, *, field: str) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
     if isinstance(obj, dict):
-        # formats: {"key_id":"PEM"} or {"keys":[{"key_id":"...","public_key_pem":"..."}]}
+        # formats: {"key_id":"PEM"} or {"key_id":{...}} or {"keys":[...]} (legacy/list)
         if "keys" in obj and isinstance(obj["keys"], list):
             items = obj["keys"]
             for i, item in enumerate(items):
-                if not isinstance(item, dict):
-                    raise AgentPackValidationError("trusted key entry must be object", field=field)
-                kid = item.get("key_id")
-                pem = item.get("public_key_pem") or item.get("pem") or item.get("public_key")
-                if not isinstance(kid, str) or not kid.strip():
-                    raise AgentPackValidationError("trusted key missing key_id", field=f"{field}[{i}].key_id")
-                if not isinstance(pem, str) or not pem.strip():
-                    raise AgentPackValidationError("trusted key missing public key PEM", field=f"{field}[{i}].public_key_pem")
-                _load_pem_public_key(pem, field=f"{field}[{i}].public_key_pem")
-                out[kid.strip()] = pem.strip()
+                kid, rec = _normalize_trusted_key_record(item, field=f"{field}[{i}]")
+                out[kid] = rec
             return out
         for k, v in obj.items():
-            if not isinstance(k, str) or not k.strip():
-                raise AgentPackValidationError("trusted key id must be string", field=field)
-            if not isinstance(v, str) or not v.strip():
-                raise AgentPackValidationError("trusted key PEM must be string", field=f"{field}.{k}")
-            _load_pem_public_key(v, field=f"{field}.{k}")
-            out[k.strip()] = v.strip()
+            kid, rec = _normalize_trusted_key_record(v, field=f"{field}.{k}", key_id=k)
+            out[kid] = rec
         return out
     if isinstance(obj, list):
         for i, item in enumerate(obj):
-            if not isinstance(item, dict):
-                raise AgentPackValidationError("trusted key entry must be object", field=field)
-            kid = item.get("key_id")
-            pem = item.get("public_key_pem") or item.get("pem") or item.get("public_key")
-            if not isinstance(kid, str) or not isinstance(pem, str):
-                raise AgentPackValidationError("trusted key entry missing key_id/public_key_pem", field=f"{field}[{i}]")
-            _load_pem_public_key(pem, field=f"{field}[{i}].public_key_pem")
-            out[kid.strip()] = pem.strip()
+            kid, rec = _normalize_trusted_key_record(item, field=f"{field}[{i}]")
+            out[kid] = rec
         return out
     raise AgentPackValidationError("trusted keys must be object/list", field=field)
 
 
-def _load_trusted_public_keys() -> dict[str, str]:
-    keys: dict[str, str] = {}
+def _load_trusted_public_keys() -> dict[str, dict[str, Any]]:
+    keys: dict[str, dict[str, Any]] = {}
     raw_json = os.getenv(_TRUSTED_KEYS_ENV, "").strip()
     raw_file = os.getenv(_TRUSTED_KEYS_FILE_ENV, "").strip()
     if raw_file:
@@ -224,6 +266,75 @@ def _load_trusted_public_keys() -> dict[str, str]:
 
 def _trusted_keys_configured() -> bool:
     return bool(os.getenv(_TRUSTED_KEYS_ENV, "").strip() or os.getenv(_TRUSTED_KEYS_FILE_ENV, "").strip())
+
+
+def _load_revoked_keys() -> set[str]:
+    raw_file = os.getenv(_REVOKED_KEYS_FILE_ENV, "").strip()
+    if not raw_file:
+        return set()
+    p = Path(raw_file).expanduser()
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise AgentPackValidationError(f"cannot read revoked keys file: {exc}", field=_REVOKED_KEYS_FILE_ENV) from exc
+
+    revoked: set[str] = set()
+    if isinstance(obj, list):
+        for i, item in enumerate(obj):
+            if not isinstance(item, str) or not item.strip():
+                raise AgentPackValidationError("revoked key id must be string", field=f"{_REVOKED_KEYS_FILE_ENV}[{i}]")
+            revoked.add(item.strip())
+        return revoked
+    if isinstance(obj, dict):
+        # Accept {"key_id": true} or {"revoked":[...]} for local ergonomics; fail closed on bad shape.
+        if "revoked" in obj and isinstance(obj["revoked"], list):
+            for i, item in enumerate(obj["revoked"]):
+                if not isinstance(item, str) or not item.strip():
+                    raise AgentPackValidationError("revoked key id must be string", field=f"{_REVOKED_KEYS_FILE_ENV}.revoked[{i}]")
+                revoked.add(item.strip())
+            return revoked
+        for k, v in obj.items():
+            if not isinstance(k, str) or not k.strip():
+                raise AgentPackValidationError("revoked key id must be string", field=_REVOKED_KEYS_FILE_ENV)
+            if v is True:
+                revoked.add(k.strip())
+            elif v is False:
+                continue
+            else:
+                raise AgentPackValidationError("revoked key value must be bool", field=f"{_REVOKED_KEYS_FILE_ENV}.{k}")
+        return revoked
+    raise AgentPackValidationError("revoked keys must be list/object", field=_REVOKED_KEYS_FILE_ENV)
+
+
+def _key_time_reason(rec: dict[str, Any], *, now: datetime) -> str | None:
+    nb = rec.get("not_before")
+    na = rec.get("not_after")
+    if nb:
+        nb_dt = _parse_iso8601_utc(nb, field="trusted_key.not_before")
+        if nb_dt and now < nb_dt:
+            return f"key not yet valid: {rec.get('key_id')}"
+    if na:
+        na_dt = _parse_iso8601_utc(na, field="trusted_key.not_after")
+        if na_dt and now > na_dt:
+            return f"key expired: {rec.get('key_id')}"
+    return None
+
+
+def _append_trust_log(entry: dict[str, Any]) -> tuple[bool, str | None]:
+    raw_file = os.getenv(_TRUST_LOG_ENV, "").strip()
+    if not raw_file:
+        return False, None
+    p = Path(raw_file).expanduser()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        return True, None
+    except Exception as exc:
+        # Best-effort: trust decision unchanged; caller records warning.
+        return False, f"trust log write failed: {exc}"
 
 
 def _content_bundle_sha256(bundle_manifest: dict[str, Any]) -> str:
@@ -470,18 +581,59 @@ def _get_signature_envelope(provenance: dict[str, Any]) -> dict[str, Any] | None
     return {"__legacy__": str(sig)}
 
 
-def verify_bundle_signature(bundle_manifest: dict[str, Any], provenance: dict[str, Any], *, trusted_keys: dict[str, str] | None = None) -> tuple[bool, list[str], dict[str, Any] | None]:
+def _normalize_loaded_trusted_keys(trusted_keys: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    if trusted_keys is None:
+        return _load_trusted_public_keys()
+    # Backward compat: callers may pass {kid: pem}.
+    if all(isinstance(v, str) for v in trusted_keys.values()):
+        return _normalize_trusted_keys_obj(trusted_keys, field="trusted_keys")
+    out: dict[str, dict[str, Any]] = {}
+    for k, v in trusted_keys.items():
+        kid, rec = _normalize_trusted_key_record(v, field=f"trusted_keys.{k}", key_id=k if isinstance(k, str) else None)
+        out[kid] = rec
+    return out
+
+
+def verify_bundle_signature(
+    bundle_manifest: dict[str, Any],
+    provenance: dict[str, Any],
+    *,
+    trusted_keys: dict[str, str] | dict[str, dict[str, Any]] | None = None,
+    now: datetime | None = None,
+) -> tuple[bool, list[str], dict[str, Any] | None]:
     """Verify Ed25519 signature over deterministic bundle payload.
 
-    Fail-closed: any missing field, unknown key, bad encoding, or invalid signature
-    returns (False, reasons, envelope). No network, no shell.
+    Fail-closed: missing/invalid signature, unknown/revoked/expired/not-yet-valid key,
+    bad encoding, or invalid signature returns (False, reasons, envelope).
+    Local-only; no network, no shell.
     """
     reasons: list[str] = []
+    now_dt = now.astimezone(timezone.utc) if isinstance(now, datetime) else datetime.now(timezone.utc)
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
     sig = _get_signature_envelope(provenance)
     if sig is None:
         return False, ["bundle unsigned or missing signature"], None
+
+    meta: dict[str, Any] = {
+        "key_id": sig.get("key_id") if isinstance(sig, dict) else None,
+        "revoked": False,
+        "expired": False,
+        "not_yet_valid": False,
+        "revocation_checked": False,
+        "trusted_key_count": 0,
+        "purpose": None,
+    }
+
+    def _ret(ok: bool, rs: list[str], envelope: dict[str, Any] | None) -> tuple[bool, list[str], dict[str, Any] | None]:
+        if isinstance(envelope, dict):
+            out = dict(envelope)
+            out["_trust"] = meta
+            return ok, rs, out
+        return ok, rs, envelope
+
     if "__legacy__" in sig:
-        return False, ["legacy/non-crypto signature metadata; fail closed"], sig
+        return _ret(False, ["legacy/non-crypto signature metadata; fail closed"], sig)
 
     alg = sig.get("alg")
     key_id = sig.get("key_id")
@@ -491,66 +643,116 @@ def verify_bundle_signature(bundle_manifest: dict[str, Any], provenance: dict[st
         reasons.append(f"unsupported signature alg: {alg!r}")
     if not isinstance(key_id, str) or not key_id.strip():
         reasons.append("signature missing key_id")
+    else:
+        key_id = key_id.strip()
+        meta["key_id"] = key_id
     if not isinstance(sig_b64, str) or not sig_b64:
         reasons.append("signature missing signature_b64")
     if not isinstance(payload_sha, str) or not re.fullmatch(r"[a-f0-9]{64}", payload_sha.lower()):
         reasons.append("signature missing/invalid payload_sha256")
     if reasons:
-        return False, reasons, sig
+        return _ret(False, reasons, sig)
 
     payload = _signature_payload(bundle_manifest, provenance)
     actual_payload_sha = _sha256_bytes(payload)
     if actual_payload_sha != payload_sha.lower():
-        return False, ["signature payload_sha256 mismatch"], sig
+        return _ret(False, ["signature payload_sha256 mismatch"], sig)
 
-    keys = trusted_keys if trusted_keys is not None else _load_trusted_public_keys()
+    try:
+        keys = _normalize_loaded_trusted_keys(trusted_keys)
+        revoked_keys = _load_revoked_keys()
+    except AgentPackValidationError as exc:
+        # Missing/bad local trust config is fail-closed but not signature tamper.
+        return _ret(False, [str(exc)], sig)
+    meta["trusted_key_count"] = len(keys)
+    meta["revocation_checked"] = os.getenv(_REVOKED_KEYS_FILE_ENV, "").strip() != "" or any(bool(r.get("revoked")) for r in keys.values())
     if not keys:
-        return False, ["no trusted keys configured; fail closed to unsigned"], sig
-    pem = keys.get(key_id.strip())
-    if not pem:
-        return False, [f"unknown signing key_id: {key_id}"], sig
+        return _ret(False, ["no trusted keys configured; fail closed to unsigned"], sig)
 
+    rec = keys.get(str(key_id))
+    if rec is None:
+        return _ret(False, [f"unknown signing key_id: {key_id}"], sig)
+    meta["purpose"] = rec.get("purpose")
+
+    if rec.get("purpose") not in (None, "agent_pack_bundle"):
+        return _ret(False, [f"key purpose not allowed for agent_pack_bundle: {key_id}"], sig)
+    if bool(rec.get("revoked")) or str(key_id) in revoked_keys:
+        meta["revoked"] = True
+        return _ret(False, [f"revoked signing key_id: {key_id}"], sig)
+    nb = _parse_iso8601_utc(rec.get("not_before"), field="trusted_key.not_before") if rec.get("not_before") else None
+    na = _parse_iso8601_utc(rec.get("not_after"), field="trusted_key.not_after") if rec.get("not_after") else None
+    if nb and now_dt < nb:
+        meta["not_yet_valid"] = True
+        return _ret(False, [f"key not yet valid: {key_id}"], sig)
+    if na and now_dt > na:
+        meta["expired"] = True
+        return _ret(False, [f"key expired: {key_id}"], sig)
+
+    pem = rec.get("public_key_pem")
     try:
         pub = _load_pem_public_key(pem, field="trusted_keys.public_key_pem")
         raw_sig = _b64decode_str(sig_b64, field="signature.signature_b64")
         pub.verify(raw_sig, payload)
     except AgentPackValidationError as exc:
-        return False, [str(exc)], sig
+        return _ret(False, [str(exc)], sig)
     except Exception:
         # fail closed, no detail leak needed beyond invalid
-        return False, ["invalid signature"], sig
+        return _ret(False, ["invalid signature"], sig)
 
     # optional embedded public key must match trusted key for key_id; never trust embedded key alone.
     embedded_pem = sig.get("public_key_pem")
     if embedded_pem is not None:
         if not isinstance(embedded_pem, str) or not embedded_pem.strip():
-            return False, ["invalid embedded public_key_pem"], sig
+            return _ret(False, ["invalid embedded public_key_pem"], sig)
         try:
             emb = _load_pem_public_key(embedded_pem, field="signature.public_key_pem")
             if _public_key_pem(emb).strip() != _public_key_pem(pub).strip():
-                return False, ["embedded public_key_pem does not match trusted key"], sig
+                return _ret(False, ["embedded public_key_pem does not match trusted key"], sig)
         except AgentPackValidationError as exc:
-            return False, [str(exc)], sig
+            return _ret(False, [str(exc)], sig)
 
-    return True, [], sig
+    return _ret(True, [], sig)
 
 
-def _verify_trust(bundle_manifest: dict[str, Any], provenance: dict[str, Any], hashes_ok: bool, reasons: list[str]) -> tuple[Literal["trusted", "unsigned", "invalid"], list[str]]:
+def _trust_meta_from_envelope(env: dict[str, Any] | None) -> dict[str, Any]:
+    base = {"key_id": None, "revoked": False, "expired": False, "not_yet_valid": False, "revocation_checked": False, "trusted_key_count": 0, "purpose": None}
+    if isinstance(env, dict) and isinstance(env.get("_trust"), dict):
+        base.update({k: env["_trust"].get(k, base[k]) for k in base})
+    return base
+
+
+def _evaluate_trust(
+    bundle_manifest: dict[str, Any],
+    provenance: dict[str, Any],
+    hashes_ok: bool,
+    reasons: list[str],
+    *,
+    log_context: str,
+) -> dict[str, Any]:
     trust_reasons = list(reasons)
+    trust_meta = {"key_id": None, "revoked": False, "expired": False, "not_yet_valid": False, "revocation_checked": False, "trusted_key_count": 0, "purpose": None}
     if not hashes_ok:
-        return "invalid", trust_reasons
+        result = {
+            "trust": "invalid",
+            "trust_reasons": trust_reasons,
+            "trust_meta": trust_meta,
+            "signature_envelope": None,
+        }
+        _maybe_log_trust(result, bundle_manifest=bundle_manifest, context=log_context)
+        return result
 
     sig = _get_signature_envelope(provenance)
     unsigned_flag = bool(bundle_manifest.get("unsigned", True)) or bool(provenance.get("unsigned", True))
     if sig is None:
         trust_reasons.append("bundle unsigned or missing signature")
-        return "unsigned", trust_reasons
+        result = {"trust": "unsigned", "trust_reasons": trust_reasons, "trust_meta": trust_meta, "signature_envelope": None}
+        _maybe_log_trust(result, bundle_manifest=bundle_manifest, context=log_context)
+        return result
 
-    ok, sig_reasons, _ = verify_bundle_signature(bundle_manifest, provenance)
+    ok, sig_reasons, env = verify_bundle_signature(bundle_manifest, provenance)
+    trust_meta = _trust_meta_from_envelope(env)
     if not ok:
         trust_reasons.extend(sig_reasons)
-        # invalid/tampered/unknown-key/missing-config all fail closed: not trusted.
-        # Distinguish tamper/invalid signature as invalid; missing config/unsigned/unknown as unsigned.
         hard_invalid = any(
             r in {"invalid signature", "signature payload_sha256 mismatch"}
             or r.startswith("invalid ")
@@ -558,18 +760,60 @@ def _verify_trust(bundle_manifest: dict[str, Any], provenance: dict[str, Any], h
             or "does not match" in r.lower()
             for r in sig_reasons
         )
-        if hard_invalid:
-            return "invalid", trust_reasons
-        return "unsigned", trust_reasons
+        key_trust_invalid = bool(
+            trust_meta.get("revoked")
+            or trust_meta.get("expired")
+            or trust_meta.get("not_yet_valid")
+        ) or any(
+            x in r.lower()
+            for r in sig_reasons
+            for x in ("revoked", "expired", "not yet valid", "purpose not allowed")
+        )
+        # Revoked/expired/not-yet-valid/invalid key metadata => invalid trust (fail-closed).
+        # Unknown key/missing trusted config remain unsigned (fail-closed, not trusted).
+        # Signature/content tamper => invalid.
+        trust = "invalid" if (hard_invalid or key_trust_invalid) else "unsigned"
+        result = {"trust": trust, "trust_reasons": trust_reasons, "trust_meta": trust_meta, "signature_envelope": env}
+        _maybe_log_trust(result, bundle_manifest=bundle_manifest, context=log_context)
+        return result
 
-    # crypto verified and trusted key resolved. Metadata unsigned flags may be stale in
-    # legacy/signed exports; crypto verification over verified content wins.
     if unsigned_flag:
         trust_reasons.append("signed bundle has unsigned metadata flag; treated as trusted due valid signature")
     if any("provenance bundle_sha256 does not match" in r for r in trust_reasons):
-        # metadata mismatch only; hashes and signature already verified.
         trust_reasons = [r for r in trust_reasons if "provenance bundle_sha256 does not match" not in r]
-    return "trusted", trust_reasons
+    result = {"trust": "trusted", "trust_reasons": trust_reasons, "trust_meta": trust_meta, "signature_envelope": env}
+    _maybe_log_trust(result, bundle_manifest=bundle_manifest, context=log_context)
+    return result
+
+
+def _maybe_log_trust(result: dict[str, Any], *, bundle_manifest: dict[str, Any], context: str) -> None:
+    meta = result.get("trust_meta") or {}
+    entry = {
+        "ts": _now_iso(),
+        "event": "agent_pack_trust",
+        "context": context,
+        "bundle_sha256": str(bundle_manifest.get("bundle_sha256") or ""),
+        "fingerprint": str(bundle_manifest.get("source_pack_fingerprint") or ""),
+        "trust": result.get("trust"),
+        "trust_reasons": list(result.get("trust_reasons") or []),
+        "key_id": meta.get("key_id"),
+        "revoked": bool(meta.get("revoked")),
+        "expired": bool(meta.get("expired")),
+        "not_yet_valid": bool(meta.get("not_yet_valid")),
+        "revocation_checked": bool(meta.get("revocation_checked")),
+        "trusted_key_count": int(meta.get("trusted_key_count") or 0),
+    }
+    logged, err = _append_trust_log(entry)
+    result["transparency_logged"] = logged
+    result["transparency_log_error"] = err
+    if err:
+        # Best-effort: do not alter trust decision.
+        result.setdefault("warnings", []).append(err)
+
+
+def _verify_trust(bundle_manifest: dict[str, Any], provenance: dict[str, Any], hashes_ok: bool, reasons: list[str]) -> tuple[Literal["trusted", "unsigned", "invalid"], list[str]]:
+    res = _evaluate_trust(bundle_manifest, provenance, hashes_ok, reasons, log_context="legacy")
+    return res["trust"], res["trust_reasons"]
 
 
 def inspect_bundle(bundle_dir: str | Path) -> dict[str, Any]:
@@ -578,17 +822,23 @@ def inspect_bundle(bundle_dir: str | Path) -> dict[str, Any]:
         raise AgentPackValidationError("bundle_dir must be an existing directory", field="bundle_dir")
     _reject_symlink_path(bdir.resolve(), "bundle_dir")
     hashes_ok, reasons, bundle_manifest, provenance, loss_items, _ = _verify_bundle_hashes(bdir.resolve())
-    trust, trust_reasons = _verify_trust(bundle_manifest, provenance, hashes_ok, reasons)
+    trust_res = _evaluate_trust(bundle_manifest, provenance, hashes_ok, reasons, log_context="inspect")
+    meta = trust_res.get("trust_meta") or {}
     return {
         "bundle_dir": str(bdir.resolve()),
         "bundle_hash": str(bundle_manifest.get("bundle_sha256") or ""),
         "hashes_ok": hashes_ok,
-        "trust": trust,
-        "trust_reasons": trust_reasons,
+        "trust": trust_res["trust"],
+        "trust_reasons": trust_res["trust_reasons"],
+        "key_id": meta.get("key_id"),
+        "revocation_checked": bool(meta.get("revocation_checked")),
+        "trusted_key_count": int(meta.get("trusted_key_count") or 0),
+        "transparency_logged": bool(trust_res.get("transparency_logged")),
         "provenance_present": bool(provenance),
         "capability_loss": loss_items,
         "manifest": bundle_manifest,
         "provenance": provenance,
+        "warnings": list(trust_res.get("warnings") or []),
     }
 
 
@@ -874,7 +1124,7 @@ def apply_install(
     try:
         inspection = inspect_bundle(plan_obj.bundle_dir)
     except Exception as exc:
-        inspection = {"trust": "invalid", "trust_reasons": [str(exc)], "bundle_hash": ""}
+        inspection = {"trust": "invalid", "trust_reasons": [str(exc)], "bundle_hash": "", "warnings": []}
     if inspection.get("bundle_hash") != plan_obj.bundle_hash:
         errors.append("bundle hash changed since planning")
     if inspection.get("trust") == "invalid":
@@ -883,6 +1133,18 @@ def apply_install(
         errors.append("bundle trust downgraded")
     if plan_obj.trust == "unsigned":
         warnings.append("UNSIGNED bundle install explicitly consented; verify provenance before use")
+    for w in inspection.get("warnings") or []:
+        if w not in warnings:
+            warnings.append(w)
+    # Apply-time transparency log entry (best-effort, no trust impact).
+    try:
+        hashes_ok, reasons, bundle_manifest, provenance, _, _ = _verify_bundle_hashes(Path(plan_obj.bundle_dir).resolve())
+        trust_res = _evaluate_trust(bundle_manifest, provenance, hashes_ok, reasons, log_context="install")
+        for w in trust_res.get("warnings") or []:
+            if w not in warnings:
+                warnings.append(w)
+    except Exception as exc:
+        warnings.append(f"trust log evaluation failed: {exc}")
 
     target_root = Path(plan_obj.target_root).resolve()
     _target_root_allowed(target_root, records_root)

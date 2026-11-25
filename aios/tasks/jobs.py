@@ -838,6 +838,21 @@ async def proactive_event_job(ctx, payload: dict):
                     try:
                         from aios.core.routine_enforcement import request_routine_side_effect_approval
 
+                        dispatch_payload = {
+                            "agent_id": agent_id,
+                            "org_id": org_id,
+                            "event": event,
+                            "routine": {
+                                **routine_meta,
+                                "routine_id": routine_id,
+                                "idempotency_key": idem,
+                                "approval_fingerprint": str(approval_fingerprint) if approval_fingerprint else None,
+                                "side_effects": effects,
+                                "approval_required": approval_required,
+                                "source_type": str(routine_meta.get("source_type") or "event_subscription"),
+                                "mode": str(routine_meta.get("mode") or "reactive"),
+                            },
+                        }
                         approval = await request_routine_side_effect_approval(
                             sess,
                             org_id=org_id,
@@ -850,6 +865,8 @@ async def proactive_event_job(ctx, payload: dict):
                             context_summary=f"Proactive event {ev.event_type} agent={agent_id}",
                             requested_by=None,
                             approval_fingerprint=str(approval_fingerprint) if approval_fingerprint else None,
+                            dispatch_job="proactive_event_job",
+                            dispatch_payload=dispatch_payload,
                         )
                     except Exception:
                         logger.debug("proactive_event_job: approval request failed", exc_info=True)
@@ -927,7 +944,7 @@ async def proactive_event_job(ctx, payload: dict):
         raise
 
 
-async def workday_job(ctx):
+async def workday_job(ctx, payload: dict | None = None):
     """Clock every proactive agent in and hand it its board for the day.
 
     This is the piece that makes an agent behave like an employee rather than a
@@ -958,29 +975,43 @@ async def workday_job(ctx):
     from aios.db.backend import db_session
     from aios.db.models import Agent, Organization
 
+    payload = payload or {}
+    target_agent_id = str(payload.get("agent_id") or "").strip()
+    target_org_id = str(payload.get("org_id") or "").strip()
+
     worked, empty, failed, paused = 0, 0, 0, 0
     # Per-org, because each org has its own owner to tell. A single global
     # digest would report another tenant's numbers to whoever reads it.
     by_org: dict[str, dict] = {}
 
     async with db_session() as db:
-        orgs = (
-            await db.execute(
-                select(Organization).where(Organization.is_active == True)  # noqa: E712
-            )
-        ).scalars().all()
-        # The org switch is checked here and nowhere subtler, so "off" is
-        # unambiguous: no org means no run, and the per-agent flag cannot
-        # re-enable a paused org on its own.
-        live = [o for o in orgs if org_workday_enabled(o)]
-        paused = len(orgs) - len(live)
-        agents = (
-            await db.execute(
-                select(Agent).where(
-                    Agent.org_id.in_([o.id for o in live]), Agent.status == "active"
+        if target_agent_id:
+            agent = await db.get(Agent, target_agent_id)
+            if not agent or (target_org_id and agent.org_id != target_org_id):
+                logger.warning("workday_job: target agent missing/cross-org agent=%s org=%s", target_agent_id, target_org_id)
+                return {"worked": 0, "empty": 0, "failed": 1, "orgs_paused": 0, "reason": "agent_not_found"}
+            org = await db.get(Organization, agent.org_id)
+            if not org or not org_workday_enabled(org):
+                return {"worked": 0, "empty": 0, "failed": 0, "orgs_paused": 1}
+            agents = [agent] if agent.status == "active" else []
+        else:
+            orgs = (
+                await db.execute(
+                    select(Organization).where(Organization.is_active == True)  # noqa: E712
                 )
-            )
-        ).scalars().all()
+            ).scalars().all()
+            # The org switch is checked here and nowhere subtler, so "off" is
+            # unambiguous: no org means no run, and the per-agent flag cannot
+            # re-enable a paused org on its own.
+            live = [o for o in orgs if org_workday_enabled(o)]
+            paused = len(orgs) - len(live)
+            agents = (
+                await db.execute(
+                    select(Agent).where(
+                        Agent.org_id.in_([o.id for o in live]), Agent.status == "active"
+                    )
+                )
+            ).scalars().all()
 
     for agent in agents:
         if not should_work_day(agent):
@@ -1041,6 +1072,25 @@ async def workday_job(ctx):
                         try:
                             from aios.core.routine_enforcement import request_routine_side_effect_approval
 
+                            dispatch_payload = {
+                                "agent_id": fresh.id,
+                                "org_id": fresh.org_id,
+                                "date": board["date"],
+                                "routine": {
+                                    **(routine_policy if isinstance(routine_policy, dict) else {}),
+                                    "routine_id": routine_id,
+                                    "idempotency_key": idem,
+                                    "side_effects": effects,
+                                    "approval_required": bool(routine_policy.get("approval_required", True)),
+                                    "approval_fingerprint": (
+                                        str(routine_policy.get("approval_fingerprint"))
+                                        if routine_policy.get("approval_fingerprint")
+                                        else None
+                                    ),
+                                    "source_type": "workday",
+                                    "mode": "proactive",
+                                },
+                            }
                             await request_routine_side_effect_approval(
                                 db,
                                 org_id=fresh.org_id,
@@ -1057,6 +1107,8 @@ async def workday_job(ctx):
                                     if routine_policy.get("approval_fingerprint")
                                     else None
                                 ),
+                                dispatch_job="workday_job",
+                                dispatch_payload=dispatch_payload,
                             )
                         except Exception:
                             logger.debug("workday: approval request failed", exc_info=True)

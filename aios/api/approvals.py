@@ -7,6 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from aios.api.deps import get_current_user, verify_org_access_async
 from aios.api.security import _require_founder
 from aios.core.approval import approval_manager
+from aios.core.audit import log_audit
+from aios.core.routine_enforcement import (
+    ROUTINE_SIDE_EFFECT_APPROVAL_TOOL,
+    ROUTINE_SIDE_EFFECT_DISPATCH_WHITELIST,
+)
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization, PendingAction as DBAction, User
 
@@ -112,6 +117,96 @@ async def _load_approval_or_404(
     return row
 
 
+async def _dispatch_routine_side_effect_approval(
+    db: DatabaseBackend, *, row: DBAction, action_id: str, decided_by: str
+) -> dict:
+    """Best-effort dispatch after human approval. Fail closed on bad marker."""
+    from sqlalchemy import select
+
+    tool_args = row.tool_args if isinstance(row.tool_args, dict) else {}
+    marker = tool_args.get("_routine_approved_action")
+    if not isinstance(marker, dict):
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.skipped", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "missing_marker"})
+        return {"dispatched": False, "reason": "missing_marker"}
+
+    marker_org = str(marker.get("org_id") or "")
+    if marker_org != str(row.org_id or ""):
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.denied", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "org_mismatch"})
+        return {"dispatched": False, "reason": "org_mismatch"}
+
+    dispatch_job = str(marker.get("dispatch_job") or "").strip()
+    dispatch_payload = marker.get("dispatch_payload") or {}
+    if not dispatch_job:
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.skipped", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "no_dispatch_job"})
+        return {"dispatched": False, "reason": "no_dispatch_job"}
+    if dispatch_job not in {j.rsplit(".", 1)[-1] for j in ROUTINE_SIDE_EFFECT_DISPATCH_WHITELIST}:
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.denied", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "job_not_whitelisted", "dispatch_job": dispatch_job})
+        return {"dispatched": False, "reason": "job_not_whitelisted"}
+    if not isinstance(dispatch_payload, dict):
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.denied", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "bad_payload"})
+        return {"dispatched": False, "reason": "bad_payload"}
+
+    # Ensure approved human decision is present in DB before dispatch.
+    fresh = (
+        await db.execute(
+            select(DBAction).where(DBAction.id == action_id).execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if not fresh or fresh.status != "approved" or not str(fresh.decided_by or "").strip():
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.denied", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "not_human_approved"})
+        return {"dispatched": False, "reason": "not_human_approved"}
+    if str(fresh.org_id or "") != str(row.org_id or ""):
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.denied", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "fresh_org_mismatch"})
+        return {"dispatched": False, "reason": "fresh_org_mismatch"}
+
+    payload = dict(dispatch_payload)
+    payload.setdefault("org_id", row.org_id)
+    # Stamp routine approval context for traceability; enforcement uses DB evidence.
+    routine = payload.get("routine") if isinstance(payload.get("routine"), dict) else {}
+    routine = dict(routine)
+    routine.setdefault("routine_id", marker.get("routine_id"))
+    routine.setdefault("idempotency_key", marker.get("idempotency_key"))
+    routine.setdefault("approval_fingerprint", marker.get("approved_fingerprint"))
+    routine.setdefault("source_type", marker.get("source_type"))
+    routine.setdefault("mode", marker.get("mode"))
+    routine.setdefault("side_effects", marker.get("side_effects") or [])
+    routine.setdefault("approved", True)
+    routine.setdefault("approved_action_id", action_id)
+    routine.setdefault("approved_by", decided_by)
+    payload["routine"] = routine
+
+    full_job = f"aios.tasks.jobs.{dispatch_job}" if "." not in dispatch_job else dispatch_job
+    try:
+        from aios.tasks.queue import enqueue_job
+
+        await enqueue_job(full_job, payload)
+    except Exception as exc:
+        await log_audit(db, row.org_id, "routine_side_effect.dispatch.skipped", "pending_action",
+                        user_id=decided_by, resource_id=action_id,
+                        details={"reason": "enqueue_failed", "error": str(exc)[:200], "dispatch_job": dispatch_job})
+        return {"dispatched": False, "reason": "enqueue_failed", "error": str(exc)[:200]}
+
+    await log_audit(db, row.org_id, "routine_side_effect.dispatch.enqueued", "pending_action",
+                    user_id=decided_by, resource_id=action_id,
+                    details={"dispatch_job": dispatch_job, "routine_id": marker.get("routine_id"),
+                             "idempotency_key": marker.get("idempotency_key")})
+    return {"dispatched": True, "dispatch_job": dispatch_job}
+
+
 @router.post("/{action_id}/approve")
 async def approve_action(
     action_id: str,
@@ -129,7 +224,6 @@ async def approve_action(
     # Agent pack activation: deterministic apply after approval.
     try:
         from aios.api.agent_packs import apply_agent_pack_activation, ACTIVATE_TOOL, ROLLBACK_TOOL
-        from aios.core.audit import log_audit
         from sqlalchemy import select
 
         fresh = (
@@ -149,10 +243,15 @@ async def approve_action(
                                 user_id=user.id, resource_id=str(apply_result.get("activation_id") or action_id),
                                 details={"tool_name": tool, "action_id": action_id, "reason": apply_result.get("reason")})
             return {"status": "approved", "action_id": action_id, "apply": apply_result}
+        if fresh and tool == ROUTINE_SIDE_EFFECT_APPROVAL_TOOL:
+            dispatch = await _dispatch_routine_side_effect_approval(
+                db, row=fresh, action_id=action_id, decided_by=user.id
+            )
+            return {"status": "approved", "action_id": action_id, "dispatch": dispatch}
     except HTTPException:
         raise
     except Exception:
-        logger.exception("agent pack apply hook failed for %s", action_id)
+        logger.exception("approval post-hook failed for %s", action_id)
 
     return {"status": "approved", "action_id": action_id}
 

@@ -16,6 +16,12 @@ from sqlalchemy import select
 logger = logging.getLogger(__name__)
 
 ROUTINE_SIDE_EFFECT_APPROVAL_TOOL = "routine_side_effect_approve"
+ROUTINE_SIDE_EFFECT_DISPATCH_WHITELIST = {
+    "proactive_event_job",
+    "aios.tasks.jobs.proactive_event_job",
+    "workday_job",
+    "aios.tasks.jobs.workday_job",
+}
 
 
 class RoutineSideEffectBlocked(PermissionError):
@@ -84,6 +90,27 @@ def _marker_matches(
     return True
 
 
+def _normalize_dispatch_job(dispatch_job: str | None) -> str | None:
+    job = str(dispatch_job or "").strip()
+    if not job:
+        return None
+    if job not in ROUTINE_SIDE_EFFECT_DISPATCH_WHITELIST:
+        raise RoutineSideEffectBlocked(
+            f"routine side effect approval denied: dispatch_job not whitelisted: {job}"
+        )
+    return job.rsplit(".", 1)[-1]
+
+
+def _normalize_dispatch_payload(dispatch_payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if dispatch_payload is None:
+        return None
+    if not isinstance(dispatch_payload, dict):
+        raise RoutineSideEffectBlocked(
+            "routine side effect approval denied: dispatch_payload must be dict"
+        )
+    return dict(dispatch_payload)
+
+
 async def request_routine_side_effect_approval(
     db: Any,
     *,
@@ -97,6 +124,8 @@ async def request_routine_side_effect_approval(
     context_summary: str = "",
     requested_by: str | None = None,
     approval_fingerprint: str | None = None,
+    dispatch_job: str | None = None,
+    dispatch_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create or reuse explicit human-approval request for routine side effect.
 
@@ -117,6 +146,8 @@ async def request_routine_side_effect_approval(
         raise RoutineSideEffectBlocked("routine side effect approval unavailable") from exc
 
     effects = _normalize_side_effects(side_effects)
+    norm_dispatch_job = _normalize_dispatch_job(dispatch_job)
+    norm_dispatch_payload = _normalize_dispatch_payload(dispatch_payload)
     try:
         rows = (
             await db.execute(
@@ -163,6 +194,9 @@ async def request_routine_side_effect_approval(
         "source_type": str(source_type or "").strip(),
         "approved_fingerprint": approval_fingerprint,
     }
+    if norm_dispatch_job:
+        marker["dispatch_job"] = norm_dispatch_job
+        marker["dispatch_payload"] = norm_dispatch_payload or {}
     tool_args = {
         "_routine_approved_action": marker,
         "routine_id": rid,
@@ -170,6 +204,9 @@ async def request_routine_side_effect_approval(
         "idempotency_key": key,
         "side_effects": effects,
     }
+    if norm_dispatch_job:
+        tool_args["dispatch_job"] = norm_dispatch_job
+        tool_args["dispatch_payload"] = norm_dispatch_payload or {}
     if requested_by:
         tool_args["_requested_by"] = str(requested_by)
 
@@ -339,9 +376,4 @@ async def enforce_routine_side_effect(
     )
     raise RoutineSideEffectBlocked(
         f"routine side effect denied: DB approval evidence required for {routine_id}:{act}"
-    )
-
-    logger.info(
-        "routine side effect approved: routine=%s org=%s action=%s key=%s source=%s",
-        routine_id, org_id, act, key, source_type,
     )

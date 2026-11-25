@@ -64,7 +64,7 @@ def _sha256_json(data: Any) -> str:
 
 
 def _now_iso() -> str:
-    # Deterministic timestamp not possible from wall clock; use fixed export metadata format? 
+    # Deterministic timestamp not possible from wall clock; use fixed export metadata format?
     # Spec says created_at in bundle manifest; keep deterministic by using manifest provenance.created_at
     # fallback to fixed epoch-like stable value. No clock dependence for determinism.
     return "1970-01-01T00:00:00Z"
@@ -80,7 +80,7 @@ def _ensure_safe_output_dir(output_dir: str | Path) -> Path:
             raise AgentPackValidationError("output_dir must not be a symlink", field="output_dir")
         if not p.is_dir():
             raise AgentPackValidationError("output_dir must be a directory", field="output_dir")
-    # validate path parts - no traversal via .. 
+    # validate path parts - no traversal via ..
     for part in p.parts:
         if part == "..":
             raise AgentPackValidationError("output_dir contains path traversal", field="output_dir")
