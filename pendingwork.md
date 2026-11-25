@@ -634,3 +634,6 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - Verified: `git diff --check` clean; `py_compile` OK on both changed files.
 - NOT done (by design): commit/push/deploy — agents must not commit/push/deploy; changes left uncommitted in working tree.
 - Judgment call for human decision: denial now returns redirect `303` (fail-closed, matches cross-tenant no-leak contract) instead of surfacing `403`; member-reject denial also enforced symmetrically with approve.
+- Commit `d2774f3c5eb649947decf51f930ed9c9dda9e62d` (`bbebb6e..d2774f3 main -> main`); 3 files, `137 insertions(+)`, `10 deletions(-)`; graphify-out/ and handoff file excluded from commit.
+- Coolify AIOS deploy #826 `wprvo9cs78c5zvu5nr0huvbu` for `d2774f3` finished `2026-11-25T15:54:26Z`.
+- Post-deploy verification: `/health/live` 200 `{"status":"live"}`; `/health/ready` 200 all checks ok; homepage 200 size 97549 with 2 `aios_lang` hits and 2 `>ES<` hits; `/dashboard/login` 200 size 5329 with 1 `aios_lang` hit. No gate weakening, no fabricated approval.
