@@ -31,6 +31,7 @@ from .secrets import router as secrets_router
 from .eval import router as eval_router
 from .gdpr import router as gdpr_router
 from .automations import router as automations_router
+from .routines import router as routines_router
 from .knowledge import router as knowledge_router
 from .integrations import router as integrations_router
 from .dev import router as dev_router
@@ -49,6 +50,7 @@ from .innovation import router as innovation_router
 from .lia import router as lia_router
 from .slack import router as slack_router
 from .model_intelligence import router as models_router
+from .agent_packs import router as agent_packs_router
 
 api_router = APIRouter()
 api_router.include_router(whatsapp_router)
@@ -61,6 +63,7 @@ api_router.include_router(innovation_router)
 api_router.include_router(lia_router)
 api_router.include_router(slack_router)
 api_router.include_router(models_router)
+api_router.include_router(agent_packs_router)
 api_router.include_router(crm_router)
 api_router.include_router(voice_router)
 api_router.include_router(license_router)
@@ -70,6 +73,7 @@ api_router.include_router(security_router)
 api_router.include_router(integrations_router)
 api_router.include_router(knowledge_router)
 api_router.include_router(automations_router)
+api_router.include_router(routines_router)
 api_router.include_router(auth_router)
 api_router.include_router(agents_router)
 api_router.include_router(versions_router)

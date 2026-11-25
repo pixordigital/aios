@@ -567,6 +567,67 @@ async def test_proactive_event_job_skips_completion_for_failed_run(monkeypatch):
     assert published == []
 
 
+async def test_proactive_event_job_explicit_routine_policy_pending_then_approved(monkeypatch):
+    """Configured routine policy gates the run; a real human decision releases it."""
+    from sqlalchemy import select
+
+    from aios.core.approval import approval_manager
+    from aios.db.models import PendingAction
+    from aios.tasks.jobs import proactive_event_job
+
+    o = await _org("ev-job-routine-hitl")
+    agent = await _mk_agent(o, ["crm.*"])
+    ev = EventEnvelope(
+        "crm.stage_changed.won", o, {"deal_id": "d11"}, idempotency_key="evt-routine:d11"
+    )
+    payload = {
+        "event": ev.to_dict(),
+        "agent_id": agent,
+        "org_id": o,
+        "routine": {
+            "routine_id": "event_subscription:policy",
+            "side_effects": ["external_send"],
+            "approval_required": True,
+            "idempotency_key": "evt-routine-policy:d11",
+        },
+    }
+
+    class FakeAuto:
+        runtime = None
+
+        def __init__(self, a):
+            self.a = a
+
+        async def run(self, conv, msg, db=None):
+            return "done"
+
+    published = []
+
+    async def fake_publish(event_type, org_id, body, **kw):
+        published.append((event_type, org_id, body, kw))
+
+    monkeypatch.setattr("aios.core.autonomous_agent.AutonomousAgent", FakeAuto)
+    monkeypatch.setattr("aios.core.events.publish", fake_publish)
+
+    blocked = await proactive_event_job(None, payload)
+    assert blocked["blocked"] is True
+    assert blocked["approval_requested"] is True
+    assert blocked["approval"]["status"] == "pending"
+    assert published == []
+
+    async with async_session() as sess:
+        row = (
+            await sess.execute(
+                select(PendingAction).where(PendingAction.id == blocked["approval"]["approval_id"])
+            )
+        ).scalar_one()
+    assert await approval_manager.approve(row.id, decided_by="u-routine", org_id=o) is True
+
+    out = await proactive_event_job(None, payload)
+    assert out["ok"] is True
+    assert len(published) == 1
+
+
 def test_render_event_instruction_carries_type_and_payload():
     from aios.tasks.jobs import render_event_instruction
 

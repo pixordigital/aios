@@ -434,6 +434,57 @@ async def test_workday_job_ignores_sdr_and_support(test_session, monkeypatch):
     assert result["worked"] == 0
 
 
+async def test_workday_job_explicit_routine_policy_pending_then_approved(test_session, monkeypatch):
+    """Workday runs ungated until an explicit policy exists, then needs approval."""
+    from aios.core.approval import approval_manager
+    from aios.core.routine_enforcement import ROUTINE_SIDE_EFFECT_APPROVAL_TOOL
+    from aios.db.models import PendingAction
+    from aios.tasks import jobs as J
+
+    org = await _org("job-routine-hitl")
+    await _enable_workday(org)
+    closer = await _agent(
+        org,
+        "policy-closer",
+        workday_routine={"side_effects": ["external_send"], "approval_required": True},
+    )
+    await _deal(org, closer, lead_name="policy deal")
+
+    ran: list[str] = []
+
+    class _FakeAuto:
+        def __init__(self, agent):
+            self.agent = agent
+
+        async def run(self, conv, msg, db=None, emit=None):
+            ran.append(self.agent.id)
+            return "worked"
+
+    monkeypatch.setattr("aios.core.autonomous_agent.AutonomousAgent", _FakeAuto)
+    monkeypatch.setattr("aios.core.events.publish", _noop_publish)
+
+    blocked = await J.workday_job(None)
+    assert blocked["worked"] == 0
+    assert blocked["failed"] == 1
+    assert ran == []
+
+    async with async_session() as sess:
+        rows = (
+            await sess.execute(
+                select(PendingAction).where(
+                    PendingAction.org_id == org,
+                    PendingAction.tool_name == ROUTINE_SIDE_EFFECT_APPROVAL_TOOL,
+                )
+            )
+        ).scalars().all()
+    assert len(rows) == 1
+    assert await approval_manager.approve(rows[0].id, decided_by="u-workday", org_id=org) is True
+
+    result = await J.workday_job(None)
+    assert result["worked"] == 1
+    assert ran == [closer]
+
+
 # ─── the master switch ─────────────────────────────────────────────────────
 
 class TestOrgSwitch:

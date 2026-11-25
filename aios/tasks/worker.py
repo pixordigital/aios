@@ -21,6 +21,7 @@ from .jobs import (
     FUNCTIONS,
     event_consume_job,
     monthly_report_job,
+    night_shift_job,
     owner_escalation_job,
     template_status_reconcile_job,
     weekly_report_job,
@@ -272,6 +273,8 @@ class WorkerSettings:
         # 07:00, before the 08:00 sales sweep, so a rep works today's board on
         # freshly-staged data rather than yesterday's.
         cron(workday_job, hour=7, minute=0),
+        # 03:00 UTC nightly maintenance/reporting. Read-only; no customer mutation.
+        cron(night_shift_job, hour=3, minute=0),
         cron(owner_escalation_job, minute={0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55}),
         cron(weekly_standup_job, hour=9, minute=0),  # daily trigger, self-skips unless Monday
         cron(weekly_report_job, hour=9, minute=15),  # owner report + 1:1 agenda, Mondays

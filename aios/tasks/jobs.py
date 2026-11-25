@@ -4,6 +4,7 @@ Each top-level function is a job ARQ can execute.
 Registered in FUNCTIONS list for the worker to discover.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -760,12 +761,18 @@ async def proactive_event_job(ctx, payload: dict):
     becomes an instruction and the agent chooses what to do with it.
     """
     from aios.core.events import EventEnvelope, ev_type_matches, publish, subscriptions_for
+    from aios.core.routine_enforcement import (
+        RoutineSideEffectBlocked,
+        enforce_routine_side_effect,
+        routine_idempotency_key,
+    )
     from aios.db.engine import async_session as _sess
     from aios.db.models import Agent as AgentModel
 
     event = payload.get("event") or {}
     agent_id = payload.get("agent_id", "")
     org_id = payload.get("org_id", "")
+    routine_meta = payload.get("routine") if isinstance(payload.get("routine"), dict) else {}
     ev = EventEnvelope.from_dict(event)
 
     try:
@@ -784,6 +791,77 @@ async def proactive_event_job(ctx, payload: dict):
                     "proactive_event_job: %s no longer subscribes to %s", agent_id, ev.event_type
                 )
                 return {"skipped": "unsubscribed"}
+
+            routine_id = str(
+                routine_meta.get("routine_id")
+                or f"event_subscription:{agent_id}:{ev.event_type}"
+            )
+            action = "proactive_event_dispatch"
+            idem = str(
+                routine_meta.get("idempotency_key")
+                or routine_idempotency_key(routine_id, action, ev.idempotency_key or ev.event_id)
+            )
+            # Only an explicitly configured routine policy may add a
+            # routine-level gate. The agent runtime already HITL-gates tools;
+            # inventing a deny-all policy here would block every event with no
+            # approval to find.
+            if routine_meta:
+                side_effects = routine_meta.get("side_effects") or []
+                approval_required = bool(routine_meta.get("approval_required", True))
+                approved = bool(routine_meta.get("approved", False))
+                approval_fingerprint = routine_meta.get("approval_fingerprint")
+                effects = list(side_effects) if isinstance(side_effects, list) else [str(side_effects)]
+                routine = type(
+                    "Routine",
+                    (),
+                    {
+                        "routine_id": routine_id,
+                        "org_id": org_id,
+                        "source_type": str(routine_meta.get("source_type") or "event_subscription"),
+                        "mode": str(routine_meta.get("mode") or "reactive"),
+                    },
+                )()
+                try:
+                    await enforce_routine_side_effect(
+                        db=sess,
+                        routine=routine,
+                        action=action,
+                        side_effects=effects,
+                        approval_required=approval_required,
+                        idempotency_key=idem,
+                        approved=approved,
+                        approval_fingerprint=str(approval_fingerprint) if approval_fingerprint else None,
+                    )
+                except RoutineSideEffectBlocked as exc:
+                    logger.warning("proactive_event_job blocked: %s", exc)
+                    approval = None
+                    try:
+                        from aios.core.routine_enforcement import request_routine_side_effect_approval
+
+                        approval = await request_routine_side_effect_approval(
+                            sess,
+                            org_id=org_id,
+                            routine_id=routine_id,
+                            action=action,
+                            idempotency_key=idem,
+                            side_effects=effects,
+                            mode=str(routine_meta.get("mode") or "reactive"),
+                            source_type=str(routine_meta.get("source_type") or "event_subscription"),
+                            context_summary=f"Proactive event {ev.event_type} agent={agent_id}",
+                            requested_by=None,
+                            approval_fingerprint=str(approval_fingerprint) if approval_fingerprint else None,
+                        )
+                    except Exception:
+                        logger.debug("proactive_event_job: approval request failed", exc_info=True)
+                    return {
+                        "blocked": True,
+                        "routine_id": routine_id,
+                        "action": action,
+                        "idempotency_key": idem,
+                        "reason": str(exc),
+                        "approval_requested": bool(approval),
+                        "approval": approval,
+                    }
 
             instruction = render_event_instruction(ev)
             gov = agent.governance_config or {}
@@ -917,6 +995,76 @@ async def workday_job(ctx):
                 if not instruction:
                     empty += 1
                     continue
+
+                from aios.core.routine_enforcement import (
+                    RoutineSideEffectBlocked,
+                    enforce_routine_side_effect,
+                    routine_idempotency_key,
+                )
+
+                routine_id = f"workday:{fresh.id}"
+                action = "workday_board_dispatch"
+                idem = routine_idempotency_key(routine_id, action, board["date"])
+                routine = type(
+                    "Routine",
+                    (),
+                    {
+                        "routine_id": routine_id,
+                        "org_id": fresh.org_id,
+                        "source_type": "workday",
+                        "mode": "proactive",
+                    },
+                )()
+                routine_policy = (fresh.extra_data or {}).get("workday_routine") or {}
+                # No configured policy means no routine-level gate; tool-level
+                # HITL remains authoritative for actual side effects.
+                if isinstance(routine_policy, dict) and routine_policy:
+                    side_effects = routine_policy.get("side_effects") or []
+                    effects = list(side_effects) if isinstance(side_effects, list) else [str(side_effects)]
+                    try:
+                        await enforce_routine_side_effect(
+                            db=db,
+                            routine=routine,
+                            action=action,
+                            side_effects=effects,
+                            approval_required=bool(routine_policy.get("approval_required", True)),
+                            idempotency_key=idem,
+                            approved=bool(routine_policy.get("approved", False)),
+                            approval_fingerprint=(
+                                str(routine_policy.get("approval_fingerprint"))
+                                if routine_policy.get("approval_fingerprint")
+                                else None
+                            ),
+                        )
+                    except RoutineSideEffectBlocked as exc:
+                        logger.warning("workday blocked for agent %s: %s", fresh.id, exc)
+                        try:
+                            from aios.core.routine_enforcement import request_routine_side_effect_approval
+
+                            await request_routine_side_effect_approval(
+                                db,
+                                org_id=fresh.org_id,
+                                routine_id=routine_id,
+                                action=action,
+                                idempotency_key=idem,
+                                side_effects=effects,
+                                mode="proactive",
+                                source_type="workday",
+                                context_summary=f"Workday dispatch agent={fresh.id} date={board['date']}",
+                                requested_by=None,
+                                approval_fingerprint=(
+                                    str(routine_policy.get("approval_fingerprint"))
+                                    if routine_policy.get("approval_fingerprint")
+                                    else None
+                                ),
+                            )
+                        except Exception:
+                            logger.debug("workday: approval request failed", exc_info=True)
+                        failed += 1
+                        _stats = by_org.setdefault(fresh.org_id, {"worked": 0, "failed": 0, "failures": []})
+                        _stats["failed"] += 1
+                        _stats["failures"].append((fresh.name or fresh.id, str(exc)))
+                        continue
 
                 gov = fresh.governance_config or {}
                 is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
@@ -1554,6 +1702,556 @@ async def monthly_report_job(ctx):
     )
 
 
+# ─── Night shift (read-only maintenance/reporting) ─────────────────────────
+
+_NIGHT_SHIFT_SUBJOBS = (
+    "security_scan",
+    "stale_sweep",
+    "integration_check",
+    "memory_consolidation_report",
+    "morning_digest",
+)
+
+
+def _ns_utcnow():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc)
+
+
+def _ns_iso(dt):
+    if dt is None:
+        return None
+    if getattr(dt, "tzinfo", None) is None:
+        from datetime import timezone
+
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+async def _ns_audit(db, org_id: str, action: str, details: dict, resource_id: str | None = None):
+    """Best-effort audit: AuditLog row + audit_sink append. Never raises."""
+    try:
+        from aios.core.audit import log_audit
+
+        await log_audit(
+            db, org_id, action, "night_shift", resource_id=resource_id, details=details
+        )
+    except Exception:
+        logger.warning("night_shift audit failed action=%s org=%s", action, org_id, exc_info=True)
+    try:
+        from aios.core.audit_sink import append
+
+        append(org_id, action, {"resource_type": "night_shift", "resource_id": resource_id, **details})
+    except Exception:
+        logger.debug("night_shift audit_sink failed action=%s", action, exc_info=True)
+
+
+async def _ns_security_event(db, org_id: str, event_type: str, payload: dict, severity: str = "medium"):
+    """Best-effort SecurityEvent only for real findings."""
+    try:
+        from aios.governance.security import record_security_event
+
+        await record_security_event(
+            db,
+            org_id=org_id,
+            source="night_shift",
+            event_type=event_type,
+            severity=severity,
+            payload=payload,
+        )
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+    except Exception:
+        logger.debug("night_shift security event failed type=%s", event_type, exc_info=True)
+
+
+async def _ns_claimed(db, org_id: str, date_str: str) -> bool:
+    """Idempotency claim: night_shift:{org_id}:{date}. Returns True if already claimed."""
+    from sqlalchemy import select
+    from aios.db.models import IntegrationEvent
+
+    key = f"night_shift:{org_id}:{date_str}"
+    try:
+        existing = (await db.execute(
+            select(IntegrationEvent.idempotency_key).where(IntegrationEvent.idempotency_key == key)
+        )).first()
+        if existing:
+            return True
+        from datetime import timedelta
+
+        now = _ns_utcnow().replace(tzinfo=None)
+        db.add(IntegrationEvent(
+            idempotency_key=key,
+            peer="night_shift",
+            type="night_shift.run",
+            payload={"org_id": org_id, "date": date_str},
+            response={"status": "started"},
+            expires_at=now + timedelta(days=30),
+        ))
+        await db.commit()
+        return False
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        # Race or DB error: treat as claimed/unknown to avoid double-run.
+        logger.warning("night_shift idempotency claim failed org=%s date=%s", org_id, date_str, exc_info=True)
+        return True
+
+
+async def _ns_mark_complete(db, org_id: str, date_str: str, summary: dict):
+    from sqlalchemy import select
+    from aios.db.models import IntegrationEvent
+
+    key = f"night_shift:{org_id}:{date_str}"
+    try:
+        row = (await db.execute(
+            select(IntegrationEvent).where(IntegrationEvent.idempotency_key == key)
+        )).scalar_one_or_none()
+        if row:
+            row.response = {"status": "completed", "summary": summary}
+            await db.commit()
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.debug("night_shift mark complete failed org=%s", org_id, exc_info=True)
+
+
+async def _night_shift_security_scan(db, org_id: str, since, now):
+    from sqlalchemy import func, select
+    from aios.db.models import AuditLog
+    from aios.governance.security import SecurityEvent, SecurityIncident
+
+    summary = {
+        "status": "ok",
+        "window_hours": 24,
+        "counts": {},
+        "anomalies": [],
+        "unknown": [],
+    }
+    try:
+        sec_events = (await db.execute(
+            select(SecurityEvent.event_type, func.count(SecurityEvent.id))
+            .where(SecurityEvent.org_id == org_id, SecurityEvent.created_at >= since)
+            .group_by(SecurityEvent.event_type)
+        )).all()
+        summary["counts"]["security_events"] = {str(k): int(v) for k, v in sec_events}
+        total_sec = sum(int(v) for _, v in sec_events)
+        summary["counts"]["security_events_total"] = total_sec
+
+        open_incidents = (await db.execute(
+            select(SecurityIncident.severity, func.count(SecurityIncident.id))
+            .where(SecurityIncident.org_id == org_id, SecurityIncident.status != "closed")
+            .group_by(SecurityIncident.severity)
+        )).all()
+        summary["counts"]["open_incidents"] = {str(k): int(v) for k, v in open_incidents}
+
+        auth_fail = sum(int(v) for k, v in sec_events if str(k) in {"security.auth.failure", "auth_failure"})
+        cross_tenant = sum(int(v) for k, v in sec_events if "cross_tenant" in str(k))
+        denied = sum(int(v) for k, v in sec_events if str(k) == "security.response.denied")
+        if auth_fail:
+            summary["anomalies"].append({"type": "auth_failures", "count": auth_fail, "severity": "medium"})
+        if cross_tenant:
+            summary["anomalies"].append({"type": "cross_tenant_blocks", "count": cross_tenant, "severity": "high"})
+        if denied:
+            summary["anomalies"].append({"type": "response_denied", "count": denied, "severity": "medium"})
+        critical_open = sum(int(v) for k, v in open_incidents if str(k) == "critical")
+        if critical_open:
+            summary["anomalies"].append({"type": "critical_incidents_open", "count": critical_open, "severity": "critical"})
+
+        # Vuln status unknown unless deterministic telemetry exists.
+        vuln_events = sum(int(v) for k, v in sec_events if "vuln" in str(k))
+        if vuln_events == 0:
+            summary["unknown"].append("vulnerability_status:no_vuln_telemetry_24h")
+
+        # Real findings -> SecurityEvent
+        for a in summary["anomalies"]:
+            await _ns_security_event(
+                db, org_id,
+                f"night_shift.finding.{a['type']}",
+                {"count": a["count"], "window_hours": 24},
+                severity=str(a.get("severity") or "medium"),
+            )
+    except Exception as exc:
+        summary["status"] = "failed"
+        summary["error"] = str(exc)[:300]
+        raise
+    return summary
+
+
+async def _night_shift_stale_sweep(db, org_id: str, since, now):
+    from datetime import timedelta
+
+    from sqlalchemy import select
+    from aios.core.signals import OPEN_STAGES
+    from aios.db.models import CrmDeal
+    from aios.governance.ocp import SharedTask
+
+    stale_cutoff = now - timedelta(days=7)
+    summary = {"status": "ok", "stale_deals": [], "stale_tasks": [], "counts": {}}
+    try:
+        deals = (await db.execute(
+            select(CrmDeal).where(
+                CrmDeal.org_id == org_id,
+                CrmDeal.stage.in_(OPEN_STAGES),
+            )
+        )).scalars().all()
+        for d in deals:
+            reasons = []
+            due = _ns_iso((d.extra_data or {}).get("next_follow_up"))
+            raw_due = (d.extra_data or {}).get("next_follow_up")
+            overdue = False
+            if raw_due:
+                try:
+                    from datetime import datetime, timezone
+
+                    dd = datetime.fromisoformat(str(raw_due))
+                    if dd.tzinfo is None:
+                        dd = dd.replace(tzinfo=timezone.utc)
+                    overdue = dd <= now
+                except Exception:
+                    overdue = False
+            if overdue:
+                reasons.append("follow_up_overdue")
+            if not raw_due:
+                reasons.append("missing_next_follow_up")
+            upd = d.updated_at
+            if upd is not None:
+                if getattr(upd, "tzinfo", None) is None:
+                    from datetime import timezone
+
+                    upd = upd.replace(tzinfo=timezone.utc)
+                if upd <= stale_cutoff:
+                    reasons.append("stale_updated_at")
+            if reasons:
+                summary["stale_deals"].append({
+                    "deal_id": d.id,
+                    "stage": d.stage,
+                    "lead": d.lead_name or d.lead_email or d.lead_phone or d.id,
+                    "reasons": sorted(set(reasons)),
+                    "updated_at": _ns_iso(d.updated_at),
+                    "next_follow_up": str(raw_due) if raw_due else None,
+                })
+
+        tasks = (await db.execute(
+            select(SharedTask).where(
+                SharedTask.org_id == org_id,
+                SharedTask.status.not_in(("completed", "cancelled")),
+            )
+        )).scalars().all()
+        for t in tasks:
+            reasons = []
+            due = t.deadline
+            if due is not None:
+                if getattr(due, "tzinfo", None) is None:
+                    from datetime import timezone
+
+                    due = due.replace(tzinfo=timezone.utc)
+                if due <= now:
+                    reasons.append("deadline_overdue")
+            upd = t.updated_at
+            if upd is not None:
+                if getattr(upd, "tzinfo", None) is None:
+                    from datetime import timezone
+
+                    upd = upd.replace(tzinfo=timezone.utc)
+                if upd <= stale_cutoff:
+                    reasons.append("stale_updated_at")
+            if reasons:
+                summary["stale_tasks"].append({
+                    "task_id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "reasons": sorted(set(reasons)),
+                    "deadline": _ns_iso(t.deadline),
+                    "updated_at": _ns_iso(t.updated_at),
+                })
+
+        summary["counts"] = {
+            "stale_deals": len(summary["stale_deals"]),
+            "stale_tasks": len(summary["stale_tasks"]),
+        }
+    except Exception as exc:
+        summary["status"] = "failed"
+        summary["error"] = str(exc)[:300]
+        raise
+    return summary
+
+
+async def _night_shift_integration_check(db, org_id: str, since, now):
+    from datetime import timedelta
+
+    from sqlalchemy import func, select
+    from aios.db.models import ChannelConnection, IntegrationOutbox
+
+    summary = {"status": "ok", "counts": {}, "issues": [], "unknown": []}
+    try:
+        # Explicitly no flush_outbox call. Read-only.
+        stale_outbox = now.replace(tzinfo=None) - timedelta(hours=1)
+        outbox_rows = (await db.execute(
+            select(IntegrationOutbox.status, func.count(IntegrationOutbox.id))
+            .where(IntegrationOutbox.peer.in_(["arvo", "night_shift"]) | (IntegrationOutbox.peer != None))  # noqa: E711
+            .group_by(IntegrationOutbox.status)
+        )).all()
+        # Outbox is not org-scoped in model; report global counts as unknown-scope if any.
+        summary["counts"]["outbox_by_status"] = {str(k): int(v) for k, v in outbox_rows}
+        if outbox_rows:
+            summary["unknown"].append("integration_outbox:not_org_scoped")
+
+        stale_processing = (await db.execute(
+            select(func.count(IntegrationOutbox.id)).where(
+                IntegrationOutbox.status == "processing",
+                IntegrationOutbox.updated_at <= stale_outbox,
+            )
+        )).scalar() or 0
+        failed = sum(int(v) for k, v in outbox_rows if str(k) == "failed")
+        pending = sum(int(v) for k, v in outbox_rows if str(k) in {"pending", "processing"})
+        summary["counts"]["outbox_stale_processing"] = int(stale_processing)
+        if int(stale_processing):
+            summary["issues"].append({"type": "outbox_stale_processing", "count": int(stale_processing)})
+        if failed:
+            summary["issues"].append({"type": "outbox_failed_exhausted", "count": int(failed)})
+
+        channels = (await db.execute(
+            select(ChannelConnection).where(ChannelConnection.org_id == org_id)
+        )).scalars().all()
+        inactive = []
+        for c in channels:
+            if not c.is_active:
+                inactive.append({"id": c.id, "type": c.channel_type, "label": c.label or ""})
+        summary["counts"]["channels_total"] = len(channels)
+        summary["counts"]["channels_inactive"] = len(inactive)
+        if inactive:
+            summary["issues"].append({"type": "channels_inactive", "count": len(inactive), "items": inactive[:20]})
+    except Exception as exc:
+        summary["status"] = "failed"
+        summary["error"] = str(exc)[:300]
+        raise
+    return summary
+
+
+async def _night_shift_memory_consolidation_report(db, org_id: str, since, now):
+    from sqlalchemy import func, select
+    from aios.db.models import AgentLearning, AgentReflection, Skill
+
+    summary = {"status": "ok", "counts": {}, "gaps": []}
+    try:
+        # Read-only report. No consolidation rerun.
+        learnings_24h = (await db.execute(
+            select(func.count(AgentLearning.id)).where(
+                AgentLearning.org_id == org_id, AgentLearning.created_at >= since.replace(tzinfo=None)
+            )
+        )).scalar() or 0
+        reflections_24h = (await db.execute(
+            select(func.count(AgentReflection.id)).where(
+                AgentReflection.org_id == org_id, AgentReflection.created_at >= since.replace(tzinfo=None)
+            )
+        )).scalar() or 0
+        skills_total = (await db.execute(
+            select(func.count(Skill.id)).where(Skill.org_id == org_id)
+        )).scalar() or 0
+        skills_draft = (await db.execute(
+            select(func.count(Skill.id)).where(Skill.org_id == org_id, Skill.status == "draft")
+        )).scalar() or 0
+        summary["counts"] = {
+            "learnings_24h": int(learnings_24h),
+            "reflections_24h": int(reflections_24h),
+            "skills_total": int(skills_total),
+            "skills_draft": int(skills_draft),
+        }
+        if int(learnings_24h) == 0:
+            summary["gaps"].append("no_learnings_24h")
+        if int(reflections_24h) == 0:
+            summary["gaps"].append("no_reflections_24h")
+        if int(skills_draft) > 0:
+            summary["gaps"].append("draft_skills_pending_review")
+    except Exception as exc:
+        summary["status"] = "failed"
+        summary["error"] = str(exc)[:300]
+        raise
+    return summary
+
+
+async def _night_shift_morning_digest(org_id: str, date_str: str, results: dict, failures: list):
+    """Owner-only digest. Returns {sent, targets, text, reason}."""
+    from aios.core.meetings import human_slack_targets, post_to_slack
+
+    targets = await human_slack_targets(org_id, team_id="")
+    lines = [f"*Night shift* — {date_str}"]
+    if failures:
+        lines.append(f":rotating_light: *{len(failures)} subjob(s) failed*")
+        for name, err in failures[:10]:
+            lines.append(f"• `{name}`: {str(err)[:140]}")
+    else:
+        lines.append("✅ Sem falhas de subjob")
+
+    sec = results.get("security_scan") or {}
+    stale = results.get("stale_sweep") or {}
+    integ = results.get("integration_check") or {}
+    mem = results.get("memory_consolidation_report") or {}
+    lines.append("")
+    lines.append("*Security*")
+    lines.append(f"• events_24h={sec.get('counts',{}).get('security_events_total','unknown')} anomalies={len(sec.get('anomalies',[]))} unknown={len(sec.get('unknown',[]))}")
+    for a in (sec.get("anomalies") or [])[:5]:
+        lines.append(f"  - {a.get('type')}: {a.get('count')}")
+    for u in (sec.get("unknown") or [])[:3]:
+        lines.append(f"  - unknown: {u}")
+    lines.append("*Stale sweep (no mutation)*")
+    lines.append(f"• deals={stale.get('counts',{}).get('stale_deals','unknown')} tasks={stale.get('counts',{}).get('stale_tasks','unknown')}")
+    lines.append("*Integrations (no mutation/flush)*")
+    lines.append(f"• issues={len(integ.get('issues',[]))} inactive_channels={integ.get('counts',{}).get('channels_inactive','unknown')}")
+    lines.append("*Memory report (no rerun)*")
+    mc = mem.get("counts", {})
+    lines.append(f"• learnings_24h={mc.get('learnings_24h','unknown')} reflections_24h={mc.get('reflections_24h','unknown')} skills_draft={mc.get('skills_draft','unknown')}")
+    lines.append("")
+    lines.append("_Read-only report. HITL required for any remediation._")
+
+    text = "\n".join(lines)
+    if not targets:
+        return {"sent": 0, "targets": 0, "text": text, "reason": "no_owner_slack_dm"}
+    sent = 0
+    for t in targets:
+        try:
+            if await asyncio.to_thread(post_to_slack, t["token"], t["channel"], text):
+                sent += 1
+        except Exception:
+            logger.warning("night_shift digest post failed org=%s channel=%s", org_id, t.get("channel"), exc_info=True)
+    return {"sent": sent, "targets": len(targets), "text": text, "reason": None if sent else "post_failed"}
+
+
+async def night_shift_job(ctx):
+    """03:00 UTC read-only maintenance/reporting per org.
+
+    Subjobs: security scan, stale sweep, integration check, memory consolidation report,
+    morning digest. Failures isolated. No customer/deal/task/integration mutation.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from aios.db.backend import db_session
+    from aios.db.models import Organization
+
+    now = _ns_utcnow()
+    since = now - timedelta(hours=24)
+    date_str = now.date().isoformat()
+    org_reports = []
+    totals = {"orgs": 0, "processed": 0, "skipped_idempotent": 0, "subjob_failures": 0}
+
+    async with db_session() as db:
+        orgs = (await db.execute(
+            select(Organization).where(Organization.is_active == True)  # noqa: E712
+        )).scalars().all()
+    totals["orgs"] = len(orgs)
+
+    for org in orgs:
+        org_id = org.id
+        org_result = {
+            "org_id": org_id,
+            "date": date_str,
+            "status": "ok",
+            "subjobs": {},
+            "failures": [],
+            "digest": None,
+        }
+        try:
+            async with db_session() as db:
+                if await _ns_claimed(db, org_id, date_str):
+                    totals["skipped_idempotent"] += 1
+                    org_result["status"] = "skipped_idempotent"
+                    org_reports.append(org_result)
+                    continue
+        except Exception as exc:
+            totals["subjob_failures"] += 1
+            org_result["status"] = "failed"
+            org_result["failures"].append(["idempotency", str(exc)[:300]])
+            org_reports.append(org_result)
+            continue
+
+        for subjob in _NIGHT_SHIFT_SUBJOBS:
+            if subjob == "morning_digest":
+                continue
+            async with db_session() as db:
+                await _ns_audit(db, org_id, f"night_shift.{subjob}.start", {"date": date_str, "subjob": subjob}, resource_id=date_str)
+            try:
+                async with db_session() as db:
+                    if subjob == "security_scan":
+                        res = await _night_shift_security_scan(db, org_id, since, now)
+                    elif subjob == "stale_sweep":
+                        res = await _night_shift_stale_sweep(db, org_id, since, now)
+                    elif subjob == "integration_check":
+                        res = await _night_shift_integration_check(db, org_id, since, now)
+                    elif subjob == "memory_consolidation_report":
+                        res = await _night_shift_memory_consolidation_report(db, org_id, since, now)
+                    else:
+                        res = {"status": "skipped", "reason": "unknown_subjob"}
+                    await db.commit()
+                org_result["subjobs"][subjob] = res
+                async with db_session() as db:
+                    await _ns_audit(db, org_id, f"night_shift.{subjob}.complete", {"date": date_str, "subjob": subjob, "status": res.get("status")}, resource_id=date_str)
+            except Exception as exc:
+                err = str(exc)[:300]
+                logger.exception("night_shift subjob failed org=%s subjob=%s", org_id, subjob)
+                org_result["subjobs"][subjob] = {"status": "failed", "error": err}
+                org_result["failures"].append([subjob, err])
+                totals["subjob_failures"] += 1
+                async with db_session() as db:
+                    await _ns_audit(db, org_id, f"night_shift.{subjob}.failed", {"date": date_str, "subjob": subjob, "error": err}, resource_id=date_str)
+                try:
+                    from aios.core.dead_letter import write_dlq
+
+                    await write_dlq(
+                        direction="outbound",
+                        channel_type="night_shift",
+                        job_name="aios.tasks.jobs.night_shift_job",
+                        payload={"org_id": org_id, "date": date_str, "subjob": subjob},
+                        error=f"night_shift.{subjob}: {err}",
+                        org_id=org_id,
+                    )
+                except Exception:
+                    logger.debug("night_shift DLQ write failed org=%s subjob=%s", org_id, subjob, exc_info=True)
+
+        # Digest after subjobs; digest failure isolated.
+        digest_res = None
+        async with db_session() as db:
+            await _ns_audit(db, org_id, "night_shift.morning_digest.start", {"date": date_str, "subjob": "morning_digest"}, resource_id=date_str)
+        try:
+            digest_res = await _night_shift_morning_digest(org_id, date_str, org_result["subjobs"], org_result["failures"])
+            org_result["digest"] = digest_res
+            if digest_res.get("reason") == "no_owner_slack_dm":
+                async with db_session() as db:
+                    await _ns_audit(db, org_id, "night_shift.morning_digest.no_target", {"date": date_str, "reason": "no_owner_slack_dm"}, resource_id=date_str)
+            async with db_session() as db:
+                await _ns_audit(db, org_id, "night_shift.morning_digest.complete", {"date": date_str, "subjob": "morning_digest", "sent": digest_res.get("sent"), "targets": digest_res.get("targets")}, resource_id=date_str)
+        except Exception as exc:
+            err = str(exc)[:300]
+            logger.exception("night_shift digest failed org=%s", org_id)
+            org_result["digest"] = {"sent": 0, "targets": 0, "reason": "digest_failed", "error": err}
+            org_result["failures"].append(["morning_digest", err])
+            totals["subjob_failures"] += 1
+            async with db_session() as db:
+                await _ns_audit(db, org_id, "night_shift.morning_digest.failed", {"date": date_str, "subjob": "morning_digest", "error": err}, resource_id=date_str)
+
+        org_result["status"] = "ok" if not org_result["failures"] else "completed_with_failures"
+        async with db_session() as db:
+            await _ns_mark_complete(db, org_id, date_str, {
+                "status": org_result["status"],
+                "failures": org_result["failures"],
+                "subjobs": {k: {"status": v.get("status"), "counts": v.get("counts")} for k, v in org_result["subjobs"].items()},
+            })
+        totals["processed"] += 1
+        org_reports.append(org_result)
+
+    logger.info("night_shift: %s", totals)
+    return {"date": date_str, "totals": totals, "orgs": org_reports}
+
+
 # ARQ worker function registry
 async def verify_fleet_job(ctx, payload: dict):
     """Verify every active agent of an org in the background.
@@ -1624,9 +2322,11 @@ FUNCTIONS = [
     event_consume_job,
     proactive_event_job,
     workday_job,
+    night_shift_job,
     owner_escalation_job,
     verify_fleet_job,
 ]
+
 
 
 async def template_status_reconcile_job(ctx, payload: dict | None = None):

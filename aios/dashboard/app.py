@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
@@ -1539,6 +1540,164 @@ async def _recent_activity(db, org_id: str, minutes: int = 30) -> dict[str, str]
         return {}
 
 
+def _empty_ops() -> dict:
+    return {
+        "pending_approvals": {"total": 0, "by_agent": {}, "by_team": {}},
+        "routines": [],
+        "routine_badges": {"by_agent": {}, "by_team": {}},
+        "failed_night_jobs": {"total": 0, "recent": []},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _routine_badge(routine, now: datetime) -> str:
+    last_status = str(getattr(routine, "last_status", "") or "").lower()
+    enabled = bool(getattr(routine, "enabled", False))
+    mode = str(getattr(routine, "mode", "") or "").lower()
+    next_run_at = getattr(routine, "next_run_at", None)
+    if next_run_at is not None and next_run_at.tzinfo is None:
+        next_run_at = next_run_at.replace(tzinfo=timezone.utc)
+    if last_status == "failed":
+        return "failed"
+    if last_status == "running":
+        return "running"
+    if enabled and next_run_at is not None and next_run_at < now - timedelta(minutes=15):
+        return "stale"
+    if not enabled:
+        return "disabled"
+    if mode in {"reactive", "hybrid"}:
+        return "reactive"
+    return "ok"
+
+
+def _merge_routine_badge(current: str | None, incoming: str) -> str:
+    order = ["failed", "running", "stale", "reactive", "ok", "disabled"]
+    if current is None:
+        return incoming
+    return current if order.index(current) <= order.index(incoming) else incoming
+
+
+def _routine_is_failed_night(routine) -> bool:
+    last_status = str(getattr(routine, "last_status", "") or "").lower()
+    if last_status != "failed":
+        return False
+    hay = " ".join([
+        str(getattr(routine, "source_type", "") or ""),
+        str(getattr(routine, "job_name", "") or ""),
+        str(getattr(routine, "name", "") or ""),
+        str(getattr(routine, "routine_id", "") or ""),
+    ]).lower()
+    return any(token in hay for token in ("night", "fixed", "maintenance", "backup", "cron", "tick"))
+
+
+def _project_routine(routine) -> dict:
+    def _iso(dt):
+        if dt is None:
+            return None
+        if getattr(dt, "tzinfo", None) is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
+    return {
+        "routine_id": getattr(routine, "routine_id", None),
+        "name": getattr(routine, "name", None),
+        "source_type": getattr(routine, "source_type", None),
+        "enabled": bool(getattr(routine, "enabled", False)),
+        "mode": getattr(routine, "mode", None),
+        "last_status": getattr(routine, "last_status", None),
+        "last_run_at": _iso(getattr(routine, "last_run_at", None)),
+        "next_run_at": _iso(getattr(routine, "next_run_at", None)),
+        "job_name": getattr(routine, "job_name", None),
+        "agent_id": getattr(routine, "agent_id", None),
+        "team_id": getattr(routine, "team_id", None),
+    }
+
+
+def _build_teams_map_ops(*, teams, pending_rows, routines, now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    ops = _empty_ops()
+    ops["generated_at"] = now.isoformat()
+
+    agent_to_teams: dict[str, list[str]] = {}
+    for team in teams or []:
+        tid = str(getattr(team, "id", ""))
+        for member in getattr(team, "agents", None) or []:
+            aid = str(getattr(member, "id", ""))
+            if aid:
+                agent_to_teams.setdefault(aid, []).append(tid)
+
+    by_agent: dict[str, int] = {}
+    by_team: dict[str, int] = {}
+    total = 0
+    for row in pending_rows or []:
+        total += 1
+        aid = str(getattr(row, "agent_id", "") or "")
+        if not aid:
+            continue
+        by_agent[aid] = by_agent.get(aid, 0) + 1
+        for tid in agent_to_teams.get(aid, []):
+            by_team[tid] = by_team.get(tid, 0) + 1
+    ops["pending_approvals"] = {"total": total, "by_agent": by_agent, "by_team": by_team}
+
+    routines = list(routines or [])
+    routines.sort(key=lambda r: (
+        str(getattr(r, "last_status", "") or "") != "failed",
+        str(getattr(r, "name", "") or "").lower(),
+        str(getattr(r, "routine_id", "") or ""),
+    ))
+    ops["routines"] = [_project_routine(r) for r in routines[:60]]
+
+    badges_agent: dict[str, str] = {}
+    badges_team: dict[str, str] = {}
+    for routine in routines:
+        badge = _routine_badge(routine, now)
+        aid = str(getattr(routine, "agent_id", "") or "")
+        tid = str(getattr(routine, "team_id", "") or "")
+        if aid:
+            badges_agent[aid] = _merge_routine_badge(badges_agent.get(aid), badge)
+            for mapped_tid in agent_to_teams.get(aid, []):
+                badges_team[mapped_tid] = _merge_routine_badge(badges_team.get(mapped_tid), badge)
+        if tid:
+            badges_team[tid] = _merge_routine_badge(badges_team.get(tid), badge)
+    ops["routine_badges"] = {"by_agent": badges_agent, "by_team": badges_team}
+
+    failed_night = [r for r in routines if _routine_is_failed_night(r)]
+    ops["failed_night_jobs"] = {
+        "total": len(failed_night),
+        "recent": [_project_routine(r) for r in failed_night[:10]],
+    }
+    return ops
+
+
+async def _teams_map_ops(db, org_id: str, teams) -> dict:
+    now = datetime.now(timezone.utc)
+    pending_rows = []
+    routines = []
+    try:
+        from aios.db.models import PendingAction
+
+        pending_rows = (await db.execute(
+            select(PendingAction.agent_id)
+            .where(PendingAction.org_id == org_id, PendingAction.status == "pending")
+        )).all()
+        pending_rows = [types.SimpleNamespace(agent_id=row[0]) for row in pending_rows]
+    except Exception:
+        logger.debug("teams map pending approvals failed", exc_info=True)
+        pending_rows = []
+    try:
+        from aios.core.routines import list_routines
+
+        routines = await list_routines(db, org_id, include_disabled=True)
+    except Exception:
+        logger.debug("teams map routines failed", exc_info=True)
+        routines = []
+    try:
+        return _build_teams_map_ops(teams=teams, pending_rows=pending_rows, routines=routines, now=now)
+    except Exception:
+        logger.debug("teams map ops build failed", exc_info=True)
+        return _empty_ops()
+
+
 @router.get("/teams/map/data")
 async def team_map_data(request: Request):
     """Live payload for the map canvas: structure + recent activity.
@@ -1554,7 +1713,8 @@ async def team_map_data(request: Request):
         )).scalars().all()
         agents = (await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))).scalars().all()
         activity = await _recent_activity(db, org_id)
-    return {"ok": True, "graph": _team_graph(teams, agents), "activity": activity}
+        ops = await _teams_map_ops(db, org_id, teams)
+    return {"ok": True, "graph": _team_graph(teams, agents), "activity": activity, "ops": ops}
 
 
 @router.get("/teams", response_class=HTMLResponse)
@@ -3531,6 +3691,59 @@ async def automations_cred_delete(request: Request, cid: str):
             await db.commit()
     return RedirectResponse("/dashboard/automations", status_code=303)
 
+# ─── Routines (read-only normalized view) ───
+
+@router.get("/routines", response_class=HTMLResponse)
+async def routines_list(request: Request, source_type: str = "", mode: str = "", agent_id: str = "", q: str = "", enabled: str = ""):
+    org_id = await _org_filter(request)
+    from aios.core.routines import list_routines
+
+    async with db_session() as db:
+        rows = await list_routines(
+            db,
+            org_id,
+            agent_id=agent_id or None,
+            source_type=source_type or None,
+            mode=mode or None,
+            include_disabled=True,
+        )
+    if enabled == "enabled":
+        rows = [r for r in rows if r.enabled]
+    elif enabled == "disabled":
+        rows = [r for r in rows if not r.enabled]
+    if q:
+        ql = q.lower()
+        rows = [
+            r
+            for r in rows
+            if ql in r.name.lower() or ql in r.routine_id.lower() or ql in (r.job_name or "").lower()
+        ]
+    return await _render(
+        "routines.html",
+        request,
+        title="Rotinas",
+        routines=rows,
+        source_type=source_type,
+        mode=mode,
+        agent_id=agent_id,
+        q=q,
+        enabled=enabled,
+        total=len(rows),
+    )
+
+
+@router.get("/routines/{routine_id:path}", response_class=HTMLResponse)
+async def routine_detail(request: Request, routine_id: str):
+    org_id = await _org_filter(request)
+    from aios.core.routines import get_routine
+
+    async with db_session() as db:
+        r = await get_routine(db, org_id, routine_id)
+    if not r:
+        return HTMLResponse("<h2>Rotina não encontrada</h2><a href='/dashboard/routines'>Voltar</a>", status_code=404)
+    return await _render("routine_detail.html", request, title=r.name, r=r)
+
+
 @router.get("/wizard", response_class=HTMLResponse)
 async def wizard_page(request: Request):
     return await _render("wizard.html", request, title="Assistente 60s")
@@ -4694,41 +4907,214 @@ async def crm_merge(request: Request):
         await db.commit()
     return RedirectResponse("/dashboard/crm", status_code=303)
 
+def _dashboard_is_founder(user, org) -> bool:
+    if org is None or user is None:
+        return False
+    return (org.extra_data or {}).get("founder_user_id") == user.id or getattr(user, "role", "") == "owner"
+
+
+async def _dashboard_knowledge_actor(db, user):
+    from aios.governance.ocp import DepartmentMember
+    from aios.tools.rag_search import resolve_granted_record_ids
+
+    deps_rows = (
+        await db.execute(
+            select(DepartmentMember.department_id).where(
+                DepartmentMember.org_id == user.org_id, DepartmentMember.user_id == user.id
+            )
+        )
+    ).scalars().all()
+    try:
+        grants = await resolve_granted_record_ids(user.org_id, user.id)
+    except Exception:
+        logger.warning("dashboard knowledge grants resolution failed; fail_closed", exc_info=True)
+        grants = set()
+    org = await db.get(Organization, user.org_id)
+    return {
+        "actor_org_id": user.org_id,
+        "actor_departments": {d for d in deps_rows if d},
+        "is_founder": _dashboard_is_founder(user, org),
+        "granted_record_ids": grants,
+        "org": org,
+    }
+
+
 @router.get("/knowledge", response_class=HTMLResponse)
 async def knowledge_page(request: Request):
-    org_id = await _org_filter(request)
-    from aios.db.models import Memory
+    from aios.api.deps import get_dashboard_user
+    from aios.governance.knowledge import KnowledgeGrant, KnowledgeRecord, can_retrieve, knowledge_citation
+
+    user = await get_dashboard_user(request)
+    if not user:
+        return RedirectResponse("/dashboard/login", status_code=303)
+    org_id = user.org_id
     async with db_session() as db:
-        mems = (await db.execute(select(Memory).where(Memory.org_id==org_id).order_by(Memory.created_at.desc()).limit(30))).scalars().all()
-    return await _render("knowledge.html", request, title="Base Conhecimento", memories=mems)
+        actor = await _dashboard_knowledge_actor(db, user)
+        rows = (
+            await db.execute(
+                select(KnowledgeRecord)
+                .where(KnowledgeRecord.org_id == org_id)
+                .order_by(KnowledgeRecord.created_at.desc())
+                .limit(200)
+            )
+        ).scalars().all()
+        visible = []
+        for r in rows:
+            allowed, reason = can_retrieve(
+                r,
+                actor_org_id=actor["actor_org_id"],
+                actor_departments=actor["actor_departments"],
+                is_founder=actor["is_founder"],
+                granted_record_ids=actor["granted_record_ids"],
+            )
+            if not allowed:
+                continue
+            grants = (
+                await db.execute(
+                    select(KnowledgeGrant).where(
+                        KnowledgeGrant.org_id == org_id,
+                        KnowledgeGrant.record_id == r.id,
+                        KnowledgeGrant.revoked_at.is_(None),
+                    )
+                )
+            ).scalars().all()
+            active_grants = [g for g in grants if g.expires_at is None or g.expires_at >= datetime.now(timezone.utc).replace(tzinfo=None)]
+            visible.append({
+                "record": r,
+                "citation": knowledge_citation(r),
+                "grant_count": len(active_grants),
+                "grantee_ids": [g.user_id for g in active_grants],
+                "access_reason": reason,
+            })
+    return await _render(
+        "knowledge.html",
+        request,
+        title="Base Conhecimento Governada",
+        records=visible,
+        is_founder=actor["is_founder"],
+    )
+
 
 @router.post("/knowledge/ingest")
 async def knowledge_ingest(request: Request):
-    org_id = await _org_filter(request)
+    from aios.api.deps import get_dashboard_user
+    from aios.governance.knowledge import CLASSIFICATIONS, KNOWLEDGE_KINDS, KnowledgeRecord, validate_provenance
+
+    user = await get_dashboard_user(request)
+    if not user:
+        return RedirectResponse("/dashboard/login", status_code=303)
     form = await request.form()
     file = ffile(form, "file")
-    agent_id = fstr(form, "agent_id") or None
-    if not file:
-        return RedirectResponse("/dashboard/knowledge", status_code=303)
-    content = (await file.read()).decode(errors="ignore")[:20000]
-    # chunk 800 chars
-    chunks = [content[i:i+800] for i in range(0, len(content), 800)][:20]
-    from aios.db.models import Memory
-    from aios.core.memory import _embed
+    title = fstr(form, "title")
+    source_type = fstr(form, "source_type") or "upload"
+    source_id = fstr(form, "source_id")
+    classification = fstr(form, "classification") or "internal"
+    kind = fstr(form, "kind") or "statement"
+    department_id = fstr(form, "department_id") or None
     async with db_session() as db:
-        for ch in chunks:
-            try:
-                emb = _embed(ch)
-            except Exception:
-                emb = None
-            m = Memory(agent_id=agent_id or (await db.execute(select(Agent).where(Agent.org_id==org_id).limit(1))).scalars().first().id if (await db.execute(select(Agent).where(Agent.org_id==org_id).limit(1))).scalars().first() else (await db.execute(select(Agent).where(Agent.org_id==org_id))).scalars().first().id if False else None, org_id=org_id, type="long_term", content=ch, extra_data={"source": file.filename, "embedding": emb} if emb else {"source": file.filename})
-            # fallback agent_id required: use first agent or fake
-            if not m.agent_id:
-                ag = (await db.execute(select(Agent).where(Agent.org_id==org_id).limit(1))).scalars().first()
-                m.agent_id = ag.id if ag else "00000000-0000-0000-0000-000000000000"
-            db.add(m)
+        org = await db.get(Organization, user.org_id)
+    is_founder = _dashboard_is_founder(user, org)
+    if not file or not title or not source_type:
+        return await _render(
+            "knowledge.html", request, title="Base Conhecimento Governada",
+            records=[], is_founder=is_founder,
+            error="title, source_type e arquivo são obrigatórios (provenance fail-closed).",
+        )
+    if kind not in KNOWLEDGE_KINDS or classification not in CLASSIFICATIONS:
+        return await _render(
+            "knowledge.html", request, title="Base Conhecimento Governada",
+            records=[], is_founder=is_founder,
+            error="kind/classification inválidos.",
+        )
+    content = (await file.read()).decode(errors="ignore")[:20000]
+    if not content.strip():
+        return RedirectResponse("/dashboard/knowledge?error=empty", status_code=303)
+    words = content.split()
+    chunks, current, size = [], [], 0
+    chunk_size = 1200
+    for word in words:
+        if size + len(word) + 1 > chunk_size and current:
+            chunks.append(" ".join(current))
+            current, size = [], 0
+        current.append(word)
+        size += len(word) + 1
+    if current:
+        chunks.append(" ".join(current))
+    chunks = chunks[:50]
+    async with db_session() as db:
+        org = await db.get(Organization, user.org_id)
+        if not _dashboard_is_founder(user, org):
+            return await _render(
+                "knowledge.html", request, title="Base Conhecimento Governada",
+                records=[], is_founder=False,
+                error="Apenas founder/owner pode ingerir conhecimento governado.",
+            )
+        records = []
+        for index, chunk in enumerate(chunks):
+            record = KnowledgeRecord(
+                org_id=user.org_id,
+                department_id=department_id,
+                title=f"{title} [{index + 1}/{len(chunks)}]",
+                content=chunk,
+                kind=kind,
+                classification=classification,
+                source_type=source_type.strip(),
+                source_id=source_id.strip(),
+                provenance={
+                    "ingestion": "dashboard_upload",
+                    "filename": file.filename,
+                    "chunk_index": index,
+                    "chunk_count": len(chunks),
+                    "uploaded_by": user.id,
+                },
+                derived_from=[],
+                search_text=chunk,
+            )
+            problems = validate_provenance(record)
+            if problems:
+                return await _render(
+                    "knowledge.html", request, title="Base Conhecimento Governada",
+                    records=[], is_founder=True,
+                    error=f"provenance inválida: {', '.join(problems)}",
+                )
+            db.add(record)
+            records.append(record)
         await db.commit()
-    return RedirectResponse("/dashboard/knowledge", status_code=303)
+        for record in records:
+            await db.refresh(record)
+        try:
+            from aios.core.rag import RAG_STATUS, store_knowledge_vectors
+            from aios.core.memory import _embed
+
+            if RAG_STATUS["vector"]:
+                await store_knowledge_vectors(records, [_embed(r.content) for r in records])
+        except Exception:
+            logger.warning("dashboard knowledge vector store failed", exc_info=True)
+    return RedirectResponse("/dashboard/knowledge?ingested=1", status_code=303)
+
+
+@router.post("/knowledge/{record_id}/promote")
+async def knowledge_promote(request: Request, record_id: str):
+    from aios.api.deps import get_dashboard_user
+    from aios.governance.knowledge import KnowledgeRecord, fact_promotion_allowed
+
+    user = await get_dashboard_user(request)
+    if not user:
+        return RedirectResponse("/dashboard/login", status_code=303)
+    async with db_session() as db:
+        record = await db.get(KnowledgeRecord, record_id)
+        org = await db.get(Organization, user.org_id)
+        if not record or record.org_id != user.org_id:
+            return RedirectResponse("/dashboard/knowledge?error=not_found", status_code=303)
+        # Confirmation is the authenticated founder identity, never a form value.
+        confirmed = _dashboard_is_founder(user, org)
+        if not confirmed:
+            return RedirectResponse("/dashboard/knowledge?error=founder_required", status_code=303)
+        if not fact_promotion_allowed(record, human_confirmed=confirmed):
+            return RedirectResponse("/dashboard/knowledge?error=human_confirm_required", status_code=303)
+        record.kind = "fact"
+        await db.commit()
+    return RedirectResponse("/dashboard/knowledge?promoted=1", status_code=303)
 
 # ─── WhatsApp (Gateway unificado: Evolution engine + wrapper) ───
 @router.get("/whatsapp", response_class=HTMLResponse)

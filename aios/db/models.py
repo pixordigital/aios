@@ -453,8 +453,8 @@ class PendingAction(Base, TimestampMixin):
     # other tenants' tool_args and approve/reject mutated other tenants' rows
     # (while reporting 404, because the in-memory lookup missed).
     org_id: Mapped[str] = mapped_column(String(36), index=True, default="")
-    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id"), index=True)
-    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id"), index=True)
+    agent_id: Mapped[str | None] = mapped_column(ForeignKey("agents.id"), index=True, nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id"), index=True, nullable=True)
     tool_name: Mapped[str] = mapped_column(String(255))
     tool_args: Mapped[dict] = mapped_column(JSON, default=dict)
     context_summary: Mapped[str] = mapped_column(Text, default="")
@@ -1339,6 +1339,65 @@ from aios.governance import innovation as _innovation  # noqa: E402,F401  (regis
 from aios.core import crm_intelligence as _crm_intel  # noqa: E402,F401  (registers CRM account tables)
 from aios.core import lia as _lia  # noqa: E402,F401  (registers LIA tables)
 from aios.governance import knowledge as _knowledge  # noqa: E402,F401  (registers knowledge tables)
+
+
+class AgentPack(Base, TimestampMixin, OrgScopedMixin):
+    """Versioned internal agent pack. Active version is HITL-gated."""
+    __tablename__ = "agent_packs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    pack_key: Mapped[str] = mapped_column(String(128), index=True)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    agent_type: Mapped[str] = mapped_column(String(64), default="")
+    active_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint("org_id", "pack_key", name="uq_agent_packs_org_pack_key"),
+    )
+
+
+class AgentPackVersion(Base, TimestampMixin):
+    """Immutable pack version. Manifest/checksum/provenance are audit facts."""
+    __tablename__ = "agent_pack_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    pack_id: Mapped[str] = mapped_column(ForeignKey("agent_packs.id"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    version_semver: Mapped[str] = mapped_column(String(32))
+    version_num: Mapped[int] = mapped_column(Integer, default=1)
+    manifest_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    checksum_sha256: Mapped[str] = mapped_column(String(64), index=True, default="")
+    fingerprint_sha256: Mapped[str] = mapped_column(String(64), index=True, default="")
+    capability_loss_json: Mapped[list] = mapped_column(JSON, default=list)
+    provenance_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint("pack_id", "version_semver", name="uq_agent_pack_versions_pack_semver"),
+    )
+
+
+class AgentPackActivation(Base, TimestampMixin):
+    """HITL-gated activation/rollback request and audit state."""
+    __tablename__ = "agent_pack_activations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    pack_id: Mapped[str] = mapped_column(ForeignKey("agent_packs.id"), index=True)
+    version_id: Mapped[str] = mapped_column(ForeignKey("agent_pack_versions.id"), index=True)
+    from_version_id: Mapped[str | None] = mapped_column(ForeignKey("agent_pack_versions.id"), nullable=True)
+    to_version_id: Mapped[str | None] = mapped_column(ForeignKey("agent_pack_versions.id"), nullable=True)
+    approval_action_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    action_type: Mapped[str] = mapped_column(String(30), default="activate")  # activate|rollback
+    status: Mapped[str] = mapped_column(String(30), default="requested", index=True)
+    requested_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(default=_now)
+    decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class OwnerNotification(Base, TimestampMixin, OrgScopedMixin):

@@ -15,6 +15,12 @@
   .map-stat-icon { display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:var(--bg-raised);color:var(--accent);font-size:1rem;font-weight:700; }
   .map-stat-value { font-size:1.18rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums; }
   .map-stat-label { margin-top:.2rem;color:var(--text-secondary);font-size:.72rem; }
+  .map-ops { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.7rem;margin-bottom:1rem; }
+  .map-op { min-height:64px;padding:.65rem .8rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px; }
+  .map-op-value { font-size:1rem;font-weight:700;font-variant-numeric:tabular-nums; }
+  .map-op-label { margin-top:.15rem;color:var(--text-secondary);font-size:.72rem; }
+  .map-op.warn .map-op-value { color:var(--amber); }
+  .map-op.bad .map-op-value { color:var(--red,#ef4444); }
   .map-toolbar { display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;padding:.75rem;background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;margin-bottom:.75rem; }
   .map-search-wrap { position:relative;flex:1 1 250px;max-width:440px; }
   .map-search-icon { position:absolute;left:.75rem;top:50%;transform:translateY(-50%);color:var(--text-tertiary);pointer-events:none; }
@@ -32,6 +38,9 @@
   .map-legend-line { width:20px;border-top:2px solid var(--map-member); }
   .map-legend-line.shared { border-top-style:dashed;border-color:var(--amber); }
   .map-legend-mark.activity { border-radius:50%;background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 16%,transparent); }
+  .map-legend-mark.pending { background:var(--amber); }
+  .map-legend-mark.routine-failed { background:var(--red,#ef4444); }
+  .map-legend-mark.routine-ok { background:var(--green); }
   .map-flow-guide { display:flex;align-items:center;gap:.55rem;margin:.75rem 0;padding:.65rem .8rem;border-radius:10px;background:var(--accent-subtle);color:var(--text-secondary);font-size:.75rem; }
   .map-flow-guide strong { color:var(--text);font-weight:600; }
   .map-flow-step { display:inline-flex;align-items:center;gap:.4rem; }
@@ -90,8 +99,9 @@
   .mp-row span:first-child { color: var(--text-secondary); }
   .map-instructions { display:flex;justify-content:space-between;gap:.75rem;flex-wrap:wrap;margin:.55rem .15rem 0;color:var(--text-tertiary);font-size:.72rem; }
   @media (max-width: 720px) {
-    .map-stats { grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem; }
+    .map-stats,.map-ops { grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem; }
     .map-stat { min-height:62px;padding:.6rem;gap:.55rem; }
+    .map-op { min-height:56px;padding:.55rem .65rem; }
     .map-stat-icon { width:30px;height:30px; }
     .map-flow-guide { overflow-x:auto;white-space:nowrap; }
     .map-legend { gap:.55rem .7rem; }
@@ -118,6 +128,12 @@
     <div class="map-stat"><span class="map-stat-icon" aria-hidden="true">●</span><div><div class="map-stat-value" id="stat-active">0</div><div class="map-stat-label">Em atividade agora</div></div></div>
     <div class="map-stat"><span class="map-stat-icon" aria-hidden="true">↔</span><div><div class="map-stat-value" id="stat-shared">0</div><div class="map-stat-label">Em mais de uma equipe</div></div></div>
 </div>
+<div class="map-ops" aria-label="Resumo operacional">
+    <div class="map-op" id="op-pending-card"><div class="map-op-value" id="stat-pending">0</div><div class="map-op-label">Aprovações pendentes</div></div>
+    <div class="map-op" id="op-routines-card"><div class="map-op-value" id="stat-routines">0</div><div class="map-op-label">Rotinas visíveis</div></div>
+    <div class="map-op" id="op-failed-card"><div class="map-op-value" id="stat-failed-night">0</div><div class="map-op-label">Falhas noturnas/fixas</div></div>
+    <div class="map-op"><div class="map-op-value" id="stat-ops-updated">—</div><div class="map-op-label">Ops atualizado</div></div>
+</div>
 <div class="map-toolbar">
     <label class="map-search-wrap">
         <span class="map-search-icon" aria-hidden="true">⌕</span>
@@ -138,6 +154,9 @@
     <span class="map-legend-item"><span class="map-legend-mark member"></span>Assistente</span>
     <span class="map-legend-item"><span class="map-legend-line shared"></span>Compartilhado</span>
     <span class="map-legend-item"><span class="map-legend-mark activity"></span>Atividade recente</span>
+    <span class="map-legend-item"><span class="map-legend-mark pending"></span>Aprovação pendente</span>
+    <span class="map-legend-item"><span class="map-legend-mark routine-ok"></span>Rotina OK/reativa</span>
+    <span class="map-legend-item"><span class="map-legend-mark routine-failed"></span>Rotina falha/atrasada</span>
     <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber)"></span>Coordenação geral</span>
     <span class="map-legend-item"><span class="map-legend-mark" style="background:var(--amber);opacity:.45"></span>Security (Red + Blue)</span>
     <span class="map-legend-item"><span class="map-legend-line" style="border-color:var(--green)"></span>Fluxo ao vivo</span>
@@ -510,6 +529,12 @@
         label(p.x + 16, p.y + 64, strategyLabel(t.strategy), 10, "var(--text-secondary)");
         const countText = el("text", { x: p.x + p.w - 13, y: p.y + 20, fill: "var(--text-secondary)", "font-size": 10, "text-anchor": "end" }, grp);
         countText.textContent = count + " " + (count === 1 ? "assistente" : "assistentes");
+        const teamPending = el("text", { x: p.x + p.w - 13, y: p.y + 34, fill: "var(--amber)", "font-size": 9, "text-anchor": "end", "data-op-team-pending": rawId(t.id), opacity: "0" }, grp);
+        teamPending.textContent = "";
+        const teamRoutine = el("circle", { cx: p.x + p.w - 16, cy: p.y + 64, r: 4, fill: "var(--text-tertiary)", "data-op-team-routine": rawId(t.id), opacity: "0" }, grp);
+        const teamRoutineTitle = document.createElementNS(NS, "title");
+        teamRoutineTitle.textContent = "Rotinas: sem dados";
+        teamRoutine.appendChild(teamRoutineTitle);
         grp.addEventListener("click", () => openPanel(t.id));
         grp.addEventListener("keydown", ev => {
             if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openPanel(t.id); }
@@ -547,8 +572,14 @@
         const statusColor = active ? "var(--green)" : "var(--text-tertiary)";
         el("circle", { cx: p.x + 53, cy: p.y + 60, r: 3, fill: statusColor, "class": "work-dot" }, grp);
         label(p.x + 62, p.y + 64, statusText, 9, "var(--text-secondary)");
+        const opPending = el("text", { x: p.x + p.w - 12, y: p.y + 19, fill: "var(--amber)", "font-size": 9, "text-anchor": "end", "data-op-pending": rawId(n.id), opacity: "0" }, grp);
+        opPending.textContent = "";
+        const opRoutine = el("circle", { cx: p.x + p.w - 14, cy: p.y + 60, r: 4, fill: "var(--text-tertiary)", "data-op-routine": rawId(n.id), opacity: "0" }, grp);
+        const opRoutineTitle = document.createElementNS(NS, "title");
+        opRoutineTitle.textContent = "Rotina: sem dados";
+        opRoutine.appendChild(opRoutineTitle);
         if (others.length) {
-            const shared = el("text", { x: p.x + p.w - 12, y: p.y + 19, fill: "var(--amber)", "font-size": 9, "text-anchor": "end" }, grp);
+            const shared = el("text", { x: p.x + p.w - 32, y: p.y + 19, fill: "var(--amber)", "font-size": 9, "text-anchor": "end" }, grp);
             shared.textContent = "↔ +" + others.length + " equipe" + (others.length === 1 ? "" : "s");
         }
         const title = document.createElementNS(NS, "title");
@@ -585,6 +616,29 @@
         mpRows.appendChild(d);
     };
     let activity = {};
+    let ops = { pending_approvals: { total: 0, by_agent: {}, by_team: {} }, routines: [], routine_badges: { by_agent: {}, by_team: {} }, failed_night_jobs: { total: 0, recent: [] }, generated_at: null };
+    const statPending = document.getElementById("stat-pending");
+    const statRoutines = document.getElementById("stat-routines");
+    const statFailedNight = document.getElementById("stat-failed-night");
+    const statOpsUpdated = document.getElementById("stat-ops-updated");
+    const opPendingCard = document.getElementById("op-pending-card");
+    const opFailedCard = document.getElementById("op-failed-card");
+    const badgeMeta = {
+        ok: { fill: "var(--green)", label: "Rotina OK" },
+        running: { fill: "var(--accent)", label: "Rotina em execução" },
+        failed: { fill: "var(--red,#ef4444)", label: "Rotina com falha" },
+        stale: { fill: "var(--amber)", label: "Rotina atrasada" },
+        disabled: { fill: "var(--text-tertiary)", label: "Rotina desativada" },
+        reactive: { fill: "var(--green)", label: "Rotina reativa" },
+    };
+    function routineBadgeFor(kind, id) {
+        const by = (ops.routine_badges && ops.routine_badges[kind === "team" ? "by_team" : "by_agent"]) || {};
+        return by[id] || null;
+    }
+    function pendingFor(kind, id) {
+        const by = (ops.pending_approvals && ops.pending_approvals[kind === "team" ? "by_team" : "by_agent"]) || {};
+        return Number(by[id] || 0);
+    }
     function openPanel(id) {
         lastFocus = document.activeElement;
         mpRows.innerHTML = "";
@@ -605,6 +659,12 @@
         row("Lidera a equipe", named("manager"));
         row("Assistentes", String(counts.member || 0));
         row("Distribuição", strategyLabel(disp.strategy));
+        const teamId = rawId(disp.id);
+        row("Aprovações pendentes", String(pendingFor("team", teamId)));
+        const teamBadge = routineBadgeFor("team", teamId);
+        row("Estado das rotinas", teamBadge ? (badgeMeta[teamBadge] || { label: teamBadge }).label : "Sem rotina");
+        const teamFailed = (ops.failed_night_jobs && ops.failed_night_jobs.recent || []).filter(r => rawId(r.team_id || "") === teamId).length;
+        row("Falhas noturnas/fixas", String(teamFailed));
         mpEdit.href = disp.url;
         mpEdit.textContent = "Editar equipe";
         panel.hidden = false;
@@ -694,6 +754,51 @@
         if (secGroupEl && secShared) secGroupEl.classList.toggle("working", minsOf(activity[rawId(secShared)]) <= 15);
         activeStat.textContent = working;
     }
+
+    function paintOps() {
+        const pendingTotal = Number((ops.pending_approvals && ops.pending_approvals.total) || 0);
+        const routines = Array.isArray(ops.routines) ? ops.routines : [];
+        const failedNight = Number((ops.failed_night_jobs && ops.failed_night_jobs.total) || 0);
+        statPending.textContent = String(pendingTotal);
+        statRoutines.textContent = String(routines.length);
+        statFailedNight.textContent = String(failedNight);
+        statOpsUpdated.textContent = ops.generated_at ? new Date(ops.generated_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—";
+        opPendingCard.classList.toggle("warn", pendingTotal > 0);
+        opFailedCard.classList.toggle("bad", failedNight > 0);
+
+        document.querySelectorAll("[data-op-pending]").forEach(node => {
+            const count = pendingFor("agent", node.getAttribute("data-op-pending"));
+            node.textContent = count > 0 ? "⏳" + count : "";
+            node.setAttribute("opacity", count > 0 ? "1" : "0");
+            node.setAttribute("aria-label", count > 0 ? count + " aprovações pendentes" : "Sem aprovações pendentes");
+        });
+        document.querySelectorAll("[data-op-routine]").forEach(node => {
+            const aid = node.getAttribute("data-op-routine");
+            const badge = routineBadgeFor("agent", aid);
+            const meta = badge ? (badgeMeta[badge] || { fill: "var(--text-tertiary)", label: badge }) : null;
+            node.setAttribute("opacity", meta ? "1" : "0");
+            node.setAttribute("fill", meta ? meta.fill : "var(--text-tertiary)");
+            node.setAttribute("aria-label", meta ? meta.label : "Sem rotina");
+            const t = node.querySelector("title");
+            if (t) t.textContent = meta ? meta.label : "Rotina: sem dados";
+        });
+        document.querySelectorAll("[data-op-team-pending]").forEach(node => {
+            const count = pendingFor("team", node.getAttribute("data-op-team-pending"));
+            node.textContent = count > 0 ? "⏳" + count : "";
+            node.setAttribute("opacity", count > 0 ? "1" : "0");
+            node.setAttribute("aria-label", count > 0 ? count + " aprovações pendentes na equipe" : "Sem aprovações pendentes na equipe");
+        });
+        document.querySelectorAll("[data-op-team-routine]").forEach(node => {
+            const tid = node.getAttribute("data-op-team-routine");
+            const badge = routineBadgeFor("team", tid);
+            const meta = badge ? (badgeMeta[badge] || { fill: "var(--text-tertiary)", label: badge }) : null;
+            node.setAttribute("opacity", meta ? "1" : "0");
+            node.setAttribute("fill", meta ? meta.fill : "var(--text-tertiary)");
+            node.setAttribute("aria-label", meta ? meta.label : "Sem rotina");
+            const t = node.querySelector("title");
+            if (t) t.textContent = meta ? ("Rotinas: " + meta.label) : "Rotinas: sem dados";
+        });
+    }
     async function poll() {
         if (document.hidden) return;
         try {
@@ -701,13 +806,24 @@
             if (!res.ok) throw new Error("http " + res.status);
             const payload = await res.json();
             activity = payload.activity || {};
+            if (payload && payload.ops && typeof payload.ops === "object") {
+                ops = {
+                    pending_approvals: payload.ops.pending_approvals || { total: 0, by_agent: {}, by_team: {} },
+                    routines: Array.isArray(payload.ops.routines) ? payload.ops.routines : [],
+                    routine_badges: payload.ops.routine_badges || { by_agent: {}, by_team: {} },
+                    failed_night_jobs: payload.ops.failed_night_jobs || { total: 0, recent: [] },
+                    generated_at: payload.ops.generated_at || null,
+                };
+            }
             paintActivity();
+            paintOps();
             setLive(true, fmtClock());
         } catch (e) {
             setLive(false);
         }
     }
     setLive(false);
+    paintOps();
     poll();
     paintActivity();
     setInterval(poll, POLL_MS);

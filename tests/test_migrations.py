@@ -101,3 +101,18 @@ def test_inbound_populates_provider_message_id():
     assert 'extra.get("msg_id")' in src
     assert "channel_message_id=provider_msg_id" in src
     assert "duplicate" in src
+
+
+def test_agent_packs_migration_makes_pending_actions_nullable():
+    p = VERSIONS / "b2c3d4e5f6a7_agent_packs.py"
+    assert p.exists()
+    src = p.read_text()
+    # A3: PendingAction.agent_id/conversation_id became nullable; migration must
+    # upgrade existing DBs safely (SQLite batch alter, idempotent when absent/already nullable).
+    assert "batch_alter_table" in src
+    assert 'pending_actions' in src
+    assert '"agent_id"' in src or "'agent_id'" in src
+    assert '"conversation_id"' in src or "'conversation_id'" in src
+    assert "nullable=True" in src
+    assert "has_table" in src
+    assert "nullable_updates" in src or 'get("nullable")' in src
