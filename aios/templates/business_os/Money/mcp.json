@@ -1,0 +1,2 @@
+{"command": "money-update", "schedule": "hourly", "description": "Monitor de pagamentos: flag de faturas em atraso e cobranças sem compensação."}
+{"command": "supply-level-monitor", "schedule": "hourly", "description": "Gestor flags supply_level >= risco (nível de estoque/oferta)."}

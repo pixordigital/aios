@@ -1,0 +1,2 @@
+{"command": "money-log", "schedule": "hourly", "description": "Appende o snapshot de KPIs de dinheiro ao Log/money."}
+{"command": "supply-log", "schedule": "hourly", "description": "Appende o supply_level ao Log/supply."}

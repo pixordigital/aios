@@ -1,0 +1,9 @@
+{
+  "template": "weekly-supply-check",
+  "kpis": {
+    "tcotros": {"descricao": "Taxa de cobranças de ordem de trabalho no prazo (%)"},
+    "retrig": {"descricao": "Retíqued de ordens reabertas/retriggers (%)"},
+    "supply_level": {"descricao": "Nível de estoque/oferta (escalas 0-3)"},
+    "escala": {"descricao": "Escala operacional atual (ex: A/B/C)"}
+  }
+}

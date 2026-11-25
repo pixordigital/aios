@@ -1,0 +1,30 @@
+# SDR "Voice Answer Systems" — perfilBusinessOS canonico (doctype profile).
+# ProfileField entries: name, kind, domain, required.
+# Consumido por aios/core/business_sdr.py:profile_doc_from_extra_data
+# (fallback) e aios/core/sdr_prompt.py.
+doctype: profile
+profile: sdr
+version: "2026-03-25"
+fields:
+  - name: lead_name
+    kind: string
+    domain: full_name
+    required: true
+  - name: lead_phone
+    kind: string
+    domain: phone_e164
+    required: true
+  - name: lead_email
+    kind: string
+    domain: email
+    required: false
+  - name: lead_company
+    kind: string
+    domain: company_name
+    required: false
+whatsapp:
+  # ChannelConnection (aios/db/models.py:315), channel_type whatsapp.
+  channel_type: whatsapp
+  label: WhatsApp Business
+  is_active: true
+  config: {}

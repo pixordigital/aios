@@ -1,0 +1,2 @@
+{"command": "generate-suggestions", "schedule": "hourly", "description": "Gera sugestões de resposta para tickets recebidos."}
+{"command": "direct_send", "schedule": "hourly", "description": "Envia respostas diretas aprovadas."}
