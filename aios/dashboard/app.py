@@ -603,6 +603,18 @@ async def _org_filter(request: Request) -> str:
 
 # ─── Dashboard ───
 
+@router.get("/one_person", response_class=HTMLResponse)
+async def dashboard_one_person(request: Request):
+    """OnePersonOS vision view: scaffold status, pending actions, decisions."""
+    from aios.core.one_person_os import DIRS
+    import os
+
+    base = str(settings.app_data_dir) if getattr(settings, "app_data_dir", None) else os.getcwd()
+    dirs = {d: os.path.isdir(os.path.join(base, d)) for d in DIRS}
+    all_done = bool(base) and all(dirs.values())
+    return await _render("one_person_os.html", request, dirs=dirs, all_done=all_done, base=base)
+
+
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 async def dashboard_home(request: Request):

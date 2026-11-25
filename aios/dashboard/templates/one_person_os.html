@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}OnePersonOS — Single-Person Business OS{% endblock %}
+
+{% block content %}
+<h1 class="display-4 text-center mb-2">OnePersonOS</h1>
+<p class="lead text-center mb-5">Your one-person business operating system — vision view.</p>
+
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card mb-4">
+      <div class="card-header">Structure ({% if all_done %}✅{% else %}⏳{% endif %})</div>
+      <div class="card-body">
+        <table class="table table-sm">
+          <tbody>
+            <tr>
+              <th>Context</th>
+              <td class="text-{% if dirs['Context'] %}success{% else %}warning{% endif %}">{% if dirs['Context'] %}Created{% else %}Pending{% endif %}</td>
+            </tr>
+            <tr><th>Decision Log</th><td>{% if dirs['Decision_Log'] %}✅{% else %}⏳{% endif %}</td></tr>
+            <tr><th>Inbox</th><td>{% if dirs['Inbox'] %}✅{% else %}⏳{% endif %}</td></tr>
+            <tr><th>Work</th><td>{% if dirs['Work'] %}✅{% else %}⏳{% endif %}</td></tr>
+            <tr><th>Log</th><td>{% if dirs['Log'] %}✅{% else %}⏳{% endif %}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">Recommendation</div>
+      <div class="card-body">
+        <p>Run <code>aios one_person_os --init {{ base }}</code> to scaffold all five dirs in seconds.</p>
+        <p>Mirror the shape of <a href="/dashboard/agents">agents.html</a>; when team_brain is configured, push Log/.* summaries via <code>aios.core.one_person_os.sync_one_person_os_to_team_brain</code>.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
