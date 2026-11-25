@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap">
+  <a href="/dashboard/agent-packs" class="btn btn-ghost btn-sm">← Voltar</a>
+  <h1 style="flex:1">{{ pack.name or pack.pack_key }}</h1>
+  {% if pack.active_version_id %}<span class="badge" style="border-color:var(--green);color:var(--green)">ativo</span>{% else %}<span class="badge">sem versão ativa</span>{% endif %}
+</div>
+
+<div class="grid-2 mb-4">
+  <div class="card">
+    <h2 class="mb-2">Identidade</h2>
+    <div class="text-sm" style="display:grid;gap:0.375rem">
+      <div><span class="text-tertiary">pack_key:</span> <span class="font-mono">{{ pack.pack_key }}</span></div>
+      <div><span class="text-tertiary">agent_type:</span> <span class="badge">{{ pack.agent_type or '-' }}</span></div>
+      <div><span class="text-tertiary">id:</span> <span class="font-mono">{{ pack.id }}</span></div>
+      <div><span class="text-tertiary">active_version_id:</span> <span class="font-mono">{{ pack.active_version_id or '-' }}</span></div>
+      <div><span class="text-tertiary">created_at:</span> <span class="font-mono">{{ pack.created_at.isoformat() if pack.created_at else '-' }}</span></div>
+      <div><span class="text-tertiary">updated_at:</span> <span class="font-mono">{{ pack.updated_at.isoformat() if pack.updated_at else '-' }}</span></div>
+    </div>
+    {% if pack.description %}<p class="text-sm text-secondary mt-3">{{ pack.description }}</p>{% endif %}
+  </div>
+  <div class="card" style="border-color:var(--amber-subtle)">
+    <h2 class="mb-2">Governança</h2>
+    <ul style="margin:0;padding-left:1.25rem;font-size:0.8125rem;color:var(--text-secondary);display:grid;gap:0.375rem">
+      <li>Ativação/rollback exigem HITL: ação cria <span class="font-mono">PendingAction</span>, sem mutação antes de aprovação.</li>
+      <li>UI web não executa install/write no filesystem do servidor. Instalação local é fluxo guiado CLI/core com consentimento/auditoria.</li>
+      <li>Export gera bundle em diretório temporário e retorna arquivo; sem shell exec.</li>
+      <li>Capability loss e provenance vêm do manifest/version metadata armazenado; trate como evidência, não confiança cega.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <h2 class="mb-2">Targets suportados (união das versões)</h2>
+  {% if supported_targets %}
+    <div style="display:flex;gap:0.375rem;flex-wrap:wrap">
+      {% for t in supported_targets %}<span class="badge font-mono">{{ t }}</span>{% endfor %}
+    </div>
+  {% else %}
+    <div class="text-sm text-tertiary">Nenhum runtime target declarado.</div>
+  {% endif %}
+</div>
+
+<div class="card mb-4">
+  <h2 class="mb-2">Versões</h2>
+  <div style="display:flex;flex-direction:column;gap:0.75rem">
+    {% for v in versions %}
+    <details style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.75rem" {% if loop.first %}open{% endif %}>
+      <summary style="cursor:pointer;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+        <span style="font-weight:600">{{ v.version_semver }}</span>
+        <span class="text-xs text-tertiary font-mono">#{{ v.version_num }}</span>
+        {% if pack.active_version_id == v.id %}<span class="badge" style="border-color:var(--green);color:var(--green)">ativa</span>{% endif %}
+        {% if v.has_high_loss %}<span class="badge" style="border-color:var(--red);color:var(--red)">capability loss high</span>{% elif v.capability_loss %}<span class="badge" style="border-color:var(--amber);color:var(--amber)">capability loss</span>{% endif %}
+        {% if v.provenance.get('signature') %}<span class="badge" style="border-color:var(--green);color:var(--green)">assinada</span>{% else %}<span class="badge">unsigned</span>{% endif %}
+      </summary>
+
+      <div class="grid-2 mt-3" style="gap:0.75rem">
+        <div>
+          <div class="text-xs text-tertiary mb-1">Checksums / fingerprint</div>
+          <div class="text-xs font-mono" style="display:grid;gap:0.25rem;word-break:break-all">
+            <div><span class="text-tertiary">checksum:</span> {{ v.checksum_sha256 or '-' }}</div>
+            <div><span class="text-tertiary">fingerprint:</span> {{ v.fingerprint_sha256 or '-' }}</div>
+            <div><span class="text-tertiary">version_id:</span> {{ v.id }}</div>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-tertiary mb-1">Provenance</div>
+          <div class="text-xs" style="display:grid;gap:0.25rem">
+            <div><span class="text-tertiary">source:</span> <span class="font-mono">{{ v.provenance.get('source','-') }}</span></div>
+            <div><span class="text-tertiary">created_by:</span> <span class="font-mono">{{ v.provenance.get('created_by','-') }}</span></div>
+            <div><span class="text-tertiary">created_at:</span> <span class="font-mono">{{ v.provenance.get('created_at','-') }}</span></div>
+            <div><span class="text-tertiary">signature:</span> {{ 'present' if v.provenance.get('signature') else 'absent' }}</div>
+            <div><span class="text-tertiary">trust:</span> {% if v.provenance.get('signature') %}assinatura presente (verificação fora desta tela){% else %}não assinado{% endif %}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-3">
+        <div class="text-xs text-tertiary mb-1">Runtime targets</div>
+        {% if v.runtime_targets %}
+        <div style="display:flex;gap:0.375rem;flex-wrap:wrap">{% for t in v.runtime_targets %}<span class="badge font-mono">{{ t }}</span>{% endfor %}</div>
+        {% else %}<div class="text-xs text-tertiary">-</div>{% endif %}
+      </div>
+
+      <div class="mt-3">
+        <div class="text-xs text-tertiary mb-1">Capability loss</div>
+        {% if v.capability_loss %}
+        <div style="display:flex;flex-direction:column;gap:0.375rem">
+          {% for item in v.capability_loss %}
+          <div style="border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.75rem">
+            <div style="display:flex;gap:0.375rem;flex-wrap:wrap;align-items:center">
+              <span class="badge" style="border-color:{{ 'var(--red)' if item.severity in ['high','blocker'] else ('var(--amber)' if item.severity in ['warn','medium'] else 'var(--border)') }};color:{{ 'var(--red)' if item.severity in ['high','blocker'] else ('var(--amber)' if item.severity in ['warn','medium'] else 'var(--text-tertiary)') }}">{{ item.severity or 'info' }}</span>
+              <span class="badge">{{ item.status or item.reason_code or 'loss' }}</span>
+              <span class="font-mono text-tertiary">{{ item.field_path or item.source_field or item.id or '' }}</span>
+            </div>
+            <div class="text-secondary mt-1">{{ item.reason or item.detail or item.message or '-' }}</div>
+            {% if item.remediation or item.portable_alternative %}<div class="text-tertiary mt-1">Remediação: {{ item.remediation or item.portable_alternative }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-xs text-tertiary">Nenhuma perda declarada.</div>
+        {% endif %}
+      </div>
+
+      <div class="mt-3" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:flex-end">
+        <form method="GET" action="/dashboard/agent-packs/{{ pack.id }}/versions/{{ v.id }}/export" style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap">
+          <div>
+            <label>Export target</label>
+            <select class="input" name="target" style="min-width:160px">
+              {% for t in export_targets %}
+              <option value="{{ t }}" {% if t in v.runtime_targets %}selected{% endif %}>{{ t }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" type="submit">Exportar bundle</button>
+        </form>
+        <div class="text-xs text-tertiary">Download gera bundle temporário; arquivo retornado como anexo.</div>
+      </div>
+
+      <details class="mt-3">
+        <summary class="text-xs text-tertiary" style="cursor:pointer">Manifest (read-only)</summary>
+        <pre class="text-xs font-mono" style="margin-top:0.5rem;background:var(--bg-raised);border:1px solid var(--border);border-radius:6px;padding:0.75rem;overflow:auto;max-height:320px;white-space:pre-wrap">{{ v.manifest_pretty }}</pre>
+      </details>
+    </details>
+    {% else %}
+      <div class="text-sm text-tertiary">Nenhuma versão publicada.</div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2 class="mb-2">Ativações / HITL</h2>
+  <p class="text-sm text-secondary mb-3">Histórico de pedidos de ativação/rollback. Aprovação acontece na fila de Aprovações; esta tela só exibe estado.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ação</th><th>Status</th><th>Versão</th><th>Approval</th><th>Solicitado</th><th>Decidido/Aplicado</th><th>Erro</th></tr></thead>
+      <tbody>
+        {% for a in activations %}
+        <tr>
+          <td><span class="badge">{{ a.action_type }}</span></td>
+          <td><span class="badge" style="border-color:{{ 'var(--green)' if a.status in ['active','approved'] else ('var(--amber)' if a.status in ['requested','pending'] else ('var(--red)' if a.status in ['failed','rejected'] else 'var(--border)')) }};color:{{ 'var(--green)' if a.status in ['active','approved'] else ('var(--amber)' if a.status in ['requested','pending'] else ('var(--red)' if a.status in ['failed','rejected'] else 'var(--text-tertiary)')) }}">{{ a.status }}</span></td>
+          <td class="text-xs font-mono">{{ a.version_label or a.version_id[:8] }}</td>
+          <td class="text-xs font-mono">{% if a.approval_action_id %}<a href="/dashboard/approvals">{{ a.approval_action_id[:8] }}</a>{% else %}-{% endif %}</td>
+          <td class="text-xs font-mono">{{ a.requested_at.isoformat() if a.requested_at else '-' }}</td>
+          <td class="text-xs font-mono">{{ a.decided_at.isoformat() if a.decided_at else (a.applied_at.isoformat() if a.applied_at else '-') }}</td>
+          <td class="text-xs text-secondary">{{ a.error or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-sm text-tertiary">Nenhuma ativação registrada.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -169,6 +169,32 @@ def test_inspect_plan_deterministic(tmp_path: Path):
     assert isinstance(p1.capability_loss, list)
 
 
+def test_openbot_inspect_plan_install(tmp_path: Path):
+    bundle = _export_bundle(tmp_path, "openbot")
+    insp = inspect_bundle(bundle)
+    assert insp["hashes_ok"] is True
+    assert insp["trust"] == "unsigned"
+    assert insp["manifest"]["target"] == "openbot"
+    loss_items = insp["capability_loss"]
+    assert any(i.get("field_path") == "openbot.bundle" for i in loss_items)
+
+    target_root = tmp_path / "target-openbot"
+    records = tmp_path / "records"
+    plan = plan_install(bundle, "openbot", target_root=target_root, records_dir=records)
+    assert plan.target == "openbot"
+    assert plan.trust == "unsigned"
+    assert plan.requires_unsigned_ack is True
+    assert plan.requires_capability_loss_ack is True
+    rels = {op.rel_path for op in plan.operations}
+    assert "openbot/agent.bundle.json" in rels
+    assert "AGENTS.md" in rels
+
+    consent = _consent(plan, phrase="I CONSENT UNSIGNED_RISK_ACCEPTED", allow_unsigned=True)
+    res = apply_install(plan, consent=consent, records_dir=records, audit_log_path=records / "audit.jsonl")
+    assert res.ok, res.errors
+    assert (target_root / "openbot" / "agent.bundle.json").exists()
+
+
 def test_plan_diff_create_modify_noop(tmp_path: Path):
     bundle = _export_bundle(tmp_path, "codex")
     target_root = tmp_path / "target"

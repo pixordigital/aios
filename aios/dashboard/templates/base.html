@@ -395,6 +395,7 @@ window.aiosI18n.register({
   'Aprovações':'Aprobaciones',
   'Automações':'Automatizaciones',
   'Rotinas':'Rutinas',
+  'Pacotes':'Paquetes',
   'Membros':'Miembros',
   'base de conhecimento':'base de conocimiento',
   'Análises':'Análisis',
@@ -532,6 +533,10 @@ window.aiosI18n.register({
             <a href="/dashboard/routines" class="{% if request.url.path.startswith('/dashboard/routines') %}active{% endif %}">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 <span class="nav-text">Rotinas</span>
+            </a>
+            <a href="/dashboard/agent-packs" class="{% if request.url.path.startswith('/dashboard/agent-packs') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4M12 22V12"/></svg>
+                <span class="nav-text">Pacotes</span>
             </a>
             <a href="/dashboard/sandbox" class="{% if request.url.path.startswith('/dashboard/sandbox') %}active{% endif %}">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"/></svg>
@@ -686,6 +691,10 @@ window.aiosI18n.register({
         <a href="/dashboard/routines" class="{% if request.url.path.startswith('/dashboard/routines') %}active{% endif %}">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             <span class="label">Rotinas</span>
+        </a>
+        <a href="/dashboard/agent-packs" class="{% if request.url.path.startswith('/dashboard/agent-packs') %}active{% endif %}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4M12 22V12"/></svg>
+            <span class="label">Pacotes</span>
         </a>
         <a href="/dashboard/sandbox" class="{% if request.url.path.startswith('/dashboard/sandbox') %}active{% endif %}">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"/></svg>

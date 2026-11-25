@@ -29,13 +29,16 @@ except Exception:  # pragma: no cover - dependency declared in pyproject
     Ed25519PrivateKey = None  # type: ignore[assignment]
     Ed25519PublicKey = None  # type: ignore[assignment]
 
-InstallTarget = Literal["claude_code", "codex", "opencode", "openclaw"]
-_TARGETS: tuple[str, ...] = ("claude_code", "codex", "opencode", "openclaw")
+InstallTarget = Literal["claude_code", "codex", "opencode", "openclaw", "openbot"]
+_TARGETS: tuple[str, ...] = ("claude_code", "codex", "opencode", "openclaw", "openbot")
 _DEFAULT_TARGET_ROOTS: dict[str, Path] = {
     "claude_code": Path.home() / ".claude",
     "codex": Path.home() / ".codex",
     "opencode": Path.home() / ".config" / "opencode",
     "openclaw": Path.home() / ".openclaw",
+    # Conservative default; OpenBot has no canonical Pixor-managed install path yet.
+    # Guided local install only, no auto-install/no network.
+    "openbot": Path.home() / ".openbot",
 }
 _DEFAULT_RECORD_DIR = Path.home() / ".local" / "share" / "aios" / "agent-pack-installs"
 _DEFAULT_AUDIT_LOG = _DEFAULT_RECORD_DIR / "audit.jsonl"

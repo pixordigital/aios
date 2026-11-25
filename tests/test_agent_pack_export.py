@@ -78,6 +78,7 @@ def _read_json(path: Path):
     ("codex", COMMON_FILES | {"AGENTS.md", "codex/agent.json", "codex/skills/sales-sdr/SKILL.md", "tool-policy.json"}),
     ("opencode", COMMON_FILES | {"opencode.agent.fragment.json", ".opencode/skills/sales-sdr/SKILL.md", "AGENTS.md", "tool-policy.json"}),
     ("openclaw", COMMON_FILES | {"openclaw/agent.bundle.json", "AGENTS.md", "skills/sales-sdr/SKILL.md", "tool-policy.json"}),
+    ("openbot", COMMON_FILES | {"openbot/agent.bundle.json", "AGENTS.md", "openbot/skills/sales-sdr/SKILL.md", "tool-policy.json"}),
 ])
 def test_export_per_target_file_set(tmp_path: Path, target, expected):
     m = _manifest()
@@ -233,3 +234,21 @@ def test_opencode_no_root_config(tmp_path: Path):
     frag = _read_json(out / "opencode.agent.fragment.json")
     assert "agent" in frag
     assert "sales-sdr" in frag["agent"]
+
+
+def test_openbot_export_conservative_and_loss_reported(tmp_path: Path):
+    m = _manifest()
+    out = tmp_path / "out"
+    res = export_agent_pack(m, target="openbot", output_dir=out)
+    assert "openbot/agent.bundle.json" in res.files
+    assert "openbot/skills/sales-sdr/SKILL.md" in res.files
+    bundle = _read_json(out / "openbot/agent.bundle.json")
+    assert bundle["schema"] == "openbot.agent.bundle.v1"
+    assert bundle["id"] == "sales-sdr"
+    assert bundle["unsigned"] is True
+    assert bundle["parity_claim"] is False
+    loss = _read_json(out / "capability-loss.report.json")
+    openbot_loss = [i for i in loss["items"] if i["field_path"] == "openbot.bundle"]
+    assert openbot_loss
+    assert openbot_loss[0]["status"] == "partial"
+    assert any("no parity" in i["reason"].lower() or "conservative" in i["reason"].lower() for i in openbot_loss)

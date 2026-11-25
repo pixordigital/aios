@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,13 +24,14 @@ from aios.dashboard.forms import ffile, fstr
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse, FileResponse
+from starlette.background import BackgroundTask
 from jinja2 import Environment, FileSystemLoader
-from sqlalchemy import delete as _sa_delete, func, select
+from sqlalchemy import case, delete as _sa_delete, func, select
 from sqlalchemy.orm import selectinload
 
 from aios.db.backend import db_session
-from aios.db.models import Agent, AgentInstance, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
+from aios.db.models import Agent, AgentInstance, AgentPack, AgentPackActivation, AgentPackVersion, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
 from aios.core.audit import log_audit
 from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
@@ -546,6 +548,7 @@ async def _dashboard_tool_actor_context(request: Request) -> dict:
         return {"_unresolved": True}
     actor_departments: set[str] = set()
     is_founder = False
+    granted_record_ids: set[str] = set()
     try:
         from aios.governance.ocp import DepartmentMember
 
@@ -562,18 +565,19 @@ async def _dashboard_tool_actor_context(request: Request) -> dict:
             org = await db.get(Organization, user.org_id)
             extra = (org.extra_data or {}) if org else {}
             is_founder = bool(extra.get("founder_user_id") == user.id or getattr(user, "role", "") == "owner")
+            try:
+                from aios.tools.rag_search import resolve_granted_record_ids
+
+                granted_record_ids = await resolve_granted_record_ids(
+                    str(getattr(user, "org_id", "") or ""),
+                    str(getattr(user, "id", "") or ""),
+                    db=db,
+                )
+            except Exception:
+                granted_record_ids = set()
     except Exception:
         logger.debug("dashboard tool actor context lookup failed; failing closed", exc_info=True)
         return {"_unresolved": True}
-    granted_record_ids: set[str] = set()
-    try:
-        from aios.tools.rag_search import resolve_granted_record_ids
-
-        granted_record_ids = await resolve_granted_record_ids(
-            str(getattr(user, "org_id", "") or ""), str(getattr(user, "id", "") or "")
-        )
-    except Exception:
-        granted_record_ids = set()
     return {
         "actor_user_id": str(user.id or ""),
         "actor_departments": actor_departments,
@@ -803,6 +807,34 @@ async def approvals_reject(request: Request, action_id: str):
     org_id = await _org_filter(request)
     await approval_manager.reject(action_id, decided_by=user_id, org_id=org_id)
     return RedirectResponse("/dashboard/approvals", status_code=303)
+
+
+@router.get("/security/preapprovals", response_class=HTMLResponse)
+async def security_preapprovals_page(request: Request):
+    """Read-only view of stored preapproval policy. No approval decisions here."""
+    from aios.api.deps import get_dashboard_user
+    from aios.api.security import _preapproval_payload
+    from aios.governance.security import is_founder_authority
+
+    user = await get_dashboard_user(request)
+    if not user:
+        return RedirectResponse("/dashboard/login", status_code=303)
+    async with db_session() as db:
+        org = await db.get(Organization, user.org_id)
+    if not is_founder_authority(user=user, org=org):
+        return HTMLResponse(
+            "<h1>403</h1><p>Founder/owner authority required.</p>",
+            status_code=403,
+        )
+    extra = getattr(org, "extra_data", None) or {}
+    sec = extra.get("security_policy") if isinstance(extra.get("security_policy"), dict) else {}
+    return await _render(
+        "security_preapprovals.html", request,
+        title="Pré-aprovações armazenadas",
+        **_preapproval_payload(org),
+        updated_at=sec.get("updated_at"),
+        updated_by=sec.get("updated_by"),
+    )
 
 
 # ─── Workflow contracts (ICM-X) ───
@@ -3691,6 +3723,232 @@ async def automations_cred_delete(request: Request, cid: str):
             await db.commit()
     return RedirectResponse("/dashboard/automations", status_code=303)
 
+# ─── Agent Packs (read-only catalog + safe export) ───
+
+_AGENT_PACK_EXPORT_TARGETS = ("claude_code", "codex", "opencode", "openclaw", "openbot")
+
+
+def _agent_pack_version_label(version: AgentPackVersion | None) -> str | None:
+    if not version:
+        return None
+    return f"{version.version_semver} (#{version.version_num})"
+
+
+def _agent_pack_capability_loss(version: AgentPackVersion) -> list[dict]:
+    raw = version.capability_loss_json or []
+    out = []
+    for item in raw:
+        if isinstance(item, dict):
+            out.append(item)
+        else:
+            try:
+                out.append(dict(item))
+            except Exception:
+                out.append({"detail": str(item), "severity": "info"})
+    return out
+
+
+def _agent_pack_runtime_targets(version: AgentPackVersion) -> list[str]:
+    manifest = version.manifest_json or {}
+    targets = []
+    for rt in (manifest.get("runtime_targets") or []):
+        if isinstance(rt, dict):
+            t = rt.get("target")
+            if t:
+                targets.append(str(t))
+    # dedupe preserve order
+    seen = set()
+    out = []
+    for t in targets:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
+@router.get("/agent-packs", response_class=HTMLResponse)
+async def agent_packs_list(request: Request):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        packs = (
+            await db.execute(
+                select(AgentPack).where(AgentPack.org_id == org_id).order_by(AgentPack.updated_at.desc())
+            )
+        ).scalars().all()
+        pack_ids = [p.id for p in packs]
+        versions = []
+        if pack_ids:
+            versions = (
+                await db.execute(
+                    select(AgentPackVersion).where(
+                        AgentPackVersion.org_id == org_id,
+                        AgentPackVersion.pack_id.in_(pack_ids),
+                    )
+                )
+            ).scalars().all()
+    versions_by_pack: dict[str, list[AgentPackVersion]] = {}
+    version_by_id = {v.id: v for v in versions}
+    for v in versions:
+        versions_by_pack.setdefault(v.pack_id, []).append(v)
+    rows = []
+    for p in packs:
+        p_versions = sorted(versions_by_pack.get(p.id, []), key=lambda v: v.version_num, reverse=True)
+        active = version_by_id.get(p.active_version_id) if p.active_version_id else None
+        rows.append({
+            "id": p.id,
+            "pack_key": p.pack_key,
+            "name": p.name,
+            "description": p.description,
+            "agent_type": p.agent_type,
+            "active_version_id": p.active_version_id,
+            "active_version_label": _agent_pack_version_label(active),
+            "version_count": len(p_versions),
+            "updated_at": p.updated_at,
+        })
+    return await _render("agent_packs.html", request, title="Pacotes de Agentes", packs=rows)
+
+
+@router.get("/agent-packs/{pack_id}", response_class=HTMLResponse)
+async def agent_pack_detail(request: Request, pack_id: str):
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        pack = (
+            await db.execute(
+                select(AgentPack).where(AgentPack.id == pack_id, AgentPack.org_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if not pack:
+            return HTMLResponse("<h2>Pacote não encontrado</h2><a href='/dashboard/agent-packs'>Voltar</a>", status_code=404)
+        versions = (
+            await db.execute(
+                select(AgentPackVersion)
+                .where(AgentPackVersion.pack_id == pack.id, AgentPackVersion.org_id == org_id)
+                .order_by(AgentPackVersion.version_num.desc())
+            )
+        ).scalars().all()
+        activations = (
+            await db.execute(
+                select(AgentPackActivation)
+                .where(AgentPackActivation.pack_id == pack.id, AgentPackActivation.org_id == org_id)
+                .order_by(AgentPackActivation.created_at.desc())
+                .limit(50)
+            )
+        ).scalars().all()
+
+    version_by_id = {v.id: v for v in versions}
+    supported_targets = []
+    seen_targets = set()
+    vrows = []
+    for v in versions:
+        capability_loss = _agent_pack_capability_loss(v)
+        runtime_targets = _agent_pack_runtime_targets(v)
+        for t in runtime_targets:
+            if t not in seen_targets:
+                seen_targets.add(t)
+                supported_targets.append(t)
+        has_high_loss = any(str((i or {}).get("severity", "")).lower() in {"high", "blocker"} for i in capability_loss)
+        vrows.append({
+            "id": v.id,
+            "version_semver": v.version_semver,
+            "version_num": v.version_num,
+            "checksum_sha256": v.checksum_sha256,
+            "fingerprint_sha256": v.fingerprint_sha256,
+            "capability_loss": capability_loss,
+            "has_high_loss": has_high_loss,
+            "provenance": v.provenance_json or {},
+            "runtime_targets": runtime_targets,
+            "manifest_pretty": json.dumps(v.manifest_json or {}, ensure_ascii=False, indent=2, sort_keys=True),
+            "created_at": v.created_at,
+        })
+    arows = []
+    for a in activations:
+        v = version_by_id.get(a.version_id)
+        arows.append({
+            "id": a.id,
+            "action_type": a.action_type,
+            "status": a.status,
+            "version_id": a.version_id,
+            "version_label": _agent_pack_version_label(v),
+            "approval_action_id": a.approval_action_id,
+            "requested_at": a.requested_at,
+            "decided_at": a.decided_at,
+            "applied_at": a.applied_at,
+            "error": a.error,
+        })
+    return await _render(
+        "agent_pack_detail.html",
+        request,
+        title=f"Pacote: {pack.name or pack.pack_key}",
+        pack=pack,
+        versions=vrows,
+        activations=arows,
+        supported_targets=supported_targets,
+        export_targets=list(_AGENT_PACK_EXPORT_TARGETS),
+    )
+
+
+@router.get("/agent-packs/{pack_id}/versions/{version_id}/export")
+async def agent_pack_export(request: Request, pack_id: str, version_id: str, target: str = "openbot"):
+    org_id = await _org_filter(request)
+    target = (target or "").strip()
+    if target not in _AGENT_PACK_EXPORT_TARGETS:
+        raise HTTPException(status_code=400, detail=f"target inválido. Use: {', '.join(_AGENT_PACK_EXPORT_TARGETS)}")
+
+    async with db_session() as db:
+        pack = (
+            await db.execute(select(AgentPack).where(AgentPack.id == pack_id, AgentPack.org_id == org_id))
+        ).scalar_one_or_none()
+        if not pack:
+            raise HTTPException(status_code=404, detail="Pacote não encontrado")
+        version = (
+            await db.execute(
+                select(AgentPackVersion).where(
+                    AgentPackVersion.id == version_id,
+                    AgentPackVersion.pack_id == pack.id,
+                    AgentPackVersion.org_id == org_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not version:
+            raise HTTPException(status_code=404, detail="Versão não encontrada")
+
+    manifest = version.manifest_json or {}
+    capability_loss = version.capability_loss_json or []
+
+    try:
+        from aios.core.agent_pack import validate_agent_pack
+        from aios.core.agent_pack_export import export_agent_pack as build_agent_pack_bundle
+    except Exception as e:
+        logger.exception("agent pack export deps unavailable")
+        raise HTTPException(status_code=503, detail="Export indisponível neste ambiente") from e
+
+    try:
+        validated = validate_agent_pack(manifest)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Manifest inválido: {e}") from e
+
+    tmpdir = tempfile.mkdtemp(prefix="aios-agent-pack-export-")
+    try:
+        bundle_dir = Path(tmpdir) / "bundle"
+        build_agent_pack_bundle(validated, target=target, output_dir=bundle_dir, capability_loss=capability_loss)
+        archive_base = Path(tmpdir) / f"{pack.pack_key}-{version.version_semver}-{target}"
+        archive_path = shutil.make_archive(str(archive_base), "zip", root_dir=bundle_dir)
+        filename = Path(archive_path).name
+        return FileResponse(
+            archive_path,
+            media_type="application/zip",
+            filename=filename,
+            background=BackgroundTask(shutil.rmtree, tmpdir, ignore_errors=True),
+        )
+    except HTTPException:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
+    except Exception as e:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        logger.exception("agent pack export failed")
+        raise HTTPException(status_code=500, detail="Falha ao exportar bundle") from e
+
+
 # ─── Routines (read-only normalized view) ───
 
 @router.get("/routines", response_class=HTMLResponse)
@@ -3895,6 +4153,18 @@ def _funnel_stats(deals: list) -> dict:
     }
 
 
+def _agg_funnel_stats(rows) -> dict:
+    total = sum(int(r.count) for r in rows)
+    won = sum(int(r.won_count) for r in rows)
+    return {
+        "total": total,
+        "value": sum(float(r.value or 0) for r in rows),
+        "won": won,
+        "won_value": sum(float(r.won_value or 0) for r in rows),
+        "win_rate": (won / total * 100) if total else 0.0,
+    }
+
+
 # Below this many deals ever occupying a stage, a percentage is noise that Sales
 # would read as a trend. Such stages report "n insufficient" instead of a number,
 # because "1 of 1 advanced = 100%" is a false positive waiting to mislead.
@@ -3990,7 +4260,17 @@ async def funnels_page(request: Request):
             select(SalesFunnel).where(SalesFunnel.org_id == org_id)
             .order_by(SalesFunnel.created_at.desc())
         )).scalars().all()
-        deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id))).scalars().all()
+        pipeline_key = func.coalesce(func.nullif(CrmDeal.pipeline, ""), "default")
+        agg_rows = (await db.execute(
+            select(
+                pipeline_key.label("pipeline"),
+                func.count(CrmDeal.id).label("count"),
+                func.sum(func.coalesce(CrmDeal.value, 0)).label("value"),
+                func.sum(case((CrmDeal.stage == "closed_won", 1), else_=0)).label("won_count"),
+                func.sum(case((CrmDeal.stage == "closed_won", func.coalesce(CrmDeal.value, 0)), else_=0)).label("won_value"),
+            ).where(CrmDeal.org_id == org_id).group_by(pipeline_key)
+        )).all()
+        by_pipeline = {r.pipeline: r for r in agg_rows}
         open_insights = (await db.execute(
             select(FunnelInsight).where(FunnelInsight.org_id == org_id, FunnelInsight.resolved.is_(False))
         )).scalars().all()
@@ -3999,8 +4279,8 @@ async def funnels_page(request: Request):
             open_by_funnel[i.funnel_id] = open_by_funnel.get(i.funnel_id, 0) + 1
         rows = []
         for f in funnels:
-            fd = [d for d in deals if (d.pipeline or "default") == f.pipeline]
-            st = _funnel_stats(fd)
+            row = by_pipeline.get(f.pipeline)
+            st = _agg_funnel_stats([row] if row is not None else [])
             rows.append({
                 "id": f.id, "name": f.name, "description": f.description,
                 "pipeline": f.pipeline, "is_active": f.is_active,
@@ -4008,7 +4288,7 @@ async def funnels_page(request: Request):
                 "deal_count": st["total"], "deal_value": st["value"],
                 "open_insight_count": open_by_funnel.get(f.id, 0),
             })
-        agg = _funnel_stats(deals)
+        agg = _agg_funnel_stats(agg_rows)
         return await _render(
             "funnels.html", request, title="Funis de Vendas", funnels=rows,
             total_deals=agg["total"], total_value=agg["value"],
@@ -4925,7 +5205,7 @@ async def _dashboard_knowledge_actor(db, user):
         )
     ).scalars().all()
     try:
-        grants = await resolve_granted_record_ids(user.org_id, user.id)
+        grants = await resolve_granted_record_ids(user.org_id, user.id, db=db)
     except Exception:
         logger.warning("dashboard knowledge grants resolution failed; fail_closed", exc_info=True)
         grants = set()
@@ -4966,7 +5246,7 @@ async def knowledge_page(request: Request):
                 select(KnowledgeRecord)
                 .where(KnowledgeRecord.org_id == org_id)
                 .order_by(KnowledgeRecord.created_at.desc(), KnowledgeRecord.id.desc())
-                .limit(KNOWLEDGE_RECORD_SCAN_LIMIT)
+                .limit(KNOWLEDGE_RECORD_SCAN_LIMIT + 1)
             )
         ).scalars().all()
         visible_rows = []
@@ -4980,6 +5260,10 @@ async def knowledge_page(request: Request):
             )
             if allowed:
                 visible_rows.append((r, reason))
+        knowledge_truncated = len(rows) > KNOWLEDGE_RECORD_SCAN_LIMIT
+        if knowledge_truncated:
+            sentinel_id = rows[-1].id
+            visible_rows = [(r, reason) for r, reason in visible_rows if r.id != sentinel_id]
         knowledge_total = len(visible_rows)
         visible = []
         for r, reason in visible_rows[offset : offset + limit]:
@@ -5006,6 +5290,8 @@ async def knowledge_page(request: Request):
         title="Base Conhecimento Governada",
         records=visible,
         knowledge_total=knowledge_total,
+        knowledge_truncated=knowledge_truncated,
+        knowledge_scan_limit=KNOWLEDGE_RECORD_SCAN_LIMIT,
         knowledge_offset=offset,
         knowledge_limit=limit,
         is_founder=actor["is_founder"],

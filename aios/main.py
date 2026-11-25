@@ -917,9 +917,23 @@ async def health():
 
 
 
+def _run_pack_cli(argv: list[str]) -> int:
+    from aios.core.agent_pack_cli import main as pack_main
+
+    return pack_main(argv)
+
+
 def run():
+    import sys
+
+    # Preserve default behavior: `aios`/`python -m aios.main` starts server.
+    # Subcommand dispatch: `aios pack ...` handles agent-pack CLI only.
+    if len(sys.argv) > 1 and sys.argv[1] == "pack":
+        raise SystemExit(_run_pack_cli(sys.argv[2:]))
+
     import uvicorn
     uvicorn.run("aios.main:app", host="0.0.0.0", port=8777, reload=False)
+
 
 if __name__ == "__main__":
     run()

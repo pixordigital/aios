@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
+  <div>
+    <h1>Pacotes de Agentes</h1>
+    <p class="text-sm text-secondary mt-1">Catálogo interno de Agent Packs: versões, provenance, capability loss e status de ativação HITL. Instalação web no filesystem do servidor desativada por segurança.</p>
+  </div>
+  <div class="text-xs text-tertiary font-mono">{{ packs|length }} pacote(s)</div>
+</div>
+
+<div class="card mb-4" style="border-color:var(--amber-subtle)">
+  <div class="text-sm" style="color:var(--amber)"><strong>Segurança:</strong> UI web não instala/escreve bundle arbitrário no servidor. Ativação/rollback exigem HITL via fluxo de aprovações. Para instalar localmente com consentimento/auditoria, use CLI/API local guiada.</div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th>Pacote</th><th>Tipo</th><th>Versão ativa</th><th>Versões</th><th>Atualizado</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for p in packs %}
+      <tr>
+        <td>
+          <div style="font-weight:500">{{ p.name or p.pack_key }}</div>
+          <div class="text-xs text-tertiary font-mono">{{ p.pack_key }}</div>
+          {% if p.description %}<div class="text-xs text-secondary mt-1">{{ p.description[:140] }}{% if p.description|length > 140 %}…{% endif %}</div>{% endif %}
+        </td>
+        <td><span class="badge">{{ p.agent_type or '-' }}</span></td>
+        <td class="text-xs font-mono">{{ p.active_version_label or '—' }}</td>
+        <td class="text-xs">{{ p.version_count }}</td>
+        <td class="text-xs font-mono">{{ p.updated_at.strftime('%d/%m %H:%M') if p.updated_at else '-' }}</td>
+        <td><a class="btn btn-ghost btn-sm" href="/dashboard/agent-packs/{{ p.id }}">Abrir</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="text-secondary text-sm">Nenhum pacote encontrado para esta organização.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

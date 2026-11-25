@@ -16,9 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from aios.core.agent_pack import AgentPackManifest, AgentPackValidationError, manifest_fingerprint, validate_agent_pack
 
-ExportTarget = Literal["claude_code", "codex", "opencode", "openclaw"]
+ExportTarget = Literal["claude_code", "codex", "opencode", "openclaw", "openbot"]
 
-_TARGETS: tuple[str, ...] = ("claude_code", "codex", "opencode", "openclaw")
+_TARGETS: tuple[str, ...] = ("claude_code", "codex", "opencode", "openclaw", "openbot")
 _LOSS_STATUSES = {"supported", "partial", "unsupported", "transformed", "denied"}
 _LOSS_SEVERITIES = {"info", "warn", "blocker"}
 _STATUS_RANK = {"denied": 4, "unsupported": 3, "transformed": 2, "partial": 1, "supported": 0}
@@ -266,6 +266,8 @@ def _target_supported_fields(target: ExportTarget) -> set[str]:
         return common | {"runtime_targets"}
     if target == "openclaw":
         return common | {"runtime_targets"}
+    if target == "openbot":
+        return common | {"runtime_targets"}
     return common
 
 
@@ -334,6 +336,16 @@ def _build_export_losses(manifest: AgentPackManifest, target: ExportTarget, capa
             source_ref=src,
             target_ref=f"{tgt}/openclaw/agent.bundle.json",
             remediation="Review capability-loss report before import",
+        ))
+    if target == "openbot":
+        items.append(CapabilityLossItem(
+            field_path="openbot.bundle",
+            status="partial",
+            severity="warn",
+            reason="OpenBot export is conservative adapter-only; Pixor/runtime-only fields marked loss, no parity claim",
+            source_ref=src,
+            target_ref=f"{tgt}/openbot/agent.bundle.json",
+            remediation="Review capability-loss report before import; install guided local only",
         ))
 
     # no executable side-effect stubs
@@ -537,6 +549,28 @@ def _target_files(manifest: AgentPackManifest, target: ExportTarget) -> dict[str
             "memory_scope": manifest.memory_scope.model_dump(mode="json"),
             "runtime_targets": [rt.model_dump(mode="json") for rt in manifest.runtime_targets],
             "unsigned": True,
+        }) + "\n"
+    elif target == "openbot":
+        # Conservative OpenBot adapter: plain JSON bundle + skill md. No parity claim.
+        files["AGENTS.md"] = _render_agents_md(manifest)
+        files[f"openbot/skills/{skill_id}/SKILL.md"] = skill_md
+        files["tool-policy.json"] = tool_policy
+        files["openbot/agent.bundle.json"] = _canonical_json({
+            "schema": "openbot.agent.bundle.v1",
+            "id": manifest.identity.id,
+            "name": manifest.identity.name,
+            "agent_type": manifest.identity.agent_type,
+            "description": manifest.identity.description,
+            "version": manifest.version,
+            "prompt": manifest.prompt.model_dump(mode="json"),
+            "tools": manifest.tools.model_dump(mode="json"),
+            "routines": _routines(manifest),
+            "approvals": manifest.approvals.model_dump(mode="json"),
+            "memory_scope": manifest.memory_scope.model_dump(mode="json"),
+            "runtime_targets": [rt.model_dump(mode="json") for rt in manifest.runtime_targets],
+            "unsigned": True,
+            "parity_claim": False,
+            "notes": "Export-only adapter; install guided local only. Pixor/runtime-only fields may be lossy; see capability-loss report.",
         }) + "\n"
     else:
         raise AgentPackValidationError(f"unknown export target: {target}", field="target")
