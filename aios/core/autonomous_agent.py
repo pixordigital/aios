@@ -542,6 +542,11 @@ class AutonomousAgent:
         except Exception:
             pass
         try:
+            from aios.core.second_brain import consolidate_reflection
+            await consolidate_reflection(self.agent.id, self.agent.org_id or "", conversation_id, reflections)
+        except Exception:
+            pass
+        try:
             from aios.core.agent_db import agent_db
 
             await agent_db.create_reflection(

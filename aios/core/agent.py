@@ -1397,6 +1397,14 @@ class AgentRuntime:
         # memory pipeline: inject relevant past context
         injections = await self.memory.get_context_injections(user_message, top_k=3)
         ctx.extend(injections)
+        # second brain: AgentDB reflections + learnings (best-effort)
+        try:
+            from aios.core.second_brain import get_second_brain_injections
+            ctx.extend(await get_second_brain_injections(
+                self.agent.id, self.agent.org_id or "", user_message, top_k=3
+            ))
+        except Exception:
+            logger.debug("second_brain injection failed", exc_info=True)
 
         # skill injection — load relevant skills for this task
         try:
