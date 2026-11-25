@@ -21,3 +21,24 @@
     </a>
   {% endfor %}
 </div>
+<script>
+(function () {
+  const dict = {
+    'Equipes': 'Equipos',
+    'Mapa': 'Mapa'
+  };
+  if (window.aiosI18n && window.aiosI18n.register) {
+    window.aiosI18n.register(dict);
+    return;
+  }
+  if (!String(localStorage.getItem('aios_lang') || '').startsWith('es')) return;
+  document.querySelectorAll('a').forEach(a => {
+    Object.entries(dict).forEach(([from, to]) => {
+      if (a.textContent.trim() === from) a.textContent = to;
+      ['title', 'aria-label', 'placeholder'].forEach(attr => {
+        if (a.getAttribute(attr) === from) a.setAttribute(attr, to);
+      });
+    });
+  });
+})();
+</script>

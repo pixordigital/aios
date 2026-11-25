@@ -26,27 +26,47 @@ async function checkStatus(){
 checkStatus();
 function escapeAnsi(s){ return s.replace(/\x1b\[[0-9;]*m/g,''); }
 async function runBuild(){
-  const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert('prompt vazio');
-  const o=document.getElementById('build-out'); o.style.display=''; o.textContent='⏳ Claude+Codex construindo...'; document.getElementById('log').textContent='build: '+p.slice(0,80);
+  const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert(window.aiosI18n.t('prompt vazio'));
+  const o=document.getElementById('build-out'); o.style.display=''; o.textContent=window.aiosI18n.t('⏳ Claude+Codex construindo...'); document.getElementById('log').textContent='build: '+p.slice(0,80);
   const r=await fetch('/api/dev/build',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})}); const j=await r.json();
   o.textContent=escapeAnsi(`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,8000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,8000)}`);
 }
 async function runOne(which){
-  const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert('prompt vazio');
+  const p=document.getElementById('build-prompt').value.trim(); if(!p) return alert(window.aiosI18n.t('prompt vazio'));
   const o=document.getElementById('build-out'); o.style.display=''; o.textContent='⏳ '+which+'...';
   const r=await fetch(`/api/dev/${which}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p})}); const j=await r.json();
   o.textContent=escapeAnsi((j.stdout||j.result||JSON.stringify(j,null,2)).slice(0,10000));
 }
 async function runReview(){
   const p=document.getElementById('review-prompt').value;
-  const o=document.getElementById('review-out'); o.style.display=''; o.textContent='⏳ Dual review...';
+  const o=document.getElementById('review-out'); o.style.display=''; o.textContent=window.aiosI18n.t('⏳ Dual review...');
   const r=await fetch('/api/dev/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({diff:p})}); const j=await r.json();
   o.textContent=escapeAnsi(`=== CLAUDE ===\n${(j.claude.stdout||j.claude.result||JSON.stringify(j.claude,null,2)).slice(0,6000)}\n\n=== CODEX ===\n${(j.codex.stdout||JSON.stringify(j.codex,null,2)).slice(0,6000)}`);
 }
 async function runCodexReview(){
-  const o=document.getElementById('review-out'); o.style.display=''; o.textContent='⏳ codex review...';
+  const o=document.getElementById('review-out'); o.style.display=''; o.textContent=window.aiosI18n.t('⏳ codex review...');
   const r=await fetch('/api/dev/review/codex',{method:'POST'}); const j=await r.json();
   o.textContent=escapeAnsi((j.stdout||JSON.stringify(j,null,2)).slice(0,10000));
 }
+</script>
+<script>
+window.aiosI18n.register({
+  'Construção e review dual direto na VPS (claude 2.1.260 + codex 0.153.1 + opencode 1.15.13)': 'Construcción y revisión dual directamente en la VPS (claude 2.1.260 + codex 0.153.1 + opencode 1.15.13)',
+  'checando...': 'comprobando...',
+  'Envia prompt para claude e codex em paralelo (workspace-write)': 'Envía prompt a claude y codex en paralelo (workspace-write)',
+  'Ex: crie endpoint POST /api/lead com validação': 'Ej: crea endpoint POST /api/lead con validación',
+  'Só Claude': 'Solo Claude',
+  'Só Codex': 'Solo Codex',
+  '🔍 Review Dual': '🔍 Revisión dual',
+  '1 linha por achado L<linha>: severidade problema. fix.': '1 línea por hallazgo L<línea>: severidad problema. fix.',
+  'Cole diff ou deixe vazio para git diff HEAD~1': 'Pega diff o déjalo vacío para git diff HEAD~1',
+  'Dual Review': 'Revisión dual',
+  'Codex review': 'Revisión de Codex',
+  'Pronto.': 'Listo.',
+  'prompt vazio': 'prompt vacío',
+  '⏳ Claude+Codex construindo...': '⏳ Claude+Codex construyendo...',
+  '⏳ Dual review...': '⏳ Revisión dual...',
+  '⏳ codex review...': '⏳ revisión de codex...'
+});
 </script>
 {% endblock %}

@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Directly-persisted HITL rows (crm.py / team_collaboration.py) name a real
 # registry tool. Alert-only Deal Desk rows are deliberately absent.
 _REPLAY_TOOLS = frozenset({"crm_update_deal", "request_build"})
+_AGENT_PACK_APPROVAL_TOOLS = frozenset({"agent_pack_activate", "agent_pack_rollback"})
 
 
 @dataclass
@@ -263,9 +264,17 @@ class ApprovalManager:
                     return
                 if row.tool_name not in TOOL_REGISTRY:
                     return
-                args = row.tool_args
-                if not isinstance(args, dict):
+                raw_args = row.tool_args
+                if not isinstance(raw_args, dict):
                     return
+                # Caller-supplied marker is untrusted; DB row is authoritative.
+                args = dict(raw_args)
+                args.pop("_requested_by", None)
+                args["_hitl_approved_action"] = {
+                    "action_id": row.id,
+                    "org_id": row.org_id,
+                    "decided_by": row.decided_by,
+                }
                 tool_name = row.tool_name
                 agent_id = row.agent_id or ""
 

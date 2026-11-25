@@ -139,16 +139,15 @@ def test_shared_dict_session_is_supported(db):
     assert len(_rows(db)) == 1
 
 
-def test_in_memory_dedupe_unchanged_without_session():
+def test_explicit_marker_without_session_fails_closed():
     adapter = _adapter()
     shared = {"task_id": "task-1"}
 
-    first = adapter.enforce_execution(shared, action="send_email")
-    second = adapter.enforce_execution(shared, action="send_email")
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter.enforce_execution(shared, action="send_email")
 
-    assert second == first
-    assert adapter.side_effect_recorded
-    assert shared["_icm_side_effect_keys"] == {first}
+    assert not adapter.side_effect_recorded
+    assert "_icm_side_effect_keys" not in shared
 
 
 def test_unique_race_resolves_by_run_id():

@@ -6,7 +6,7 @@
     <a href="/dashboard/admin/backup" class="btn btn-sm {% if request.url.path.startswith('/dashboard/admin/backup') %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:999px">Backup & Restore</a>
 </div>
 <div class="flex-between mb-4">
-    <div><h1>Organizações</h1><p class="text-sm text-secondary mt-1">{{ orgs|length }} {{ 'organização' if orgs|length == 1 else 'organizações' }}</p></div>
+    <div><h1>Organizações</h1><p class="text-sm text-secondary mt-1">{{ orgs|length }} <span>{{ 'organização' if orgs|length == 1 else 'organizações' }}</span></p></div>
 </div>
 
 <div class="table-wrap">
@@ -42,4 +42,26 @@
         </tbody>
     </table>
 </div>
+<script>
+window.aiosI18n.register({
+    'Organizações': 'Organizaciones',
+    'Frota de Clientes': 'Flota de Clientes',
+    'Backup & Restore': 'Backup y restauración',
+    'organização': 'organización',
+    'organizações': 'organizaciones',
+    'Nome': 'Nombre',
+    'Slug': 'Slug',
+    'Plano': 'Plan',
+    'Usuários': 'Usuarios',
+    'Agentes': 'Agentes',
+    'Mensagens/24h': 'Mensajes/24h',
+    'Status': 'Estado',
+    'Criada em': 'Creada el',
+    'Ativa': 'Activa',
+    'Suspensa': 'Suspendida',
+    'Ver': 'Ver',
+    'Suspender': 'Suspender',
+    'Reativar': 'Reactivar'
+});
+</script>
 {% endblock %}

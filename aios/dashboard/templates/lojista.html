@@ -38,4 +38,20 @@ function pickSol(k){ document.querySelectorAll('[id^=sol-]').forEach(function(el
 nextStep(1);
 document.getElementById('loj-form').addEventListener('submit', function(e){ var p=document.querySelector('[name=phone]').value||''; if(!/^\d{10,15}$/.test(p)){ e.preventDefault(); alert('WhatsApp inválido: só dígitos, ex. 5511999999999'); } });
 </script>
+<script>
+window.aiosI18n.register({
+    'Começar em 1 minuto': 'Empezar en 1 minuto',
+    '1 número → 1 objetivo → 1 frase sobre teu negócio. Pronto.': '1 número → 1 objetivo → 1 frase sobre tu negocio. Listo.',
+    '3 Negócio': '3 Negocio',
+    '1. Teu WhatsApp': '1. Tu WhatsApp',
+    'Só dígitos, ex. 5511999999999': 'Solo dígitos, ej. 5511999999999',
+    'Próximo': 'Siguiente',
+    '2. O que tu quer?': '2. ¿Qué quieres?',
+    'Voltar': 'Volver',
+    '3. O que tu vende? (1 frase)': '3. ¿Qué vendes? (1 frase)',
+    'Ex.: pizzaria no centro, entrega em 40min': 'Ej.: pizzería en el centro, entrega en 40min',
+    'Criar meu atendente': 'Crear mi atendente',
+    'WhatsApp inválido: só dígitos, ex. 5511999999999': 'WhatsApp inválido: solo dígitos, ej. 5511999999999'
+});
+</script>
 {% endblock %}

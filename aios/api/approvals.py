@@ -1,5 +1,7 @@
 """Approval API — human-in-the-loop queue management."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from aios.api.deps import get_current_user, verify_org_access_async
@@ -8,10 +10,14 @@ from aios.core.approval import approval_manager
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization, PendingAction as DBAction, User
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 
 _APPROVER_ROLES = {"admin", "org_admin", "superadmin"}
-_REQUESTER_KEYS = ("requested_by", "created_by", "actor_user_id", "human_id")
+_REQUESTER_KEYS = (
+    "_requested_by", "requested_by", "created_by", "actor_user_id", "human_id"
+)
 
 
 async def _require_decision_authority(
@@ -32,10 +38,13 @@ async def _require_decision_authority(
 
 def _is_self_approval(row: DBAction, user_id: str) -> bool:
     args = row.tool_args if isinstance(row.tool_args, dict) else {}
-    requester = getattr(row, "requested_by", None) or getattr(row, "created_by", None)
-    if not requester:
-        requester = next((args[k] for k in _REQUESTER_KEYS if args.get(k)), None)
-    return bool(requester) and str(requester) == str(user_id)
+    requesters = (
+        getattr(row, "requested_by", None),
+        getattr(row, "created_by", None),
+        *(args.get(k) for k in _REQUESTER_KEYS),
+    )
+    uid = str(user_id)
+    return any(r and str(r) == uid for r in requesters)
 
 
 @router.get("")
@@ -110,12 +119,41 @@ async def approve_action(
     user: User = Depends(get_current_user),
 ):
     """Approve a pending tool call."""
-    await _load_approval_or_404(
+    row = await _load_approval_or_404(
         db, action_id=action_id, org_id=user.org_id, user=user, source="api.approvals.approve"
     )
     ok = await approval_manager.approve(action_id, decided_by=user.id, org_id=user.org_id)
     if not ok:
         raise HTTPException(404, "Action not found or already decided")
+
+    # Agent pack activation: deterministic apply after approval.
+    try:
+        from aios.api.agent_packs import apply_agent_pack_activation, ACTIVATE_TOOL, ROLLBACK_TOOL
+        from aios.core.audit import log_audit
+        from sqlalchemy import select
+
+        fresh = (
+            await db.execute(
+                select(DBAction).where(DBAction.id == action_id).execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        tool = str(getattr(fresh, "tool_name", "") or row.tool_name or "")
+        if fresh and tool in {ACTIVATE_TOOL, ROLLBACK_TOOL}:
+            action_kind = "rollback" if tool == ROLLBACK_TOOL else "activation"
+            await log_audit(db, user.org_id, f"agent_pack.{action_kind}.approved", "agent_pack_activation",
+                            user_id=user.id, resource_id=action_id,
+                            details={"tool_name": tool, "action_id": action_id})
+            apply_result = await apply_agent_pack_activation(db, fresh)
+            if not apply_result.get("ok"):
+                await log_audit(db, user.org_id, f"agent_pack.{action_kind}.failed", "agent_pack_activation",
+                                user_id=user.id, resource_id=str(apply_result.get("activation_id") or action_id),
+                                details={"tool_name": tool, "action_id": action_id, "reason": apply_result.get("reason")})
+            return {"status": "approved", "action_id": action_id, "apply": apply_result}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("agent pack apply hook failed for %s", action_id)
+
     return {"status": "approved", "action_id": action_id}
 
 
@@ -126,10 +164,33 @@ async def reject_action(
     user: User = Depends(get_current_user),
 ):
     """Reject a pending tool call."""
-    await _load_approval_or_404(
+    row = await _load_approval_or_404(
         db, action_id=action_id, org_id=user.org_id, user=user, source="api.approvals.reject"
     )
     ok = await approval_manager.reject(action_id, decided_by=user.id, org_id=user.org_id)
     if not ok:
         raise HTTPException(404, "Action not found or already decided")
+
+    try:
+        from aios.api.agent_packs import ACTIVATE_TOOL, ROLLBACK_TOOL, _load_activation_for_action
+        from aios.core.audit import log_audit
+
+        tool = str(row.tool_name or "")
+        if tool in {ACTIVATE_TOOL, ROLLBACK_TOOL}:
+            action_kind = "rollback" if tool == ROLLBACK_TOOL else "activation"
+            await log_audit(db, user.org_id, f"agent_pack.{action_kind}.rejected", "agent_pack_activation",
+                            user_id=user.id, resource_id=action_id,
+                            details={"tool_name": tool, "action_id": action_id})
+            fresh = await db.get(DBAction, action_id)
+            if fresh:
+                activation = await _load_activation_for_action(db, fresh)
+                if activation and activation.status == "requested":
+                    activation.status = "rejected"
+                    activation.decided_by = user.id
+                    from datetime import datetime, timezone
+                    activation.decided_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    await db.commit()
+    except Exception:
+        logger.exception("agent pack reject hook failed for %s", action_id)
+
     return {"status": "rejected", "action_id": action_id}

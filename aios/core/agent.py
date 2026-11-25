@@ -332,10 +332,11 @@ class AgentRuntime:
         conversation_id: str,
         user_message: str,
         db: DatabaseBackend | None = None,
+        approved_hitl: dict | None = None,
     ) -> str:
         """Non-streaming: collect full response and return."""
         collected = ""
-        async for event in self.run_stream(conversation_id, user_message, db):
+        async for event in self.run_stream(conversation_id, user_message, db, approved_hitl):
             if event["type"] == STREAM_TOKEN:
                 collected += event["content"]
             elif event["type"] == STREAM_ERROR:
@@ -559,6 +560,7 @@ class AgentRuntime:
         conversation_id: str,
         user_message: str,
         db: DatabaseBackend | None = None,
+        approved_hitl: dict | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Streaming, with every event tagged and published to the canvas.
 
@@ -574,12 +576,12 @@ class AgentRuntime:
                 # Raising the deadline aborts a runaway stage instead of
                 # letting it spend the org's token budget.
                 async with asyncio.timeout(self._stage_timeout):
-                    async for ev in self._run_stream_inner(conversation_id, user_message, db):
+                    async for ev in self._run_stream_inner(conversation_id, user_message, db, approved_hitl):
                         if ev.get("type") == STREAM_TOKEN:
                             collected.append(ev.get("content", ""))
                         yield emit_stream_event(self.agent, ev, run_id)
             else:
-                async for ev in self._run_stream_inner(conversation_id, user_message, db):
+                async for ev in self._run_stream_inner(conversation_id, user_message, db, approved_hitl):
                     if ev.get("type") == STREAM_TOKEN:
                         collected.append(ev.get("content", ""))
                     yield emit_stream_event(self.agent, ev, run_id)
@@ -608,6 +610,7 @@ class AgentRuntime:
         conversation_id: str,
         user_message: str,
         db: DatabaseBackend | None = None,
+        approved_hitl: dict | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Streaming: yield token/tool_call/done events as they happen.
 
@@ -805,6 +808,19 @@ class AgentRuntime:
                         fn_name = fn.get("name", "")
                         fn_args = fn.get("arguments", "{}")
                         hitl_reason = self._hitl_tool_reason(fn_name, fn_args)
+                        approved_match = False
+                        if isinstance(approved_hitl, dict):
+                            try:
+                                parsed_args = json.loads(fn_args) if isinstance(fn_args, str) else fn_args
+                            except (TypeError, ValueError):
+                                parsed_args = None
+                            if (
+                                approved_hitl.get("tool_name") == fn_name
+                                and isinstance(parsed_args, dict)
+                                and parsed_args == approved_hitl.get("tool_args")
+                            ):
+                                approved_match = True
+                                approved_hitl = None  # marker covers one call only
 
                         # governance check — deny tool if blocked
                         if fn_name in self._denied_tools:
@@ -813,29 +829,36 @@ class AgentRuntime:
                         elif self._allowed_tools != "__all__" and fn_name not in self._allowed_tools:
                             result = f"Tool '{fn_name}' is not in the allowed list."
                             logger.warning("Governance blocked tool '%s' (not in allow-list) for agent %s", fn_name, self.agent.id)
-                        elif self._autonomy in ("ask", "ask_tools", "ask_all") or hitl_reason:
+                        elif self._autonomy in ("ask", "ask_tools", "ask_all") or hitl_reason or approved_match:
                             # approval mode — block before the side effect runs
-                            from aios.core.approval import approval_manager
-                            action_id = str(uuid.uuid4())
-                            hooks.fire(HookPoint.APPROVAL_REQUESTED, HookContext(
-                                agent_id=self.agent.id,
-                                conversation_id=conversation_id,
-                                data={"action_id": action_id, "tool_name": fn_name},
-                            ))
-                            approved = await approval_manager.request_approval(
-                                action_id=action_id,
-                                agent_id=self.agent.id,
-                                conversation_id=conversation_id,
-                                tool_name=fn_name,
-                                tool_args=json.loads(fn_args) if isinstance(fn_args, str) else fn_args,
-                                context_summary=f"HITL: {hitl_reason}" if hitl_reason else response_content[:200],
-                                # Without this the row lands with org_id="" and
-                                # the approvals API filters it out for every
-                                # tenant, so nobody could ever approve it — the
-                                # agent waited the full timeout on an action no
-                                # human could see.
-                                org_id=self.agent.org_id,
-                            )
+                            if approved_match:
+                                approved = True
+                            else:
+                                from aios.core.approval import approval_manager
+                                action_id = str(uuid.uuid4())
+                                hooks.fire(HookPoint.APPROVAL_REQUESTED, HookContext(
+                                    agent_id=self.agent.id,
+                                    conversation_id=conversation_id,
+                                    data={"action_id": action_id, "tool_name": fn_name},
+                                ))
+                                approval_args = json.loads(fn_args) if isinstance(fn_args, str) else fn_args
+                                actor_user_id = str(self._actor_context_from_agent(self.agent).get("actor_user_id") or "")
+                                if actor_user_id and isinstance(approval_args, dict):
+                                    approval_args = {**approval_args, "_requested_by": actor_user_id}
+                                approved = await approval_manager.request_approval(
+                                    action_id=action_id,
+                                    agent_id=self.agent.id,
+                                    conversation_id=conversation_id,
+                                    tool_name=fn_name,
+                                    tool_args=approval_args,
+                                    context_summary=f"HITL: {hitl_reason}" if hitl_reason else response_content[:200],
+                                    # Without this the row lands with org_id="" and
+                                    # the approvals API filters it out for every
+                                    # tenant, so nobody could ever approve it — the
+                                    # agent waited the full timeout on an action no
+                                    # human could see.
+                                    org_id=self.agent.org_id,
+                                )
                             if not approved:
                                 result = f"Tool '{fn_name}' was not approved by human."
                                 logger.info("Approval denied for tool '%s' on agent %s", fn_name, self.agent.id)
@@ -1116,6 +1139,11 @@ class AgentRuntime:
             return f"tool '{fn_name}' requires approval by agent policy"
         if fn_name in ("crm_delete_deal", "crm_merge_deals"):
             return f"destructive tool '{fn_name}' requires approval"
+        # Dynamic tools register arbitrary names; name-based rules cannot see them.
+        from aios.tools.registry import TOOL_REGISTRY
+        entry = TOOL_REGISTRY.get(fn_name)
+        if isinstance(entry, dict) and entry.get("dynamic") is True:
+            return f"dynamic tool '{fn_name}' requires approval"
         if isinstance(fn_args, str):
             try:
                 fn_args = json.loads(fn_args)
@@ -1130,10 +1158,14 @@ class AgentRuntime:
             recipients = args.get("to", args.get("to_emails", []))
             if isinstance(recipients, (list, tuple, set)) and len(recipients) >= 100:
                 return f"bulk email to {len(recipients)} recipients requires approval"
+        destructive = ("DELETE ", "DROP ", "TRUNCATE ", "PG_")
         if fn_name in ("code", "python_sandbox", "sql_query"):
             payload = str(args).upper()
-            if any(word in payload for word in ("DELETE ", "DROP ", "TRUNCATE ", "PG_")):
+            if any(word in payload for word in destructive):
                 return f"destructive {fn_name} call requires approval"
+        payload = " ".join(str(args.get(k, "")) for k in ("code", "sql", "query", "script")).upper()
+        if any(word in payload for word in destructive):
+            return f"destructive payload in {fn_name} args requires approval"
         for key in ("value", "amount", "valor"):
             val = args.get(key)
             if isinstance(val, (int, float)) and not isinstance(val, bool) and val >= self._hitl_value_threshold:

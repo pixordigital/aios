@@ -9,6 +9,14 @@
     {% if request.query_params.get('saved') %}<span class="badge" style="background:var(--green-subtle);border-color:var(--green);color:var(--green)">Salvo</span>{% endif %}
   </div>
 
+  <div class="card" style="margin-bottom:1rem">
+    <label for="ui-language">Idioma da interface</label>
+    <select id="ui-language" class="input" aria-label="Idioma da interface">
+      <option value="pt">Português</option>
+      <option value="es">Español</option>
+    </select>
+  </div>
+
   <form method="POST" action="/dashboard/settings/save" style="display:flex;flex-direction:column;gap:1rem">
     <div class="card">
       <h3 style="margin-bottom:0.125rem">LLM — Provedores</h3>
@@ -166,6 +174,75 @@
   </form>
 </div>
 <script>
+window.aiosI18n.register({
+  'Configurações':'Configuración',
+  'Chaves por organização — isoladas, sem .env global. Vazias herdam do servidor.':'Claves por organización — aisladas, sin .env global. Las vacías heredan del servidor.',
+  'Salvo':'Guardado',
+  'Idioma da interface':'Idioma de la interfaz',
+  'LLM — Provedores':'LLM — Proveedores',
+  'Pelo menos 1 obrigatória para agentes rodarem live. OpenRouter recomendado (agrega todos modelos).':'Al menos 1 obligatoria para que los agentes funcionen en vivo. OpenRouter recomendado (agrega todos los modelos).',
+  'Testar':'Probar',
+  'limpar':'limpiar',
+  'Deixe vazio para usar':'Deje vacío para usar',
+  '(/data). Preencha para S3/R2.':'(/data). Complete para S3/R2.',
+  'SMTP — E-mail':'SMTP — Correo electrónico',
+  'Relatório semanal:':'Informe semanal:',
+  'Se vazio, usamos o primeiro administrador da organização. Se SMTP não estiver configurado, o envio aparece como indisponível no relatório; o Slack continua funcionando.':'Si está vacío, usamos el primer administrador de la organización. Si SMTP no está configurado, el envío aparece como no disponible en el informe; Slack sigue funcionando.',
+  '📅 Google Calendar — Agendamento Real':'📅 Google Calendar — Programación Real',
+  'Conecte para SDR agendar consulta/visita direto no Calendar (Roberto/Mariana). Sem isso, agente só usa':'Conecte para que SDR programe consulta/visita directamente en Calendar (Roberto/Mariana). Sin esto, el agente solo usa',
+  '✓ Google Calendar conectado com sucesso!':'✓ Google Calendar conectado con éxito!',
+  'Conectar com Google OAuth':'Conectar con Google OAuth',
+  'Clique para autorizar acesso ao Calendar — 1 clique, sem JSON':'Haga clic para autorizar el acceso a Calendar — 1 clic, sin JSON',
+  '— ou use service account (avançado) —':'— o use service account (avanzado) —',
+  '— vazio':'— vacío',
+  'Cole JSON do service account OU defina':'Pegue el JSON del service account O defina',
+  'no .env.':'en .env.',
+  'Criar service account →':'Crear service account →',
+  'primary ou email@group.calendar.google.com':'primary o email@group.calendar.google.com',
+  'Default: primary':'Predeterminado: primary',
+  'Testar Calendar':'Probar Calendar',
+  '⏰ Alertas — Expiração por organização':'⏰ Alertas — Expiración por organización',
+  'Alertas `PendingAction` (Deal Desk) expiram automaticamente. Padrão 7 dias, configurável por negócio.':'Alertas `PendingAction` (Deal Desk) expiran automáticamente. Predeterminado 7 días, configurable por negocio.',
+  'Expiração (dias)':'Expiración (días)',
+  '3 dias':'3 días',
+  '7 dias (padrão)':'7 días (predeterminado)',
+  '14 dias':'14 días',
+  '30 dias':'30 días',
+  '60 dias':'60 días',
+  'Alert-only: expira para `expired`, nunca bloqueia. Validação humana obrigatória.':'Alert-only: expira a `expired`, nunca bloquea. Validación humana obligatoria.',
+  'Jornada Diária dos Agentes':'Jornada Diaria de los Agentes',
+  'Cada agente proactive recebe sua fila de deals e trabalha sozinho às 07:00 UTC.':'Cada agente proactivo recibe su cola de deals y trabaja solo a las 07:00 UTC.',
+  'Ativar ou pausar a jornada diária':'Activar o pausar la jornada diaria',
+  'Ativar jornada diária dos agentes':'Activar jornada diaria de los agentes',
+  'Ativa':'Activa',
+  'Agentes na fila':'Agentes en la cola',
+  'ativada':'activada',
+  'SDR e support ficam de fora — eles trabalham quando chega uma mensagem.':'SDR y support quedan fuera — trabajan cuando llega un mensaje.',
+  'Para tirar um agente específico da fila mesmo com a jornada ativa,':'Para sacar un agente específico de la cola incluso con la jornada activa,',
+  'nas flags do agente':'en las flags del agente',
+  'com':'con',
+  'A fila vem dos deals abertos que o agente é dono, e o histórico do CRM é o que':'La cola viene de los deals abiertos de los que es dueño el agente, y el historial del CRM es lo que',
+  'muda o dia seguinte — nada é lembrado por fora.':'cambia el día siguiente — nada se recuerda por fuera.',
+  'Nenhum agente elegível no momento. Ligar a jornada agora não faz nada até':'Ningún agente elegible en este momento. Activar la jornada ahora no hace nada hasta',
+  'existir um agente ativo com deals abertos.':'que exista un agente activo con deals abiertos.',
+  'Stripe / OAuth / Outros':'Stripe / OAuth / Otros',
+  'Salvar chaves':'Guardar claves',
+  'Falha ao iniciar OAuth':'Fallo al iniciar OAuth',
+  '\n\nConfigure no Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nE no Google Cloud Console adicione redirect URI:\n':'\n\nConfigure en Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nY en Google Cloud Console añada la redirect URI:\n',
+  '\n\nSessão expirada — recarregue a página (F5) e faça login novamente.':'\n\nSesión expirada — recargue la página (F5) e inicie sesión nuevamente.',
+  'Erro: ':'Error: ',
+  'Desconectar Google Calendar?':'¿Desconectar Google Calendar?',
+  'Falha':'Fallo',
+  'testando...':'probando...',
+  'erro':'error'
+});
+const t=window.aiosI18n.t;
+(function(){
+  const sel=document.getElementById('ui-language');
+  if(!sel) return;
+  sel.value=localStorage.getItem('aios_lang')||'pt';
+  sel.addEventListener('change',function(){ localStorage.setItem('aios_lang',sel.value); location.reload(); });
+})();
 async function connectGoogleCalendar(e){
   const btn=e ? (e.currentTarget||e.target) : event.target; const origText=btn.textContent; btn.textContent='Conectando...'; btn.disabled=true;
   try{
@@ -173,41 +250,41 @@ async function connectGoogleCalendar(e){
     const j=await r.json();
     if(j.authorization_url){ window.location.href=j.authorization_url; }
     else {
-      const msg=j.error||j.detail||j.title||j.message||'Falha ao iniciar OAuth';
+      const msg=j.error||j.detail||j.title||j.message||t('Falha ao iniciar OAuth');
       // Se não configurado, mostra instruções
       if(msg.includes('não configurado')){
-        alert(msg + '\n\nConfigure no Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nE no Google Cloud Console adicione redirect URI:\n' + window.location.origin + '/api/auth/google/calendar/callback');
+        alert(msg + t('\n\nConfigure no Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nE no Google Cloud Console adicione redirect URI:\n') + window.location.origin + '/api/auth/google/calendar/callback');
       } else if(r.status===401){
-        alert(msg + '\n\nSessão expirada — recarregue a página (F5) e faça login novamente.');
+        alert(msg + t('\n\nSessão expirada — recarregue a página (F5) e faça login novamente.'));
       } else {
         alert(msg);
       }
       btn.textContent=origText; btn.disabled=false;
     }
-  }catch(e){ alert('Erro: '+e.message); btn.textContent=origText; btn.disabled=false; }
+  }catch(e){ alert(t('Erro: ')+e.message); btn.textContent=origText; btn.disabled=false; }
 }
 async function disconnectCalendar(){
-  if(!confirm('Desconectar Google Calendar?')) return;
+  if(!confirm(t('Desconectar Google Calendar?'))) return;
   try{
     const r=await fetch('/api/auth/google/calendar/disconnect', {method:'POST', credentials:'include'});
     const j=await r.json();
-    if(j.ok) location.reload(); else alert(j.error||'Falha');
-  }catch(e){ alert('Erro: '+e.message); }
+    if(j.ok) location.reload(); else alert(j.error||t('Falha'));
+  }catch(e){ alert(t('Erro: ')+e.message); }
 }
 async function testCalendar(){
   const el=document.getElementById('test-calendar');
-  el.textContent='testando...'; el.style.color='var(--text-tertiary)';
+  el.textContent=t('testando...'); el.style.color='var(--text-tertiary)';
   const fd=new FormData(document.querySelector('form'));
   try{
     const r=await fetch('/dashboard/settings/test-calendar',{method:'POST', body: fd});
     const j=await r.json();
     el.textContent=j.ok?'✓ ok':'✗ '+(j.error||j.status);
     el.style.color=j.ok?'var(--green)':'var(--red)';
-  }catch(e){ el.textContent='erro'; el.style.color='var(--red)';}
+  }catch(e){ el.textContent=t('erro'); el.style.color='var(--red)';}
 }
 async function testKey(provider){
   const el=document.getElementById('test-'+provider);
-  el.textContent='testando...'; el.style.color='var(--text-tertiary)';
+  el.textContent=t('testando...'); el.style.color='var(--text-tertiary)';
   const fd=new FormData(document.querySelector('form'));
   fd.set('provider', provider);
   try{
@@ -215,7 +292,7 @@ async function testKey(provider){
     const j=await r.json();
     el.textContent=j.ok?'✓ ok ('+j.status+')':'✗ '+ (j.error||j.status);
     el.style.color=j.ok?'var(--green)':'var(--red)';
-  }catch(e){ el.textContent='erro'; el.style.color='var(--red)';}
+  }catch(e){ el.textContent=t('erro'); el.style.color='var(--red)';}
 }
 </script>
 {% endblock %}

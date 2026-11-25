@@ -108,7 +108,11 @@ async def test_approval_timeout():
     assert am.get_pending("t3") == []
 
 
-def _hitl_runtime(governance_config: dict):
+def _hitl_runtime(
+    governance_config: dict,
+    tool_name: str = "crm_update_deal",
+    arguments: str = '{"value": 9000}',
+):
     """Agent that requests one high-value tool call on its first LLM turn."""
     import types
     import uuid
@@ -117,7 +121,7 @@ def _hitl_runtime(governance_config: dict):
 
     uid = str(uuid.uuid4())
     agent = types.SimpleNamespace(
-        id=f"hitl-agent-{uid}", org_id=f"hitl-org-{uid}", tools=["crm_update_deal"],
+        id=f"hitl-agent-{uid}", org_id=f"hitl-org-{uid}", tools=[tool_name],
         llm_config={"model": "openai/gpt-4o", "temperature": 0.7, "max_tokens": 4096},
         governance_config=governance_config, name="t", system_prompt="hi",
         memory_config={}, extra_data={},
@@ -130,7 +134,7 @@ def _hitl_runtime(governance_config: dict):
         if len(turns) == 1:
             yield {"type": "tool_call", "tool_calls": [{
                 "id": "c1", "function": {
-                    "name": "crm_update_deal", "arguments": '{"value": 9000}',
+                    "name": tool_name, "arguments": arguments,
                 },
             }]}
         else:
@@ -173,6 +177,51 @@ async def test_hitl_gate_blocks_tool_until_human_approves(monkeypatch):
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_hitl_request_tags_requester_without_mutating_execution_args(monkeypatch):
+    from aios.core import approval as approval_module
+
+    seen = []
+
+    async def _request(**kwargs):
+        seen.append(kwargs)
+        return True
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime(
+        {"autonomy": "autonomous", "hitl_enabled": True, "hitl_value_threshold": 5000},
+        arguments={"value": 9000},
+    )
+    rt.agent.extra_data = {"actor_context": {"actor_user_id": "user-7"}}
+    [ev async for ev in rt.run_stream("c-hitl-requester", "update deal")]
+
+    assert len(seen) == 1
+    assert seen[0]["tool_args"] == {"value": 9000, "_requested_by": "user-7"}
+    assert executed == [("crm_update_deal", {"value": 9000})]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_hitl_request_without_actor_omits_requester(monkeypatch):
+    from aios.core import approval as approval_module
+
+    seen = []
+
+    async def _request(**kwargs):
+        seen.append(kwargs)
+        return True
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime({
+        "autonomy": "autonomous", "hitl_enabled": True, "hitl_value_threshold": 5000,
+    })
+    [ev async for ev in rt.run_stream("c-hitl-no-actor", "update deal")]
+
+    assert len(seen) == 1
+    assert seen[0]["tool_args"] == {"value": 9000}
+    assert "_requested_by" not in seen[0]["tool_args"]
+    assert executed == [("crm_update_deal", '{"value": 9000}')]
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_hitl_gate_executes_approved_tool(monkeypatch):
     from aios.core import approval as approval_module
 
@@ -208,6 +257,85 @@ async def test_hitl_disabled_does_not_gate_tool(monkeypatch):
     assert executed == [("crm_update_deal", '{"value": 9000}')]
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_hitl_approved_marker_skips_new_request(monkeypatch):
+    from aios.core import approval as approval_module
+
+    seen = []
+
+    async def _request(**kwargs):
+        seen.append(kwargs)
+        return True
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime({
+        "autonomy": "autonomous", "hitl_enabled": True, "hitl_value_threshold": 5000,
+    })
+    marker = {
+        "action_id": "appr-marked",
+        "tool_name": "crm_update_deal",
+        "tool_args": {"value": 9000},
+    }
+    [ev async for ev in rt.run_stream("c-hitl-marked", "update deal", approved_hitl=marker)]
+
+    assert seen == []
+    assert executed == [("crm_update_deal", '{"value": 9000}')]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_hitl_unmarked_call_still_requests(monkeypatch):
+    from aios.core import approval as approval_module
+
+    seen = []
+
+    async def _request(**kwargs):
+        seen.append(kwargs)
+        return True
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime({
+        "autonomy": "autonomous", "hitl_enabled": True, "hitl_value_threshold": 5000,
+    })
+    [ev async for ev in rt.run_stream("c-hitl-unmarked", "update deal")]
+
+    assert len(seen) == 1
+    assert seen[0]["tool_name"] == "crm_update_deal"
+    assert executed == [("crm_update_deal", '{"value": 9000}')]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+@pytest.mark.parametrize("tool_name,arguments,marker_args", [
+    ("crm_delete_deal", '{"deal_id": "d1"}', {"value": 9000}),
+    ("crm_update_deal", '{"value": 9000}', {"value": 1}),
+])
+async def test_hitl_marker_mismatch_still_requests(
+    monkeypatch, tool_name, arguments, marker_args,
+):
+    from aios.core import approval as approval_module
+
+    seen = []
+
+    async def _request(**kwargs):
+        seen.append(kwargs)
+        return True
+
+    monkeypatch.setattr(approval_module.approval_manager, "request_approval", _request)
+    rt, executed = _hitl_runtime({
+        "autonomy": "autonomous", "hitl_enabled": True, "hitl_value_threshold": 5000,
+    }, tool_name=tool_name, arguments=arguments)
+    marker = {
+        "action_id": "appr-mismatch",
+        "tool_name": "crm_update_deal",
+        "tool_args": marker_args,
+    }
+    [ev async for ev in rt.run_stream("c-hitl-mismatch", "update deal", approved_hitl=marker)]
+
+    assert len(seen) == 1
+    assert seen[0]["tool_name"] == tool_name
+    assert seen[0]["tool_args"] == json.loads(arguments)
+    assert executed == [(tool_name, arguments)]
+
+
 @pytest.mark.parametrize("tool,args,needs_hitl", [
     ("crm_delete_deal", '{"deal_id": "d1"}', True),
     ("crm_update_deal", '{"deal_id": "d1", "stage": "closed_won"}', True),
@@ -219,6 +347,31 @@ async def test_hitl_disabled_does_not_gate_tool(monkeypatch):
 def test_hitl_risk_rules(tool, args, needs_hitl):
     rt, _ = _hitl_runtime({"hitl_enabled": True, "hitl_value_threshold": 5000})
     assert bool(rt._hitl_tool_reason(tool, args)) is needs_hitl
+
+
+def test_hitl_dynamic_tool_requires_approval(monkeypatch):
+    from aios.tools.registry import TOOL_REGISTRY
+
+    name = "gap_dynamic_probe"
+    monkeypatch.setitem(TOOL_REGISTRY, name, {"dynamic": True})
+    rt, _ = _hitl_runtime({"hitl_enabled": True, "hitl_value_threshold": 5000})
+    assert rt._hitl_tool_reason(name, {"payload": "hello"})
+    assert rt._hitl_tool_reason(name, '{"payload": "hello"}')
+
+
+def test_hitl_dynamic_tool_disabled_has_no_reason(monkeypatch):
+    from aios.tools.registry import TOOL_REGISTRY
+
+    name = "gap_dynamic_probe_off"
+    monkeypatch.setitem(TOOL_REGISTRY, name, {"dynamic": True})
+    rt, _ = _hitl_runtime({"hitl_enabled": False, "hitl_value_threshold": 5000})
+    assert rt._hitl_tool_reason(name, {"payload": "hello"}) == ""
+
+
+def test_hitl_destructive_payload_in_common_keys():
+    rt, _ = _hitl_runtime({"hitl_enabled": True})
+    assert rt._hitl_tool_reason("gap_unregistered_tool", {"sql": "DROP TABLE x"})
+    assert rt._hitl_tool_reason("gap_unregistered_tool", {"script": "echo hi"}) == ""
 
 
 # ─── Rubric scoring ───
@@ -383,6 +536,41 @@ async def test_approval_decision_blocks_self_approval(auth_client, test_org, tes
     await test_session.refresh(mine)
     await test_session.refresh(own)
     assert mine.status == own.status == "pending"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+@pytest.mark.parametrize("tag,requester_key", [
+    ("under", "_requested_by"),
+    ("plain", "requested_by"),
+    ("actor", "actor_user_id"),
+    ("human", "human_id"),
+])
+async def test_approval_decision_blocks_copied_actor_id(
+    auth_client, test_org, test_user, test_session, tag, requester_key
+):
+    for verb in ("approve", "reject"):
+        row = await _seed_action(
+            test_session, test_org.id, action_id=f"copy-{tag}-{verb}",
+            tool_args={requester_key: test_user.id},
+        )
+        r = await auth_client.post(f"/api/approvals/{row.id}/{verb}")
+        assert r.status_code == 403, r.text
+        await test_session.refresh(row)
+        assert row.status == "pending"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_approval_decision_allows_tagged_other_requester(
+    auth_client, test_org, test_user, test_session
+):
+    row = await _seed_action(
+        test_session, test_org.id, action_id="other-requester",
+        tool_args={"_requested_by": "someone-else"},
+    )
+    r = await auth_client.post(f"/api/approvals/{row.id}/approve")
+    assert r.status_code == 200, r.text
+    await test_session.refresh(row)
+    assert row.status == "approved"
 
 
 @pytest.mark.asyncio(loop_scope="function")

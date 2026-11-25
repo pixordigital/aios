@@ -102,8 +102,8 @@ function copyDeployCmd() {
         </div>
         {% if inst.extra_data.get('health') %}
         <div class="flex-center gap-3 mt-2" style="font-size:0.75rem;color:var(--text-secondary);border-top:1px solid var(--border);padding-top:0.5rem">
-            <span>Organizações: {{ inst.extra_data.health.orgs or '?' }}</span>
-            <span>Agentes: {{ inst.extra_data.health.agents or '?' }}</span>
+            <span><span>Organizações:</span> {{ inst.extra_data.health.orgs or '?' }}</span>
+            <span><span>Agentes:</span> {{ inst.extra_data.health.agents or '?' }}</span>
         </div>
         {% endif %}
     </div>
@@ -121,4 +121,36 @@ function copyDeployCmd() {
     </div>
 </div>
 {% endif %}
+<script>
+window.aiosI18n.register({
+    'Frota de Clientes': 'Flota de Clientes',
+    '← Organizações': '← Organizaciones',
+    '+ Implantar cliente': '+ Desplegar cliente',
+    '+ Registrar existente': '+ Registrar existente',
+    'Implantar no VPS do cliente': 'Desplegar en el VPS del cliente',
+    'Conecte-se via SSH ao servidor deles e execute:': 'Conéctate por SSH a su servidor y ejecuta:',
+    'Copiar': 'Copiar',
+    'Nome do cliente': 'Nombre del cliente',
+    'E-mail do administrador': 'Correo electrónico del administrador',
+    'Copiar comando': 'Copiar comando',
+    'Fechar': 'Cerrar',
+    'Copiado! Cole no terminal SSH do cliente.': '¡Copiado! Pega en el terminal SSH del cliente.',
+    'Registrar instância de cliente': 'Registrar instancia de cliente',
+    'URL base': 'URL base',
+    'Chave da API (JWT da conta de administrador deles)': 'Clave de API (JWT de la cuenta de administrador de ellos)',
+    'ID da organização deles (opcional)': 'ID de la organización de ellos (opcional)',
+    'deixe em branco para o padrão': 'deja en blanco para el valor predeterminado',
+    'Cancelar': 'Cancelar',
+    'Após a implantação, registre o cliente aqui com o JWT dele.': 'Tras el despliegue, registra al cliente aquí con su JWT.',
+    'Registrar': 'Registrar',
+    'Conectada': 'Conectada',
+    'Organizações:': 'Organizaciones:',
+    'Agentes:': 'Agentes:',
+    'Gerenciar': 'Gestionar',
+    'Remover': 'Eliminar',
+    'Nenhum cliente': 'Ningún cliente',
+    'Registre instâncias de clientes para gerenciá-las a partir daqui.': 'Registra instancias de clientes para gestionarlas desde aquí.',
+    'Adicionar cliente': 'Añadir cliente'
+});
+</script>
 {% endblock %}

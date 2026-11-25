@@ -76,5 +76,41 @@
             <span style="color: var(--text-secondary); opacity: 0.6;" title="Cadastros temporariamente fechados">Cadastros temporariamente fechados</span>
         </div>
     </div>
+<script>
+(function(){
+  if(localStorage.getItem('aios_lang')!=='es') return;
+  var dict={
+    'AIOS — Entrar': 'AIOS — Iniciar sesión',
+    'Acesse sua conta': 'Accede a tu cuenta',
+    'E-mail': 'Correo electrónico',
+    'voce@empresa.com': 'tu@empresa.com',
+    'Senha': 'Contraseña',
+    'Tem 2FA? (opcional)': '¿Tienes 2FA? (opcional)',
+    'Entrar': 'Iniciar sesión',
+    'Cadastros temporariamente fechados': 'Registros temporalmente cerrados'
+  };
+  var attrs=['title','aria-label','placeholder','alt'];
+  function apply(root){
+    var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{
+      acceptNode:function(n){ return n.nodeType===1&&(n.tagName==='SCRIPT'||n.tagName==='STYLE')?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT; }
+    });
+    var n;
+    while(n=w.nextNode()){
+      if(n.nodeType===3){
+        var v=n.nodeValue.trim();
+        if(dict[v]) n.nodeValue=n.nodeValue.replace(v,dict[v]);
+      }else{
+        for(var i=0;i<attrs.length;i++){
+          var a=attrs[i], val=n.getAttribute(a);
+          if(val!==null&&dict[val]) n.setAttribute(a,dict[val]);
+        }
+      }
+    }
+  }
+  document.documentElement.lang='es';
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',function(){apply(document.documentElement);},{once:true});
+  else apply(document.documentElement);
+})();
+</script>
 </body>
 </html>

@@ -224,6 +224,61 @@ def test_adapter_rejects_unbacked_db_approval_marker(tmp_path, row_kwargs):
     session.close()
 
 
+def test_adapter_rejects_preapproved_without_db_session(tmp_path):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root=tmp_path,
+        org_id="o",
+        run_id="r",
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-nosession",
+            "approved_fingerprint": fp,
+            "actions": ["company_lookup"],
+        },
+    )
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter.enforce_execution({}, action="company_lookup")
+
+
+class _AsyncOnlySession:
+    async def execute(self, *args, **kwargs):
+        raise AssertionError("async session must not execute")
+
+
+@pytest.mark.parametrize("via_shared", [False, True])
+def test_adapter_rejects_preapproved_with_async_only_session(tmp_path, via_shared):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    session = _AsyncOnlySession()
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root=tmp_path,
+        org_id="o",
+        run_id="r",
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-async",
+            "approved_fingerprint": fp,
+            "actions": ["company_lookup"],
+        },
+        db_session=None if via_shared else session,
+    )
+    shared = {"icm_db_session": session} if via_shared else {}
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter.enforce_execution(shared, action="company_lookup")
+
+
 def test_adapter_fails_closed_on_unsupported_context_layers(tmp_path):
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter

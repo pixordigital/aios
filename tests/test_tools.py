@@ -136,7 +136,8 @@ async def test_tools_test_endpoint_wires_actor_context(monkeypatch):
     assert captured["kwargs"]["granted_record_ids"] == {"kr1"}
 
 
-async def _run_gated_tool(monkeypatch, *, tool_name="rag_search", args=None, org_extra=None, org_id="org1"):
+async def _run_gated_tool(monkeypatch, *, tool_name="rag_search", args=None, org_extra=None, org_id="org1",
+                          code_reference="", input_schema=None):
     from aios.api import tools as tools_api
     from aios.db.models import Tool
 
@@ -154,8 +155,10 @@ async def _run_gated_tool(monkeypatch, *, tool_name="rag_search", args=None, org
         id = "t1"
         org_id = "org1"
         name = tool_name
-        code_reference = ""
+        description = "dynamic gap test"
 
+    _Tool.code_reference = code_reference
+    _Tool.input_schema = input_schema
     org = _FakeOrg()
     org.extra_data = org_extra or {}
 
@@ -192,6 +195,32 @@ async def test_tools_test_endpoint_blocks_risky_tools(monkeypatch, tool_name, ar
     assert out["ok"] is False
     assert out["requires_approval"] is True
     assert expected in out["error"]
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_tools_test_endpoint_blocks_dynamic_code_tool_before_execution(monkeypatch):
+    from aios.tools.registry import TOOL_REGISTRY
+
+    name = "gap_dynamic_hitl_tool"
+    missing = object()
+    previous = TOOL_REGISTRY.get(name, missing)
+    try:
+        out, executed = await _run_gated_tool(
+            monkeypatch,
+            tool_name=name,
+            code_reference="code:result = 1",
+            input_schema={"type": "object", "properties": {}},
+        )
+    finally:
+        if previous is missing:
+            TOOL_REGISTRY.pop(name, None)
+        else:
+            TOOL_REGISTRY[name] = previous
+
+    assert out["ok"] is False
+    assert out["requires_approval"] is True
+    assert "dynamic tool" in out["error"]
     assert executed == []
 
 
@@ -354,6 +383,95 @@ async def test_dashboard_lab_tool_run_allows_admin(monkeypatch):
     resp = await dashboard_app.lab_tool_run(_Req())
     assert resp.status_code == 200
     assert '"ok":true' in resp.body.decode().replace(" ", "").lower() or '"ok": true' in resp.body.decode().lower()
+
+
+async def _run_lab_tool(monkeypatch, *, tool_name="calculator", args=None, org_extra=None, org_id="org1", db_down=False):
+    from aios.dashboard import app as dashboard_app
+
+    executed = []
+
+    class _Req:
+        async def json(self):
+            return {"tool": tool_name, "args": args if args is not None else {}}
+
+    async def _user(_request):
+        return type("U", (), {"id": "u1", "org_id": "org1", "role": "admin"})()
+
+    class _FakeToolEngine:
+        def __init__(self, names, **kwargs):
+            pass
+
+        async def execute(self, name, args_json):
+            executed.append((name, args_json))
+            return "2"
+
+    org = _FakeOrg()
+    org.extra_data = org_extra or {}
+
+    class _DB:
+        async def get(self, _model, _id):
+            if db_down:
+                raise RuntimeError("db down")
+            return org
+
+    class _DBCtx:
+        async def __aenter__(self):
+            return _DB()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    async def _org(_request):
+        return org_id
+
+    monkeypatch.setattr("aios.api.deps.get_dashboard_user", _user)
+    monkeypatch.setattr(dashboard_app, "_dashboard_tool_actor_context", lambda _r: _coro({
+        "actor_user_id": "u1", "actor_departments": set(), "is_founder": False, "granted_record_ids": set(),
+    }))
+    monkeypatch.setattr(dashboard_app, "_resolve_org_id", _org)
+    monkeypatch.setattr(dashboard_app, "db_session", lambda: _DBCtx())
+    monkeypatch.setattr("aios.core.tools.ToolEngine", _FakeToolEngine)
+    monkeypatch.setitem(__import__("aios.tools.registry", fromlist=["TOOL_REGISTRY"]).TOOL_REGISTRY, tool_name, {"description": "x"})
+    return await dashboard_app.lab_tool_run(_Req()), executed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name,args,org_extra,expected", [
+    ("crm_update_deal", {"amount": 6000}, {}, "amount=6000"),
+    ("crm_delete_deal", {}, {}, "destructive tool"),
+])
+async def test_dashboard_lab_tool_run_hitl_blocks_risky_tools(monkeypatch, tool_name, args, org_extra, expected):
+    resp, executed = await _run_lab_tool(monkeypatch, tool_name=tool_name, args=args, org_extra=org_extra)
+    assert resp.status_code == 403
+    data = __import__("json").loads(resp.body)
+    assert data["ok"] is False
+    assert data["requires_approval"] is True
+    assert expected in data["error"]
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_dashboard_lab_tool_run_hitl_allows_safe_tool(monkeypatch):
+    resp, executed = await _run_lab_tool(monkeypatch, org_extra={"governance_config": {"hitl_tools": []}})
+    assert resp.status_code == 200
+    assert __import__("json").loads(resp.body)["ok"] is True
+    assert executed == [("calculator", "{}")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("org_id,db_down,args,expected", [
+    ("", False, {}, "org context missing"),
+    ("org1", True, {}, "org policy unavailable"),
+    ("org1", False, "not json", "invalid arguments"),
+])
+async def test_dashboard_lab_tool_run_hitl_fail_closed(monkeypatch, org_id, db_down, args, expected):
+    resp, executed = await _run_lab_tool(monkeypatch, org_id=org_id, db_down=db_down, args=args)
+    assert resp.status_code == 403
+    data = __import__("json").loads(resp.body)
+    assert data["ok"] is False
+    assert data["requires_approval"] is True
+    assert expected in data["error"]
+    assert executed == []
 
 
 @pytest.mark.asyncio

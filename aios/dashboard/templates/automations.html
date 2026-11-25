@@ -9,7 +9,7 @@
 </div>
 
 <div class="grid-4 mb-4">
-  <div class="stat-card"><p class="stat-label">Total</p><p class="stat-value">{{ workflows|length }}</p><span class="text-xs text-tertiary">{{ triggers|length }} gatilhos</span></div>
+  <div class="stat-card"><p class="stat-label">Total</p><p class="stat-value">{{ workflows|length }}</p><span class="text-xs text-tertiary">{{ triggers|length }} <span>gatilhos</span></span></div>
   <div class="stat-card"><p class="stat-label">Ativas</p><p class="stat-value">{{ active_count }}</p><span class="text-xs text-tertiary">gatilhos ligados</span></div>
   <div class="stat-card"><p class="stat-label">Execuções hoje</p><p class="stat-value">{{ runs_today }}</p><span class="text-xs text-tertiary">últimas 24h</span></div>
   <div class="stat-card"><p class="stat-label">Falhas</p><p class="stat-value" style="color:var(--red)">{{ failed_count }}</p><span class="text-xs text-tertiary">requer atenção</span></div>
@@ -61,7 +61,7 @@
       <div style="font-weight:600;font-size:0.9375rem">{{wf.name}}</div>
       <span class="badge" style="font-size:0.625rem;border-color:{{ 'var(--green)' if wf.status!='failed' else 'var(--red)' }};color:{{ 'var(--green)' if wf.status!='failed' else 'var(--red)' }}">{{wf.status}}</span>
     </div>
-    <div style="font-size:0.75rem;color:var(--text-secondary)">{{wf.description or 'Sem descrição'}} • {{wf.timeout_seconds}}s timeout</div>
+    <div style="font-size:0.75rem;color:var(--text-secondary)">{% if wf.description %}{{wf.description}}{% else %}<span>Sem descrição</span>{% endif %} • {{wf.timeout_seconds}}s timeout</div>
     <div style="display:flex;gap:0.375rem;flex-wrap:wrap">
       {% for tr in wf_trigs %}
         <span class="badge" style="font-size:0.625rem;background:{{ 'var(--green-subtle)' if tr.is_active else 'var(--bg-hover)' }};border-color:{{ 'var(--green)' if tr.is_active else 'var(--border)' }}">
@@ -84,7 +84,7 @@
       <a href="/dashboard/automations/{{wf.id}}" class="btn btn-primary btn-sm">Abrir</a>
       <form method="POST" action="/dashboard/automations/{{wf.id}}/run" style="display:inline"><input type="hidden" name="input" value='{"test":true}'><button class="btn btn-ghost btn-sm">▶ Testar</button></form>
       <form method="POST" action="/dashboard/automations/{{wf.id}}/duplicate" style="display:inline"><button class="btn btn-ghost btn-sm">⎘ Duplicar</button></form>
-      <a href="/dashboard/automations/{{wf.id}}/delete" class="btn btn-ghost btn-sm" onclick="return confirm('Excluir?')" style="color:var(--red)">×</a>
+      <a href="/dashboard/automations/{{wf.id}}/delete" class="btn btn-ghost btn-sm" onclick="return confirm(window.aiosI18n.t('Excluir?'))" style="color:var(--red)">×</a>
     </div>
   </div>
 {% endfor %}
@@ -225,4 +225,77 @@
     </div>
   </div>
 </dialog>
+<script>
+window.aiosI18n.register({
+    'Automações': 'Automatizaciones',
+    'Workflows visuais • Gatilhos • Credenciais • Execuções — sem n8n': 'Flujos de trabajo visuales • Disparadores • Credenciales • Ejecuciones — sin n8n',
+    '🔑 Credenciais': '🔑 Credenciales',
+    '+ Nova automação': '+ Nueva automatización',
+    'gatilhos': 'disparadores',
+    'Ativas': 'Activas',
+    'gatilhos ligados': 'disparadores activados',
+    'Execuções hoje': 'Ejecuciones hoy',
+    'Falhas': 'Fallos',
+    'requer atenção': 'requieren atención',
+    'Agendadas': 'Programadas',
+    'Com falha': 'Con fallo',
+    'Nenhuma automação': 'Ninguna automatización',
+    'Crie em 30s a partir de um template ou do zero. Webhook, cron e eventos sem código.': 'Crea en 30s a partir de una plantilla o desde cero. Webhook, cron y eventos sin código.',
+    'Criar primeira': 'Crear la primera',
+    'Lab avançado': 'Lab avanzado',
+    '📚 Templates — 1 clique para começar': '📚 Plantillas — 1 clic para empezar',
+    'Usar template': 'Usar plantilla',
+    'Sem descrição': 'Sin descripción',
+    'sem gatilho - manual': 'sin disparador - manual',
+    '▶ Testar': '▶ Probar',
+    'Excluir?': '¿Eliminar?',
+    'Execuções recentes': 'Ejecuciones recientes',
+    '💡 Como usar sem n8n': '💡 Cómo usar sin n8n',
+    'Gatilho:': 'Disparador:',
+    'diário), evento ou manual': 'diario), evento o manual',
+    'Ações:': 'Acciones:',
+    'HTTP Request, Código Python, Transform, Agente IA, IF, Wait — encadeados em DAG': 'HTTP Request, Código Python, Transform, Agente IA, IF, Wait — encadenados en DAG',
+    'Dados:': 'Datos:',
+    'use': 'usa',
+    'entre passos': 'entre pasos',
+    'Credenciais:': 'Credenciales:',
+    'salve token/api_key uma vez e reuse via': 'guarda token/api_key una vez y reutilízalo mediante',
+    'Nova automação': 'Nueva automatización',
+    'Ou começar do zero': 'O empezar desde cero',
+    'Nome: ex. Lead → Slack': 'Nombre: p. ej. Lead → Slack',
+    'Descrição (opcional)': 'Descripción (opcional)',
+    '⏰ Agendamento': '⏰ Programación',
+    'cron: 0 9 * * * ou evento: message.received': 'cron: 0 9 * * * o evento: message.received',
+    'Quando executar?': '¿Cuándo ejecutar?',
+    'Personalizado (avançado)': 'Personalizado (avanzado)',
+    'A cada 15 minutos': 'Cada 15 minutos',
+    'A cada 30 minutos': 'Cada 30 minutos',
+    'A cada hora': 'Cada hora',
+    'A cada 4 horas': 'Cada 4 horas',
+    'Todo dia às 9h': 'Todos los días a las 9h',
+    'Todo dia às 18h': 'Todos los días a las 18h',
+    'Toda segunda às 9h': 'Todos los lunes a las 9h',
+    'Dias úteis (seg-sex) às 9h': 'Días laborables (lun-vie) a las 9h',
+    'Todo dia 1 às 9h (mensal)': 'Todos los días 1 a las 9h (mensual)',
+    'Frequência': 'Frecuencia',
+    'Diário': 'Diario',
+    'De hora em hora': 'Cada hora',
+    'Dias úteis (seg-sex)': 'Días laborables (lun-vie)',
+    'Mensal': 'Mensual',
+    'Dia semana': 'Día de la semana',
+    'Segunda': 'Lunes',
+    'Terça': 'Martes',
+    'Quarta': 'Miércoles',
+    'Quinta': 'Jueves',
+    'Sexta': 'Viernes',
+    'Cron gerado:': 'Cron generado:',
+    'Criar automação': 'Crear automatización',
+    'Nome: ex. Slack Webhook': 'Nombre: p. ej. Slack Webhook',
+    'API Key': 'Clave API',
+    'Basic (user:pass)': 'Básico (usuario:contraseña)',
+    'token ou key': 'token o clave',
+    'Salvar credencial': 'Guardar credencial',
+    'Nenhuma credencial. Crie para usar em HTTP Request sem expor segredo.': 'Ninguna credencial. Crea una para usarla en HTTP Request sin exponer secretos.'
+});
+</script>
 {% endblock %}

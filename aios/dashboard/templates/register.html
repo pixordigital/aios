@@ -82,5 +82,51 @@
             Já tem uma conta? <a href="/dashboard/login">Entrar</a>
         </div>
     </div>
+<script>
+(function(){
+  if(localStorage.getItem('aios_lang')!=='es') return;
+  var dict={
+    'AIOS — Registrar': 'AIOS — Registrarse',
+    'Crie sua conta': 'Crea tu cuenta',
+    'Seu nome': 'Tu nombre',
+    'João': 'Juan',
+    'Senha': 'Contraseña',
+    'mín. 8 caracteres': 'mín. 8 caracteres',
+    'E-mail': 'Correo electrónico',
+    'voce@empresa.com': 'tu@empresa.com',
+    'Nome da organização': 'Nombre de la organización',
+    'Minha Empresa': 'Mi Empresa',
+    'Criar conta': 'Crear cuenta',
+    'Já tem uma conta?': '¿Ya tienes una cuenta?',
+    'Entrar': 'Ingresar'
+  };
+  function t(s){
+    var m=s.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    if(!m||!Object.prototype.hasOwnProperty.call(dict,m[2])) return s;
+    return m[1]+dict[m[2]]+m[3];
+  }
+  document.documentElement.lang='es';
+  document.title=t(document.title);
+  var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{
+    acceptNode:function(n){
+      return n.nodeType===1&&/^(SCRIPT|STYLE|NOSCRIPT)$/.test(n.tagName)?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  var attrs=['title','aria-label','placeholder','alt','value'];
+  var n,i,a,v;
+  while((n=walker.nextNode())){
+    if(n.nodeType===3){
+      v=t(n.nodeValue);
+      if(v!==n.nodeValue) n.nodeValue=v;
+    }else{
+      for(i=0;i<attrs.length;i++){
+        a=attrs[i];
+        v=n.getAttribute(a);
+        if(v!==null && t(v)!==v) n.setAttribute(a,t(v));
+      }
+    }
+  }
+})();
+</script>
 </body>
 </html>

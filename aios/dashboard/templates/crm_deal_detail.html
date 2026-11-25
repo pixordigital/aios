@@ -105,5 +105,31 @@
   document.getElementById('deal-detail').addEventListener('click', function(e) {
     if (e.target === this) this.close();
   });
+  window.aiosI18n.register({
+    'Pipeline': 'Pipeline',
+    'Stage': 'Etapa',
+    'Valor': 'Valor',
+    'Score': 'Score',
+    'Probabilidade (C10)': 'Probabilidad (C10)',
+    'Previsão Fechamento': 'Previsión de cierre',
+    'Dono': 'Propietario',
+    'Origem': 'Origen',
+    'Entidade (derivada)': 'Entidad (derivada)',
+    'Prioridade': 'Prioridad',
+    'heurística (não preditiva validada)': 'heurística (no predictiva validada)',
+    '👤 Customer 360 (mínimo)': '👤 Customer 360 (mínimo)',
+    'Account': 'Cuenta',
+    '— não vinculado': '— no vinculado',
+    'vínculo:': 'vínculo:',
+    '(não autoritativo)': '(no autoritativo)',
+    'Contact': 'Contacto',
+    'Vínculos account/contact inferidos por heurística; sem FK de schema. CS workspace / command center / revenue intelligence completa: indisponíveis neste track. Gap: docs/CRM_SCHEMA_GAPS.md.': 'Vínculos account/contact inferidos por heurística; sin FK de schema. CS workspace / command center / revenue intelligence completa: no disponibles en este track. Gap: docs/CRM_SCHEMA_GAPS.md.',
+    '⚙️ Campos Custom (C9) — Pipeline': '⚙️ Campos Personalizados (C9) — Pipeline',
+    'Salvar campos': 'Guardar campos',
+    '🕐 Histórico (C6)': '🕐 Historial (C6)',
+    '🧭 Timeline unificada (deal)': '🧭 Timeline unificada (deal)',
+    '💬 Comentários / Notas (C7)': '💬 Comentarios / Notas (C7)',
+    'Sem notas': 'Sin notas'
+  });
 </script>
 {% endblock %}

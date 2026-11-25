@@ -279,9 +279,35 @@ def test_provisioner_accepts_supplied_fingerprint_matched_approval(tmp_path: Pat
     )
     assert "preapproved" not in other["icm"]
 
-    adapter = _side_effect_adapter(tmp_path, manifest, marker)
-    adapter.enforce_execution({}, action="agent_run")
-    assert adapter.approval_bound["approval_id"] == "appr-founder-1"
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from aios.db.engine import Base
+    from aios.db.models import PendingAction
+    from aios.icm.dedupe_model import ICMSideEffect
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'approvals.db'}")
+    Base.metadata.create_all(
+        engine,
+        tables=[PendingAction.__table__, ICMSideEffect.__table__],
+    )
+    with Session(engine) as session:
+        session.add(
+            PendingAction(
+                id=marker["approval_id"],
+                org_id="org-1",
+                agent_id="agent-1",
+                conversation_id="conv-1",
+                tool_name=stage_id,
+                tool_args={},
+                status="approved",
+                decided_by=marker["approved_by"],
+            )
+        )
+        session.commit()
+        adapter = _side_effect_adapter(tmp_path, manifest, marker)
+        adapter.enforce_execution({"icm_db_session": session}, action="agent_run")
+        assert adapter.approval_bound["approval_id"] == "appr-founder-1"
 
 
 def test_provisioner_without_approvals_scrubs_marker_and_blocks_side_effects(tmp_path: Path):

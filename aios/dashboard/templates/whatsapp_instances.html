@@ -34,7 +34,7 @@
     <button class="btn btn-ghost btn-sm" onclick="checkStatus('{{name}}')">↻ Status</button>
     <form method="POST" action="/dashboard/evolution/{{name}}/restart" style="display:inline"><button class="btn btn-ghost btn-sm">⟳ Restart</button></form>
     <form method="POST" action="/dashboard/evolution/{{name}}/logout" style="display:inline"><button class="btn btn-ghost btn-sm" style="color:var(--amber)">Logout</button></form>
-    <form method="POST" action="/dashboard/evolution/{{name}}/delete" style="display:inline" onsubmit="return confirm('Excluir {{name}}?')"><button class="btn btn-ghost btn-sm" style="color:var(--red)">Excluir</button></form>
+    <form method="POST" action="/dashboard/evolution/{{name}}/delete" style="display:inline" onsubmit="return confirm(window.aiosI18n.t('Excluir')+' {{name}}?')"><button class="btn btn-ghost btn-sm" style="color:var(--red)">Excluir</button></form>
   </div>
   <div style="font-size:0.6875rem;color:var(--text-tertiary)">Webhook: <span class="font-mono">/api/whatsapp/webhook/evolution/{{name}}</span></div>
 </div>
@@ -43,7 +43,7 @@
 
 <script>
 async function connectQR(name){
-  const el=document.getElementById('qr-'+name); el.innerHTML='⏳ carregando...';
+  const el=document.getElementById('qr-'+name); el.innerHTML=window.aiosI18n.t('⏳ carregando...');
   try{
     const r=await fetch(`/dashboard/evolution/${name}/qrcode`); const j=await r.json();
     const data=j.data||j.connect?.data||j;
@@ -55,12 +55,33 @@ async function connectQR(name){
     } else {
       el.innerHTML=`<pre class="font-mono" style="font-size:0.6875rem;white-space:pre-wrap">${JSON.stringify(data,null,2).slice(0,800)}</pre>`;
     }
-  }catch(e){ el.textContent='Erro: '+e.message; }
+  }catch(e){ el.textContent=window.aiosI18n.t('Erro:')+' '+e.message; }
 }
 async function checkStatus(name){
   const r=await fetch(`/dashboard/evolution/${name}/connect`); const j=await r.json();
   alert(JSON.stringify(j,null,2).slice(0,600));
   location.reload();
 }
+</script>
+<script>
+window.aiosI18n.register({
+  'Conecte seu número — Baileys, Cloud API ou Coexistence (App + Cloud mesmo número)': 'Conecta tu número — Baileys, Cloud API o Coexistence (App + Cloud mismo número)',
+  '+ Nova instância': '+ Nueva instancia',
+  'Nova instância — via Gateway': 'Nueva instancia — vía Gateway',
+  'Baileys (Web) — c/ anti-ban gateway': 'Baileys (Web) — con gateway anti-ban',
+  'Coexistence (App + Cloud mesmo número) — SMB': 'Coexistence (App + Cloud mismo número) — SMB',
+  'Canal será criado auto. Gateway roteia Baileys/Cloud/Coexistence; webhook em /api/whatsapp/webhook/evolution/{instance} (smb_message_echoes p/ coexistence)': 'Canal se crea automáticamente. Gateway enruta Baileys/Cloud/Coexistence; webhook en /api/whatsapp/webhook/evolution/{instance} (smb_message_echoes para coexistence)',
+  'Criar': 'Crear',
+  'Nenhuma instância': 'Ninguna instancia',
+  'Crie a primeira — QR aparece em segundos.': 'Crea la primera — QR aparece en segundos.',
+  'Sem canal AIOS — será criado ao usar': 'Sin canal AIOS — se creará al usar',
+  'Clique Conectar para QR': 'Haz clic en Conectar para QR',
+  '↻ Status': '↻ Estado',
+  '⟳ Restart': '⟳ Reiniciar',
+  'Logout': 'Cerrar sesión',
+  'Excluir': 'Eliminar',
+  '⏳ carregando...': '⏳ cargando...',
+  'Erro:': 'Error:'
+});
 </script>
 {% endblock %}

@@ -291,7 +291,8 @@ class CRMUpdateTool(BaseTool):
                   value: float | None = None, score: int | None = None,
                   lead_name: str = "", lead_email: str = "",
                   lead_phone: str = "", agent_id: str = "",
-                  team_id: str = "") -> dict:
+                  team_id: str = "",
+                  _hitl_approved_action: dict | None = None) -> dict:
         from aios.config import settings
         import os
 
@@ -324,6 +325,40 @@ class CRMUpdateTool(BaseTool):
                     hitl_reason = f"Deal R${deal.value:.2f} > R$5k em {stage} — aprovação necessária"
         except Exception:
             pass
+
+        if needs_hitl and isinstance(_hitl_approved_action, dict):
+            action_id = _hitl_approved_action.get("action_id")
+            marker_org = _hitl_approved_action.get("org_id")
+            decided_by = _hitl_approved_action.get("decided_by")
+            if (
+                isinstance(action_id, str) and action_id
+                and isinstance(marker_org, str) and marker_org == org_id
+                and isinstance(decided_by, str) and decided_by
+            ):
+                try:
+                    from aios.db.engine import async_session
+                    from aios.db.models import PendingAction
+                    from sqlalchemy import select as _sel1
+
+                    async with async_session() as s:
+                        approved = (await s.execute(
+                            _sel1(PendingAction).where(
+                                PendingAction.id == action_id,
+                                PendingAction.org_id == org_id,
+                                PendingAction.status == "approved",
+                                PendingAction.decided_by == decided_by,
+                                PendingAction.tool_name == "crm_update_deal",
+                            )
+                        )).scalar_one_or_none()
+                        args = approved.tool_args if approved else None
+                    if (
+                        isinstance(args, dict)
+                        and args.get("deal_id") == deal_id
+                        and args.get("stage") == stage
+                    ):
+                        needs_hitl = False
+                except Exception as e:
+                    logger.warning("HITL replay marker check failed %s", e)
 
         if needs_hitl:
             try:

@@ -101,13 +101,42 @@ def _approval_manifest():
     })
 
 
+def _approval_session(tmp_path: Path, approval_id: str):
+    """Sync Session with approved org-scoped row + durable claim table."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from aios.db.models import PendingAction
+    from aios.icm.dedupe_model import ICMSideEffect
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'approvals.db'}")
+    PendingAction.__table__.create(engine)
+    ICMSideEffect.__table__.create(engine)
+    session = Session(engine)
+    session.add(
+        PendingAction(
+            id=approval_id,
+            org_id="org-1",
+            agent_id="agent-1",
+            conversation_id="conv-1",
+            tool_name="lead_score",
+            status="approved",
+            decided_by="founder-1",
+        )
+    )
+    session.commit()
+    return session
+
+
 def test_agent_binding_injects_explicit_icm_preapproved(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
     manifest = _approval_manifest()
+    session = _approval_session(tmp_path, "approval-explicit")
     agent = _agent(extra_data={
         "icm": {
             "workspace_id": "sales_ops",
             "stage_manifest": manifest.model_dump(mode="json"),
+            "icm_db_session": session,
             "preapproved": {
                 "approved": True,
                 "approval_id": "approval-explicit",
@@ -124,6 +153,7 @@ def test_agent_binding_injects_explicit_icm_preapproved(tmp_path: Path, monkeypa
     assert runtime.stage.approval_bound["source"] == "icm_preapproved"
     # execution gate should pass for allowed tool
     runtime._icm_enforce_tool("lead_score", conversation_id="conv-1")
+    session.close()
 
 
 def test_agent_tool_side_effect_key_reused_within_run(tmp_path: Path, monkeypatch):
@@ -132,10 +162,12 @@ def test_agent_tool_side_effect_key_reused_within_run(tmp_path: Path, monkeypatc
 
     monkeypatch.setattr(settings, "app_data_dir", str(tmp_path))
     manifest = _approval_manifest().model_copy(update={"side_effects": True})
+    session = _approval_session(tmp_path, "approval-dedupe")
     agent = _agent(extra_data={
         "icm": {
             "workspace_id": "sales_ops",
             "stage_manifest": manifest.model_dump(mode="json"),
+            "icm_db_session": session,
             "preapproved": {
                 "approved": True,
                 "approval_id": "approval-dedupe",
@@ -161,6 +193,7 @@ def test_agent_tool_side_effect_key_reused_within_run(tmp_path: Path, monkeypatc
     assert checks[0][1] == checks[1][1]
     assert checks[0][0] == set()
     assert checks[1][0] == {checks[1][1]}
+    session.close()
 
 
 def test_agent_binding_fails_closed_without_explicit_preapproved(tmp_path: Path, monkeypatch):

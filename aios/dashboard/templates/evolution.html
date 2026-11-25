@@ -41,7 +41,7 @@
     <button class="btn btn-ghost btn-sm" onclick="checkStatus('{{name}}')">↻ Status</button>
     <form method="POST" action="/dashboard/evolution/{{name}}/restart" style="display:inline"><button class="btn btn-ghost btn-sm">⟳ Restart</button></form>
     <form method="POST" action="/dashboard/evolution/{{name}}/logout" style="display:inline"><button class="btn btn-ghost btn-sm" style="color:var(--amber)">Logout</button></form>
-    <form method="POST" action="/dashboard/evolution/{{name}}/delete" style="display:inline" onsubmit="return confirm('Excluir {{name}}?')"><button class="btn btn-ghost btn-sm" style="color:var(--red)">Excluir</button></form>
+    <form method="POST" action="/dashboard/evolution/{{name}}/delete" style="display:inline" onsubmit="return confirm(window.aiosI18n.t('Excluir ')+'{{name}}?')"><button class="btn btn-ghost btn-sm" style="color:var(--red)">Excluir</button></form>
   </div>
   <div style="font-size:0.6875rem;color:var(--text-tertiary)">Webhook: <span class="font-mono">/api/evolution/webhook/{{name}}</span></div>
 </div>
@@ -50,7 +50,7 @@
 
 <script>
 async function connectQR(name){
-  const el=document.getElementById('qr-'+name); el.innerHTML='⏳ carregando...';
+  const el=document.getElementById('qr-'+name); el.innerHTML=window.aiosI18n.t('⏳ carregando...');
   try{
     const r=await fetch(`/dashboard/evolution/${name}/qrcode`); const j=await r.json();
     const data=j.data||j.connect?.data||j;
@@ -63,12 +63,34 @@ async function connectQR(name){
     } else {
       el.innerHTML=`<pre class="font-mono" style="font-size:0.6875rem;white-space:pre-wrap">${JSON.stringify(data,null,2).slice(0,800)}</pre>`;
     }
-  }catch(e){ el.textContent='Erro: '+e.message; }
+  }catch(e){ el.textContent=window.aiosI18n.t('Erro: ')+e.message; }
 }
 async function checkStatus(name){
   const r=await fetch(`/dashboard/evolution/${name}/connect`); const j=await r.json();
   alert(JSON.stringify(j,null,2).slice(0,600));
   location.reload();
 }
+</script>
+<script>
+window.aiosI18n.register({
+  'Wrapper Python sobre Evolution (Baileys + Cloud API + Coexistence) — QR/status via Evolution, anti-ban/LGPD/voice no gateway': 'Wrapper Python sobre Evolution (Baileys + Cloud API + Coexistence) — QR/estado vía Evolution, anti-ban/LGPD/voz en gateway',
+  '+ Nova instância': '+ Nueva instancia',
+  'Nova instância — via Gateway': 'Nueva instancia — vía Gateway',
+  'Baileys (Web) — c/ anti-ban gateway': 'Baileys (Web) — con anti-ban gateway',
+  'Coexistence (App + Cloud mesmo número) — SMB': 'Coexistence (App + Cloud mismo número) — SMB',
+  'Canal será criado auto. Gateway roteia Baileys/Cloud/Coexistence; webhook em /api/whatsapp/webhook/evolution/{instance} (smb_message_echoes p/ coexistence)': 'Canal se creará automáticamente. Gateway enruta Baileys/Cloud/Coexistence; webhook en /api/whatsapp/webhook/evolution/{instance} (smb_message_echoes para coexistence)',
+  'Criar': 'Crear',
+  'Nenhuma instância': 'Ninguna instancia',
+  'Crie a primeira — QR aparece em segundos.': 'Crea la primera — QR aparece en segundos.',
+  'Sem canal AIOS — será criado ao usar template': 'Sin canal AIOS — se creará al usar template',
+  'atividade': 'actividad',
+  'Clique Conectar para QR': 'Haz clic en Conectar para QR',
+  '⟳ Restart': '⟳ Reiniciar',
+  'Logout': 'Cerrar sesión',
+  'Excluir': 'Eliminar',
+  'Excluir ': '¿Eliminar ',
+  '⏳ carregando...': '⏳ cargando...',
+  'Erro: ': 'Error: '
+});
 </script>
 {% endblock %}

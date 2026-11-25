@@ -1,11 +1,36 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="mb-4"><h1>Orientador comercial</h1><p class="text-sm text-secondary">Vamos entender como sua equipe vende antes de sugerir mudanças. As informações do CRM ajudam a conferir o contexto; podem estar incompletas.</p></div>
-<div class="card mb-4"><h2>O que aparece hoje no CRM</h2><p class="text-sm">{{ assessment.crm_evidence.total }} negócios registrados; {{ assessment.crm_evidence.open }} em andamento; {{ assessment.crm_evidence.won }} ganhos.</p>
+<div class="card mb-4"><h2>O que aparece hoje no CRM</h2><p class="text-sm">{{ assessment.crm_evidence.total }} <span>negócios registrados;</span> {{ assessment.crm_evidence.open }} <span>em andamento;</span> {{ assessment.crm_evidence.won }} <span>ganhos.</span></p>
 {% if assessment.crm_evidence.stages %}<p class="text-xs text-tertiary">Etapas registradas: {{ assessment.crm_evidence.stages|join(', ') }}</p>{% else %}<p class="text-xs text-tertiary">Ainda não há negócios para comparar.</p>{% endif %}</div>
 <div class="card mb-4"><h2>Entendimento até agora</h2>
 {% for key, prompt in questions %}<p class="text-sm mt-1"><strong>{{ prompt }}</strong><br>{{ answers.get(key) or 'Ainda precisamos entender este ponto.' }}</p>{% endfor %}
 {% if next_key %}<form method="post" action="/dashboard/funnels/advisor/{{ assessment.id }}/answer" class="mt-3"><input type="hidden" name="field" value="{{ next_key }}"><label class="text-sm">{{ question_map[next_key] }}</label><textarea class="input" name="answer" rows="3" required maxlength="4000" placeholder="Conte com suas palavras"></textarea><button class="btn btn-primary btn-sm mt-2">Salvar resposta</button></form>
 {% else %}<p class="text-xs text-tertiary">Compare com os números acima. Se algum ponto estiver errado, escreva a correção e a entrevista será reaberta.</p><form method="post" action="/dashboard/funnels/advisor/{{ assessment.id }}/confirm"><textarea class="input" name="correction" rows="2" maxlength="4000" placeholder="Correção, se necessário; deixe em branco para confirmar"></textarea><button class="btn btn-primary btn-sm mt-2">{% if assessment.status == 'confirmed' %}Confirmar novamente{% else %}Confirmo que o resumo está correto{% endif %}</button></form>{% endif %}</div>
-{% if assessment.status == 'confirmed' and assessment.proposal.stages %}<div class="card"><h2>Proposta de pipeline</h2><p class="text-sm">{{ assessment.proposal.description }}</p><ol>{% for s in assessment.proposal.stages %}<li><strong>{{ s }}</strong> — {{ assessment.proposal.guidance[s] }}</li>{% endfor %}</ol><h3 class="mt-3">Medidas</h3>{% for m in assessment.proposal.measures %}<div class="mb-2"><strong>{{ m.name }}</strong>{% if not m.supported %}<span class="text-xs"> — dados insuficientes</span>{% endif %}<p class="text-sm">{{ m.meaning }} {{ m.why }} Cálculo: {{ m.calculation }} Ação possível: {{ m.action }}</p></div>{% endfor %}<p class="text-xs text-tertiary">Evidência: {{ assessment.proposal.evidence.total }} negócios no CRM. Metas desejadas informadas pela equipe ainda não foram convertidas em metas numéricas. Ao aprovar, o funil começa vazio: nenhum negócio existente será movido. Se quiser aproveitar negócios atuais, revise as etapas antes de movê-los manualmente.</p><form method="post" action="/dashboard/funnels/advisor/{{ assessment.id }}/approve"><button class="btn btn-primary">Aprovar e criar em Funis</button></form><form method="post" action="/dashboard/funnels/advisor/{{ assessment.id }}/reject" class="mt-2"><button class="btn btn-ghost">Rejeitar proposta</button></form></div>{% endif %}
+{% if assessment.status == 'confirmed' and assessment.proposal.stages %}<div class="card"><h2>Proposta de pipeline</h2><p class="text-sm">{{ assessment.proposal.description }}</p><ol>{% for s in assessment.proposal.stages %}<li><strong>{{ s }}</strong> — {{ assessment.proposal.guidance[s] }}</li>{% endfor %}</ol><h3 class="mt-3">Medidas</h3>{% for m in assessment.proposal.measures %}<div class="mb-2"><strong>{{ m.name }}</strong>{% if not m.supported %}<span class="text-xs"> — dados insuficientes</span>{% endif %}<p class="text-sm">{{ m.meaning }} {{ m.why }} Cálculo: {{ m.calculation }} <span>Ação possível:</span> {{ m.action }}</p></div>{% endfor %}<p class="text-xs text-tertiary"><span>Evidência:</span> {{ assessment.proposal.evidence.total }} <span>negócios no CRM. Metas desejadas informadas pela equipe ainda não foram convertidas em metas numéricas. Ao aprovar, o funil começa vazio: nenhum negócio existente será movido. Se quiser aproveitar negócios atuais, revise as etapas antes de movê-los manualmente.</span></p><form method="post" action="/dashboard/funnels/advisor/{{ assessment.id }}/approve"><button class="btn btn-primary">Aprovar e criar em Funis</button></form><form method="post" action="/dashboard/funnels/advisor/{{ assessment.id }}/reject" class="mt-2"><button class="btn btn-ghost">Rejeitar proposta</button></form></div>{% endif %}
+<script>
+window.aiosI18n.register({
+    'Orientador comercial': 'Asesor comercial',
+    'Vamos entender como sua equipe vende antes de sugerir mudanças. As informações do CRM ajudam a conferir o contexto; podem estar incompletas.': 'Vamos a entender cómo tu equipo vende antes de sugerir cambios. La información del CRM ayuda a verificar el contexto; puede estar incompleta.',
+    'O que aparece hoje no CRM': 'Lo que aparece hoy en el CRM',
+    'negócios registrados;': 'negocios registrados;',
+    'em andamento;': 'en curso;',
+    'ganhos.': 'ganados.',
+    'Ainda não há negócios para comparar.': 'Aún no hay negocios para comparar.',
+    'Entendimento até agora': 'Entendimiento hasta ahora',
+    'Conte com suas palavras': 'Cuéntalo con tus palabras',
+    'Salvar resposta': 'Guardar respuesta',
+    'Compare com os números acima. Se algum ponto estiver errado, escreva a correção e a entrevista será reaberta.': 'Compara con los números anteriores. Si algún punto está mal, escribe la corrección y la entrevista se reabrirá.',
+    'Correção, se necessário; deixe em branco para confirmar': 'Corrección, si es necesario; déjalo en blanco para confirmar',
+    'Confirmar novamente': 'Confirmar nuevamente',
+    'Confirmo que o resumo está correto': 'Confirmo que el resumen es correcto',
+    'Proposta de pipeline': 'Propuesta de pipeline',
+    '— dados insuficientes': '— datos insuficientes',
+    'Ação possível:': 'Acción posible:',
+    'Evidência:': 'Evidencia:',
+    'negócios no CRM. Metas desejadas informadas pela equipe ainda não foram convertidas em metas numéricas. Ao aprovar, o funil começa vazio: nenhum negócio existente será movido. Se quiser aproveitar negócios atuais, revise as etapas antes de movê-los manualmente.': 'negocios en el CRM. Las metas deseadas informadas por el equipo aún no se han convertido en metas numéricas. Al aprobar, el embudo empieza vacío: ningún negocio existente será movido. Si quieres aprovechar los negocios actuales, revisa las etapas antes de moverlos manualmente.',
+    'Aprovar e criar em Funis': 'Aprobar y crear en Embudos',
+    'Rejeitar proposta': 'Rechazar propuesta'
+});
+</script>
 {% endblock %}

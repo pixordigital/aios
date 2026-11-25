@@ -229,15 +229,15 @@ async def test_tool(
 ):
     tool = await db.get(Tool, tool_id)
     args = body.get("args") or body.get("arguments") or {}
+    if tool and tool.code_reference and tool.code_reference.startswith("code:"):
+        from aios.tools.dynamic import register_dynamic_tool
+        register_dynamic_tool(tool.name, tool.description, tool.code_reference[5:], tool.input_schema)
     reason = await _direct_tool_hitl_reason(db, user, org_id, tool.name if tool else "", args)
     if reason:
         return {"ok": False, "error": f"HITL: {reason}", "requires_approval": True}
     await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.test_tool")
     import json
     from aios.core.tools import ToolEngine
-    if tool.code_reference and tool.code_reference.startswith("code:"):
-        from aios.tools.dynamic import register_dynamic_tool
-        register_dynamic_tool(tool.name, tool.description, tool.code_reference[5:], tool.input_schema)
     actor = await _tool_actor_context(db, user)
     eng = ToolEngine([tool.name], org_id=org_id, **actor)
     try:

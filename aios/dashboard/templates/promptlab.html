@@ -27,4 +27,14 @@ async function runAB(){
  document.getElementById('metric').textContent='A '+j.latency_ms+'ms | B '+(j.compare_latency_ms||'')+'ms';
 }
 </script>
+<script>
+window.aiosI18n.register({
+    'Teste A/B de prompts com latência': 'Prueba A/B de prompts con latencia',
+    'Você é um assistente útil': 'Eres un asistente útil',
+    'Você é um assistente criativo e conciso': 'Eres un asistente creativo y conciso',
+    'input usuário': 'entrada del usuario',
+    'Olá, quem é você?': 'Hola, ¿quién eres?',
+    'Testando...': 'Probando...'
+});
+</script>
 {% endblock %}

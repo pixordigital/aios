@@ -88,34 +88,34 @@ async function triggerBackup() {
     const btn = document.getElementById('btn-backup-now');
     const result = document.getElementById('backup-result');
     btn.disabled = true;
-    btn.textContent = 'Executando...';
+    btn.textContent = window.aiosI18n.t('Executando...');
     result.style.display = 'none';
     try {
         const resp = await fetch('/dashboard/admin/backup', { method: 'POST', headers: { 'Content-Type': 'application/json' }});
         const data = await resp.json();
         result.style.display = 'block';
         if (data.ok) {
-            result.innerHTML = '<span style="color:var(--green)">✓ Backup concluído</span><br><pre style="font-size:0.6875rem;max-height:200px;overflow:auto;background:var(--bg);padding:0.5rem;border-radius:var(--radius-sm);margin-top:0.5rem">' + escapeHtml(data.output || '') + '</pre>';
+            result.innerHTML = '<span style="color:var(--green)">' + window.aiosI18n.t('✓ Backup concluído') + '</span><br><pre style="font-size:0.6875rem;max-height:200px;overflow:auto;background:var(--bg);padding:0.5rem;border-radius:var(--radius-sm);margin-top:0.5rem">' + escapeHtml(data.output || '') + '</pre>';
             setTimeout(() => location.reload(), 2000);
         } else {
-            result.innerHTML = '<span style="color:var(--red)">✗ Falha: ' + escapeHtml(data.error || 'erro desconhecido') + '</span>';
+            result.innerHTML = '<span style="color:var(--red)">' + window.aiosI18n.t('✗ Falha: ') + escapeHtml(data.error || window.aiosI18n.t('erro desconhecido')) + '</span>';
         }
     } catch (e) {
         result.style.display = 'block';
-        result.innerHTML = '<span style="color:var(--red)">✗ Erro de rede: ' + escapeHtml(e.message) + '</span>';
+        result.innerHTML = '<span style="color:var(--red)">' + window.aiosI18n.t('✗ Erro de rede: ') + escapeHtml(e.message) + '</span>';
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Backup Agora';
+        btn.textContent = window.aiosI18n.t('Backup Agora');
     }
 }
 
 function confirmRestore(name) {
-    if (confirm('Confirmar restore do backup "' + name + '"?\n\n⚠️ ATENÇÃO: Isso irá SOBRESCREVER o banco de dados atual.\nEsta ação NÃO pode ser desfeita.\n\nDigite "confirmar" para prosseguir:')) {
-        const input = prompt('Digite exatamente: confirmar');
+    if (confirm(window.aiosI18n.t('Confirmar restore do backup "') + name + window.aiosI18n.t('"?\n\n⚠️ ATENÇÃO: Isso irá SOBRESCREVER o banco de dados atual.\nEsta ação NÃO pode ser desfeita.\n\nDigite "confirmar" para prosseguir:'))) {
+        const input = prompt(window.aiosI18n.t('Digite exatamente: confirmar'));
         if (input === 'confirmar') {
             doRestore(name);
         } else {
-            alert('Restore cancelado - confirmação incorreta');
+            alert(window.aiosI18n.t('Restore cancelado - confirmação incorreta'));
         }
     }
 }
@@ -123,7 +123,7 @@ function confirmRestore(name) {
 async function doRestore(name) {
     const btn = event.target;
     btn.disabled = true;
-    btn.textContent = 'Restaurando...';
+    btn.textContent = window.aiosI18n.t('Restaurando...');
     try {
         const form = new FormData();
         form.append('backup_name', name);
@@ -133,13 +133,13 @@ async function doRestore(name) {
         if (data.ok) {
             alert('✓ ' + data.message);
         } else {
-            alert('✗ Falha: ' + (data.error || 'erro desconhecido'));
+            alert(window.aiosI18n.t('✗ Falha: ') + (data.error || window.aiosI18n.t('erro desconhecido')));
         }
     } catch (e) {
-        alert('✗ Erro de rede: ' + e.message);
+        alert(window.aiosI18n.t('✗ Erro de rede: ') + e.message);
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Restore';
+        btn.textContent = window.aiosI18n.t('Restore');
     }
 }
 
@@ -148,5 +148,40 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+</script>
+<script>
+window.aiosI18n.register({
+    'Backup & Restore': 'Copia de seguridad y restauración',
+    'Gerenciar backups do banco de dados': 'Gestionar copias de seguridad de la base de datos',
+    '← Voltar': '← Volver',
+    'Backups Locais': 'Copias locales',
+    'Backups S3': 'Copias S3',
+    'Bucket S3': 'Depósito S3',
+    'não configurado': 'no configurado',
+    'Versioning S3': 'Versionado S3',
+    'Enabled': 'Activado',
+    'Disabled': 'Desactivado',
+    'Habilite:': 'Active:',
+    'Backup Agora': 'Hacer copia',
+    'Histórico de Backups (últimos 50)': 'Historial de copias (últimas 50)',
+    'Arquivo': 'Archivo',
+    'Data': 'Fecha',
+    'Tamanho': 'Tamaño',
+    'Origem': 'Origen',
+    'Ações': 'Acciones',
+    'Restore': 'Restaurar',
+    'Nenhum backup encontrado': 'No se encontraron copias',
+    'Execute "Backup Agora" ou configure AIOS_S3_BUCKET para sincronização automática.': 'Ejecuta "Hacer copia" o configura AIOS_S3_BUCKET para sincronización automática.',
+    'Executando...': 'Ejecutando...',
+    '✓ Backup concluído': '✓ Copia completada',
+    '✗ Falha: ': '✗ Error: ',
+    'erro desconhecido': 'error desconhecido',
+    '✗ Erro de rede: ': '✗ Error de red: ',
+    'Confirmar restore do backup "': 'Confirmar restauración de la copia "',
+    '"?\n\n⚠️ ATENÇÃO: Isso irá SOBRESCREVER o banco de dados atual.\nEsta ação NÃO pode ser desfeita.\n\nDigite "confirmar" para prosseguir:': '"?\n\n⚠️ ATENCIÓN: Esto SOBREESCRIBIRÁ la base de datos actual.\nEsta acción NO se puede deshacer.\n\nEscribe "confirmar" para continuar:',
+    'Digite exatamente: confirmar': 'Escribe exactamente: confirmar',
+    'Restore cancelado - confirmação incorreta': 'Restauración cancelada - confirmación incorrecta',
+    'Restaurando...': 'Restaurando...'
+});
 </script>
 {% endblock %}

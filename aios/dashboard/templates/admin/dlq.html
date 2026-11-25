@@ -7,7 +7,7 @@
     <a href="/dashboard/admin/dlq" class="btn btn-sm {% if request.url.path.startswith('/dashboard/admin/dlq') %}btn-primary{% else %}btn-ghost{% endif %}" style="border-radius:999px">Dead Letter Queue</a>
 </div>
 <div class="flex-between mb-4">
-    <div><h1>Dead Letter Queue</h1><p class="text-sm text-secondary mt-1">{{ entries|length }} entrad{{ 'a' if entries|length == 1 else 'as' }} falha{{ 'm' if entries|length == 1 else 's' }}</p></div>
+    <div><h1>Dead Letter Queue</h1><p class="text-sm text-secondary mt-1">{{ entries|length }} <span>entrad{{ 'a' if entries|length == 1 else 'as' }}</span> <span>falha{{ 'm' if entries|length == 1 else 's' }}</span></p></div>
     <form method="GET" style="display:flex;gap:0.5rem;align-items:center">
         <select name="org_filter" class="input" style="width:auto;min-width:180px">
             <option value="">Todas as orgs</option>
@@ -77,13 +77,13 @@
                 <td style="white-space:nowrap">
                     {% if e.status != 'retried' %}
                     <form method="POST" action="/dashboard/admin/dlq/{{ e.id }}/retry" style="display:inline">
-                        <button class="btn btn-primary btn-sm" type="submit" onclick="return confirm('Reenfileirar esta mensagem?')">Reprocessar</button>
+                        <button class="btn btn-primary btn-sm" type="submit" onclick="return confirm(window.aiosI18n.lang()==='es' ? window.aiosI18n.t('Reenfileirar esta mensagem?') : 'Reenfileirar esta mensagem?')">Reprocessar</button>
                     </form>
                     {% else %}
                     <span class="text-tertiary text-xs">Já reenfileirado</span>
                     {% endif %}
                     <form method="POST" action="/dashboard/admin/dlq/{{ e.id }}/delete" style="display:inline;margin-left:0.25rem">
-                        <button class="btn btn-ghost btn-sm" type="submit" style="color:var(--red);border-color:var(--red-subtle)" onclick="return confirm('Excluir esta entrada do DLQ?')">Excluir</button>
+                        <button class="btn btn-ghost btn-sm" type="submit" style="color:var(--red);border-color:var(--red-subtle)" onclick="return confirm(window.aiosI18n.lang()==='es' ? window.aiosI18n.t('Excluir esta entrada do DLQ?') : 'Excluir esta entrada do DLQ?')">Excluir</button>
                     </form>
                 </td>
             </tr>
@@ -102,4 +102,39 @@
     </div>
 </div>
 {% endif %}
+<script>
+window.aiosI18n.register({
+    'Organizações': 'Organizaciones',
+    'Frota de Clientes': 'Flota de Clientes',
+    'Backup & Restore': 'Backup y restauración',
+    'Dead Letter Queue': 'Dead Letter Queue',
+    'ID': 'ID',
+    'Todas as orgs': 'Todas las organizaciones',
+    'Filtrar': 'Filtrar',
+    'Limpar': 'Limpiar',
+    'entrada': 'entrada',
+    'entradas': 'entradas',
+    'falham': 'fallida',
+    'falhas': 'fallidas',
+    'Org': 'Organización',
+    'Canal': 'Canal',
+    'Direção': 'Dirección',
+    'Job': 'Job',
+    'Conversa': 'Conversación',
+    'Erro': 'Error',
+    'Tentativas': 'Intentos',
+    'Status': 'Estado',
+    'Criado em': 'Creado el',
+    'Ações': 'Acciones',
+    'Reenfileirado': 'Reencolado',
+    'Pendente': 'Pendiente',
+    'Reenfileirar esta mensagem?': '¿Reencolar este mensaje?',
+    'Reprocessar': 'Reprocesar',
+    'Já reenfileirado': 'Ya reencolado',
+    'Excluir esta entrada do DLQ?': '¿Eliminar esta entrada del DLQ?',
+    'Excluir': 'Eliminar',
+    'Dead Letter Queue vazia': 'Dead Letter Queue vacía',
+    'Todas as mensagens foram processadas com sucesso.': 'Todos los mensajes se procesaron correctamente.'
+});
+</script>
 {% endblock %}

@@ -55,13 +55,32 @@ function filterModelsWiz(i){
   if(!q)document.querySelectorAll('#wiz-model-dropdown .model-option').forEach(function(o){o.style.display='block'});
 }
 function selectModelWiz(v){document.getElementById('wiz-model-search').value=v;document.getElementById('wiz-model-dropdown').classList.remove('open');}
-document.getElementById('wiz-form').addEventListener('submit', function(e){ var v=document.getElementById('wiz-prompt').value||''; if(!v.trim()||v.trim().length<20){ e.preventDefault(); alert('Prompt muito curto (min 20)');} });
+document.getElementById('wiz-form').addEventListener('submit', function(e){ var v=document.getElementById('wiz-prompt').value||''; if(!v.trim()||v.trim().length<20){ e.preventDefault(); alert(window.aiosI18n.t('Prompt muito curto (min 20)'));} });
 document.addEventListener('DOMContentLoaded',function(){
   var dd=document.getElementById('wiz-model-dropdown');
   var obs=new MutationObserver(function(){dd.style.display=dd.classList.contains('open')?'block':'none'});
   obs.observe(dd,{attributes:true,attributeFilter:['class']});
   if(dd) dd.addEventListener('mousedown',function(e){e.preventDefault()});
   loadModelGroups("wiz-model-groups", selectModelWiz);
+});
+</script>
+<script>
+window.aiosI18n.register({
+    'Novo agente — assistente': 'Nuevo agente — asistente',
+    '1 Intenção': '1 Intención',
+    '4 Testar': '4 Probar',
+    'O que o agente deve fazer?': '¿Qué debe hacer el agente?',
+    'Ex.: qualificar leads BANT e agendar reunião': 'Ej.: calificar leads BANT y agendar reunión',
+    'Próximo': 'Siguiente',
+    'Voltar': 'Volver',
+    'Nome': 'Nombre',
+    'Meu Agente': 'Mi Agente',
+    'Prompt (editável)': 'Prompt (editable)',
+    'Ferramentas (espaço/comma)': 'Herramientas (espacio/coma)',
+    'Revisar e criar': 'Revisar y crear',
+    'Revise prompt e clique Criar. Teste opcional após criar em /dashboard/agents.': 'Revise prompt y haga clic en Crear. Prueba opcional después de crear en /dashboard/agents.',
+    'Criar agente': 'Crear agente',
+    'Prompt muito curto (min 20)': 'Prompt demasiado corto (mín 20)'
 });
 </script>
 {% endblock %}

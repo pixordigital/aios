@@ -2,7 +2,7 @@
 {% block content %}
 <div class="flex-between mb-4">
     <div>
-         <h1>{{ conv.channel | capitalize }} — conversa</h1>
+         <h1>{{ conv.channel | capitalize }} — <span>conversa</span></h1>
         <p class="text-sm text-secondary mt-1">{{ conv.id[:20] }}… · {{ messages|length }} mensagem{{ 's' if messages|length != 1 }} · <span id="handover-status" class="badge">{{ (conv.extra_data.get('handover',{}).get('status','bot') if conv.extra_data else 'bot') }}</span> <span id="sla-badge" class="badge" style="display:none;margin-left:0.5rem"></span></p>
     </div>
     <div style="display:flex;gap:0.5rem">
@@ -90,7 +90,7 @@ async function loadAutonomous(){
       return;
     }
     card.style.display='';
-    content.innerHTML=j.trials.map((t,i)=>`<div style="display:flex;gap:0.5rem;align-items:flex-start;padding:0.5rem;background:${t.success?'var(--green-subtle)':'var(--red-subtle)'};border:1px solid ${t.success?'var(--green)':'var(--red)'};border-radius:4px;margin-bottom:0.375rem"><div style="width:24px;height:24px;border-radius:99px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.7rem;font-weight:600;background:${t.success?'var(--green)':'var(--red)'};color:#fff">${i+1}</div><div style="flex:1"><div style="font-weight:600;font-size:0.75rem">${t.success?'✓ Sucesso':'✗ Falha'} — ${esc(t.reason||'')}</div><div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.15rem">${esc((t.response||'').slice(0,120))}</div>${t.reflection?`<div style="font-size:0.65rem;color:var(--amber);margin-top:0.25rem;background:var(--bg);padding:0.25rem 0.375rem;border-radius:3px">💡 Reflexão: ${esc(t.reflection.slice(0,150))}</div>`:''}</div><span style="font-size:0.6rem;color:var(--text-tertiary)">${t.confidence?Math.round(t.confidence*100)+'%':''}</span></div>`).join('');
+    content.innerHTML=j.trials.map((t,i)=>`<div style="display:flex;gap:0.5rem;align-items:flex-start;padding:0.5rem;background:${t.success?'var(--green-subtle)':'var(--red-subtle)'};border:1px solid ${t.success?'var(--green)':'var(--red)'};border-radius:4px;margin-bottom:0.375rem"><div style="width:24px;height:24px;border-radius:99px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:0.7rem;font-weight:600;background:${t.success?'var(--green)':'var(--red)'};color:#fff">${i+1}</div><div style="flex:1"><div style="font-weight:600;font-size:0.75rem">${t.success?window.aiosI18n.t('✓ Sucesso'):window.aiosI18n.t('✗ Falha')} — ${esc(t.reason||'')}</div><div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.15rem">${esc((t.response||'').slice(0,120))}</div>${t.reflection?`<div style="font-size:0.65rem;color:var(--amber);margin-top:0.25rem;background:var(--bg);padding:0.25rem 0.375rem;border-radius:3px">💡 ${window.aiosI18n.t('Reflexão')}: ${esc(t.reflection.slice(0,150))}</div>`:''}</div><span style="font-size:0.6rem;color:var(--text-tertiary)">${t.confidence?Math.round(t.confidence*100)+'%':''}</span></div>`).join('');
     if(j.skills && j.skills.length){
       skillsEl.style.display='';
       skillsList.innerHTML=j.skills.slice(0,3).map(s=>`<div style="font-size:0.65rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.375rem"><b>${esc(s.name)}</b> — ${esc((s.description||'').slice(0,80))}</div>`).join('');
@@ -113,10 +113,10 @@ async function loadHandover(){
     if(s==='human'){
       banner.style.display=''; banner.style.background='var(--amber-subtle)'; banner.style.border='1px solid var(--amber)';
       let mins=Math.floor(elapsed/60), secs=elapsed%60;
-      banner.textContent=`👤 Humano assumiu há ${mins}m ${secs}s — bot pausado. SLA ${slaMin}m ${elapsed>slaSec?'⚠️ ESTOUROU':'em dia'}.`;
-      if(elapsed>slaSec){ sla.style.display=''; sla.textContent='SLA estourado'; sla.style.background='var(--red)'; sla.style.color='#fff'; } else { sla.style.display=''; sla.textContent=`SLA ${slaMin - mins}m restantes`; sla.style.background='var(--amber-subtle)'; sla.style.color='var(--amber)'; }
+      banner.textContent=`${window.aiosI18n.t('👤 Humano assumiu há ')}${mins}m ${secs}${window.aiosI18n.t('s — bot pausado. SLA ')}${slaMin}m ${elapsed>slaSec?window.aiosI18n.t('⚠️ ESTOUROU'):window.aiosI18n.t('em dia')}.`;
+      if(elapsed>slaSec){ sla.style.display=''; sla.textContent=window.aiosI18n.t('SLA estourado'); sla.style.background='var(--red)'; sla.style.color='#fff'; } else { sla.style.display=''; sla.textContent=`SLA ${slaMin - mins}m restantes`; sla.style.background='var(--amber-subtle)'; sla.style.color='var(--amber)'; }
       take.style.display='none'; rel.style.display=''; humanBox.style.display='';
-      if(Notification && Notification.permission==='granted' && !window._handoverNotified){ new Notification('Handover', {body: `Conversa ${convId.slice(0,8)} assumida por humano`}); window._handoverNotified=true; }
+      if(Notification && Notification.permission==='granted' && !window._handoverNotified){ new Notification('Handover', {body: window.aiosI18n.t('Conversa ')+convId.slice(0,8)+window.aiosI18n.t(' assumida por humano')}); window._handoverNotified=true; }
     } else {
       banner.style.display='none'; take.style.display=''; rel.style.display='none'; humanBox.style.display='none'; sla.style.display='none'; window._handoverNotified=false;
     }
@@ -136,8 +136,8 @@ async function loadDLQ(){
       box.style.display='';
       list.innerHTML = entries.map(e => `<div style="display:flex;gap:0.5rem;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:0.5rem;margin-bottom:0.375rem;font-size:0.75rem;flex-wrap:wrap">
         <span style="flex:1;min-width:200px"><b>${esc(e.job_name)}</b> <span style="color:var(--text-tertiary)">${esc(e.direction)} · ${esc(e.channel_type)}</span><div style="color:var(--red);font-size:0.7rem">${esc((e.error||'').slice(0,200))}</div></span>
-        <form method="POST" action="/dashboard/admin/dlq/${e.id}/retry" style="display:inline"><button class="btn btn-primary btn-sm" type="submit" onclick="return confirm('Reenfileirar?')">Reprocessar</button></form>
-        <form method="POST" action="/dashboard/admin/dlq/${e.id}/delete" style="display:inline;margin-left:0.25rem"><button class="btn btn-ghost btn-sm" type="submit" style="color:var(--red);border-color:var(--red-subtle)" onclick="return confirm('Excluir?')">Excluir</button></form>
+        <form method="POST" action="/dashboard/admin/dlq/${e.id}/retry" style="display:inline"><button class="btn btn-primary btn-sm" type="submit" onclick="return confirm(window.aiosI18n.t('Reenfileirar?'))">Reprocessar</button></form>
+        <form method="POST" action="/dashboard/admin/dlq/${e.id}/delete" style="display:inline;margin-left:0.25rem"><button class="btn btn-ghost btn-sm" type="submit" style="color:var(--red);border-color:var(--red-subtle)" onclick="return confirm(window.aiosI18n.t('Excluir?'))">Excluir</button></form>
       </div>`).join('');
     } else {
       box.style.display='none';
@@ -159,5 +159,41 @@ async function decide(id, act){
 }
  loadHandover(); setInterval(loadHandover,5000);
 if(Notification && Notification.permission==='default'){ Notification.requestPermission(); }
+</script>
+<script>
+window.aiosI18n.register({
+    'conversa': 'conversación',
+    '👤 Assumir': '👤 Asumir',
+    '🤖 Devolver ao bot': '🤖 Devolver al bot',
+    '← Voltar': '← Volver',
+    '⏳ Aprovações pendentes': '⏳ Aprobaciones pendientes',
+    '🤖 Autônomo — Trials & Reflexões': '🤖 Autónomo — Trials & Reflexiones',
+    'Carregando...': 'Cargando...',
+    'Skills aprendidas:': 'Habilidades aprendidas:',
+    '📬 Dead Letter Queue — mensagens falhadas': '📬 Dead Letter Queue — mensajes fallidos',
+    'Ver DLQ completo': 'Ver DLQ completo',
+    'Resposta humana...': 'Respuesta humana...',
+    'Enviar como humano': 'Enviar como humano',
+    'Buscar transcrição: onde falou preço?': 'Buscar transcripción: dónde dijo precio?',
+    'W3 gravação+busca — Whisper S3': 'W3 grabación+búsqueda — Whisper S3',
+    'Digite “preço”, “troca”, “prazo” para filtrar mensagens e transcrições': 'Escriba “precio”, “cambio”, “plazo” para filtrar mensajes y transcripciones',
+    'Nenhuma mensagem nesta conversa.': 'Ningún mensaje en esta conversa.',
+    '✓ Sucesso': '✓ Éxito',
+    '✗ Falha': '✗ Fallo',
+    'Reflexão': 'Reflexión',
+    '👤 Humano assumiu há ': '👤 Humano asumió hace ',
+    's — bot pausado. SLA ': 's — bot en pausa. SLA ',
+    '⚠️ ESTOUROU': '⚠️ EXCEDIÓ',
+    'em dia': 'al día',
+    'SLA estourado': 'SLA excedido',
+    'Conversa ': 'Conversación ',
+    ' assumida por humano': ' asumida por humano',
+    'Aprovar': 'Aprobar',
+    'Rejeitar': 'Rechazar',
+    'Reprocessar': 'Reprocesar',
+    'Excluir': 'Eliminar',
+    'Reenfileirar?': '¿Volver a encolar?',
+    'Excluir?': '¿Eliminar?'
+});
 </script>
 {% endblock %}

@@ -2,14 +2,14 @@
 {% block content %}
 {% include "_teams_tabs.html" %}
 <div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
-    <div><h1>Equipes</h1><p class="text-sm text-secondary mt-1">{{ teams|length }} equipe{{ 's' if teams|length != 1 }}</p></div>
+    <div><h1>Equipes</h1><p class="text-sm text-secondary mt-1">{{ teams|length }} <span>equipe</span>{{ 's' if teams|length != 1 }}</p></div>
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
         <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="followup"><button class="btn btn-ghost btn-sm" title="SDR → Follow-up → Closer (Follow-up orquestrador + Manager)">⚡ Follow-up</button></form>
         <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="comercial"><button class="btn btn-ghost btn-sm" title="SDR → Closer → Manager (Manager + Closer orquestrador)">💼 Comercial</button></form>
         <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="suporte"><button class="btn btn-ghost btn-sm" title="Support → Manager (Manager orquestrador)">🎧 Suporte</button></form>
         <form method="POST" action="/dashboard/teams/quick-create" style="display:inline"><input type="hidden" name="template" value="dados"><button class="btn btn-ghost btn-sm" title="Analyst → Scientist → Manager (Manager orquestrador)">📊 Dados</button></form>
         <form method="POST" action="/dashboard/teams/business-setup" style="display:inline"
-              onsubmit="return confirm('Criar o Coordenador Geral e as equipes de Marketing, Customer Success e Receita?\\n\\nOs agentes serão criados ativos. A jornada diária continua desligada até você ligar em Configurações.')">
+              onsubmit="return confirm(window.aiosI18n.t('Criar o Coordenador Geral e as equipes de Marketing, Customer Success e Receita?\\n\\nOs agentes serão criados ativos. A jornada diária continua desligada até você ligar em Configurações.'))">
           <button type="submit" class="btn btn-ghost">Montar empresa</button>
         </form>
         <a href="/dashboard/teams/new" class="btn btn-primary">Nova equipe</a>
@@ -19,7 +19,7 @@
 {% if bs is not none %}
   <div class="card" style="border-left:3px solid var(--green)">
     <p class="text-sm" style="margin:0">
-      Empresa montada: {{ bs }} equipe{{ 's' if bs != '1' }} criada{{ 's' if bs != '1' }} e o Coordenador Geral pronto.
+      <span>Empresa montada:</span> {{ bs }} <span>equipe</span>{{ 's' if bs != '1' }} <span>criada</span>{{ 's' if bs != '1' }} <span>e o Coordenador Geral pronto.</span>
       Os agentes já estão ativos — ligue a jornada diária em <a href="/dashboard/settings" style="color:var(--border-accent)">Configurações</a> quando quiser que eles trabalhem sozinhos.
     </p>
   </div>
@@ -47,11 +47,11 @@
                 <a href="/dashboard/teams/{{ t.id }}/edit" style="color:var(--text);text-decoration:none;font-weight:600;font-size:0.9375rem">{{ t.name }}</a>
                 <span class="badge" style="color:var(--text-secondary);font-size:0.625rem;background:var(--bg-hover)">{{ strategy_label(t.routing_strategy) }}</span>
                 {% if compat.score >= 80 %}
-                <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem">Compatibilidade {{ compat.score }}%</span>
+                <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem"><span>Compatibilidade</span> {{ compat.score }}%</span>
                 {% elif compat.score >= 50 %}
-                <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.625rem">Compatibilidade {{ compat.score }}%</span>
+                <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.625rem"><span>Compatibilidade</span> {{ compat.score }}%</span>
                 {% else %}
-                <span class="badge" style="border-color:var(--red);color:var(--red);font-size:0.625rem">Compatibilidade {{ compat.score }}%</span>
+                <span class="badge" style="border-color:var(--red);color:var(--red);font-size:0.625rem"><span>Compatibilidade</span> {{ compat.score }}%</span>
                 {% endif %}
             </div>
             <div class="flex-center gap-1">
@@ -121,4 +121,34 @@
     </div>
     {% endfor %}
 </div>
+<script>
+window.aiosI18n.register({
+    'Equipes': 'Equipos',
+    'equipe': 'equipo',
+    'SDR → Follow-up → Closer (Follow-up orquestrador + Manager)': 'SDR → Follow-up → Closer (Follow-up orquestador + Manager)',
+    'SDR → Closer → Manager (Manager + Closer orquestrador)': 'SDR → Closer → Manager (Manager + Closer orquestador)',
+    'Support → Manager (Manager orquestrador)': 'Support → Manager (Manager orquestador)',
+    'Analyst → Scientist → Manager (Manager orquestrador)': 'Analyst → Scientist → Manager (Manager orquestador)',
+    '🎧 Suporte': '🎧 Soporte',
+    '📊 Dados': '📊 Datos',
+    'Criar o Coordenador Geral e as equipes de Marketing, Customer Success e Receita?\\n\\nOs agentes serão criados ativos. A jornada diária continua desligada até você ligar em Configurações.': '¿Crear el Coordenador Geral y los equipos de Marketing, Customer Success y Receita?\\n\\nLos agentes se crearán activos. La jornada diaria sigue desactivada hasta que la actives en Configuración.',
+    'Montar empresa': 'Configurar empresa',
+    'Nova equipe': 'Nuevo equipo',
+    'Empresa montada:': 'Empresa configurada:',
+    'criada': 'creada',
+    'e o Coordenador Geral pronto.': 'y el Coordenador Geral listo.',
+    'Os agentes já estão ativos — ligue a jornada diária em': 'Los agentes ya están activos — activa la jornada diaria en',
+    'Configurações': 'Configuración',
+    'quando quiser que eles trabalhem sozinhos.': 'cuando quieras que trabajen solos.',
+    'Não foi possível montar a empresa. Veja o log.': 'No se pudo configurar la empresa. Consulta el log.',
+    'Compatibilidade': 'Compatibilidad',
+    'Excluir': 'Eliminar',
+    'Orquestrador:': 'Orquestador:',
+    '⚠ Nenhum orquestrador atribuído': '⚠ Ningún orquestador asignado',
+    'Atribuir': 'Asignar',
+    'Sem equipes': 'Sin equipos',
+    'As equipes roteiam conversas entre agentes com estratégias configuráveis e coordenação liderada por orquestrador.': 'Los equipos enrutan conversaciones entre agentes con estrategias configurables y coordinación liderada por orquestador.',
+    'Criar equipe': 'Crear equipo'
+});
+</script>
 {% endblock %}

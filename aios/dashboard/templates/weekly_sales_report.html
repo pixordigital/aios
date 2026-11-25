@@ -9,4 +9,45 @@
 <h2>Sugestões e revisão</h2>
 {% if report.payload.follow_up %}<section class="card mb-3"><h3>Acompanhamento da semana anterior</h3>{% for item in report.payload.follow_up %}<p>{% if item.tried is none %}Ainda sem revisão: {% elif item.tried %}Tentada; resultado informado: {{ item.outcome or 'sem resultado registrado' }}. {% else %}Não tentada. {% endif %}<a href="/dashboard/sales-reports/{{ item.report_id }}">{{ item.title }} — revisar sugestão anterior</a></p>{% endfor %}</section>{% endif %}
 {% for rec in recommendations %}<section class="card mb-3"><h3>{{ rec.title }}</h3><p><b>Evidência:</b> {{ rec.evidence }}</p><p><b>Próximo passo:</b> {{ rec.action }} <a href="{{ rec.target_url }}">Abrir tela relacionada →</a></p><form method="POST" action="/dashboard/sales-reports/{{ report.id }}/recommendations/{{ rec.id }}"><label>Você tentou esta sugestão?</label><select class="input" name="tried"><option value="no" {% if rec.tried is sameas false %}selected{% endif %}>Ainda não</option><option value="yes" {% if rec.tried is sameas true %}selected{% endif %}>Sim</option></select><label>O que aconteceu?</label><textarea class="input" name="outcome" rows="2">{{ rec.outcome }}</textarea><button class="btn btn-primary mt-2">Salvar revisão</button></form></section>{% else %}<p>Não há sugestões acionáveis com os dados registrados nesta semana.</p>{% endfor %}
+<script>
+window.aiosI18n.register({
+    'Relatório semanal de vendas': 'Informe semanal de ventas',
+    'Semana de': 'Semana del',
+    'Baixar PDF': 'Descargar PDF',
+    'E-mail do relatório:': 'Correo electrónico del informe:',
+    'pendente': 'pendiente',
+    'falhou; verifique SMTP em Configurações': 'falló; verifique SMTP en Configuración',
+    'sem destinatário; configure em Configurações': 'sin destinatario; configure en Configuración',
+    'SMTP não configurado; configure SMTP e o destinatário em Configurações': 'SMTP no configurado; configure SMTP y el destinatario en Configuración',
+    '. Os relatórios Slack continuam ativos.': '. Los informes de Slack siguen activos.',
+    'Comparação semanal': 'Comparación semanal',
+    'Contagem e valor dos negócios atualizados na semana, agrupados pela etapa atual:': 'Conteo y valor de los negocios actualizados en la semana, agrupados por la etapa actual:',
+    'Semana do relatório': 'Semana del informe',
+    'negócio(s), R$': 'negocio(s), R$',
+    'Sem negócios registrados.': 'Sin negocios registrados.',
+    'Meta mensal': 'Meta mensual',
+    'Nenhuma meta cadastrada.': 'Ninguna meta registrada.',
+    'Definir meta no CRM': 'Definir meta en el CRM',
+    'Mudanças de etapa registradas': 'Cambios de etapa registrados',
+    'Nenhuma mudança registrada.': 'Ningún cambio registrado.',
+    'Não há atribuição confiável por agente nesta semana.': 'No hay atribución fiable por agente esta semana.',
+    'negócio(s) ativos sem agente responsável cadastrado. Mensagens e conversas não são usadas como prova de venda.': 'negocio(s) activos sin agente responsable registrado. Los mensajes y las conversas no se usan como prueba de venta.',
+    'Sugestões e revisão': 'Sugerencias y revisión',
+    'Acompanhamento da semana anterior': 'Seguimiento de la semana anterior',
+    'Ainda sem revisão:': 'Aún sin revisión:',
+    'Tentada; resultado informado:': 'Intentada; resultado informado:',
+    'sem resultado registrado': 'sin resultado registrado',
+    'Não tentada.': 'No intentada.',
+    '— revisar sugestão anterior': '— revisar sugerencia anterior',
+    'Evidência:': 'Evidencia:',
+    'Próximo passo:': 'Próximo paso:',
+    'Abrir tela relacionada →': 'Abrir pantalla relacionada →',
+    'Você tentou esta sugestão?': '¿Intentó esta sugerencia?',
+    'Ainda não': 'Aún no',
+    'Sim': 'Sí',
+    'O que aconteceu?': '¿Qué pasó?',
+    'Salvar revisão': 'Guardar revisión',
+    'Não há sugestões acionáveis com os dados registrados nesta semana.': 'No hay sugerencias accionables con los datos registrados esta semana.'
+});
+</script>
 {% endblock %}

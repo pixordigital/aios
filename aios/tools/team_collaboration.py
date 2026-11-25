@@ -580,6 +580,48 @@ class RequestBuildInput(BaseModel):
     urgency: str = Field(default="warning", description="info | warning | blocker")
 
 
+_REQUEST_BUILD_PENDING_ARGS = (
+    "requirement", "revenue_justification", "evidence", "to_team", "from_team",
+)
+
+
+async def _verified_approved_request_build(
+    marker: Any, org_id: str, tool_args: dict[str, Any]
+) -> str | None:
+    """Return approved action id only when the marker matches a DB-approved row."""
+    if not isinstance(marker, dict):
+        return None
+    action_id = marker.get("action_id")
+    marker_org = marker.get("org_id")
+    decided_by = marker.get("decided_by")
+    if not all(isinstance(v, str) and v for v in (action_id, marker_org, decided_by)):
+        return None
+    if marker_org != org_id:
+        return None
+
+    from sqlalchemy import select
+
+    from aios.db.engine import async_session
+    from aios.db.models import PendingAction
+
+    async with async_session() as sess:
+        row = (await sess.execute(select(PendingAction).where(
+            PendingAction.id == action_id,
+            PendingAction.org_id == org_id,
+            PendingAction.status == "approved",
+            PendingAction.decided_by == decided_by,
+            PendingAction.tool_name == "request_build",
+        ))).scalar_one_or_none()
+        if row is None:
+            return None
+        row_args = row.tool_args
+        if not isinstance(row_args, dict):
+            return None
+        if any(row_args.get(k) != tool_args.get(k) for k in _REQUEST_BUILD_PENDING_ARGS):
+            return None
+        return row.id
+
+
 class RequestBuildTool(BaseTool):
     name = "request_build"
     description = (
@@ -599,6 +641,8 @@ class RequestBuildTool(BaseTool):
         evidence: str = "",
         to_team: str = "dev",
         urgency: str = "warning",
+        *,
+        _hitl_approved_action: dict | None = None,
     ) -> dict[str, Any]:
         from aios.db.engine import async_session
         from aios.db.models import Agent, Message
@@ -761,28 +805,33 @@ class RequestBuildTool(BaseTool):
         # Parked for the owner's decision, so "told" and "decided" are distinct.
         from aios.db.models import PendingAction
 
-        async with async_session() as sess:
-            pa = PendingAction(
-                org_id=org_id,
-                agent_id=self._agent_id or manager_id,
-                conversation_id=conv_id,
-                tool_name="request_build",
-                tool_args={
-                    "requirement": requirement,
-                    "revenue_justification": justification,
-                    "evidence": evidence,
-                    "to_team": target_name,
-                    "from_team": caller.name,
-                },
-                context_summary=(
-                    f"{caller.name} pediu para {target_name} construir. "
-                    f"{manager_name} viability: {feasibility[:400]}"
-                ),
-                status="pending",
-            )
-            sess.add(pa)
-            await sess.commit()
-            pending_id = pa.id
+        pending_args = {
+            "requirement": requirement,
+            "revenue_justification": justification,
+            "evidence": evidence,
+            "to_team": target_name,
+            "from_team": caller.name,
+        }
+        pending_id = await _verified_approved_request_build(
+            _hitl_approved_action, org_id, pending_args
+        )
+        if pending_id is None:
+            async with async_session() as sess:
+                pa = PendingAction(
+                    org_id=org_id,
+                    agent_id=self._agent_id or manager_id,
+                    conversation_id=conv_id,
+                    tool_name="request_build",
+                    tool_args=pending_args,
+                    context_summary=(
+                        f"{caller.name} pediu para {target_name} construir. "
+                        f"{manager_name} viability: {feasibility[:400]}"
+                    ),
+                    status="pending",
+                )
+                sess.add(pa)
+                await sess.commit()
+                pending_id = pa.id
 
         return {
             "ok": True,

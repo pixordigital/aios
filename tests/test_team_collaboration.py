@@ -22,6 +22,7 @@ from aios.db.models import (
     Conversation,
     Message,
     Organization,
+    PendingAction,
     Team,
     team_agents,
 )
@@ -29,6 +30,7 @@ from aios.tools.team_collaboration import (
     _MAX_HOPS,
     AskTeamManagerTool,
     NotifyHumanTool,
+    RequestBuildTool,
     _hops,
 )
 
@@ -879,3 +881,124 @@ async def test_report_jobs_skip_off_their_day(monkeypatch):
     assert (await weekly_report_job(None))["skipped"] is True  # 2026-09-01 is a Tuesday
     # Monthly proceeds past its gate and reaches the (empty) org list.
     assert "skipped" not in await monthly_report_job(None)
+
+
+# ── approved request_build replay must not re-pend ───────────────────────
+
+async def _wire_request_build(session, slug: str):
+    org = await _org(session, slug)
+    sales = await _team(session, org, "sales")
+    dev = await _team(session, org, "dev")
+    sales_mgr = await _agent(session, org, "sales-manager")
+    dev_mgr = await _agent(session, org, "dev-manager")
+    sales.manager_agent_id, dev.manager_agent_id = sales_mgr.id, dev_mgr.id
+    await _join(session, sales, sales_mgr)
+    await session.commit()
+    return org, sales_mgr
+
+
+async def _seed_approved_build(session, org, agent, tool_args, *, decided_by="owner"):
+    conv = Conversation(
+        org_id=org.id, channel="internal", external_id="approved-seed", agent_id=agent.id
+    )
+    session.add(conv)
+    await session.flush()
+    pa = PendingAction(
+        id="approved-1", org_id=org.id, agent_id=agent.id, conversation_id=conv.id,
+        tool_name="request_build", tool_args=tool_args,
+        status="approved", decided_by=decided_by,
+    )
+    session.add(pa)
+    await session.commit()
+
+
+def _patch_build_delivery(monkeypatch):
+    class _Feasible:
+        def __init__(self, agent, db):
+            pass
+
+        async def run(self, conv_id, prompt, db=None):
+            return "Viavel em dois dias, com risco pequeno."
+
+    async def _targets(org_id, team_id=""):
+        return [{"token": "t", "channel": "D_OWNER", "is_1on1": True}]
+
+    async def _deliver(org_id, text, urgency="info", requires_ack=False, team_id=""):
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "aios.core.orchestrator._get_runtime",
+        lambda agent, db=None: _Feasible(agent, db),
+    )
+    monkeypatch.setattr("aios.core.meetings.human_slack_targets", _targets)
+    monkeypatch.setattr("aios.core.owner_notify.deliver_owner", _deliver)
+
+
+async def test_request_build_approved_marker_skips_new_pending(test_session, monkeypatch):
+    org, mgr = await _wire_request_build(test_session, "replay-approved")
+    args = {
+        "requirement": "Adicionar relatorio de funil",
+        "revenue_justification": "R$ 10000/mes em receita",
+        "evidence": "pipeline",
+        "to_team": "dev",
+    }
+    await _seed_approved_build(
+        test_session, org, mgr, dict(args, from_team="sales")
+    )
+    _patch_build_delivery(monkeypatch)
+
+    tool = RequestBuildTool()
+    tool._org_id, tool._agent_id = org.id, mgr.id
+    out = await tool.run(
+        **args, urgency="warning",
+        _hitl_approved_action={
+            "action_id": "approved-1", "org_id": org.id, "decided_by": "owner",
+        },
+    )
+
+    rows = (await test_session.execute(select(PendingAction))).scalars().all()
+    assert out["ok"] is True
+    assert out["pending_approval_id"] == "approved-1"
+    assert [r.id for r in rows] == ["approved-1"]
+
+
+@pytest.mark.parametrize(
+    "slug,decided_by,requirement",
+    [
+        ("replay-forged", "intruder", "Adicionar relatorio de funil"),
+        ("replay-mismatch", "owner", "Pedido diferente com 20% de ganho"),
+    ],
+    ids=["forged", "mismatched"],
+)
+async def test_request_build_bad_marker_still_pends(
+    test_session, monkeypatch, slug, decided_by, requirement
+):
+    org, mgr = await _wire_request_build(test_session, slug)
+    base = {
+        "requirement": "Adicionar relatorio de funil",
+        "revenue_justification": "R$ 10000/mes em receita",
+        "evidence": "pipeline",
+        "to_team": "dev",
+    }
+    await _seed_approved_build(
+        test_session, org, mgr, dict(base, from_team="sales")
+    )
+    _patch_build_delivery(monkeypatch)
+
+    tool = RequestBuildTool()
+    tool._org_id, tool._agent_id = org.id, mgr.id
+    call_args = dict(base, requirement=requirement)
+    out = await tool.run(
+        **call_args, urgency="warning",
+        _hitl_approved_action={
+            "action_id": "approved-1", "org_id": org.id, "decided_by": decided_by,
+        },
+    )
+
+    rows = (await test_session.execute(select(PendingAction))).scalars().all()
+    new = [r for r in rows if r.id != "approved-1"]
+    assert out["ok"] is True
+    assert out["pending_approval_id"] != "approved-1"
+    assert len(rows) == 2 and len(new) == 1
+    assert new[0].status == "pending"
+    assert new[0].tool_args["requirement"] == requirement

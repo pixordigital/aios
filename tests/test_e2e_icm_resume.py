@@ -125,7 +125,7 @@ async def test_e2e_icm_output_schema_failure_fails_node():
 
 
 @pytest.mark.asyncio
-async def test_workflow_explicit_preapproved_populates_icm_approval():
+async def test_workflow_explicit_preapproved_populates_icm_approval(tmp_path):
     manifest = StageManifest(
         id="approved_stage",
         version="1.0.0",
@@ -140,18 +140,42 @@ async def test_workflow_explicit_preapproved_populates_icm_approval():
         tool_args={"expression": "2+2"},
         stage_manifest=manifest,
     )
-    shared = {
-        "preapproved": {
-            "approved": True,
-            "approval_id": "appr-valid",
-            "approved_fingerprint": fp,
-            "actions": ["calculator"],
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from aios.db.models import PendingAction
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'approvals.db'}")
+    PendingAction.__table__.create(engine)
+    with Session(engine) as session:
+        session.add(
+            PendingAction(
+                id="appr-valid",
+                org_id="default",
+                agent_id="agent-1",
+                conversation_id="conv-preapproved-valid",
+                tool_name="calculator",
+                tool_args={},
+                status="approved",
+                decided_by="founder-1",
+            )
+        )
+        session.commit()
+        shared = {
+            "preapproved": {
+                "approved": True,
+                "approval_id": "appr-valid",
+                "approved_fingerprint": fp,
+                "actions": ["calculator"],
+            },
+            "icm_db_session": session,
         }
-    }
-    result = WorkflowResult()
+        result = WorkflowResult()
 
-    await WorkflowEngine()._execute_node(node, "conv-preapproved-valid", shared, result)
+        await WorkflowEngine()._execute_node(node, "conv-preapproved-valid", shared, result)
 
+    engine.dispose()
     assert result.node_status["n1"] == "done"
     assert shared["icm_approval"]["approval_id"] == "appr-valid"
     assert shared["icm_approval"]["approved_fingerprint"] == fp

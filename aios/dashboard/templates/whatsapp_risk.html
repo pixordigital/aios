@@ -44,9 +44,9 @@
             <div>
                 <div style="font-weight:500;font-size:0.9375rem">{{ c.label }} <span style="color:var(--text-tertiary);font-family:var(--font-mono);font-size:0.75rem">{{ c.instance }}</span></div>
                 <div style="font-size:0.75rem;color:var(--text-tertiary);margin-top:0.125rem">
-                    {{ c.sent_today }} enviados hoje · teto do aquecimento {{ c.daily_cap }}/dia
+                    {{ c.sent_today }} <span>enviados hoje · teto do aquecimento</span> {{ c.daily_cap }}<span>/dia</span>
                     {% if c.velocity_ratio > 1.0 %} · <span style="color:var(--red)">acima do teto</span>{% endif %}
-                    {% if c.blocked_today %} · {{ c.blocked_today }} bloqueados{% endif %}
+                    {% if c.blocked_today %} · {{ c.blocked_today }} <span>bloqueados</span>{% endif %}
                 </div>
             </div>
             <div style="text-align:right">
@@ -65,10 +65,10 @@
         {% endif %}
 
         <div style="margin-top:0.75rem;display:flex;gap:1rem;flex-wrap:wrap;font-size:0.6875rem;color:var(--text-tertiary)">
-            <span>bans: {{ c.counts.get('ban_signal', 0) }}</span>
+            <span><span>bans:</span> {{ c.counts.get('ban_signal', 0) }}</span>
             <span>403: {{ c.counts.get('http_403', 0) }}</span>
             <span>429: {{ c.counts.get('http_429', 0) }}</span>
-            <span>quedas: {{ c.counts.get('disconnect', 0) }}</span>
+            <span><span>quedas:</span> {{ c.counts.get('disconnect', 0) }}</span>
             <span>opt-out: {{ c.counts.get('opted_out', 0) }}</span>
         </div>
     </div>
@@ -100,4 +100,29 @@
         índice oficial e não substitui o julgamento de usar a rota oficial.
     </div>
 </div>
+<script>
+window.aiosI18n.register({
+    'Risco de ban': 'Riesgo de baneo',
+    'Só se aplica à rota não-oficial (Baileys). Meta Cloud API é canal oficial e não carrega este risco.': 'Solo se aplica a la ruta no oficial (Baileys). Meta Cloud API es canal oficial y no conlleva este riesgo.',
+    'Painel Evolution': 'Panel de Evolution',
+    'Baixo': 'Bajo',
+    'Atenção': 'Atención',
+    'Crítico': 'Crítico',
+    'Nenhuma instância Baileys ativa. Ative um canal WhatsApp com provedor': 'Ninguna instancia Baileys activa. Active un canal WhatsApp con proveedor',
+    'para o acompanhamento de risco aparecer aqui.': 'para que el seguimiento de riesgo aparezca aquí.',
+    'Risco atual (pior instância)': 'Riesgo actual (peor instancia)',
+    'Baseado em sinais reais das últimas 24h: bloqueios, rate limits, quedas e velocidade de envio.': 'Basado en señales reales de las últimas 24h: bloqueos, límites de tasa, caídas y velocidad de envío.',
+    'enviados hoje · teto do aquecimento': 'enviados hoy · límite de calentamiento',
+    '/dia': '/día',
+    'acima do teto': 'por encima del límite',
+    'O que fazer': 'Qué hacer',
+    'bans:': 'baneos:',
+    'quedas:': 'caídas:',
+    'Sobrevive a restart. Opt-out é obrigação legal (LGPD) — estes números não serão contatados de novo.': 'Sobrevive al reinicio. Opt-out es obligación legal (LGPD) — estos números no serán contactados de nuevo.',
+    'O que este painel não sabe.': 'Lo que este panel no sabe.',
+    'O WhatsApp não publica como classifica abuso. Ele enxerga device, conta, padrões de interação e': 'WhatsApp no publica cómo clasifica el abuso. Ve el dispositivo, la cuenta, los patrones de interacción y',
+    'histórico — tudo invisível aqui. Este número reduz as causas de ban que dá para medir; não é um': 'historial — todo invisible aquí. Este número reduce las causas de baneo que se pueden medir; no es un',
+    'índice oficial e não substitui o julgamento de usar a rota oficial.': 'índice oficial ni sustituye el juicio de usar la ruta oficial.'
+});
+</script>
 {% endblock %}

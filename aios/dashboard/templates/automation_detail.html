@@ -5,7 +5,7 @@
   <h1 style="flex:1">{{wf.name}}</h1>
   <span class="badge">{{wf.status}}</span>
 </div>
-<p class="text-sm text-secondary" style="margin-bottom:1rem">{{wf.description or 'Sem descrição'}} • timeout {{wf.timeout_seconds}}s • id <span class="font-mono">{{wf.id[:8]}}</span></p>
+<p class="text-sm text-secondary" style="margin-bottom:1rem">{{wf.description or 'Sem descrição'}} <span>• timeout</span> {{wf.timeout_seconds}}s <span>• id</span> <span class="font-mono">{{wf.id[:8]}}</span></p>
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem" class="mb-4">
 <div class="card">
@@ -44,7 +44,7 @@
 </div>
 
 <div class="card mb-4">
-  <div class="flex-between mb-2"><h2>Fluxo (DAG)</h2><span class="text-xs text-tertiary">{{nodes|length}} passos • paralelo onde depende permite</span></div>
+  <div class="flex-between mb-2"><h2>Fluxo (DAG)</h2><span class="text-xs text-tertiary">{{nodes|length}} <span>passos • paralelo onde depende permite</span></span></div>
   {% if nodes %}
   <div style="display:flex;gap:0.5rem;overflow-x:auto;padding-bottom:0.5rem">
     {% for n in nodes %}
@@ -95,4 +95,47 @@
   </div>
   {% else %}<div class="text-sm text-tertiary">Nenhuma execução ainda. Clique Testar.</div>{% endfor %}
 </div>
+<script>
+window.aiosI18n.register({
+    '← Voltar': '← Volver',
+    'Sem descrição': 'Sin descripción',
+    '• timeout': '• timeout',
+    '• id': '• id',
+    '🔗 Gatilhos': '🔗 Disparadores',
+    'Pausar': 'Pausar',
+    'Ativar': 'Activar',
+    'Nenhum gatilho — execução manual apenas': 'Ningún disparador — solo ejecución manual',
+    'Webhook': 'Webhook',
+    'Cron': 'Cron',
+    'Evento': 'Evento',
+    'nome': 'nombre',
+    'cron/evento': 'cron/evento',
+    '+ Gatilho': '+ Disparador',
+    'URL webhook:': 'URL webhook:',
+    'Copiar': 'Copiar',
+    '▶ Testar': '▶ Probar',
+    '▶ Executar agora': '▶ Ejecutar ahora',
+    'Fluxo (DAG)': 'Flujo (DAG)',
+    'passos • paralelo onde depende permite': 'pasos • en paralelo donde la dependencia lo permite',
+    'dep:': 'dep:',
+    'if:': 'if:',
+    'Remover': 'Eliminar',
+    'Sem passos. Adicione abaixo.': 'Sin pasos. Añade abajo.',
+    'Nome do passo': 'Nombre del paso',
+    'ex. Notificar Slack': 'ej. Notificar Slack',
+    'Ferramenta / Agente': 'Herramienta / Agente',
+    '— agente IA —': '— agente IA —',
+    '🔀 IF condição': '🔀 IF condición',
+    'Depende de (label anterior)': 'Depende de (etiqueta anterior)',
+    'deixe vazio = paralelo': 'deja vacío = paralelo',
+    '+ Passo': '+ Paso',
+    'JSON avançado (tool_args com templating)': 'JSON avanzado (tool_args con templating)',
+    'Edite via API:': 'Edita vía API:',
+    '— use': '— usa',
+    'Execuções': 'Ejecuciones',
+    'nós': 'nodos',
+    'Detalhe': 'Detalle',
+    'Nenhuma execução ainda. Clique Testar.': 'Ninguna ejecución todavía. Haz clic en Probar.'
+});
+</script>
 {% endblock %}

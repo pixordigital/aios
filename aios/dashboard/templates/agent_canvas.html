@@ -258,5 +258,92 @@ function App(){
 const el = document.getElementById('wrapper');
 if(el) createRoot(el).render(React.createElement(App));
 </script>
+<script>
+(function(){
+  if(localStorage.getItem('aios_lang')!=='es') return;
+  var dict={
+    'Agent Canvas': 'Lienzo de Agentes',
+    'connecting…': 'conectando…',
+    '0 nodes · 0 edges': '0 nodos · 0 aristas',
+    'Cross-process bridge is': 'El puente entre procesos está',
+    'off': 'desactivado',
+    ': agent runs triggered from': ': las ejecuciones de agentes iniciadas desde',
+    'WhatsApp/email/cron happen in the ARQ worker and are': 'WhatsApp/email/cron ocurren en el worker ARQ y',
+    'not': 'no son',
+    'visible here. Only runs raised in the web process appear. Set': 'visibles aquí. Solo aparecen las ejecuciones iniciadas en el proceso web. Establece',
+    'and restart to enable.': 'y reinicia para activarlo.',
+    'live': 'en vivo',
+    'reconnecting…': 'reconectando…',
+    'idle': 'inactivo'
+  };
+  var attrs=['title','aria-label','placeholder','alt','value'];
+  var skip={SCRIPT:1,STYLE:1,NOSCRIPT:1};
+  var seen=new WeakSet();
+  function tr(s){ return Object.prototype.hasOwnProperty.call(dict,s)?dict[s]:null; }
+  function line(s){
+    var m=s.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    if(!m) return s;
+    var hit=tr(m[2]);
+    return hit===null?s:m[1]+hit+m[3];
+  }
+  function textNode(node){
+    if(seen.has(node)) return;
+    var raw=node.nodeValue;
+    if(raw.indexOf('\n')===-1){
+      var out=line(raw);
+      if(out===raw) return;
+      node.nodeValue=out;
+    }else{
+      var parts=raw.split('\n'), changed=false;
+      for(var i=0;i<parts.length;i++){
+        var out=line(parts[i]);
+        if(out!==parts[i]){ parts[i]=out; changed=true; }
+      }
+      if(!changed) return;
+      node.nodeValue=parts.join('\n');
+    }
+    seen.add(node);
+  }
+  function attrsOf(el){
+    for(var i=0;i<attrs.length;i++){
+      var a=attrs[i], v=el.getAttribute(a);
+      if(v===null) continue;
+      var hit=tr(v);
+      if(hit!==null) el.setAttribute(a,hit);
+    }
+  }
+  function apply(root){
+    root=root||document.body;
+    if(root.nodeType===3){ textNode(root); return; }
+    if(root.nodeType!==1&&root.nodeType!==9&&root.nodeType!==11) return;
+    if(root.nodeType===1&&skip[root.tagName]) return;
+    var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{
+      acceptNode:function(n){
+        if(n.nodeType===1&&skip[n.tagName]) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var n;
+    while((n=walker.nextNode())){
+      if(n.nodeType===3) textNode(n); else attrsOf(n);
+    }
+  }
+  function go(){
+    apply();
+    var mo=new MutationObserver(function(records){
+      records.forEach(function(r){
+        if(r.type==='characterData') textNode(r.target);
+        else if(r.type==='childList') r.addedNodes.forEach(function(node){
+          if(node.nodeType===3) textNode(node);
+          else if(node.nodeType===1) apply(node);
+        });
+      });
+    });
+    mo.observe(document.body,{childList:true,characterData:true,subtree:true});
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',go,{once:true});
+  else go();
+})();
+</script>
 </body>
 </html>

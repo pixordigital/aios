@@ -241,9 +241,69 @@ function goToStep(n) {
         }
     }
     if (n === 4) {
-        document.getElementById('sim-agent-name').innerText = document.getElementById('agent-name-input').value || 'Atendente Virtual';
+        document.getElementById('sim-agent-name').innerText = document.getElementById('agent-name-input').value || window.aiosI18n.t('Atendente Virtual');
     }
 }
 
+</script>
+<script>
+window.aiosI18n.register({
+    '🚀 Criar Atendente em 1 Minuto': '🚀 Crear Atendente en 1 Minuto',
+    'Coloque um funcionário de IA para atender clientes no seu WhatsApp de forma prática.': 'Ponga un empleado de IA para atender clientes en su WhatsApp de forma práctica.',
+    '← Voltar': '← Volver',
+    '1. Escolher Função': '1. Elegir Función',
+    '2. Seu Negócio': '2. Su Negocio',
+    '3. Inteligência & Regras': '3. Inteligencia & Reglas',
+    '4. Revisar & Ativar': '4. Revisar & Activar',
+    'O que esse atendente deve fazer no seu WhatsApp?': '¿Qué debe hacer este atendente en su WhatsApp?',
+    'Selecione o modelo mais adequado para a necessidade da sua empresa:': 'Seleccione el modelo más adecuado para la necesidad de su empresa:',
+    'Continuar →': 'Continuar →',
+    'Sobre a sua Empresa': 'Sobre su Empresa',
+    'O atendente usará essas informações para se apresentar e falar com os clientes:': 'El atendente usará esta información para presentarse y hablar con los clientes:',
+    'Nome do Atendente (como ele se apresenta)': 'Nombre del Atendente (cómo se presenta)',
+    'Ex.: Bia do Atendimento': 'Ej.: Bia do Atendimento',
+    'Nome da sua Empresa ou Marca': 'Nombre de su Empresa o Marca',
+    'Ex.: Pizzaria da Nonna, Clínica Sorriso, Oficina Tech': 'Ej.: Pizzaria da Nonna, Clínica Sorriso, Oficina Tech',
+    'O que você vende ou faz? (1 ou 2 frases)': '¿Qué vende o hace? (1 o 2 frases)',
+    'Ex.: Pizzas artesanais no forno a lenha e vinhos selecionados com entrega rápida em até 40 min em toda a cidade.': 'Ej.: Pizzas artesanales en horno de leña y vinos seleccionados con entrega rápida en hasta 40 min en toda la ciudad.',
+    'Tom de Conversa': 'Tono de Conversación',
+    'Amigável e Caloroso (com emojis)': 'Amigable y Cálido (con emojis)',
+    'Profissional e Polido': 'Profesional y Pulido',
+    'Super Direto e Rápido': 'Súper Directo y Rápido',
+    'Inteligência, Horários e Segurança': 'Inteligencia, Horarios y Seguridad',
+    'Escolha a velocidade da IA e regras de proteção para seu negócio:': 'Elija la velocidad de la IA y reglas de protección para su negocio:',
+    'Nível de Inteligência do Atendente': 'Nivel de Inteligencia del Atendente',
+    '⚡ Rápido & Econômico (Recomendado)': '⚡ Rápido & Económico (Recomendado)',
+    'Respostas imediatas em menos de 2 segundos. Ideal para WhatsApp, atendimento ágil e baixo consumo de créditos.': 'Respuestas inmediatas en menos de 2 segundos. Ideal para WhatsApp, atención ágil y bajo consumo de créditos.',
+    '🧠 Alta Precisão & Raciocínio': '🧠 Alta Precisión & Razonamiento',
+    'Mais inteligente e analítico. Ideal para negociações mais delicadas, interpretação de regras densas ou catálogos complexos.': 'Más inteligente y analítico. Ideal para negociaciones más delicadas, interpretación de reglas densas o catálogos complejos.',
+    'Horário Comercial e Plantão Noturno': 'Horario Comercial y Turno Nocturno',
+    'Ex.: Segunda a Sábado das 09h às 20h': 'Ej.: Lunes a Sábado de 09h a 20h',
+    'O que fazer fora do horário comercial?': '¿Qué hacer fuera del horario comercial?',
+    'Anotar recado:': 'Anotar recado:',
+    'avisa que a equipe volta amanhã e pega nome e pedido.': 'avisa que el equipo vuelve mañana y toma nombre y pedido.',
+    'Atender 24h:': 'Atender 24h:',
+    'responde dúvidas sozinho mesmo de madrugada.': 'responde dudas solo incluso de madrugada.',
+    'Regras de Segurança (Proteja seu Negócio)': 'Reglas de Seguridad (Proteja su Negocio)',
+    'Nunca inventar preços ou promoções': 'Nunca inventar precios ni promociones',
+    '(se não estiver cadastrado, avisa que vai confirmar).': '(si no está registrado, avisa que lo confirmará).',
+    'Chamar atendente humano': 'Llamar a atendente humano',
+    'imediatamente se o cliente demonstrar irritação ou reclamar.': 'inmediatamente si el cliente muestra irritación o se queja.',
+    'Sempre confirmar nome e telefone': 'Siempre confirmar nombre y teléfono',
+    'antes de registrar um pedido ou agendamento.': 'antes de registrar un pedido o una cita.',
+    'Revisar →': 'Revisar →',
+    'Revise e Coloque no Ar': 'Revise y Ponga en Marcha',
+    'Exemplo do tipo de conversa que o atendente terá (conteúdo ilustrativo, não é uma conversa real):': 'Ejemplo del tipo de conversa que tendrá el atendente (contenido ilustrativo, no es una conversa real):',
+    'Prévia ilustrativa': 'Vista previa ilustrativa',
+    'Vocês entregam hoje?': '¿Ustedes entregan hoy?',
+    'Olá! Sou a assistente virtual da sua empresa. Vou confirmar o prazo com a equipe e já te respondo.': '¡Hola! Soy la asistente virtual de su empresa. Voy a confirmar el plazo con el equipo y le respondo enseguida.',
+    'Conexão com WhatsApp': 'Conexión con WhatsApp',
+    'Ao ativar, o atendente assume as conversas do seu WhatsApp conectado.': 'Al activar, el atendente asume las conversas de su WhatsApp conectado.',
+    'WhatsApp conectado': 'WhatsApp conectado',
+    'WhatsApp não conectado': 'WhatsApp no conectado',
+    'Conectar': 'Conectar',
+    '🚀 Colocar Meu Atendente no Ar': '🚀 Poner Mi Atendente en Marcha',
+    'Atendente Virtual': 'Asistente Virtual'
+});
 </script>
 {% endblock %}

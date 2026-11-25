@@ -27,7 +27,7 @@
                 <span class="text-xs text-secondary">({{ (f.size_bytes / 1024)|round(1) }} KB)</span>
             </div>
             <div style="display:flex;align-items:center;gap:0.5rem">
-                <form method="POST" action="/dashboard/simple/knowledge/{{ f.id }}/delete" style="margin:0" onsubmit="return confirm('Remover este arquivo?')">
+                <form method="POST" action="/dashboard/simple/knowledge/{{ f.id }}/delete" style="margin:0" onsubmit="return confirm(window.aiosI18n.t('Remover este arquivo?'))">
                     <button type="submit" class="btn btn-ghost btn-sm" style="color:var(--red);border-color:var(--red-subtle);font-size:0.65rem">Excluir</button>
                 </form>
             </div>
@@ -79,4 +79,25 @@
         </div>
     </form>
 </dialog>
+<script>
+window.aiosI18n.register({
+    '📚 Conhecimento da Empresa': '📚 Conocimiento de la Empresa',
+    'Ensine seus atendentes sobre preços, cardápios, políticas de troca e perguntas frequentes.': 'Enseña a tus atendientes sobre precios, menús, políticas de cambio y preguntas frecuentes.',
+    '📄 Documentos do Negócio (PDF, Word ou Texto)': '📄 Documentos del Negocio (PDF, Word o Texto)',
+    'Envie arquivos com catálogo, lista de preços, cardápio ou regulamentos. Os arquivos ficam guardados na base do seu negócio.': 'Envía archivos con catálogo, lista de precios, menú o reglamentos. Los archivos se guardan en la base de tu negocio.',
+    '📤 Enviar arquivo': '📤 Enviar archivo',
+    'Remover este arquivo?': '¿Eliminar este archivo?',
+    'Excluir': 'Eliminar',
+    '📝 Respostas Padrão (anotações)': '📝 Respuestas Estándar (anotaciones)',
+    'Anote respostas oficiais para as dúvidas mais comuns. Ainda não são usadas automaticamente pelo atendente.': 'Anota respuestas oficiales para las dudas más comunes. Aún no se usan automáticamente por el atendiente.',
+    '+ Adicionar Dúvida': '+ Agregar duda',
+    'Nenhuma pergunta cadastrada ainda. Adicione perguntas como horários de entrega, formas de pagamento e localização.': 'Aún no hay ninguna pregunta registrada. Agrega preguntas como horarios de entrega, formas de pago y ubicación.',
+    'Nova Pergunta Frequente': 'Nueva Pregunta Frecuente',
+    'Pergunta que o cliente faz:': 'Pregunta que el cliente hace:',
+    'Ex.: Vocês entregam aos domingos?': 'Ej.: ¿Ustedes entregan los domingos?',
+    'Resposta oficial que a IA deve dar:': 'Respuesta oficial que la IA debe dar:',
+    'Ex.: Sim! Entregamos aos domingos das 11h às 22h para toda a região central.': 'Ej.: ¡Sí! Entregamos los domingos de 11h a 22h para toda la zona central.',
+    'Salvar Pergunta': 'Guardar pregunta'
+});
+</script>
 {% endblock %}

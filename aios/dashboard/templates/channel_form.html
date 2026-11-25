@@ -153,7 +153,7 @@
 async function testConnection() {
     var btn = document.getElementById('test-btn');
     var result = document.getElementById('test-result');
-    btn.disabled = true; btn.textContent = '⏳ Testando...'; result.style.display = 'none';
+    btn.disabled = true; btn.textContent = window.aiosI18n.t('⏳ Testando...'); result.style.display = 'none';
 
     var channelType = document.querySelector('select[name="channel_type"]')?.value || 'web';
     var config = {};
@@ -172,14 +172,14 @@ async function testConnection() {
         result.style.background = data.ok ? 'var(--green-subtle)' : 'var(--red-subtle)';
         result.style.color = data.ok ? 'var(--green)' : 'var(--red)';
         result.style.border = '1px solid ' + (data.ok ? 'var(--green)' : 'var(--red)');
-        result.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || (data.ok ? 'Conectado' : 'Falhou'));
+        result.textContent = (data.ok ? '✅ ' : '❌ ') + (data.message || window.aiosI18n.t(data.ok ? 'Conectado' : 'Falhou'));
     } catch(e) {
         result.style.display = 'block';
         result.style.background = 'var(--red-subtle)';
         result.style.color = 'var(--red)';
-        result.textContent = '❌ Erro: ' + e.message;
+        result.textContent = window.aiosI18n.t('❌ Erro: ') + e.message;
     }
-    btn.disabled = false; btn.textContent = '🔄 Testar conexão';
+    btn.disabled = false; btn.textContent = window.aiosI18n.t('🔄 Testar conexão');
 }
 </script>
 
@@ -195,5 +195,63 @@ async function testConnection() {
     }
     function showChannelCreds(t){document.querySelectorAll('.channel-creds').forEach(function(e){e.style.display='none'});var el=document.getElementById('creds-'+t);if(el)el.style.display='flex';if(t==='evolution')showEvoProvider(document.querySelector('select[name="config_evo_provider"]')?.value||'baileys');}
     document.addEventListener('DOMContentLoaded',function(){showChannelCreds(document.querySelector('select[name="channel_type"]').value);});
+</script>
+<script>
+window.aiosI18n.register({
+    'Novo Canal': 'Nuevo Canal',
+    'Web Chat': 'Chat web',
+    'Rótulo': 'Etiqueta',
+    'WhatsApp de Produção': 'WhatsApp de Producción',
+    'Credenciais': 'Credenciales',
+    'Os canais web não precisam de configuração.': 'Los canales web no necesitan configuración.',
+    'Token do bot': 'Token del bot',
+    'Segredo de assinatura': 'Secreto de firma',
+    'ID do canal': 'ID del canal',
+    'Roteia as mensagens deste canal para o agente/time ligado a esta conexão. Deixe vazio para cair na primeira conexão Slack ativa (comportamento correto para uso só por DM).': 'Enruta los mensajes de este canal al agente/equipo vinculado a esta conexión. Déjalo vacío para caer en la primera conexión Slack activa (comportamiento correcto para uso solo por DM).',
+    'Sem chat ID fixo, as respostas voltam para quem mandou a mensagem.': 'Sin un chat ID fijo, las respuestas vuelven a quien envió el mensaje.',
+    'E-mail': 'Correo electrónico',
+    'Senha': 'Contraseña',
+    'Senha de aplicativo': 'Contraseña de aplicación',
+    'Provedor': 'Proveedor',
+    'Self-hosted (Coolify: voice-tts + voice-stt, $0/min)': 'Autohospedado (Coolify: voice-tts + voice-stt, $0/min)',
+    'ElevenLabs (melhor voz)': 'ElevenLabs (mejor voz)',
+    'Vapi (controle total, ~$0.15–0.31/min)': 'Vapi (control total, ~$0.15–0.31/min)',
+    'Vapi API key': 'Clave API de Vapi',
+    'Vapi assistant ID': 'ID de asistente de Vapi',
+    'Vapi phone ID': 'ID de teléfono de Vapi',
+    'Retell API key': 'Clave API de Retell',
+    'Retell agent ID': 'ID de agente de Retell',
+    'ElevenLabs API key': 'Clave API de ElevenLabs',
+    'ID da Voz': 'ID de voz',
+    'TTS URL (self-hosted)': 'TTS URL (autohospedada)',
+    'STT URL (self-hosted)': 'STT URL (autohospedada)',
+    'Bridge SIP (discagem)': 'Bridge SIP (marcación)',
+    'Número origem': 'Número de origen',
+    'Sem bridge, chamadas ficam': 'Sin bridge, las llamadas quedan',
+    'com TTS pronto. Webhook inbound:': 'con TTS listo. Webhook entrante:',
+    'Baileys (WhatsApp Web — self-hosted)': 'Baileys (WhatsApp Web — autohospedado)',
+    'Ao salvar, a instância Evolution é criada/reaproveitada conforme o provedor. Cada provedor tem sua própria instância — alternar não desassocia o WhatsApp já pareado.': 'Al guardar, la instancia de Evolution se crea/reutiliza según el proveedor. Cada proveedor tiene su propia instancia — cambiar no desvincula el WhatsApp ya emparejado.',
+    '⚠️ Baileys = WhatsApp Web (instável, risco de ban). Para produção, use': '⚠️ Baileys = WhatsApp Web (inestable, riesgo de baneo). Para producción, usa',
+    'URL do servidor': 'URL del servidor',
+    'Chave da API': 'Clave de API',
+    'Nome da instância': 'Nombre de la instancia',
+    'Gerencie QR code em /dashboard/evolution. Instância = isolamento multi-tenant.': 'Gestiona el código QR en /dashboard/evolution. Instancia = aislamiento multiinquilino.',
+    '✅ Recomendado — WhatsApp Cloud API oficial, estável, sem QR code. Templates gerenciados pela Meta.': '✅ Recomendado — WhatsApp Cloud API oficial, estable, sin código QR. Plantillas gestionadas por Meta.',
+    'URL do servidor Evolution': 'URL del servidor Evolution',
+    'Chave da API Evolution': 'Clave de API de Evolution',
+    'Nome da instância (Evolution)': 'Nombre de la instancia (Evolution)',
+    'Configuração Meta (opcional — Evolution provisiona automaticamente):': 'Configuración de Meta (opcional — Evolution aprovisiona automáticamente):',
+    'Template padrão (fallback 24h)': 'Plantilla predeterminada (fallback 24h)',
+    'Idioma template': 'Idioma de la plantilla',
+    'Atribuição': 'Asignación',
+    'Equipe (opcional)': 'Equipo (opcional)',
+    '— Nenhum —': '— Ninguno —',
+    '🔄 Testar conexão': '🔄 Probar conexión',
+    'Salvar': 'Guardar',
+    'Criar canal': 'Crear canal',
+    '⏳ Testando...': '⏳ Probando...',
+    'Falhou': 'Falló',
+    '❌ Erro: ': '❌ Error: '
+});
 </script>
 {% endblock %}

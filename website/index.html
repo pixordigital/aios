@@ -65,9 +65,14 @@
         .nav-burger.open span:nth-child(1) { transform: translateY(8px) rotate(45deg); }
         .nav-burger.open span:nth-child(2) { opacity: 0; transform: translateX(-6px); }
         .nav-burger.open span:nth-child(3) { transform: translateY(-8px) rotate(-45deg); }
+        .lang-switch { width: 44px; height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--text); border: 1px solid var(--border); border-radius: 10px; font-size: 12px; font-weight: 700; cursor: pointer; padding: 0; }
+        .lang-switch:hover { border-color: var(--border-hover); background: var(--surface); }
+        .lang-switch:focus-visible { outline: 3px solid var(--cyan); outline-offset: 2px; }
+        .nav-lang { display: none; }
         @media (max-width: 900px) {
             nav .inner { padding: 0 12px; flex-wrap: nowrap; height: 56px; min-height: 56px; }
-            .nav-burger { display: flex; position: static; transform: none; margin-left: auto; flex-shrink: 0; }
+            .nav-lang { display: inline-flex; margin-left: auto; }
+            .nav-burger { display: flex; position: static; transform: none; margin-left: 8px; flex-shrink: 0; }
             .nav-menu { display: none; }
             nav.open .nav-menu { display: flex; flex-direction: column; align-items: stretch; gap: 0; position: absolute; top: calc(100% + 8px); left: 0; right: 0; background: rgba(10,10,10,0.97); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 8px; backdrop-filter: blur(18px); }
             nav.open .nav-menu .links { display: flex; flex-direction: column; gap: 0; }
@@ -268,6 +273,7 @@
             <div class="logo-mark"><span>A</span></div>
             <span class="logo-text">AIOS</span>
         </a>
+        <button type="button" class="lang-switch nav-lang" aria-label="Mudar idioma para espanhol">ES</button>
         <div class="nav-burger">
             <span></span>
             <span></span>
@@ -283,6 +289,7 @@
                 <a href="/docs">Docs</a>
             </div>
             <div class="cta-group">
+                <button type="button" class="lang-switch" aria-label="Mudar idioma para espanhol">ES</button>
                 <span class="btn-ghost btn-disabled btn-internal-disabled" aria-disabled="true">Acesso interno</span>
                 <a href="#acesso" class="btn-primary">Ver opções de acesso</a>
             </div>
@@ -835,6 +842,281 @@
 </footer>
 
 <script>
+const I18N = {
+  'AIOS + ARVO — Agentes de IA e Revenue para vendas e atendimento': 'AIOS + ARVO — Agentes de IA y Revenue para ventas y atención',
+  'AIOS reúne agentes de IA para vendas e atendimento e o ARVO para acompanhar decisões de receita: sinais de risco, aprovação humana, execução registrada e verificação, com histórico auditável. Uso interno por convite.': 'AIOS reúne agentes de IA para ventas y atención y ARVO para seguir decisiones de ingresos: señales de riesgo, aprobación humana, ejecución registrada y verificación, con historial auditable. Uso interno por invitación.',
+  'O que automatizar': 'Qué automatizar',
+  'Do seu jeito': 'A tu manera',
+  'Exemplos': 'Ejemplos',
+  'Orientador comercial': 'Asesor comercial',
+  'Acesso interno': 'Acceso interno',
+  'Ver opções de acesso': 'Ver opciones de acceso',
+  '✓ Agentes de IA + controle de receita em uma plataforma': '✓ Agentes de IA + control de ingresos en una plataforma',
+  'vendas, atendimento e receita.': 'ventas, atención e ingresos.',
+  'O que é:': 'Qué es:',
+  'uma plataforma interna com dois módulos:': 'una plataforma interna con dos módulos:',
+  ', para criar assistentes de IA, e': ', para crear asistentes de IA, y',
+  ', para controle de receita.': ', para control de ingresos.',
+  'O que fazem:': 'Qué hacen:',
+  'o AIOS responde clientes, captura oportunidades e executa tarefas repetitivas; o ARVO recebe sinais de risco em negócios, encaminha para aprovação humana e registra execução e verificação — a integração operou na versão implantada anteriormente (verificado em 2026-11-22); as correções desta rodada de integração são locais e aguardam deploy, então a produção ainda não foi verificada com a nova canonical.': 'o AIOS responde clientes, captura oportunidades y ejecuta tareas repetitivas; ARVO recibe señales de riesgo en negocios, las deriva para aprobación humana y registra ejecución y verificación — la integración operó en la versión implantada anteriormente (verificado el 2026-11-22); las correcciones de esta ronda de integración son locales y esperan deploy, así que producción aún no se verificó con la nueva canonical.',
+  'Para quem:': 'Para quién:',
+  'equipes de vendas e atendimento que querem menos trabalho manual, com decisão humana e histórico auditável.': 'equipos de ventas y atención que quieren menos trabajo manual, con decisión humana e historial auditable.',
+  'Conheça o ARVO →': 'Conoce ARVO →',
+  '🛡️ Você no controle': '🛡️ Tienes el control',
+  'A equipe aprova decisões importantes antes que avancem': 'El equipo aprueba decisiones importantes antes de que avancen',
+  'Veja o que sua equipe pode automatizar →': 'Mira qué puede automatizar tu equipo →',
+  'Ver exemplos': 'Ver ejemplos',
+  'Converse sobre suas vendas e receba uma proposta de funil para revisar.': 'Habla de tus ventas y recibe una propuesta de embudo para revisar.',
+  'Conheça →': 'Conoce →',
+  'Um único endereço:': 'Una sola dirección:',
+  '· ARVO em': '· ARVO en',
+  'Plataforma de uso interno · Acesso criado pela sua empresa · Instalada em ambiente próprio': 'Plataforma de uso interno · Acceso creado por tu empresa · Instalada en entorno propio',
+  'Comece com modelos prontos': 'Empieza con modelos listos',
+  'Para vendas e atendimento': 'Para ventas y atención',
+  'Aprovação da equipe': 'Aprobación del equipo',
+  'Você define os limites': 'Tú defines los límites',
+  'Acompanhamento': 'Seguimiento',
+  'Histórico do que foi feito': 'Historial de lo que se hizo',
+  'aios — apoio à operação': 'aios — apoyo a la operación',
+  'Para quem lidera vendas': 'Para quien lidera ventas',
+  'Desenhe um funil que combina com o jeito que sua equipe vende.': 'Diseña un embudo que encaje con la forma en que tu equipo vende.',
+  'O Orientador Comercial conversa com você sobre o processo de vendas, considera o que já está registrado no CRM e propõe etapas e medidas para acompanhar. Você revisa tudo antes de aprovar; os negócios existentes não são movidos automaticamente.': 'El Asesor Comercial habla contigo sobre el proceso de ventas, considera lo que ya está registrado en el CRM y propone etapas y medidas para seguir. Tú revisas todo antes de aprobar; los negocios existentes no se mueven automáticamente.',
+  'Orientador · acesso interno': 'Asesor · acceso interno',
+  'Disponível para quem já tem acesso ao AIOS.': 'Disponible para quien ya tiene acceso a AIOS.',
+  'Do processo atual a um funil revisado por você': 'Del proceso actual a un embudo revisado por ti',
+  'Conte como vocês vendem': 'Cuenta cómo venden',
+  'Registre etapas, critérios, responsáveis e metas desejadas.': 'Registra etapas, criterios, responsables y metas deseadas.',
+  'Confira o retrato do CRM': 'Revisa el retrato del CRM',
+  'Compare suas respostas com os negócios já cadastrados.': 'Compara tus respuestas con los negocios ya registrados.',
+  'Revise antes de criar': 'Revisa antes de crear',
+  'Aprove uma proposta de funil ou ajuste as respostas primeiro.': 'Aprueba una propuesta de embudo o ajusta primero las respuestas.',
+  '01 / Menos trabalho repetido': '01 / Menos trabajo repetido',
+  'Mais tempo para atender bem': 'Más tiempo para atender bien',
+  'e fazer o negócio': 'y hacer que el negocio',
+  'andar': 'avance',
+  'Automatize etapas de vendas e atendimento que hoje dependem de alguém copiar informações, responder as mesmas dúvidas ou lembrar de fazer o próximo contato. Comece com modelos prontos e adapte cada um à rotina da sua empresa.': 'Automatiza etapas de ventas y atención que hoy dependen de que alguien copie información, responda las mismas dudas o recuerde hacer el siguiente contacto. Empieza con modelos listos y adapta cada uno a la rutina de tu empresa.',
+  'Modelos prontos para as tarefas mais comuns': 'Modelos listos para las tareas más comunes',
+  '🎙️ Vendas e atendimento': '🎙️ Ventas y atención',
+  'Vendas': 'Ventas',
+  '— faz as primeiras perguntas, entende o que o cliente procura e organiza o próximo passo.': '— hace las primeras preguntas, entiende qué busca el cliente y organiza el siguiente paso.',
+  '— ajuda a equipe a retomar conversas e oportunidades que ficaram sem resposta.': '— ayuda al equipo a retomar conversaciones y oportunidades que quedaron sin respuesta.',
+  'Atendimento': 'Atención',
+  '— responde dúvidas comuns com base nas informações da empresa e chama alguém quando precisa.': '— responde dudas comunes con base en la información de la empresa y llama a alguien cuando lo necesita.',
+  'Coordenação': 'Coordinación',
+  '— acompanha o trabalho e encaminha situações fora do padrão para a pessoa responsável.': '— sigue el trabajo y deriva situaciones fuera de lo habitual a la persona responsable.',
+  '🧭 Trabalho em equipe': '🧭 Trabajo en equipo',
+  'Encaminha cada solicitação para o assistente digital ou equipe mais adequada.': 'Deriva cada solicitud al asistente digital o equipo más adecuado.',
+  'Adapte as instruções e tarefas ao jeito como sua empresa trabalha.': 'Adapta las instrucciones y tareas a la forma en que tu empresa trabaja.',
+  '📊 Informações do negócio': '📊 Información del negocio',
+  'Ajuda a consultar informações e indicadores que sua equipe já acompanha.': 'Ayuda a consultar información e indicadores que tu equipo ya sigue.',
+  'Reúne contexto útil para apoiar decisões do dia a dia.': 'Reúne contexto útil para apoyar decisiones cotidianas.',
+  '💻 Outras tarefas internas': '💻 Otras tareas internas',
+  'Organização de informações e rotinas internas.': 'Organización de información y rutinas internas.',
+  'Apoio à equipe em tarefas administrativas recorrentes.': 'Apoyo al equipo en tareas administrativas recurrentes.',
+  'Consulta a documentos e procedimentos da empresa.': 'Consulta de documentos y procedimientos de la empresa.',
+  'Encaminhamento de situações que exigem revisão.': 'Derivación de situaciones que requieren revisión.',
+  '🛡️ Regras e revisões': '🛡️ Reglas y revisiones',
+  'Confere se uma negociação segue as regras da empresa.': 'Comprueba si una negociación sigue las reglas de la empresa.',
+  'Encaminha propostas fora do padrão para aprovação.': 'Deriva propuestas fuera de lo habitual para aprobación.',
+  'Mantém o registro das decisões e informações usadas.': 'Mantiene el registro de las decisiones y la información usada.',
+  'Sinaliza quando uma atividade precisa de atenção.': 'Señala cuando una actividad necesita atención.',
+  'Ajuda a equipe a revisar alterações importantes.': 'Ayuda al equipo a revisar cambios importantes.',
+  '⚙️ Ajuste às regras da sua empresa': '⚙️ Ajuste a las reglas de tu empresa',
+  'Explique como sua equipe trabalha, quais informações usar e em que situações uma pessoa precisa assumir.': 'Explica cómo trabaja tu equipo, qué información usar y en qué situaciones una persona debe asumir.',
+  'Como acessar →': 'Cómo acceder →',
+  '02 / Do jeito que sua empresa trabalha': '02 / A la manera de tu empresa',
+  'Automatize tarefas sem abrir mão': 'Automatiza tareas sin renunciar',
+  'das regras da': 'a las reglas de',
+  'sua empresa': 'tu empresa',
+  'Cada negócio tem seus limites, combinados e exceções. Configure o que pode seguir sozinho e o que precisa passar por alguém da equipe.': 'Cada negocio tiene sus límites, acuerdos y excepciones. Configura qué puede seguir solo y qué debe pasar por alguien del equipo.',
+  'Defina o que pode ser aprovado': 'Define qué puede aprobarse',
+  'Estabeleça limites claros. Por exemplo: pedidos simples seguem adiante; descontos maiores aguardam a aprovação de um gerente.': 'Establece límites claros. Por ejemplo: los pedidos simples siguen adelante; los descuentos mayores esperan la aprobación de un gerente.',
+  'Ensine como sua equipe atende': 'Enseña cómo atiende tu equipo',
+  'Use suas próprias orientações, políticas e materiais para que as respostas sigam os padrões e o tom da empresa.': 'Usa tus propias directrices, políticas y materiales para que las respuestas sigan los estándares y el tono de la empresa.',
+  'Não deixe decisões paradas': 'No dejes decisiones detenidas',
+  'Acompanhe pedidos de aprovação e defina por quanto tempo eles ficam aguardando uma resposta.': 'Sigue las solicitudes de aprobación y define cuánto tiempo esperan una respuesta.',
+  'Do atendimento à decisão de receita,': 'De la atención a la decisión de ingresos,',
+  'com': 'con',
+  'registro de cada passo': 'registro de cada paso',
+  'O AIOS cuida das conversas e das tarefas repetitivas. O ARVO entra quando uma negociação precisa de atenção: registra o sinal, encaminha para aprovação, guarda a execução e a verificação. Depois, a equipe consulta o que aconteceu e o que mudou no negócio.': 'AIOS se encarga de las conversaciones y las tareas repetitivas. ARVO interviene cuando una negociación necesita atención: registra la señal, la deriva para aprobación, guarda la ejecución y la verificación. Después, el equipo consulta qué ocurrió y qué cambió en el negocio.',
+  'INTEGRAÇÃO NA VERSÃO IMPLANTADA ANTERIOR · verificado em 2026-11-22 · correções desta rodada de integração são locais, pendentes de deploy · produção ainda não verificada com a nova canonical': 'INTEGRACIÓN EN LA VERSIÓN IMPLANTADA ANTERIOR · verificado el 2026-11-22 · correcciones de esta ronda de integración son locales, pendientes de deploy · producción aún no verificada con la nueva canonical',
+  'AIOS — Agentes e rotinas': 'AIOS — Agentes y rutinas',
+  '• Atende clientes e organiza oportunidades.': '• Atiende clientes y organiza oportunidades.',
+  '• Encaminha situações fora do padrão para uma pessoa.': '• Deriva situaciones fuera de lo habitual a una persona.',
+  '• Envia sinais de negócios e mudanças de etapa do CRM ao ARVO.': '• Envía señales de negocios y cambios de etapa del CRM a ARVO.',
+  '• Mantém o histórico de decisões da equipe.': '• Mantiene el historial de decisiones del equipo.',
+  '• Recebe sinais de risco e oportunidades do AIOS.': '• Recibe señales de riesgo y oportunidades de AIOS.',
+  '• Mostra ações pendentes para aprovação humana.': '• Muestra acciones pendientes de aprobación humana.',
+  '• Registra a ação aprovada e sua verificação.': '• Registra la acción aprobada y su verificación.',
+  '• Devolve o resultado ao AIOS para registro; com': '• Devuelve el resultado a AIOS para registro; con',
+  'e': 'y',
+  'ligadas (padrão': 'activadas (predeterminado',
+  '), negócios compartilhados continuam no CRM do AIOS (sem sync bidirecional); com as flags desligadas, ficam no CRUD local do ARVO.': '), los negocios compartidos siguen en el CRM de AIOS (sin sincronización bidireccional); con las banderas desactivadas, quedan en el CRUD local de ARVO.',
+  'Como agentes e revenue trabalham juntos': 'Cómo trabajan juntos los agentes y revenue',
+  'REGISTRO AUDITÁVEL': 'REGISTRO AUDITABLE',
+  'O AIOS detecta': 'AIOS detecta',
+  'Uma conversa ou mudança no CRM sinaliza uma oportunidade ou risco no negócio.': 'Una conversación o un cambio en el CRM señala una oportunidad o riesgo en el negocio.',
+  'O ARVO registra e pede avaliação': 'ARVO registra y pide evaluación',
+  'O sinal vira um registro para revisão. Ações fora do padrão esperam a aprovação de uma pessoa.': 'La señal se convierte en un registro para revisión. Las acciones fuera de lo habitual esperan la aprobación de una persona.',
+  'A equipe aprova e verifica': 'El equipo aprueba y verifica',
+  'Depois da aprovação, a ação é registrada e verificada. Com': 'Tras la aprobación, la acción se registra y verifica. Con',
+  '), o resultado volta ao AIOS e fica no histórico, e o CRM do AIOS segue como fonte do negócio; com as flags desligadas, o negócio fica no CRUD local do ARVO.': '), el resultado vuelve a AIOS y queda en el historial, y el CRM de AIOS sigue como fuente del negocio; con las banderas desactivadas, el negocio queda en el CRUD local de ARVO.',
+  'Aprovação humana': 'Aprobación humana',
+  'Ações importantes esperam a decisão da equipe.': 'Las acciones importantes esperan la decisión del equipo.',
+  'Sem duplicidade': 'Sin duplicados',
+  'Eventos repetidos não são registrados duas vezes.': 'Los eventos repetidos no se registran dos veces.',
+  '04 / Informação fácil de encontrar': '04 / Información fácil de encontrar',
+  'As respostas da empresa': 'Las respuestas de la empresa',
+  'sem procurar em': 'sin buscar en',
+  'várias pastas': 'varias carpetas',
+  'Reúna tabelas de preço, procedimentos, catálogos e respostas frequentes. Os assistentes digitais consultam esses materiais para responder com base no que sua empresa já definiu.': 'Reúne tablas de precios, procedimientos, catálogos y respuestas frecuentes. Los asistentes digitales consultan esos materiales para responder con base en lo que tu empresa ya definió.',
+  '1. Adicione os materiais': '1. Añade los materiales',
+  'Inclua arquivos com as políticas, instruções, preços e informações que sua equipe consulta com frequência.': 'Incluye archivos con las políticas, instrucciones, precios e información que tu equipo consulta con frecuencia.',
+  '2. Deixe tudo pesquisável': '2. Deja todo buscable',
+  'O AIOS organiza o conteúdo para que os assistentes encontrem a informação relevante quando alguém fizer uma pergunta.': 'AIOS organiza el contenido para que los asistentes encuentren la información relevante cuando alguien haga una pregunta.',
+  '3. Responda com contexto': '3. Responde con contexto',
+  'Em vez de depender da memória de cada pessoa, a equipe recebe respostas baseadas nos materiais da empresa.': 'En vez de depender de la memoria de cada persona, el equipo recibe respuestas basadas en los materiales de la empresa.',
+  'Informação da empresa': 'Información de la empresa',
+  'Organize os materiais que sua equipe consulta para atender clientes e tomar decisões.': 'Organiza los materiales que tu equipo consulta para atender clientes y tomar decisiones.',
+  'Saiba como acessar →': 'Descubre cómo acceder →',
+  'Automatize com': 'Automatiza con',
+  'visibilidade e limites': 'visibilidad y límites',
+  'Acompanhe o que foi feito, quanto cada atividade custou e quando a equipe precisou intervir. Defina quais tarefas podem seguir automaticamente e quais devem esperar por uma pessoa.': 'Sigue lo que se hizo, cuánto costó cada actividad y cuándo el equipo tuvo que intervenir. Define qué tareas pueden seguir automáticamente y cuáles deben esperar a una persona.',
+  'Cada equipe no seu espaço': 'Cada equipo en su espacio',
+  'Separe informações, assistentes digitais e canais por equipe, com acesso controlado.': 'Separa información, asistentes digitales y canales por equipo, con acceso controlado.',
+  'Regras claras': 'Reglas claras',
+  'Escolha o que pode ser feito automaticamente, quais limites seguir e quando pedir aprovação.': 'Elige qué puede hacerse automáticamente, qué límites seguir y cuándo pedir aprobación.',
+  'Menos tarefas esquecidas': 'Menos tareas olvidadas',
+  'As solicitações seguem um fluxo acompanhado, com tentativas automáticas quando uma etapa falha.': 'Las solicitudes siguen un flujo supervisado, con reintentos automáticos cuando una etapa falla.',
+  'Acompanhamento do trabalho': 'Seguimiento del trabajo',
+  'Veja atividades, custos, atrasos e erros para entender o que está funcionando e o que precisa de atenção.': 'Ve actividades, costes, retrasos y errores para entender qué funciona y qué necesita atención.',
+  'Custos visíveis': 'Costes visibles',
+  'Consulte os custos por assistente digital ou equipe e acompanhe o uso da plataforma.': 'Consulta los costes por asistente digital o equipo y sigue el uso de la plataforma.',
+  'As equipes compartilham contexto': 'Los equipos comparten contexto',
+  'Uma equipe pode pedir informações a outra e chamar uma pessoa quando a situação exigir julgamento humano.': 'Un equipo puede pedir información a otro y llamar a una persona cuando la situación exija juicio humano.',
+  'Conectado às tarefas do dia a dia': 'Conectado a las tareas cotidianas',
+  'Os assistentes digitais podem consultar informações, organizar contatos, atualizar oportunidades e apoiar tarefas de comunicação conforme as permissões configuradas.': 'Los asistentes digitales pueden consultar información, organizar contactos, actualizar oportunidades y apoyar tareas de comunicación según los permisos configurados.',
+  '06 / Canais — Multi-canal': '06 / Canales — Multicanal',
+  'Continue a conversa': 'Continúa la conversación',
+  'no canal que o cliente': 'en el canal que el cliente',
+  'já usa': 'ya usa',
+  'Sua equipe pode acompanhar conversas pelo': 'Tu equipo puede seguir conversaciones por',
+  'WhatsApp, e-mail, Slack, Telegram e chat do site': 'WhatsApp, correo electrónico, Slack, Telegram y chat del sitio',
+  ', mantendo o contexto junto. Os canais disponíveis dependem da configuração da sua empresa.': ', manteniendo el contexto junto. Los canales disponibles dependen de la configuración de tu empresa.',
+  'WhatsApp — onde muitos clientes já estão': 'WhatsApp — donde muchos clientes ya están',
+  'Conecte a conta da empresa e acompanhe as conversas em um só lugar': 'Conecta la cuenta de la empresa y sigue las conversaciones en un solo lugar',
+  '🔌 Conexão': '🔌 Conexión',
+  '✓ Conecte o WhatsApp usado pela empresa': '✓ Conecta el WhatsApp usado por la empresa',
+  '✓ Opção de conexão oficial da Meta': '✓ Opción de conexión oficial de Meta',
+  '✓ Configuração guiada por QR Code': '✓ Configuración guiada por QR Code',
+  '✓ Suporte aos números da equipe': '✓ Compatibilidad con los números del equipo',
+  '💎 O que sua equipe pode fazer': '💎 Qué puede hacer tu equipo',
+  '✓ Responder mensagens e compartilhar arquivos': '✓ Responder mensajes y compartir archivos',
+  '✓ Enviar áudio e mensagens estruturadas': '✓ Enviar audios y mensajes estructurados',
+  '✓ Acompanhar conversas recebidas e enviadas': '✓ Seguir conversaciones recibidas y enviadas',
+  '✓ Encaminhar situações para a equipe': '✓ Derivar situaciones al equipo',
+  '🛡️ Uso responsável': '🛡️ Uso responsable',
+  '✓ Acompanha sinais de risco no número': '✓ Supervisa señales de riesgo en el número',
+  '✓ Pode pausar atividades quando há sinais de risco': '✓ Puede pausar actividades cuando hay señales de riesgo',
+  '✓ Mantém as configurações após reinicializações': '✓ Mantiene la configuración tras reinicios',
+  '✓ Suporte a mais de um número da empresa': '✓ Compatibilidad con más de un número de la empresa',
+  '✓ Tenta novamente se uma mensagem não for processada': '✓ Reintenta si un mensaje no se procesa',
+  '✓ Mantém as mesmas orientações entre os números': '✓ Mantiene las mismas directrices entre los números',
+  'A conexão dos números e os recursos disponíveis dependem da configuração interna da empresa.': 'La conexión de los números y los recursos disponibles dependen de la configuración interna de la empresa.',
+  'Atendimento por voz': 'Atención por voz',
+  'Atenda por voz e texto com as mesmas orientações, conforme a configuração da empresa.': 'Atiende por voz y texto con las mismas directrices, según la configuración de la empresa.',
+  'Mensagens, arquivos e mídia': 'Mensajes, archivos y multimedia',
+  'E-mail': 'Correo electrónico',
+  '07 / Exemplos do dia a dia': '07 / Ejemplos cotidianos',
+  'Menos coisas perdidas': 'Menos cosas perdidas',
+  'entre uma tarefa e': 'entre una tarea y',
+  'outra': 'otra',
+  'Veja como a equipe pode usar o AIOS para organizar conversas, encontrar respostas e encaminhar decisões. Os exemplos refletem recursos disponíveis na plataforma.': 'Ve cómo el equipo puede usar AIOS para organizar conversaciones, encontrar respuestas y derivar decisiones. Los ejemplos reflejan recursos disponibles en la plataforma.',
+  '1 · Um desconto fora do padrão espera pela pessoa certa': '1 · Un descuento fuera de lo habitual espera a la persona adecuada',
+  'Governança': 'Gobernanza',
+  'Defina quais descontos precisam ser revisados. Quando uma solicitação ultrapassar o limite, o AIOS avisa a equipe e aguarda a aprovação de um responsável. A decisão fica registrada para consulta posterior.': 'Define qué descuentos deben revisarse. Cuando una solicitud supere el límite, AIOS avisa al equipo y espera la aprobación de un responsable. La decisión queda registrada para consulta posterior.',
+  'Receba avisos quando uma ação precisar de revisão.': 'Recibe avisos cuando una acción necesite revisión.',
+  '💰 Custos sob controle': '💰 Costes bajo control',
+  'Acompanhe os gastos por equipe e por assistente digital.': 'Sigue los gastos por equipo y por asistente digital.',
+  '📊 Visão da operação': '📊 Visión de la operación',
+  'Consulte pendências, resultados e intervenções da equipe.': 'Consulta pendientes, resultados e intervenciones del equipo.',
+  '2 · Um novo contato recebe atenção e não fica esquecido': '2 · Un nuevo contacto recibe atención y no queda olvidado',
+  'Captação': 'Captación',
+  'Quando alguém chama sua empresa, o assistente digital pode fazer as perguntas iniciais, consultar as informações disponíveis e organizar o contato na lista de oportunidades. Se surgir uma dúvida ou decisão fora das regras, a conversa pode ser encaminhada para uma pessoa da equipe.': 'Cuando alguien llama a tu empresa, el asistente digital puede hacer las preguntas iniciales, consultar la información disponible y organizar el contacto en la lista de oportunidades. Si surge una duda o una decisión fuera de las reglas, la conversación puede derivarse a una persona del equipo.',
+  '3 · A equipe encontra a resposta sem procurar em vários arquivos': '3 · El equipo encuentra la respuesta sin buscar en varios archivos',
+  'Conhecimento': 'Conocimiento',
+  'Reúna catálogo, tabela de preços e políticas em um lugar. Quando alguém perguntar, o assistente consulta esses materiais e usa o conteúdo da empresa para ajudar a responder — em vez de depender de respostas improvisadas.': 'Reúne catálogo, tabla de precios y políticas en un lugar. Cuando alguien pregunte, el asistente consulta esos materiales y usa el contenido de la empresa para ayudar a responder — en vez de depender de respuestas improvisadas.',
+  '4 · Uma solicitação chega à equipe responsável': '4 · Una solicitud llega al equipo responsable',
+  'Coordenação': 'Coordinación',
+  'Quando uma questão depende de outra área, o AIOS pode encaminhar o pedido e manter o contexto da conversa. Se os agentes não tiverem informação suficiente, uma pessoa é chamada para assumir.': 'Cuando una cuestión depende de otra área, AIOS puede derivar la solicitud y mantener el contexto de la conversación. Si los agentes no tienen información suficiente, se llama a una persona para asumir.',
+  '08 / Acesso à plataforma': '08 / Acceso a la plataforma',
+  'Sua equipe no controle': 'Tu equipo al control',
+  'do começo ao': 'desde el inicio hasta el',
+  'acompanhamento': 'seguimiento',
+  'O AIOS está em uso interno e o cadastro público está fechado. O acesso é criado pela empresa e destinado à equipe autorizada. Esta página é apenas uma apresentação da plataforma.': 'AIOS está en uso interno y el registro público está cerrado. El acceso lo crea la empresa y se destina al equipo autorizado. Esta página es solo una presentación de la plataforma.',
+  'Acesso restrito à equipe': 'Acceso restringido al equipo',
+  'A entrada no sistema é feita pela equipe autorizada, no endereço': 'El ingreso al sistema lo hace el equipo autorizado, en la dirección',
+  'Agentes de IA para vendas e atendimento e controle de receita com ARVO, com regras e acompanhamento da sua equipe. Plataforma de uso interno.': 'Agentes de IA para ventas y atención y control de ingresos con ARVO, con reglas y seguimiento de tu equipo. Plataforma de uso interno.',
+  'Produto': 'Producto',
+  'Canais': 'Canales',
+  'Documentação': 'Documentación',
+  'Guia de voz': 'Guía de voz',
+  'Instalação': 'Instalación',
+  'Documentação técnica': 'Documentación técnica',
+  'Dashboard · acesso interno': 'Dashboard · acceso interno',
+  'ARVO · Control Center · acesso interno': 'ARVO · Control Center · acceso interno',
+  'Acompanhamento · acesso interno': 'Seguimiento · acceso interno',
+  'Automatizações · acesso interno': 'Automatizaciones · acceso interno',
+  'Equipes · acesso interno': 'Equipos · acceso interno',
+  '© 2026 AIOS. Todos os direitos reservados.': '© 2026 AIOS. Todos los derechos reservados.',
+  'Nova mensagem recebida no WhatsApp': 'Nuevo mensaje recibido en WhatsApp',
+  'Consultando as informações e orientações da empresa...': 'Consultando la información y las directrices de la empresa...',
+  '✓ Resposta preparada para o cliente': '✓ Respuesta preparada para el cliente',
+  'Acompanhamento de oportunidades': 'Seguimiento de oportunidades',
+  'Contato organizado e próximo passo identificado.': 'Contacto organizado y siguiente paso identificado.',
+  '⚠️ Desconto fora do limite definido pela empresa.': '⚠️ Descuento fuera del límite definido por la empresa.',
+  'Revisão da equipe': 'Revisión del equipo',
+  'Aguardando aprovação de uma pessoa responsável...': 'Esperando aprobación de una persona responsable...',
+  '✓ Decisão aprovada e registrada no histórico.': '✓ Decisión aprobada y registrada en el historial.',
+  'Resumo da operação': 'Resumen de la operación',
+  '  Conversas acompanhadas  |  Pendências visíveis  |  Equipe no controle': '  Conversaciones supervisadas  |  Pendientes visibles  |  Equipo al control'
+};
+const lang = localStorage.getItem('aios_lang') === 'es' ? 'es' : 'pt';
+function applyLang() {
+  if (lang !== 'es') return;
+  document.documentElement.lang = 'es';
+  if (I18N[document.title]) document.title = I18N[document.title];
+  const desc = document.querySelector('meta[name="description"]');
+  if (desc && I18N[desc.content]) desc.content = I18N[desc.content];
+  const nodes = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    const parent = node.parentElement;
+    if (!parent || parent.closest('script,style')) return;
+    const raw = node.textContent;
+    const key = raw.replace(/\s+/g, ' ').trim();
+    if (!I18N[key]) return;
+    const match = raw.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    node.textContent = (match ? match[1] : '') + I18N[key] + (match ? match[3] : '');
+  });
+  document.querySelectorAll('[title],[aria-label],[placeholder],[alt]').forEach(el => {
+    ['title', 'aria-label', 'placeholder', 'alt'].forEach(attr => {
+      const value = el.getAttribute(attr);
+      if (value && I18N[value]) el.setAttribute(attr, I18N[value]);
+    });
+  });
+}
+const langButtons = document.querySelectorAll('.lang-switch');
+applyLang();
+langButtons.forEach(button => {
+  button.textContent = lang === 'pt' ? 'ES' : 'PT';
+  button.setAttribute('aria-label', lang === 'pt' ? 'Mudar idioma para espanhol' : 'Cambiar idioma a portugués');
+  button.addEventListener('click', () => {
+    localStorage.setItem('aios_lang', lang === 'pt' ? 'es' : 'pt');
+    location.reload();
+  });
+});
 // ── Animação de digitação do terminal ──
 const terminalLines = [
     { type: 'cmd', text: 'Nova mensagem recebida no WhatsApp', delay: 0 },
@@ -849,6 +1131,7 @@ const terminalLines = [
     { type: 'cmd', text: 'Resumo da operação', delay: 6000 },
     { type: 'success', text: '  Conversas acompanhadas  |  Pendências visíveis  |  Equipe no controle', delay: 6500 },
 ];
+if (lang === 'es') terminalLines.forEach(line => { if (I18N[line.text]) line.text = I18N[line.text]; });
 
 function typeTerminal() {
     const body = document.getElementById('terminal-body');

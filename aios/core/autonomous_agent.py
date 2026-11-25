@@ -472,6 +472,24 @@ class AutonomousAgent:
                 if conv is None or conv.org_id != self.agent.org_id:
                     logger.warning("HITL %s org/conversation mismatch — no resume", action_id)
                     return
+                # A verdict alone is not consent: require the persisted row
+                # approved by this agent's org before any runtime resume.
+                from aios.db.models import PendingAction as PendingActionModel
+
+                row = await db.get(PendingActionModel, action_id)
+                if (
+                    row is None
+                    or row.org_id != self.agent.org_id
+                    or row.status != "approved"
+                    or not row.decided_by
+                ):
+                    logger.warning("HITL %s has no valid approved row — no resume", action_id)
+                    return
+                marker = {
+                    "action_id": action_id,
+                    "tool_name": row.tool_name,
+                    "tool_args": row.tool_args,
+                }
                 extra = dict(conv.extra_data or {})
                 prior = extra.get(_HITL_RESUME_KEY)
                 claimed = list(prior) if isinstance(prior, list) else []
@@ -481,8 +499,10 @@ class AutonomousAgent:
                 conv.extra_data = extra
                 await db.commit()
                 # One bounded runtime pass. No autonomous loop, no tool replay
-                # here: AgentRuntime gates side effects before executing them.
-                await self.runtime.run(conversation_id, user_message, db)
+                # here: AgentRuntime's pre-execution gate replays the marker.
+                await self.runtime.run(
+                    conversation_id, user_message, db, approved_hitl=marker
+                )
                 logger.info("HITL %s resumed once", action_id)
         except Exception:
             logger.exception("HITL %s could not resume", action_id)

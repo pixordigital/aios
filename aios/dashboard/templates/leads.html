@@ -124,5 +124,44 @@ function bulkAction(kind) {
   else { f.action = '/dashboard/leads/review'; document.getElementById('bulk-status').value = kind; }
   f.submit();
 }
+window.aiosI18n.register({
+  'Leads — Prospecção': 'Leads — Prospección',
+  'O Prospector pesquisa, o Gerente de Vendas revisa, o SDR contata. Nada sai daqui sem revisão.': 'El Prospector investiga, el Gerente de Ventas revisa, el SDR contacta. Nada sale de aquí sin revisión.',
+  '⬇ Exportar CSV': '⬇ Exportar CSV',
+  '+ Prospector': '+ Prospector',
+  'Total': 'Total',
+  'no CRM como prospecção': 'en CRM como prospección',
+  'Aguardando revisão': 'Esperando revisión',
+  'status new': 'estado new',
+  'Aprovados': 'Aprobados',
+  'revisados pelo gerente': 'revisados por el gerente',
+  'No SDR': 'En SDR',
+  'MQL, primeiro toque': 'MQL, primer contacto',
+  'Buscar': 'Buscar',
+  'nome, empresa, email, site': 'nombre, empresa, correo, sitio',
+  'Status': 'Estado',
+  'Todos': 'Todos',
+  'Lote': 'Lote',
+  'Setor': 'Sector',
+  'Score ≥': 'Puntaje ≥',
+  'Filtrar': 'Filtrar',
+  'Limpar': 'Limpiar',
+  'selecionar todos': 'seleccionar todos',
+  'SDR da equipe (opcional)': 'SDR del equipo (opcional)',
+  '→ Enviar ao SDR': '→ Enviar al SDR',
+  '✓ Aprovar': '✓ Aprobar',
+  '✕ Rejeitar': '✕ Rechazar',
+  'lead(s) na visão': 'lead(s) en la vista',
+  'Lead': 'Lead',
+  'Setor / porte': 'Sector / tamaño',
+  'Local': 'Ubicación',
+  'Contato': 'Contacto',
+  'Score': 'Puntaje',
+  'Origem': 'Origen',
+  'a descobrir': 'por descubrir',
+  'fonte ↗': 'fuente ↗',
+  'Nenhum lead. Peça ao Prospector um ICP para começar.': 'Ningún lead. Pide al Prospector un ICP para empezar.',
+  'Selecione pelo menos um lead.': 'Selecciona al menos un lead.'
+});
 </script>
 {% endblock %}

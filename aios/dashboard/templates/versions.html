@@ -2,8 +2,8 @@
 {% block content %}
 <div class="flex-between mb-4">
   <div>
-    <h1>Histórico — {{ agent.name }}</h1>
-    <p style="color:var(--text-tertiary);font-size:0.75rem;margin:0.25rem 0 0">v{{ versions|length }} versões · rollback 1-click (prompt/voz/config)</p>
+    <h1><span>Histórico</span> — {{ agent.name }}</h1>
+    <p style="color:var(--text-tertiary);font-size:0.75rem;margin:0.25rem 0 0">v{{ versions|length }} <span>versões · rollback 1-click (prompt/voz/config)</span></p>
   </div>
   <div style="display:flex;gap:0.5rem">
     <a href="/dashboard/agents/{{ agent.id }}/edit" class="btn btn-ghost btn-sm">← Editar agente</a>
@@ -85,7 +85,7 @@ async function showDiff(versionId, verNum){
   var right=document.getElementById('diff-right');
   var unified=document.getElementById('diff-unified');
   var unifiedPre=document.getElementById('diff-unified-pre');
-  panel.style.display='block'; title.textContent='Diff — v'+verNum+' vs anterior'; left.innerHTML='Carregando…'; right.innerHTML=''; unified.style.display='none'; document.getElementById('diff-body').style.display='grid';
+  panel.style.display='block'; title.textContent='Diff — v'+verNum+' vs anterior'; left.innerHTML=window.aiosI18n.t('Carregando…'); right.innerHTML=''; unified.style.display='none'; document.getElementById('diff-body').style.display='grid';
   try{
     var r=await fetch('/api/agents/'+agentId+'/versions/'+versionId+'/diff', {credentials:'same-origin'});
     if(r.ok){
@@ -103,7 +103,7 @@ async function showDiff(versionId, verNum){
       }
     }
     var rv=await fetch('/api/agents/'+agentId+'/versions/'+versionId, {credentials:'same-origin'});
-    if(!rv.ok){ left.textContent='Erro '+rv.status; return; }
+    if(!rv.ok){ left.textContent=window.aiosI18n.t('Erro')+' '+rv.status; return; }
     var curV=await rv.json();
     var idx=versionsCache.findIndex(function(x){return x.id===versionId;});
     var prevPrompt='';
@@ -113,19 +113,33 @@ async function showDiff(versionId, verNum){
       if(rp.ok){ var pv=await rp.json(); prevPrompt=pv.system_prompt||''; }
     }
     var curPrompt=curV.system_prompt||'';
-    if(!prevPrompt){ left.innerHTML='<span style="color:var(--text-tertiary)">(sem anterior)</span>'; right.innerHTML=esc(curPrompt).replace(/\n/g,'<br>'); return; }
+    if(!prevPrompt){ left.innerHTML='<span style="color:var(--text-tertiary)">'+window.aiosI18n.t('(sem anterior)')+'</span>'; right.innerHTML=esc(curPrompt).replace(/\n/g,'<br>'); return; }
     var d=simpleLineDiff(prevPrompt, curPrompt);
     left.innerHTML=d[0]; right.innerHTML=d[1];
     title.textContent='Diff — v'+(versionsCache[idx+1]?.version||'?')+' → v'+verNum;
   }catch(e){ left.textContent=String(e); }
 }
 async function doRollback(versionId, verNum){
-  if(!confirm('Rollback para v'+verNum+'? Copia prompt/voz/config e cria nova versão.')) return;
+  if(!confirm('Rollback para v'+verNum+window.aiosI18n.t('? Copia prompt/voz/config e cria nova versão.'))) return;
   try{
     var r=await fetch('/api/agents/'+agentId+'/versions/'+versionId+'/rollback', {method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:'{}'});
-    if(!r.ok){ alert('Falha '+r.status+': '+(await r.text()).slice(0,400)); return; }
-    var j=await r.json(); alert('Rollback ok → nova v'+(j.new_version||'?')); location.reload();
+    if(!r.ok){ alert(window.aiosI18n.t('Falha')+' '+r.status+': '+(await r.text()).slice(0,400)); return; }
+    var j=await r.json(); alert(window.aiosI18n.t('Rollback ok → nova v')+(j.new_version||'?')); location.reload();
   }catch(e){ alert(String(e)); }
 }
+</script>
+<script>
+window.aiosI18n.register({
+  'Histórico': 'Historial',
+  'versões · rollback 1-click (prompt/voz/config)': 'versiones · rollback 1-clic (prompt/voz/config)',
+  'Nenhuma versão ainda.': 'Aún no hay versiones.',
+  'Fechar': 'Cerrar',
+  'Carregando…': 'Cargando…',
+  'Erro': 'Error',
+  '(sem anterior)': '(sin anterior)',
+  '? Copia prompt/voz/config e cria nova versão.': '? Copia prompt/voz/config y crea nueva versión.',
+  'Falha': 'Fallo',
+  'Rollback ok → nova v': 'Rollback ok → nueva v'
+});
 </script>
 {% endblock %}

@@ -36,4 +36,20 @@
     </table>
     {% else %}<p class="text-sm text-secondary">Sem workflow runs — crie em /dashboard/automations.</p>{% endif %}
 </div>
+<script>
+window.aiosI18n.register({
+    'Autoscale': 'Autoescalado',
+    'Latência e erro por hora — recomenda up/down/stable': 'Latencia y error por hora — recomienda up/down/stable',
+    'Status atual': 'Estado actual',
+    '▲ Recomendado escalar: adicione worker ou aumente max_jobs (atual 20 em aios/tasks/worker.py:146)': '▲ Recomendado escalar: añada worker o aumente max_jobs (actual 20 en aios/tasks/worker.py:146)',
+    'Histórico 5h — AgentMetrics': 'Historial 5h — AgentMetrics',
+    'Erros': 'Errores',
+    'Sem métricas ainda — envie mensagens para gerar `agent_metrics`.': 'Sin métricas aún — envíe mensajes para generar `agent_metrics`.',
+    'Últimos WorkflowRuns — custo por execução': 'Últimos WorkflowRuns — costo por ejecución',
+    'Status': 'Estado',
+    'Custo US$': 'Costo US$',
+    'Nós': 'Nodos',
+    'Sem workflow runs — crie em /dashboard/automations.': 'Sin workflow runs — cree en /dashboard/automations.'
+});
+</script>
 {% endblock %}

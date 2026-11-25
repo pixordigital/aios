@@ -272,6 +272,153 @@
     </style>
 </head>
 <body>
+<script>
+(function(){
+  var dict=Object.create(null);
+  var stored=localStorage.getItem('aios_lang')||'pt';
+  if(stored!=='es'&&stored!=='pt') stored='pt';
+  var currentLang=stored;
+  var seen=new WeakSet();
+  var skip={SCRIPT:1,STYLE:1,NOSCRIPT:1};
+  var attrs=['title','aria-label','placeholder','alt'];
+  var observed=false;
+  function tr(s){ return Object.prototype.hasOwnProperty.call(dict,s)?dict[s]:null; }
+  function line(s){
+    var m=s.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    if(!m) return s;
+    var hit=tr(m[2]);
+    return hit===null?s:m[1]+hit+m[3];
+  }
+  function textNode(node){
+    if(seen.has(node)) return;
+    var raw=node.nodeValue;
+    if(raw.indexOf('\n')===-1){
+      var out=line(raw);
+      if(out===raw) return;
+      node.nodeValue=out;
+    }else{
+      var parts=raw.split('\n'), changed=false;
+      for(var i=0;i<parts.length;i++){
+        var out=line(parts[i]);
+        if(out!==parts[i]){ parts[i]=out; changed=true; }
+      }
+      if(!changed) return;
+      node.nodeValue=parts.join('\n');
+    }
+    seen.add(node);
+  }
+  function attrsOf(el){
+    for(var i=0;i<attrs.length;i++){
+      var a=attrs[i], v=el.getAttribute(a);
+      if(v===null) continue;
+      var hit=tr(v);
+      if(hit!==null) el.setAttribute(a,hit);
+    }
+  }
+  function apply(root){
+    root=root||document.body;
+    if(currentLang!=='es') return;
+    if(root.nodeType===3){ textNode(root); return; }
+    if(root.nodeType===1){
+      if(skip[root.tagName]) return;
+      attrsOf(root);
+    }
+    if(root.nodeType!==1&&root.nodeType!==9&&root.nodeType!==11) return;
+    var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{
+      acceptNode:function(n){
+        if(n.nodeType===1&&skip[n.tagName]) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var n;
+    while((n=walker.nextNode())){
+      if(n.nodeType===3) textNode(n); else attrsOf(n);
+    }
+  }
+  function register(map){
+    if(map) for(var k in map) if(Object.prototype.hasOwnProperty.call(map,k)) dict[k]=map[k];
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',function(){ apply(); },{once:true});
+    else apply();
+  }
+  function watch(){
+    if(observed) return;
+    observed=true;
+    var mo=new MutationObserver(function(records){
+      records.forEach(function(r){
+        if(r.type==='characterData'){
+          if(seen.has(r.target)) return;
+          textNode(r.target);
+        }else if(r.type==='childList'){
+          r.addedNodes.forEach(function(node){
+            if(node.nodeType===3) textNode(node);
+            else if(node.nodeType===1) apply(node);
+          });
+        }
+      });
+    });
+    mo.observe(document.body,{childList:true,characterData:true,subtree:true});
+  }
+  function init(){
+    if(currentLang!=='es') return;
+    document.documentElement.setAttribute('lang','es');
+    apply();
+    watch();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init,{once:true});
+  else init();
+  window.aiosI18n={
+    register:register,
+    apply:apply,
+    lang:function(){ return currentLang; },
+    t:function(s){ var hit=tr(s); return hit===null?s:hit; }
+  };
+})();
+window.aiosI18n.register({
+  'Plataforma de Agentes & Times':'Plataforma de Agentes y Equipos',
+  'Colapsar/Expandir menu':'Contraer/Expandir menú',
+  'Expandir menu':'Expandir menú',
+  'Colapsar menu':'Contraer menú',
+  '🟢 Simples':'🟢 Simple',
+  '⚡ Avançado':'⚡ Avanzado',
+  '🟢 Modo Simples':'🟢 Modo Simple',
+  '⚡ Modo Avançado':'⚡ Modo Avanzado',
+  'Início':'Inicio',
+  'Meus Atendentes':'Mis Atendientes',
+  'Atendimento WhatsApp':'Atención WhatsApp',
+  'Conhecimento':'Conocimiento',
+  'Configurações':'Configuración',
+  'Começar':'Comenzar',
+  'Equipes':'Equipos',
+  'Conversas':'Conversaciones',
+  'Canais':'Canales',
+  'Funis':'Embudos',
+  'Aprovações':'Aprobaciones',
+  'Automações':'Automatizaciones',
+  'Rotinas':'Rutinas',
+  'Membros':'Miembros',
+  'base de conhecimento':'base de conocimiento',
+  'Análises':'Análisis',
+  'Administração':'Administración',
+  '← Minha organização':'← Mi organización',
+  'Visualizando: cliente':'Viendo: cliente',
+  'Sair':'Salir',
+  'Atendentes':'Atendientes',
+  'Atendimento':'Atención',
+  'Conectar WhatsApp':'Conectar WhatsApp',
+  'Dashboard':'Panel',
+  'Agentes':'Agentes',
+  'Voz':'Voz',
+  'Leads':'Leads',
+  'CRM IA':'CRM IA',
+  'Deal Desk (AIOS)':'Deal Desk (AIOS)',
+  'Deal Desk':'Deal Desk',
+  'Contratos':'Contratos',
+  'Sandbox':'Sandbox',
+  'Lab':'Laboratorio',
+  'Uso & Custos':'Uso y Costos',
+  'Cobrança':'Cobranza'
+});
+</script>
     <aside class="sidebar">
         <div class="sidebar-head">
             <div class="logo-wrap">
@@ -381,6 +528,10 @@
             <a href="/dashboard/automations" class="{% if request.url.path.startswith('/dashboard/automations') %}active{% endif %}">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
                 <span class="nav-text">Automações</span>
+            </a>
+            <a href="/dashboard/routines" class="{% if request.url.path.startswith('/dashboard/routines') %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span class="nav-text">Rotinas</span>
             </a>
             <a href="/dashboard/sandbox" class="{% if request.url.path.startswith('/dashboard/sandbox') %}active{% endif %}">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"/></svg>
@@ -532,6 +683,10 @@
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
             <span class="label">Automações</span>
         </a>
+        <a href="/dashboard/routines" class="{% if request.url.path.startswith('/dashboard/routines') %}active{% endif %}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="label">Rotinas</span>
+        </a>
         <a href="/dashboard/sandbox" class="{% if request.url.path.startswith('/dashboard/sandbox') %}active{% endif %}">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"/></svg>
             <span class="label">Sandbox</span>
@@ -631,6 +786,7 @@
             applyMargin();
             toggle.setAttribute('aria-label', willCollapse ? 'Expandir menu' : 'Colapsar menu');
             toggle.setAttribute('title', willCollapse ? 'Expandir menu' : 'Colapsar menu');
+            window.aiosI18n.apply(toggle);
         });
         
         // Handle window resize

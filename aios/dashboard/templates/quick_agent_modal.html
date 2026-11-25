@@ -199,4 +199,62 @@
             dd.addEventListener('mousedown',function(e){e.preventDefault()});
         }
     });
+    var QA_DICT = {
+        'Criar agente': 'Crear agente',
+        'Editor completo →': 'Editor completo →',
+        'Nome': 'Nombre',
+        'ex.: SDR de Vendas': 'p. ej.: SDR de Ventas',
+        'Tipo': 'Tipo',
+        'SDR — Desenvolvimento de Vendas': 'SDR — Desarrollo de Ventas',
+        'Closer — Fechamento de Negócios': 'Closer — Cierre de Negocios',
+        'Suporte — Atendimento ao Cliente': 'Soporte — Atención al Cliente',
+        'Analista de Dados': 'Analista de Datos',
+        'Cientista de Dados': 'Científico de Datos',
+        'Orquestrador — Coordenador de Equipe': 'Orquestador — Coordinador de Equipo',
+        'Gerente — Qualidade e Escalonamentos': 'Gerente — Calidad y Escalados',
+        'Personalizado': 'Personalizado',
+        'Modelo': 'Modelo',
+        'Buscar modelos…': 'Buscar modelos…',
+        '🔥 Últimos': '🔥 Recientes',
+        'Meta — Muse Spark': 'Meta — Muse Spark',
+        'OpenAI': 'OpenAI',
+        'Anthropic': 'Anthropic',
+        'Google': 'Google',
+        'DeepSeek': 'DeepSeek',
+        'OpenCode (grátis)': 'OpenCode (gratis)',
+        'Ollama (local)': 'Ollama (local)',
+        'Temp': 'Temp',
+        'Tokens': 'Tokens',
+        'Ferramentas': 'Herramientas',
+        'Calculadora': 'Calculadora',
+        'Busca na Web': 'Búsqueda en la Web',
+        'HTTP': 'HTTP',
+        'Data/Hora': 'Fecha/Hora',
+        'E-mail': 'Correo electrónico',
+        'Criar Deal': 'Crear Deal',
+        'Atualizar Deal': 'Actualizar Deal',
+        'Lead Score': 'Lead Score',
+        'Cancelar': 'Cancelar'
+    };
+    if (window.aiosI18n && window.aiosI18n.register) window.aiosI18n.register(QA_DICT);
+    else if (localStorage.getItem('aios_lang') === 'es') {
+        var qaWalker = document.createTreeWalker(document.getElementById('quick-agent') || document, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
+            acceptNode: function(n) {
+                if (n.nodeType === 1 && (n.tagName === 'SCRIPT' || n.tagName === 'STYLE')) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+            }
+        });
+        var qaNode;
+        while ((qaNode = qaWalker.nextNode())) {
+            if (qaNode.nodeType === 3) {
+                var raw = qaNode.nodeValue, key = raw.trim();
+                if (Object.prototype.hasOwnProperty.call(QA_DICT, key)) qaNode.nodeValue = raw.replace(key, QA_DICT[key]);
+            } else {
+                ['title','aria-label','placeholder','alt','value'].forEach(function(a){
+                    var v = qaNode.getAttribute(a);
+                    if (v !== null && Object.prototype.hasOwnProperty.call(QA_DICT, v)) qaNode.setAttribute(a, QA_DICT[v]);
+                });
+            }
+        }
+    }
 </script>

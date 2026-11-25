@@ -26,3 +26,18 @@
     </a>
   {% endfor %}
 </div>
+<script>
+(function(){
+  var dict = {
+    "Instâncias": "Instancias",
+    "Templates": "Plantillas",
+    "Risco de ban": "Riesgo de baneo"
+  };
+  if (window.aiosI18n) { window.aiosI18n.register(dict); return; }
+  if (localStorage.getItem('aios_lang') !== 'es') return;
+  document.querySelectorAll('a[href^="/dashboard/whatsapp"]').forEach(function(a){
+    var k = a.textContent.trim();
+    if (dict[k]) a.textContent = dict[k];
+  });
+})();
+</script>

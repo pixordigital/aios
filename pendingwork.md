@@ -1,8 +1,63 @@
 ## pending work handoff
 
-Snapshot: 2026-11-24. Deployed pair AIOS `dcf74b4`, ARVO `09249ba`; local AIOS `main` matched `origin/main` after push. Recheck `git status`/`git rev-parse HEAD origin/main` before any further push.
+Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` last verified 2026-11-24; local AIOS `main` matched `origin/main` after push. Recheck `git status`/`git rev-parse HEAD origin/main` before any further push.
 
-### HITL pre-execution gate — VERIFIED local 2026-11-25 (no commit/deploy/push)
+### 2026-11-25 shell-enabled resume — agent verification wave RUNNING
+
+- User granted `normal mode` (shell + push allowed) and requested pending/blocked work finished. 5 read-only agents launched: audit (`ses_ded69156affeWsv2JIcePkPDz6`), i18n smoke (`ses_ded691567ffetyF1epwgYOrcHq`), HITL tests (`ses_ded691561ffevHyz49YgdQgFRa`), new-feature tests (`ses_ded69155fffeqsYROxYLd81tzN`), dirty-code review (`ses_ded6870cbffe8IEVcocz7FMt25`). No agent may edit/commit/push/deploy.
+- Main preflight: `git branch --show-current`=`main`; `git rev-parse HEAD`=`git rev-parse origin/main`=`86714b6dd6e19ba911f44609e88999e7390d5e7c`; `git status --porcelain | wc -l`=`120`; `git diff --check` clean; `git ls-remote origin refs/heads/main` matched HEAD. Coolify app `38908ddf-a875-4105-a93f-a4570513911f` (`pixor-aios`, branch `main`) latest deploy #819 `rjjl1yfpimfzde87bhsskjeb` commit `86714b6`, status `finished`.
+- Prod baseline: `curl http://178.105.181.38:8777/health/ready` → `200 {"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`; `https://178.105.181.38/` → `200`, no `aios_lang`/`ES` switcher yet (expected pre-i18n deploy).
+- [x] `ses_ded691567ffetyF1epwgYOrcHq` — i18n static smoke: 68 changed paths; Jinja `PARSED=69 FAIL=0` (67 modified + 2 untracked); JS `EXTRACTED=108 SKIPPED_NON_PLAIN=3 NODE_OK=108 NODE_FAIL=0`; one real `window.aiosI18n=` (`base.html:369`) + guarded fallback (`_model_picker.html:95`); 12/12 lang reads use `aios_lang`; 0 dictionary keys with `{{`; website numeric diff = CSS/indexes/dates only, no plan/quota drift. No browser render.
+- [x] `ses_ded69156affeWsv2JIcePkPDz6` — pending/blocked audit: all 22 unchecked lines classified; 18 HUMAN_GATE (credentials/Founder/legal/secret rotation), 4 HISTORICAL_SUPERSEDED (`:187,:193,:319,:334`), none purely actionable without verification. Worktree map: i18n + HITL residual actionable; agent-pack/routines/knowledge/jobs undocumented and mixed. Audit saw transient two-head Alembic; main recheck `.venv/bin/alembic heads --verbose` now `Rev: b2c3d4e5f6a7 (head) Parent: e1f2a3b4c5d6` single head. Register count is 66, not 64 (line 51 stale). No literal secrets in dirty/untracked diff.
+- [x] `ses_ded69155fffeqsYROxYLd81tzN` — new-feature tests `PYTEST_XDIST_WORKER=newfeatverify1 .venv/bin/python -m pytest -q` 12 files (agent packs/routines/dashboard knowledge/night shift/teams map/commitment publish-back) → `110 passed, 40 warnings in 451.35s`; no failures/skips; `git diff --check` clean. Agent compiled stale migration name `a1b2c3d4e5f6_agent_packs.py`; main recompiled current `b2c3d4e5f6a7_agent_packs.py` + all named source → `PY_COMPILE_CURRENT_OK`. Warnings: slowapi deprecation + short JWT test keys only.
+- [x] `ses_ded691561ffevHyz49YgdQgFRa` — HITL/ICM regression `PYTEST_XDIST_WORKER=hiltlverify7q3x1 .venv/bin/python -m pytest -q` 12 files → `1 failed, 230 passed, 60 warnings in 882.75s`. Sole failure known pre-existing `tests/test_paid_workflow_e2e.py::test_paid_workflow_binds_contract_and_restricts_tools` (`aios/icm/adapter.py:280` needs real approval marker; HEAD confirmed; do NOT fabricate). `git diff --check` clean; `py_compile` 13 changed `aios/*.py` PASS.
+- [x] `ses_ded6870cbffe8IEVcocz7FMt25` — dirty-code review verdict `NEEDS_WORK` for undocumented wave. 2 blockers: `aios/tasks/jobs.py:803-804` reactive events default `approval_required=True/approved=False` with no `routine` metadata (`tests/test_events_bus.py` 3 failed/55 passed); `aios/tasks/jobs.py:1014,1024-1026` workday gate defaults closed with no producer for `extra_data.workday_routine.approved` (`tests/test_workday_board.py` 2 failed/32 passed). High: `knowledge.html:57-58`/`app.py:5097-5112` promotion accepts hidden `1` without founder gate. Medium: pending counter skips `agent_id=None`; migration downgrade loses NOT NULL; `last_status` hardcoded None. No secrets; single Alembic head; AST/Jinja clean.
+- Commit scope decision: stage only documented ES i18n + HITL residual (86 staged paths, `git diff --cached --stat` 4226+/249- before final handoff edit). Excluded as NEEDS_WORK/unverified: agent-pack/routines/knowledge/ops UI, `aios/api/router.py`, `aios/db/models.py`, `aios/tasks/jobs.py`, `aios/tasks/worker.py`, related tests + untracked files, `knowledge.html`, non-i18n `teams_map.html` hunks, `simple_knowledge.html` copy-change hunk, `graphify-out/*`. Staged `app.py` only lab-tool HITL hunk; staged `teams_map.html` only i18n register block. Known paid-e2e failure stays red; no fabricated marker.
+- Open: `graphify update .`; commit; push; Coolify deploy; post-deploy health + homepage switcher check. Human-only gates stay untouched.
+
+### 2026-11-25 ES i18n goal — STATIC VERIFIED (35 builders done)
+
+- Architecture: shared `localStorage.aios_lang` (`pt|es`). `base.html` defines early `window.aiosI18n` (`register`, `apply`, `lang`), MutationObserver, PT/ES settings select in `settings.html`. Templates call `window.aiosI18n.register({exact visible PT: ES})`; standalone pages read same key directly. No server route, no deploy/push/prod. Dynamic DB/agent text not translated by design; only static visible copy.
+- [x] `ses_deda10e7bffeEM3Ka6zblu1zyM` — `website/index.html:68-1134`: PT/ES switcher, map, translator; re-read OK. Unchecked in browser.
+- [x] `ses_deda0d18effebe3YrOj6eJQZAf` — `base.html:275-408,774-776`, `settings.html:12-18,177-296`: shared i18n + selector; re-read OK. Main added 13 missing chrome keys at `base.html:407-419`; re-read OK.
+- [x] `ses_deda0b2b8ffemrt7AJLsd7gmMQ` — `members.html`, `automation_compare.html`: 17-entry/2-entry dictionaries; main re-read pending.
+- [x] `ses_deda092ccffeEUL1w2uXT8f4ZK` — `agents.html:325-394`, `_whatsapp_tabs.html:29-43`: ES registers + guarded fallback; re-read OK.
+- [x] `ses_deda07574fferdkDKTiFzo49TD` — `automations.html:12,64,87,228-300`, `weekly_sales_report.html:12-52`: ES dicts + JS strings; re-read OK.
+- [x] `ses_deda02d99ffexVmiUsqiHR2hPy` — `simple_assistants.html:106-129`, `channel_form.html:156-256`: ES dicts + JS strings; re-read OK.
+- [x] `ses_deda02d98ffeO4jNYEKmGiPslq` — `crm_deal_detail.html:103-134`, `quick_agent_modal.html:202-259`: ES registers + fallback; re-read OK.
+- [x] `ses_deda02d95ffdMXy4x065z4WBsw` — `leads.html:127-165`, `funnel_detail.html:95-130`: ES dictionaries; re-read OK. Risk: base must expose `register` before block scripts.
+- [x] `ses_deda02d93ffeHPxeQ6A7RHaxnf` — `funnels.html:37-38,59,66-94`, `login.html:79-114`: ES dicts + standalone translator; re-read OK.
+- [x] `ses_deda02d93ffdRcUOP7AxYKdRBS` — `analytics.html:247-292`, `lab.html:442-515`: ES registers; re-read OK.
+- [x] `ses_deda02d8cffeVpM7he1dVuf5PY` — `_teams_tabs.html:24-44`, `teams_map.html:970-1058`: ES registers + fallback; re-read OK.
+- [x] `ses_deda02d81ffeuxk70C3NOIwQxe` — `team_form.html:157-193`, `promptlab.html:30-39`: ES dictionaries; re-read OK.
+- [x] `ses_deda02ce7ffeX1FUPEzg1C7KWS` — `whatsapp_template_edit.html:191-230`, `dashboard.html:278-332`: ES dictionaries; re-read OK.
+- [x] `ses_deda02ce5ffe21VPb3jCmPQoZH` — `files.html:4,80,90-129`, `automation_detail.html:8,47,98-140`: ES dicts + wrapped text; re-read OK.
+- [x] `ses_deda02ce3ffeUXBwh5UU8lEj2Q` — `control_center.html:113-135`, `funnel_advisor.html:4,10-35`: ES registers + wrapped fragments; re-read OK.
+- [x] `ses_ded9fd226ffeT6p234Ps1fYkDf` — `simple_knowledge.html:1-103`, `simple_home.html:1-192`: dictionaries + wrapped nodes; re-read OK. Render unchecked.
+- [x] `ses_ded9fd224ffedf2cSVGhc8Y3dH` — `whatsapp_template_connect.html:88-122`, `billing.html:259-411`: ES registers; re-read OK.
+- [x] `ses_ded9fd218ffeFs3OHidDieXBTa` — `_model_picker.html:33-103`, `whatsapp_instances.html:37-87`: guarded fallback + ES registers; re-read OK.
+- [x] `ses_ded9fd218ffdIipA7GCRdRLQrA` — `conversations.html:4-97`, `register.html:85-130`: ES dicts + standalone translator; re-read OK.
+- [x] `ses_ded9fd216fferNdchRCzzvWdZL` — `voice.html:372-467`, `lojista.html:41-56`: ES registers; re-read OK.
+- [x] `ses_ded9fd1ddffehNQwaW4zSOeD7s` — `whatsapp_templates.html:103-120`, `knowledge.html:83,88,97-122`: ES registers + JS strings; re-read OK.
+- [x] `ses_ded9fd1bfffe9Xz2QDfRmdiqNK` — `contracts.html:85-115`, `sandbox.html:260-406`: ES registers + JS strings; re-read OK.
+- [x] `ses_ded9fd0fbffemJcl7uPQ44Xrcu` — `file_view.html:22-26`, `agent_form.html:40,72-73,204-206,651-1277`: ES registers + JS strings; re-read OK.
+- [x] `ses_ded9fd0f8ffe7XRFcyNFydYHLo` — `autoscale.html:39-54`, `wizard.html:58,67-85`: ES dictionary + JS string; re-read OK.
+- [x] `ses_ded9fd0f6ffeqzFGRp4QhfhuAE` — `dev.html:29-71`, `versions.html:5-6,88-143`: ES dicts + wrapped JS/mixed text; re-read OK.
+- [x] `ses_ded9f70ebffeo3U06T35lU5Eqx` — `agent_canvas.html:261-347`, `channels.html:335-416`: standalone + register; re-read OK.
+- [x] `ses_ded9f70ebffdPnR5ZkvcDEqWd9` — `automation_run.html:3-25`, `whatsapp_risk.html:6-127`: registers + wrapped strings; re-read OK.
+- [x] `ses_ded9f70e6ffeCJZUenOsBkzgZ9` — `simple_assistant_wizard.html:244-309`, `conversation_detail.html:5-199`: ES registers + JS fallbacks; re-read OK.
+- [x] `ses_ded9f70dfffe9i8hujNQdycTtx` — `evolution.html:44,53,66,74-96`, `crm_custom_fields.html:82-102`: ES registers + JS strings; re-read OK.
+- [x] `ses_ded9f70dfffdrnvO2477DZOwrX` — `approvals.html:59-80`, `simple_inbox.html:158-178`: ES dictionaries; re-read OK.
+- [x] `ses_ded9f70deffeApYOPixQIHRaTe` — `proposal.html:10-31`, `teams.html:5-153`: ES dicts + wrapped mixed text; re-read OK.
+- [x] `ses_ded9f70d9ffeM6vylVFyDtliOs` — `admin/dlq.html:10,80,86,105-140`, `admin/orgs.html:9,45-67`: ES registers + plural splits; re-read OK.
+- [x] `ses_ded9f70d9ffdtZA5AOI08qyaWR` — `admin/backup.html:91-186`, `admin/client_view.html:67-79`: ES dictionaries + JS strings; re-read OK.
+- [x] `ses_ded9f70d9ffcF570I2JLYwEbWT` — `admin/org_detail.html:67,76,84,99,109-137`, `admin/fleet.html:105-106,124-155`: ES dicts + wrapped counts; re-read OK.
+- [x] `ses_ded9f7084ffexkpZ1ILhk1GtNS` — `crm.html:233-303`: ES dictionary; re-read OK.
+- Resume gate: 35/35 receipts logged. Static sweep clean: 66 `register` calls, one real `window.aiosI18n` assignment (`base.html:369`) plus guarded fallback (`_model_picker.html:95`), shared `aios_lang` key, no Jinja expressions inside dictionary keys, public numeric claims unchanged. Added base chrome keys at `base.html:407-419`. Shell-enabled 2026-11-25: Jinja/JS/grep smoke PASS at line 10; `graphify update .`, commit, push, Coolify redeploy still pending. Dirty `graphify-out/*` expected.
+
+### HITL pre-execution gate — commit + push + deploy VERIFIED 2026-11-25
+
+Commit `86714b6dd6e19ba911f44609e88999e7390d5e7c` `feat(hitl): gate side effects before execution` — 14 HITL files only. Pushed `31a003e..86714b6 main -> main`; `git rev-parse HEAD origin/main` matched. Unstaged left untouched: `graphify-out/*` churn + `pendingwork.md`. Coolify deploy `rjjl1yfpimfzde87bhsskjeb` for app `pixor-aios` (`38908ddf-a875-4105-a93f-a4570513911f`), commit `86714b6`: `status=finished`, `finished_at=2026-11-25T09:04:06Z`. MCP `deploy(wait=true)` timed out client-side; deployment completed independently, no retry issued. Post-deploy `http://178.105.181.38:8777/health/ready` → `200 {"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`; `restart_count=0`, Coolify app `running:unknown` (health-check flag disabled — endpoint truth used). Port 9777 is ARVO, not AIOS worker; AIOS worker health not probed separately. No further prod write.
 
 User chose opt-in-per-agent: reuse existing `hitl_enabled` + thresholds, no new config keys.
 
@@ -10,19 +65,54 @@ User chose opt-in-per-agent: reuse existing `hitl_enabled` + thresholds, no new 
 - [x] `aios/core/workflow.py:383,386` — conformance counts `side_effects` as approval-required, not only `approval_required`.
 - [x] Tests: `tests/test_features.py` gate deny/allow/disabled + risk rules; `tests/test_workflow_process_conformance.py` side-effects finding.
 - Verification: `PYTEST_XDIST_WORKER=hitlreg3 .venv/bin/python -m pytest -q tests/test_features.py tests/test_workflow_process_conformance.py tests/test_router.py tests/test_icm_agent_binding.py tests/test_icm_enforcement.py tests/test_agent_cost_ceiling.py tests/test_paid_workflow_e2e.py --tb=line` → `107 passed, 1 failed`. Sole failure `test_paid_workflow_binds_contract_and_restricts_tools` pre-existing on HEAD: `agent_binding.py:136` calls `enforce_execution` at construction, `pet_lead_capture` has `side_effects=True`, test supplies no marker. Confirmed via `git show HEAD:aios/icm/agent_binding.py` / `adapter.py` / `workflows.py`. Do NOT fabricate an approval marker to silence it (violates principle-verdade).
-- Remaining HITL gaps (separate tasks, NOT done): execution-on-approval for direct `PendingAction` rows (`crm.py`, `crm2.py`, `team_collaboration.py`); autonomous HITL verdict resume; ICM marker DB-backed verification with real approver identity; role/owner gate on approval decisions; direct tool endpoints (`api/tools.py`, dashboard lab) bypass agent gate.
+- Remaining HITL gaps addressed in builder wave below: execution-on-approval, autonomous verdict resume, ICM marker DB verification, decision role gate, direct tool endpoint gate. Residual gaps listed at line 32.
 
-#### Spawned builder wave 2026-11-25 — RUNNING, receipts not yet landed
+#### Spawned builder wave 2026-11-25 — VERIFIED (all receipts landed)
 
-Do NOT mark complete until each receipt lands AND main-thread re-read + targeted pytest pass. All 5 scoped to <=2 files, disjoint ownership, no prod/deploy/push/commit, fail-closed, no fabricated approval.
+All 5 scoped to <=2 files, disjoint ownership, no prod/deploy/push/commit, fail-closed, no fabricated approval. Main-thread re-read + combined pytest done (line 29-32).
 
-- [ ] `ses_dee2a6cbeffeXJdWv6OvqhwU3K` — role/owner + self-approval gate on decisions. Files `aios/api/approvals.py`, `tests/test_features.py`. Resume: `PYTEST_XDIST_WORKER=hitlrole1 .venv/bin/python -m pytest -q tests/test_features.py --tb=short`.
+- [x] `ses_dee2a6cbeffeXJdWv6OvqhwU3K` — role/owner + self-approval gate on decisions. Receipt at line 26.
 - [x] `ses_dee2a6cbeffdpLiEIRw0Hv0rph` initial — returned `too-big.` clean split, no edits. Extra file `tests/test_icm_dedupe.py`: `_adapter` fixture supplies self-asserted `appr-1` marker + DB session but creates no approved `PendingAction`. Do NOT weaken gate; `tests/test_icm_agent_binding.py` safe (no DB session).
-- [ ] `ses_dee283975ffemdrb41vebu0JwQ` — fix `tests/test_icm_dedupe.py` ONLY: create `PendingAction.__table__`, insert approved org-1 row `appr-1` with `decided_by`. Resume: `PYTEST_XDIST_WORKER=hitlicmfix1 .venv/bin/python -m pytest --noconftest -q tests/test_icm_dedupe.py --tb=short`.
-- [x] `ses_dee2a6cbeffdpLiEIRw0Hv0rph` resumed task A — receipt landed: `aios/icm/adapter.py:231-257` DB-approved-row check after fingerprint; `tests/test_icm_enforcement.py:26-48,135-224` approved-row fixture + fail-closed DB cases. Agent `hitlicm2 16 passed`; main-thread re-read OK, diff-check + py_compile OK. No-session markers stay self-asserted; async DB session fails closed. Combined ICM suite still pending fixture builder below.
-- [ ] `ses_dee2a6cbdffeUModAzVyyk5Nl3` — gate direct `/api/tools/test`. Files `aios/api/tools.py`, `tests/test_tools.py`. Dashboard lab out of scope. Resume: `PYTEST_XDIST_WORKER=hitltools1 .venv/bin/python -m pytest -q tests/test_tools.py --tb=short`.
-- [ ] `ses_dee2a6cbdffd0UYx6HH6kcCOG8` — bounded one-shot replay in `approve()` for orphaned PendingActions. Files `aios/core/approval.py`, `tests/test_approval_replay.py`. Skip replay when `_pending` waiter exists (inline `ask*` path replays itself). Resume: `PYTEST_XDIST_WORKER=hitlreplay1 .venv/bin/python -m pytest -q tests/test_approval_replay.py tests/test_features.py -k 'approval or replay or hitl' --tb=short`.
-- [ ] `ses_dee2a6cbcffed0OenMrKIJGPSo` — autonomous HITL verdict actionable/resumable. Files `aios/core/autonomous_agent.py`, `tests/test_autonomous_hitl.py`. Do NOT duplicate `AgentRuntime._hitl_tool_reason` gate. Resume: `PYTEST_XDIST_WORKER=hitlauto1 .venv/bin/python -m pytest -q tests/test_autonomous_hitl.py tests/test_agent_canvas_events.py --tb=short`.
+- [x] `ses_dee283975ffemdrb41vebu0JwQ` — receipt landed: `tests/test_icm_dedupe.py:14,40,51-74,160-168,193-198` imports `PendingAction`, creates table, seeds approved rows, maps org to approval id. Agent `9 passed`; main-thread re-read OK.
+- [x] `ses_dee2a6cbeffdpLiEIRw0Hv0rph` resumed task A — receipt landed: `aios/icm/adapter.py:231-257` DB-approved-row check after fingerprint; `tests/test_icm_enforcement.py:26-48,135-224` approved-row fixture + fail-closed DB cases. Agent `hitlicm2 16 passed`; main-thread re-read OK, diff-check + py_compile OK. No-session markers stay self-asserted; async DB session fails closed. Combined ICM suite `hitlicmcombined1 89 passed` after fixture landed.
+- [x] `ses_dee2a6cbdffeUModAzVyyk5Nl3` — gate direct `/api/tools/test`. Receipt at line 27. Dashboard lab out of scope.
+- [x] `ses_dee2a6cbdffd0UYx6HH6kcCOG8` — receipt landed: `aios/core/approval.py:9-19` `_REPLAY_TOOLS` allowlist (`crm_update_deal`, `request_build`); `:201-205` replay only with no in-process waiter; `:239-279` org/decider-bound one-shot replay; `:281-314` atomic compare-and-set status flip. `tests/test_approval_replay.py:1-158` guard tests. Agent `18 passed`; main-thread re-read OK. Residual: replayed tool may re-pend — new row id, no same-id duplicate.
+- [x] `ses_dee2a6cbcffed0OenMrKIJGPSo` — receipt landed: `aios/core/autonomous_agent.py:25` one-shot claim key; `:432-488` resume once on approval with org/claim guard, no tool replay. `tests/test_autonomous_hitl.py:1-154`. Agent `16 passed`; main-thread re-read OK. Residual: worker restart drops tool cache — `AgentRuntime` gate must hold.
+- [x] `ses_dee2a6cbeffeXJdWv6OvqhwU3K` — receipt landed: `aios/api/approvals.py:5-38` authority + self-approval helpers; `:86-131` gate both decision paths. `tests/test_features.py:319-402`. Agent `25 passed`; main-thread re-read OK. Residual: self-approval depends on requester metadata; agent rows lack it.
+- [x] `ses_dee2a6cbdffeUModAzVyyk5Nl3` — receipt landed: `aios/api/tools.py:161-182` org-scoped HITL helper; `:230-235` gate `/test` before execution. `tests/test_tools.py:139-211`. Agent `32 passed`; main-thread re-read OK. Residual: dashboard lab bypass remains; dynamic code tool names evade keyword policy.
+
+Builder wave VERIFIED locally 2026-11-25; no commit/push/deploy/prod changes. `git diff --check` + `py_compile` OK across all touched files. `graphify update .` re-run → 10044 nodes, 24705 edges, 485 communities.
+- Combined main-thread `hitlfinalA` (ICM + approval + autonomous + workflow + paid e2e, 15 files) → `146 passed, 1 failed`. `hitlfinalB` (`tests/test_tools.py tests/test_router.py`) → `79 passed, 1 warning`. Earlier ICM-only `hitlicmcombined1` → `89 passed`. Total touched set `225 passed, 1 pre-existing failure`.
+- Sole failure: `tests/test_paid_workflow_e2e.py::test_paid_workflow_binds_contract_and_restricts_tools` — pre-existing on HEAD (`agent_binding.py:136` calls `enforce_execution` at construction, `pet_lead_capture` has `side_effects=True`, test supplies no marker). Confirmed via `git show HEAD:aios/icm/agent_binding.py` / `adapter.py` / `workflows.py`. NOT caused by this wave. Do NOT fabricate an approval marker to silence it (principle-verdade).
+- Remaining HITL gaps from this wave were closed in residual wave below: dashboard lab gate, dynamic tool names, no-session ICM markers, requester metadata, autonomous chaining, replay re-pend. Residual risks listed there.
+
+#### Residual-gap builder wave 2026-11-25 — receipts landed, final gate running
+
+All builders <=2 files, disjoint ownership. No commit/push/deploy/prod writes. Main-thread re-read + `git diff --check` + `py_compile` OK on all landed files. Combined marker regression `gapcombo1` (`test_features.py`, `test_autonomous_hitl.py`, `test_approval_replay.py`, `test_crm_tools.py`) → `84 passed`.
+
+- [x] `ses_dedb753acffeexXbuLX1iFy2ba` — dashboard `/lab/tool-run` HITL gate. `aios/dashboard/app.py:2983-3004` parses args, calls `_direct_tool_hitl_reason`, fails closed on policy error; `tests/test_tools.py:359-445` tests. Agent `38 passed`; main `gapdashverify 38 passed`. Risk: unregistered dynamic tools with benign payloads still evade name-only rules.
+- [x] `ses_dedb753aaffeG2GqjepvdB2wi8` — dynamic tool names. `aios/core/agent.py:1119-1145` gates registry `dynamic=True` and destructive payload keys; `tests/test_features.py:224-246`. Agent re-read OK; main `gapdynverify 28 passed`; diff/py_compile OK.
+- [x] `ses_dedb753a9ffe1QFXc5xlmpI3hy` — returned `too-big.` clean split, no edits. Split into two builders below.
+- [x] `ses_dedb61cb3ffeBo9PoTlk0A71wB` — ICM gate: `aios/icm/adapter.py:231-261` requires usable sync DB session; `tests/test_icm_enforcement.py:227-279` no-session/async-only fail-closed. Agent `19 passed`; main re-read OK.
+- [x] `ses_dedb61cb1ffeOBcNRlDvijxAh5` — ICM fixtures: `tests/test_icm_agent_binding.py:104-156,159-196`, `tests/test_icm_dedupe.py:142-150`. Main combined ICM `gapicmverify 37 passed`. Risk: session injected into `extra_data` is test-only; JSON-backed agents need runtime injection.
+- [x] `ses_dedb753a9ffdUvZAkBpwpMg3Dx` — replay re-pend returned `too-big.` clean 4-file split; no edits.
+- [x] `ses_dedb1edfdffd4rJ5JkaoLwHtoM` — replay marker injection: `aios/core/approval.py:266-275` overwrites caller marker from approved DB row; `tests/test_approval_replay.py:92-100,110-132`. Agent `7 passed`; main re-read OK.
+- [x] `ses_dedb1edfcffeC1dzWlATjzh2NO` — CRM marker guard: `aios/tools/crm.py:290-295,329-361` DB-verified skip re-pend; `tests/test_crm_tools.py:12,36-44,327-375`. Agent `36 passed`; main re-read OK.
+- [x] `ses_dedb1edfbffeWa5cxcDgFu26Y6` — collaboration marker guard: `aios/tools/team_collaboration.py:583-623,637-646,805-834`; `tests/test_team_collaboration.py:19-35,886-1004`. Agent `40 passed`; main re-read OK.
+- [x] `ses_dedb753a8ffehj2GNX7J6PjlqQ` — autonomous chaining returned `too-big.` clean 4-file split; no edits.
+- [x] `ses_dedb1edfeffepuQJNpjTiRhaIo` — runtime marker: `aios/core/agent.py:330-339,558-564,579,584,608-614,811-823,832-857`; `tests/test_features.py:111-115,124,137,215-291`. Agent `32 passed`; main combined `84 passed`. Risk: marker bound to tool+args only, not action_id/org; internal-only.
+- [x] `ses_dedb1edfdffe8mUw1fsMPJs4Hh` — autonomous resume marker: `aios/core/autonomous_agent.py:475-505` verifies approved row then passes marker; `tests/test_autonomous_hitl.py:11,38-92,105-167,187-188,217-247`. Agent `9 passed`; main re-read OK.
+- [x] `ses_dedaf7cdbffeAic4yO223pcWFD` — dynamic `/test` ordering: `aios/api/tools.py:230-241` registers dynamic tool before HITL reason; `tests/test_tools.py:139-140,154-161,201-224`. Agent `39 passed`; main re-read OK. Risk: registry mutation precedes org-access check; execution stays blocked.
+- [x] `ses_dedacab15fferE4J7PTZXI9Jfu` — replay strips `_requested_by`: `aios/core/approval.py:271`, `tests/test_approval_replay.py:135-153`. Agent `8 passed`; main re-read OK.
+- [x] `ses_dedacab17ffeIocwuyfpzbO2fO` — requester metadata: `aios/core/agent.py:844-853` copies actor id into approval row args; `tests/test_features.py:179-221`. Agent `34 passed`; main re-read OK. Risk: non-dict tool args stay untagged.
+
+- [x] `ses_deda84f20ffeSq8PzBXPyZF4Xq` — self-approval gate: `aios/api/approvals.py:14-16,35-43` checks requester keys in `tool_args`; `tests/test_features.py:541-574` approve/reject deny + other-requester allow. Agent `40 passed`; main re-read OK. Main-thread narrowed `_REQUESTER_KEYS` by dropping `user_id` to avoid false 403 when tool args contain unrelated target user; parametrized test updated and re-read OK.
+
+Residual wave VERIFIED local 2026-11-25. All six gaps closed. No commit/push/deploy/prod writes. `git diff --check` + `py_compile` OK across all touched files. `graphify update .` final → 10534 nodes, 26501 edges, 511 communities.
+- First `gapfinalB` exposed two stale ICM fixtures after no-session gate; fixed without weakening gate: `ses_ded9d02a3ffeUop0v4NLIXG5Nh` (`tests/test_e2e_icm_resume.py:128,144-181`, agent `5 passed`, main re-read OK) and `ses_ded9d02a1ffetREWuQUTvfpJjE` (`tests/test_icm_team_workspaces.py:282-310`, agent `9 passed`, main re-read OK; SQLite FK targets absent but unenforced).
+- `gapfinalB2` → `114 passed, 1 failed`. Sole failure is known pre-existing `test_paid_workflow_binds_contract_and_restricts_tools`; do NOT fabricate marker to silence it.
+- `gapfinalA` first run → `214 passed, 4 failed` in team report tests. All narrow repros green. Full rerun `gapfinalA2` → `218 passed`; no reproduction. Classified as intermittent order/flake, not caused by HITL edits.
+- Residuals: ICM no-session fixtures need real sessions; JSON-backed agents need runtime session injection. Replay markers DB-verified per tool. Autonomous marker bound to tool+args only, internal. Requester metadata only when actor context present. Dashboard/direct dynamic tools covered via registry; unregistered benign-payload tools remain name-only.
 
 ### Remaining-gap builder wave — VERIFIED local 2026-11-24
 

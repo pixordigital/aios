@@ -2980,12 +2980,28 @@ async def lab_tool_run(request: Request):
             status_code=403,
         )
     actor.pop("_unresolved", None)
-    eng = ToolEngine([tool_name], org_id=await _resolve_org_id(request), **actor)
+    org_id = await _resolve_org_id(request)
+    try:
+        parsed_args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+        if not isinstance(parsed_args, dict):
+            raise ValueError("args must be an object")
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "HITL: invalid arguments", "requires_approval": True}, status_code=403)
+    from aios.api.tools import _direct_tool_hitl_reason
+
+    try:
+        async with db_session() as db:
+            reason = await _direct_tool_hitl_reason(db, user, org_id, tool_name, parsed_args)
+    except Exception:
+        reason = "org policy unavailable"
+    if reason:
+        return JSONResponse({"ok": False, "error": f"HITL: {reason}", "requires_approval": True}, status_code=403)
+    eng = ToolEngine([tool_name], org_id=org_id, **actor)
     try:
         out = await eng.execute(tool_name, raw_args if isinstance(raw_args, str) else _json.dumps(raw_args))
         return JSONResponse({"ok": True, "tool": tool_name, "output": out})
     except Exception:
-        logger.exception("Lab tool run failed org=%s tool=%s", await _resolve_org_id(request), tool_name)
+        logger.exception("Lab tool run failed org=%s tool=%s", org_id, tool_name)
         return JSONResponse({"ok": False, "tool": tool_name, "error": "Tool execution failed"}, status_code=200)
 
 

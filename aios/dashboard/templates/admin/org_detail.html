@@ -64,7 +64,7 @@
 </div>
 
 <div class="card mb-4">
-    <h2 class="mb-2">Usuários ({{ users|length }})</h2>
+    <h2 class="mb-2"><span>Usuários</span> ({{ users|length }})</h2>
     <div class="flex-col gap-1">
         {% for u in users %}
         <div class="flex-between" style="padding:0.375rem 0;border-bottom:1px solid var(--border)">
@@ -73,7 +73,7 @@
                 <span class="badge" style="font-size:0.625rem;border-color:var(--accent-border);color:var(--accent)">{{ u.role }}</span>
             </div>
             {% if u.role != 'superadmin' %}
-            <a href="/dashboard/admin/orgs/{{ org.id }}/users/{{ u.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm('Remover usuário?')">Remover</a>
+            <a href="/dashboard/admin/orgs/{{ org.id }}/users/{{ u.id }}/remove" class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="return confirm(window.aiosI18n.t('Remover usuário?'))">Remover</a>
             {% endif %}
         </div>
         {% endfor %}
@@ -81,7 +81,7 @@
 </div>
 
 <div class="card mb-4">
-    <h2 class="mb-2">Agentes ({{ agents|length }})</h2>
+    <h2 class="mb-2"><span>Agentes</span> ({{ agents|length }})</h2>
     <div class="flex-col gap-1">
         {% for a in agents %}
         <div class="flex-between" style="padding:0.375rem 0;border-bottom:1px solid var(--border)">
@@ -96,7 +96,7 @@
 </div>
 
 <div class="card">
-    <h2 class="mb-2">Equipes ({{ teams|length }})</h2>
+    <h2 class="mb-2"><span>Equipes</span> ({{ teams|length }})</h2>
     <div class="flex-col gap-1">
         {% for t in teams %}
         <div class="flex-between" style="padding:0.375rem 0;border-bottom:1px solid var(--border)">
@@ -106,4 +106,33 @@
         {% else %}<p class="text-sm text-secondary">Nenhuma equipe</p>{% endfor %}
     </div>
 </div>
+<script>
+window.aiosI18n.register({
+    'Detalhes da organização': 'Detalles de la organización',
+    '← Voltar': '← Volver',
+    'Usuários': 'Usuarios',
+    'Agentes': 'Agentes',
+    'Equipes': 'Equipos',
+    'Canais': 'Canales',
+    'Status': 'Estado',
+    'Ativa': 'Activa',
+    'Suspender': 'Suspender',
+    'Suspensa': 'Suspendida',
+    'Reativar': 'Reactivar',
+    'Ativado — sem branding AIOS': 'Activado — sin branding AIOS',
+    'Desativar': 'Desactivar',
+    'Desativado — com branding AIOS': 'Desactivado — con branding AIOS',
+    'Ativar': 'Activar',
+    'Remove "Powered by AIOS" do rodapé do dashboard. Requer plano Enterprise.': 'Elimina "Powered by AIOS" del pie del dashboard. Requiere plan Enterprise.',
+    'Domínio Customizado (White-label)': 'Dominio personalizado (White-label)',
+    'voz.seudominio.com': 'voz.tudominio.com',
+    'Salvar': 'Guardar',
+    'Limpar': 'Limpiar',
+    'Configure DNS CNAME para o domínio apontar para este host. SSL automático via Coolify.': 'Configura DNS CNAME para que el dominio apunte a este host. SSL automático vía Coolify.',
+    'Remover': 'Eliminar',
+    'Remover usuário?': '¿Eliminar usuario?',
+    'Nenhum agente': 'Ningún agente',
+    'Nenhuma equipe': 'Ningún equipo'
+});
+</script>
 {% endblock %}

@@ -20,7 +20,7 @@
     <div class="stat-card">
         <p class="stat-label">Conversas no WhatsApp</p>
         <p class="stat-value">{{ stats.conversations }}</p>
-        <span class="text-xs text-secondary">{{ stats.messages }} mensagens trocadas</span>
+        <span class="text-xs text-secondary">{{ stats.messages }} <span>mensagens trocadas</span></span>
         <a href="/dashboard/simple/inbox" class="stat-link">Ver conversas →</a>
     </div>
     <div class="stat-card" style="{% if stats.handover_pending > 0 %}border-color:var(--amber);background:var(--amber-subtle){% endif %}">
@@ -113,7 +113,7 @@
 
                 <div class="flex gap-2 mb-3" style="flex-wrap:wrap">
                     <span class="badge" style="font-size:0.6875rem">
-                        Inteligência: {{ (a.extra_data.get('simple_config',{}) if a.extra_data else {}).get('intelligence_level', 'fast') == 'deep' and '🧠 Alta Precisão' or '⚡ Rápido' }}
+                        <span>Inteligência:</span> {{ (a.extra_data.get('simple_config',{}) if a.extra_data else {}).get('intelligence_level', 'fast') == 'deep' and '🧠 Alta Precisão' or '⚡ Rápido' }}
                     </span>
                     {% if a.extra_data and a.extra_data.get('customized_in_pro') %}
                     <span class="badge" style="border-color:var(--accent);color:var(--accent);font-size:0.6875rem">
@@ -152,4 +152,41 @@
     </div>
     {% endif %}
 </div>
+<script>
+window.aiosI18n.register({
+    '👋 Painel da Empresa': '👋 Panel de la Empresa',
+    'Modo Simples': 'Modo Simple',
+    'Visão geral dos seus funcionários virtuais, conversas de WhatsApp e alertas.': 'Resumen de tus empleados virtuales, conversaciones de WhatsApp y alertas.',
+    '+ Criar Atendente em 1 Minuto': '+ Crear Atendente en 1 Minuto',
+    'Conversas no WhatsApp': 'Conversaciones en WhatsApp',
+    'mensagens trocadas': 'mensajes intercambiados',
+    'Ver conversas →': 'Ver conversaciones →',
+    'Precisam de Atendente Humano': 'Necesitan Atendente Humano',
+    'Clientes que pediram ajuda humana': 'Clientes que pidieron ayuda humana',
+    'Atender agora →': 'Atender ahora →',
+    'Atendentes Virtuais': 'Atendientes Virtuales',
+    'Prontos para responder': 'Listos para responder',
+    'Gerenciar atendentes →': 'Gestionar atendientes →',
+    'Custo Estimado no Mês': 'Costo Estimado del Mes',
+    'Consumo real do mês': 'Consumo real del mes',
+    'Conectado e Ativo': 'Conectado y Activo',
+    'Aguardando Leitura de QR Code': 'Esperando lectura de QR Code',
+    'Seu número está recebendo mensagens e os atendentes virtuais respondem automaticamente.': 'Tu número está recibiendo mensajes y los atendientes virtuales responden automáticamente.',
+    'Escaneie o QR Code com o aplicativo do WhatsApp no celular para começar a atender clientes.': 'Escanea el QR Code con la aplicación de WhatsApp en el celular para empezar a atender clientes.',
+    'Ver Conexão': 'Ver conexión',
+    '📲 Ler QR Code Agora': '📲 Leer QR Code ahora',
+    'Meus Atendentes': 'Mis Atendientes',
+    'Controle quem está atendendo seus clientes no WhatsApp.': 'Controla quién está atendiendo a tus clientes en WhatsApp.',
+    'Ativo 🟢': 'Activo 🟢',
+    'Atendente configurado para suporte e atendimento rápido.': 'Atendiente configurado para soporte y atención rápida.',
+    'Inteligência:': 'Inteligencia:',
+    '🧠 Alta Precisão': '🧠 Alta precisión',
+    '⚡ Personalizado no Modo Avançado': '⚡ Personalizado en Modo Avanzado',
+    '▶️ Ligar': '▶️ Activar',
+    'Abrir configurações de engenharia': 'Abrir configuraciones de ingeniería',
+    '🛠️ Modo Avançado': '🛠️ Modo Avanzado',
+    'Você ainda não tem nenhum atendente virtual': 'Aún no tienes ningún atendiente virtual',
+    'Coloque seu primeiro funcionário de IA para atender clientes no WhatsApp em menos de 1 minuto!': '¡Pon tu primer empleado de IA a atender clientes en WhatsApp en menos de 1 minuto!'
+});
+</script>
 {% endblock %}

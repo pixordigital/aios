@@ -30,7 +30,7 @@
     var recent = list.slice(0, 18);
     var recentIds = {};
     recent.forEach(function (m) { recentIds[m.model] = 1; });
-    var groups = [["Recém-lançados", recent.map(function (m) { return m.model; })]];
+    var groups = [[window.aiosI18n.t('Recém-lançados'), recent.map(function (m) { return m.model; })]];
     var byProvider = {};
     list.forEach(function (m) {
       if (recentIds[m.model]) return;
@@ -41,7 +41,7 @@
     Object.keys(byProvider).sort().forEach(function (label) {
       groups.push([label, byProvider[label]]);
     });
-    groups.push(["Local / API direta", LOCAL]);
+    groups.push([window.aiosI18n.t('Local / API direta'), LOCAL]);
 
     host.innerHTML = "";
     groups.forEach(function (group) {
@@ -72,13 +72,32 @@
     var host = document.getElementById(hostId);
     if (!host) return;
     if (cached) { draw(host, cached, onSelect, onDone); return; }
-    host.innerHTML = '<div style="padding:0.5rem 0.625rem;font-size:0.7rem;color:var(--text-tertiary)">Carregando modelos…</div>';
+    host.innerHTML = '<div style="padding:0.5rem 0.625rem;font-size:0.7rem;color:var(--text-tertiary)">' + window.aiosI18n.t('Carregando modelos…') + '</div>';
     fetch("/dashboard/api/models", { credentials: "include" })
       .then(function (response) { return response.json(); })
       .then(function (list) { cached = list || []; draw(host, cached, onSelect, onDone); })
       .catch(function () {
-        host.innerHTML = '<div style="padding:0.5rem 0.625rem;font-size:0.7rem;color:var(--red)">Falha ao carregar modelos</div>';
+        host.innerHTML = '<div style="padding:0.5rem 0.625rem;font-size:0.7rem;color:var(--red)">' + window.aiosI18n.t('Falha ao carregar modelos') + '</div>';
       });
   };
+})();
+</script>
+<script>
+(function () {
+  var map = {
+    'Recém-lançados': 'Recién lanzados',
+    'Local / API direta': 'Local / API directa',
+    'Carregando modelos…': 'Cargando modelos…',
+    'Falha ao carregar modelos': 'Error al cargar modelos'
+  };
+  if (!window.aiosI18n) {
+    var lang = localStorage.getItem('aios_lang') || 'pt';
+    window.aiosI18n = {
+      t: function (s) { return lang === 'es' && Object.prototype.hasOwnProperty.call(map, s) ? map[s] : s; },
+      register: function (m) { if (m) for (var k in m) if (Object.prototype.hasOwnProperty.call(m, k)) map[k] = m[k]; },
+      apply: function () {}
+    };
+  }
+  window.aiosI18n.register(map);
 })();
 </script>

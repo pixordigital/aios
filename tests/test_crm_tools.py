@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from aios.db.backend import db_session
-from aios.db.models import CrmDeal, CrmDealVersion, Organization
+from aios.db.models import CrmDeal, CrmDealVersion, Organization, PendingAction
 
 
 async def _org(session, name="Org A"):
@@ -31,6 +31,17 @@ async def _deal(session, org, email="a@x.com", stage="mql", extra=None):
     session.add(d)
     await session.flush()
     return d
+
+
+async def _approved_action(session, org, action_id, *, decided_by, tool_args):
+    row = PendingAction(
+        id=action_id, org_id=org.id, agent_id="agent-1", conversation_id="conv-1",
+        tool_name="crm_update_deal", tool_args=tool_args,
+        status="approved", decided_by=decided_by,
+    )
+    session.add(row)
+    await session.commit()
+    return row
 
 
 def _tool(name, org_id):
@@ -311,6 +322,57 @@ class TestCrmControl:
         async with db_session() as s:
             fresh = (await s.execute(select(CrmDeal).where(CrmDeal.id == deal_b.id))).scalar_one()
             assert fresh.value == 900.0, "cross-org write must not land"
+
+
+class TestHITLReplayMarker:
+    @pytest.mark.asyncio
+    async def test_approved_marker_skips_new_pending(self, test_session):
+        org = await _org(test_session)
+        deal = await _deal(test_session, org)
+        await _approved_action(
+            test_session, org, "approved-1", decided_by="user-1",
+            tool_args={"deal_id": deal.id, "stage": "closed_won"},
+        )
+        marker = {"action_id": "approved-1", "org_id": org.id, "decided_by": "user-1"}
+
+        res = await _tool("crm_update_deal", org.id).run(
+            deal_id=deal.id, stage="closed_won", _hitl_approved_action=marker)
+
+        assert res["ok"] is True
+        assert not res.get("pending")
+        rows = (await test_session.execute(select(PendingAction))).scalars().all()
+        assert len(rows) == 1
+        async with db_session() as s:
+            fresh = (await s.execute(select(CrmDeal).where(CrmDeal.id == deal.id))).scalar_one()
+            assert fresh.stage == "closed_won"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("case", ["forged_id", "wrong_decider", "wrong_stage", "malformed"])
+    async def test_forged_or_mismatched_marker_still_pends(self, test_session, case):
+        org = await _org(test_session)
+        deal = await _deal(test_session, org)
+        await _approved_action(
+            test_session, org, "approved-1", decided_by="user-1",
+            tool_args={"deal_id": deal.id, "stage": "closed_won"},
+        )
+        marker = {"action_id": "approved-1", "org_id": org.id, "decided_by": "user-1"}
+        stage = "closed_won"
+        if case == "forged_id":
+            marker["action_id"] = "forged"
+        elif case == "wrong_decider":
+            marker["decided_by"] = "attacker"
+        elif case == "wrong_stage":
+            stage = "closed_lost"
+        else:
+            marker = "approved-1"
+
+        res = await _tool("crm_update_deal", org.id).run(
+            deal_id=deal.id, stage=stage, _hitl_approved_action=marker)
+
+        assert res.get("pending") is True
+        rows = (await test_session.execute(select(PendingAction))).scalars().all()
+        assert len(rows) == 2
+        assert any(row.tool_args.get("stage") == stage for row in rows)
 
 
 class TestCrmDelete:
