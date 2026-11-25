@@ -48,7 +48,7 @@ raising pools. Supabase connection limits apply, not the old compose
 
 ## Version truth
 
-Expected single code Alembic head: `e1f2a3b4c5d6`. Supabase `aios` schema
+Expected single code Alembic head: `b2c3d4e5f6a7`. Supabase `aios` schema
 pre-cutover revision: `e7f8a9b0c1d2`. Verify with
 `scripts/cutover_supabase_main_db.py`; the guard refuses multiple heads,
 `alembic stamp head` on a failed migration, and any revision not actually

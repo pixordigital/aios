@@ -17,21 +17,25 @@ does not touch prod. No LLM/model call is needed.
   records it before any change; never print credentials.
 - Supabase service: `x7cec17of43bremk02s521wj`, DB `aios`, schema `aios`.
 - Supabase `aios` pre-cutover revision: `e7f8a9b0c1d2`.
-- Repository migration head: `e1f2a3b4c5d6`, via
-  `alembic/versions/icm_side_effect_dedupe.py` (`f0e1d2c3b4a5`) and
-  `alembic/versions/schema_gaps_creds_crm_kpi.py` (`e1f2a3b4c5d6`); committed
-  in `e46771e`. Integration wave `64ac67a` (`#807`) and governance/ICM wave
-  `dcf74b4` (`#809`) are committed/pushed and deployed; build from `main`.
-- Current deployed AIOS image: `dcf74b4` (Coolify `#809`). Paired ARVO image:
-  `09249ba` (`#808`). Both deployments `finished`; unsigned `/health/ready`
-  200 on each after startup. Signed delivery remains unverified; signed smoke
-  is human-only. Migrations committed in `e46771e` are included in the image.
+- Repository migration head: `b2c3d4e5f6a7`, via
+  `alembic/versions/b2c3d4e5f6a7_agent_packs.py` (committed in `155d1a2`); via
+  earlier waves, `alembic/versions/icm_side_effect_dedupe.py`
+  (`f0e1d2c3b4a5`) and `alembic/versions/schema_gaps_creds_crm_kpi.py`
+  (`e1f2a3b4c5d6`), committed in `e46771e`. Integration wave `64ac67a` (`#807`) and
+  governance/ICM wave `dcf74b4` (`#809`) are committed/pushed and deployed; build
+  from `main`.
+- Current deployed AIOS image: `2e38e91d5d70ca502acc9db34fb407bb61da73c9` (Coolify
+  `#827`, finished `2026-11-25T16:03:32Z`). Paired ARVO image:
+  `e619d220e50c0c720fb98322433742a150269975` (`#813`). Both deployments
+  `finished`; unsigned `/health/ready` 200 on each after startup. Signed delivery
+  verified 2026-11-25; signed smoke executed with real secrets (values never
+  printed). Migrations committed in `155d1a2` are included in the image.
 - Current app DB is the Supabase bridge `aios-supabase-db-8778:5432/aios`.
-  Alembic head `e1f2a3b4c5d6` reached in app; `/health/ready` `200 migrations:ok`.
+  Alembic head `b2c3d4e5f6a7` reached in app; `/health/ready` `200 migrations:ok`.
   Supabase cutover already applied for this app — no longer a future gate here.
   Section 0a is conditional/historical: use only if readiness regresses.
-  Remaining human gate: signed smoke with real secrets. Migrations committed in
-  `e46771e` must still be included in any future image.
+  Signed delivery verified 2026-11-25; migrations committed in `155d1a2` must
+  still be included in any future image.
 - AIOS engine sets `search_path = aios, public, extensions`; Alembic version
   table is `aios.alembic_version_aios`.
 
