@@ -102,16 +102,18 @@ def downgrade():
             op.drop_table(t)
 
     cols = _pending_actions_columns()
-    restore = [
-        name for name in ("agent_id", "conversation_id")
-        if name in cols and cols[name].get("nullable") is True
-    ]
+    restore = []
+    for name in ("agent_id", "conversation_id"):
+        if name not in cols or cols[name].get("nullable") is not True:
+            continue
+        null_count = op.get_bind().execute(
+            sa.text(f"SELECT COUNT(*) FROM pending_actions WHERE {name} IS NULL")
+        ).scalar_one()
+        # Real approval rows legitimately have NULL links; never invent identity
+        # or delete them just to satisfy the pre-upgrade NOT NULL contract.
+        if not int(null_count or 0):
+            restore.append(name)
     if restore:
-        # Entries created while nullable have no real agent/conversation identity.
-        # Drop those rows before restoring the pre-upgrade NOT NULL contract.
-        op.execute(
-            "DELETE FROM pending_actions WHERE " + " OR ".join(f"{name} IS NULL" for name in restore)
-        )
         with op.batch_alter_table("pending_actions") as batch_op:
             for name in restore:
                 batch_op.alter_column(name, existing_type=sa.String(36), nullable=False)
