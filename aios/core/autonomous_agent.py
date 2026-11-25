@@ -283,7 +283,7 @@ class AutonomousAgent:
                     if trial > 1 and reflections:
                         await self._extract_skill(user_message, trajectory, reflections, db)
                     # Consolidation: hot buffer -> long term (simplificado)
-                    await self._consolidate_memory(conversation_id, reflections, db)
+                    await self._consolidate_memory(conversation_id, reflections, db, user_message)
                     return response
 
                 # Falha: gera reflexão e tenta de novo
@@ -529,12 +529,36 @@ class AutonomousAgent:
         except Exception as e:
             logger.debug("Skill extraction failed: %s", e)
 
-    async def _consolidate_memory(self, conversation_id: str, reflections: List[str], db):
+    async def _consolidate_memory(
+        self, conversation_id: str, reflections: List[str], db, user_message: str = ""
+    ):
         """Consolidação dual-buffer (U-Mem style): hot -> long_term após validação."""
         if not reflections:
             return
+        reflection_text = " | ".join(reflections[-2:])
         try:
             # Injeta reflexão no memory como episodic
-            await self.runtime.memory.add(conversation_id, "system", f"[Reflexão aprendida] {' | '.join(reflections[-2:])}")
+            await self.runtime.memory.add(conversation_id, "system", f"[Reflexão aprendida] {reflection_text}")
+        except Exception:
+            pass
+        try:
+            from aios.core.agent_db import agent_db
+
+            await agent_db.create_reflection(
+                agent_id=self.agent.id,
+                org_id=self.agent.org_id or "",
+                conversation_id=conversation_id,
+                task_summary=(user_message or "")[:500],
+                what_went_well="",
+                what_could_improve=reflection_text,
+                key_insight=reflection_text,
+                action_items=[],
+                score=0.0,
+                tokens_used=0,
+                extra_data={
+                    "source": "autonomous_reflection",
+                    "conversation_id": conversation_id,
+                },
+            )
         except Exception:
             pass

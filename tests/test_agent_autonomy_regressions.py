@@ -163,3 +163,54 @@ def test_approval_request_carries_org_id():
 
     src = inspect.getsource(AgentRuntime._run_stream_inner)
     assert "org_id=self.agent.org_id" in src, "approval row still written without org_id"
+
+
+# ─── second brain: autonomous reflections persist to AgentDB ───────────────
+
+@pytest.mark.asyncio
+async def test_autonomous_reflection_persists_to_agent_db(monkeypatch):
+    """AutonomousAgent must persist reflections to AgentDB, not only MemoryManager.
+
+    MemoryManager is the hot-buffer/vector path; AgentDB is the persistent
+    second-brain store. The autonomous loop already reflects + consolidates;
+    this pins the persistence hop so later retrieval/learning can rely on it.
+    """
+    from aios.core.agent_db import agent_db
+    from aios.core.autonomous_agent import AutonomousAgent
+
+    class _Memory:
+        def __init__(self):
+            self.calls = []
+
+        async def add(self, conversation_id, role, content):
+            self.calls.append((conversation_id, role, content))
+
+    class _Agent:
+        id = "a-auto"
+        org_id = "org-1"
+        name = "Auto"
+        system_prompt = "p"
+        llm_config = {}
+        tools = []
+        governance_config = {"autonomous": True, "max_trials": 2, "hitl_enabled": False}
+        extra_data: dict = {}
+
+    auto = AutonomousAgent(_Agent())
+    memory = _Memory()
+    auto.runtime.memory = memory
+
+    persisted = {}
+
+    async def _create_reflection(**kwargs):
+        persisted.update(kwargs)
+        return None
+
+    monkeypatch.setattr(agent_db, "create_reflection", _create_reflection)
+
+    await auto._consolidate_memory("conv-1", ["reflexão 1", "reflexão 2"], None, "criar proposta")
+
+    assert memory.calls == [("conv-1", "system", "[Reflexão aprendida] reflexão 1 | reflexão 2")]
+    assert persisted["agent_id"] == "a-auto"
+    assert persisted["org_id"] == "org-1"
+    assert persisted["conversation_id"] == "conv-1"
+    assert persisted["task_summary"] == "criar proposta"
