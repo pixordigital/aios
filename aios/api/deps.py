@@ -81,7 +81,10 @@ async def get_org_id(user: User = Depends(get_current_user)) -> str:
     return user.org_id
 
 
-async def get_superadmin(user: User = Depends(get_current_user)) -> User:
+async def get_superadmin(
+    user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
+) -> User:
     """Restrict to workspace administrators.
 
     /api/dev/* runs prompts and builds with repo-wide file and shell access.
@@ -89,6 +92,26 @@ async def get_superadmin(user: User = Depends(get_current_user)) -> User:
     superadmins only.
     """
     if user.role not in ("superadmin", "owner"):
+        org_id = getattr(user, "org_id", None)
+        if db is not None and org_id:
+            source = "api.deps.superadmin"
+            try:
+                from aios.governance.security import record_security_event
+
+                event = await record_security_event(
+                    db,
+                    org_id=str(org_id),
+                    source=source,
+                    event_type="security.authz.denied",
+                    severity="medium",
+                    actor_type="human",
+                    actor_id=str(getattr(user, "id", "") or "") or None,
+                    payload={"reason": "superadmin_required", "path_source": source},
+                )
+                if event is not None:
+                    await db.commit()
+            except Exception:
+                logger.debug("authz denied metric skipped", exc_info=True)
         raise HTTPException(403, "requer administrador")
     return user
 

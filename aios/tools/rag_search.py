@@ -17,7 +17,7 @@ class RagSearchInput(BaseModel):
     top_k: int = Field(default=5, description="Quantos registros retornar (1-10)")
 
 
-async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str]:
+async def resolve_granted_record_ids(org_id: str, actor_user_id: str, db=None) -> set[str]:
     """Best-effort DB resolve of active knowledge grants for actor user in org.
 
     Returns empty set when no grant model exists or resolution fails.
@@ -32,8 +32,6 @@ async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str
         return set()
     try:
         from sqlalchemy import inspect as sa_inspect, select
-
-        from aios.db.engine import async_session
 
         GrantModel = None
         for mod_path, attr in (
@@ -98,8 +96,14 @@ async def resolve_granted_record_ids(org_id: str, actor_user_id: str) -> set[str
             vf = getattr(GrantModel, "valid_from")
             conditions.append((vf.is_(None)) | (vf <= now))
 
-        async with async_session() as s:
-            rows = (await s.execute(select(getattr(GrantModel, record_col)).where(*conditions))).scalars().all()
+        stmt = select(getattr(GrantModel, record_col)).where(*conditions)
+        if db is None:
+            from aios.db.engine import async_session
+
+            async with async_session() as s:
+                rows = (await s.execute(stmt)).scalars().all()
+        else:
+            rows = (await db.execute(stmt)).scalars().all()
         grants = {str(r) for r in rows if r}
         logger.debug("rag_search.grants_resolved org=%s actor=%s count=%s", org_id, actor_user_id, len(grants))
         return grants

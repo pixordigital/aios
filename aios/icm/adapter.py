@@ -18,6 +18,9 @@ from aios.icm.workspace import WorkspacePaths, load_context_files
 
 logger = logging.getLogger(__name__)
 
+# Local copy of approval API requester keys; no API import in enforcement path.
+_REQUESTER_KEYS = ("_requested_by", "requested_by", "created_by", "actor_user_id", "human_id")
+
 
 class SideEffectDuplicateError(RuntimeError):
     """Idempotency key already claimed by another run in the same org."""
@@ -258,6 +261,24 @@ class ICMStageAdapter:
             logger.warning("ICM approval lookup unavailable", exc_info=True)
             return None
         if row is None or not str(row.decided_by or "").strip():
+            return None
+        # Bind the approved row to a tool identity derived from the node/manifest,
+        # never from the caller-controlled marker action alone.
+        trusted_tools = {
+            str(self.manifest.id),
+            str(getattr(self.node, "tool_name", "") or ""),
+            str(getattr(self.node, "id", "") or ""),
+            "agent_run",
+            *(str(t) for t in self.manifest.allowed_tools),
+        }
+        if str(row.tool_name or "").strip() not in trusted_tools:
+            return None
+        args = row.tool_args if isinstance(row.tool_args, dict) else {}
+        decided_by = str(row.decided_by).strip()
+        if any(
+            args.get(k) is not None and str(args[k]).strip() == decided_by
+            for k in _REQUESTER_KEYS
+        ):
             return None
         return {
             "approval_id": str(approval_id),

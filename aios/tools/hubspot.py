@@ -17,25 +17,25 @@ class HubSpotTool(BaseTool):
     async def run(self, action: str, email: str = "", name: str = "", properties: dict | None = None, credential_id: str = "", api_key: str = "") -> dict:
         import httpx, json
         from aios.db.engine import async_session
-        from sqlalchemy import select
-        from aios.db.models import Credential
+        from aios.core.credential_scope import resolve_scoped_credential
         from aios.core.secrets import decrypt_secret
         token = api_key
         if credential_id:
             try:
                 async with async_session() as sess:
-# Credentials are per-tenant. This lookup was scoped by id only, so naming
-                # another org's credential_id decrypted their API token and sent it out.
-                    _org = getattr(self, "_org_id", "") or ""
-                    _stmt = select(Credential).where(Credential.id == credential_id)
-                    if _org:
-                        _stmt = _stmt.where(Credential.org_id == _org)
-                    c = (await sess.execute(_stmt)).scalar_one_or_none()
-                    if c and c.data_enc:
+                    c = await resolve_scoped_credential(
+                        sess, credential_id,
+                        org_id=getattr(self, "_org_id", "") or "",
+                        agent_id=getattr(self, "_agent_id", "") or "",
+                        tool_name=self.name,
+                    )
+                    if c is None:
+                        return {"error": "credencial HubSpot não autorizada"}
+                    if c.data_enc:
                         d = json.loads(decrypt_secret(c.data_enc))
                         token = d.get("token") or d.get("value") or token
             except Exception:
-                pass
+                return {"error": "credencial HubSpot não autorizada"}
         if not token:
             return {"error": "HubSpot token ausente (credential_id ou api_key)"}
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}

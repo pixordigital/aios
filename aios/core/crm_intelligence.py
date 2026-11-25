@@ -212,7 +212,13 @@ async def find_account_for_deal(db, deal):
 
 
 async def find_account_for_deal_with_meta(db, deal):
-    """Resolve account by heuristic. No schema FK; never fake authoritative link."""
+    """Prefer typed FK; legacy extra_data/identifier heuristics only for unlinked rows."""
+    account_id = getattr(deal, "account_id", None)
+    if account_id:
+        row = await db.get(Account, str(account_id))
+        if row is None or row.org_id != deal.org_id:
+            return None, {"kind": "none", "source": "typed_fk_invalid", "validated": False, "authoritative": False}
+        return row, {"kind": "typed_fk", "source": "crm_deals.account_id", "validated": True, "authoritative": True}
     extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
     account_id = extra.get("account_id")
     if account_id:
@@ -238,7 +244,13 @@ async def find_contact_for_deal(db, deal):
 
 
 async def find_contact_for_deal_with_meta(db, deal):
-    """Resolve contact by heuristic. No schema FK; never fake authoritative link."""
+    """Prefer typed FK; legacy extra_data/identifier heuristics only for unlinked rows."""
+    contact_id = getattr(deal, "contact_id", None)
+    if contact_id:
+        row = await db.get(Contact, str(contact_id))
+        if row is None or row.org_id != deal.org_id:
+            return None, {"kind": "none", "source": "typed_fk_invalid", "validated": False, "authoritative": False}
+        return row, {"kind": "typed_fk", "source": "crm_deals.contact_id", "validated": True, "authoritative": True}
     extra = deal.extra_data if isinstance(getattr(deal, "extra_data", None), dict) else {}
     contact_id = extra.get("contact_id")
     if contact_id:
@@ -283,12 +295,12 @@ def deal_360_payload(deal, account=None, contact=None, *, account_link=None, con
         "account": {"id": account.id, "name": account.name, "cnpj": account.cnpj} if account else None,
         "account_link": {
             **account_link,
-            "note": "No schema FK deal->account. Heuristic/read-only link; do not treat as authoritative.",
+            "note": "Typed nullable FK preferred; legacy extra_data/identifier heuristic only for unlinked rows.",
         },
         "contact": {"id": contact.id, "name": contact.name, "email": contact.email, "phone": contact.phone} if contact else None,
         "contact_link": {
             **contact_link,
-            "note": "No schema FK deal->contact. Heuristic/read-only link; do not treat as authoritative.",
+            "note": "Typed nullable FK preferred; legacy extra_data/identifier heuristic only for unlinked rows.",
         },
         "legacy_extra_keys": sorted(extra.keys()),
         "legacy_extra_data_note": "extra_data is legacy/tactical; use typed CRM objects/timeline where available.",

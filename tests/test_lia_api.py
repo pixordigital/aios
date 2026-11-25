@@ -1,5 +1,7 @@
 """LIA API: acquisition records, suppression, contact gate and CRM handoff."""
 
+from datetime import datetime, timedelta
+
 from sqlalchemy import select
 
 from aios.core.crm_intelligence import Contact
@@ -391,3 +393,66 @@ async def test_lia_cross_tenant_source_lookups_record_metric(auth_client, test_d
     assert _lia_cross_tenant_metrics(
         rows, resource_type="LeadSource", resource_org_id=second_org.id, source="lia.api.handoff.source"
     )
+
+
+async def test_suppression_list_bounded_page_and_offset(
+    auth_client, test_db_session, test_org, second_org
+):
+    base_created = datetime(2026, 1, 1)
+    own = [
+        SuppressionEntry(
+            org_id=test_org.id, kind="email", value=f"own{i}@example.com", reason="opt_out",
+            created_at=base_created + timedelta(minutes=i),
+        )
+        for i in range(3)
+    ]
+    foreign = SuppressionEntry(
+        org_id=second_org.id, kind="email", value="foreign@example.com", reason="opt_out"
+    )
+    test_db_session.add_all([*own, foreign])
+    await test_db_session.commit()
+
+    all_resp = await auth_client.get("/api/lia/suppression")
+    assert all_resp.status_code == 200, all_resp.text
+    all_body = all_resp.json()
+    assert all_body["truncated"] is False
+    assert "total" not in all_body
+    assert {e["value"] for e in all_body["items"]} == {e.value for e in own}
+    assert set(all_body["items"][0]) == {"id", "kind", "value", "reason"}
+
+    first = await auth_client.get("/api/lia/suppression", params={"limit": 2})
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert len(body["items"]) == 2
+    assert body["truncated"] is True
+    assert "total" not in body
+
+    second = await auth_client.get("/api/lia/suppression", params={"limit": 2, "offset": 2})
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert len(body["items"]) == 1
+    assert body["truncated"] is False
+
+    expected_order = [
+        e.id for e in sorted(own, key=lambda e: (e.created_at, e.id), reverse=True)
+    ]
+    assert [e["id"] for e in all_body["items"]] == expected_order
+    assert [e["id"] for e in first.json()["items"]] == expected_order[:2]
+    assert [e["id"] for e in second.json()["items"]] == expected_order[2:]
+
+    own_ids = {e["id"] for e in all_body["items"]}
+    first_ids = {e["id"] for e in first.json()["items"]}
+    second_ids = {e["id"] for e in second.json()["items"]}
+    assert first_ids | second_ids == own_ids
+    assert first_ids.isdisjoint(second_ids)
+
+    first_repeat = await auth_client.get("/api/lia/suppression", params={"limit": 2})
+    assert [e["id"] for e in first_repeat.json()["items"]] == expected_order[:2]
+    second_repeat = await auth_client.get(
+        "/api/lia/suppression", params={"limit": 2, "offset": 2}
+    )
+    assert [e["id"] for e in second_repeat.json()["items"]] == expected_order[2:]
+
+    for params in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        bad = await auth_client.get("/api/lia/suppression", params=params)
+        assert bad.status_code == 422, bad.text

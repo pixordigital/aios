@@ -66,6 +66,24 @@ async def apply_improvement(
         _sel(_Agent).where(_Agent.id == body.agent_id, _Agent.org_id == user.org_id)
     )).scalar_one_or_none()
     if not _agent:
+        try:
+            from aios.governance.security import record_cross_tenant_block_if_mismatch
+            foreign = (await db.execute(
+                _sel(_Agent).where(_Agent.id == body.agent_id)
+            )).scalar_one_or_none()
+            evt = await record_cross_tenant_block_if_mismatch(
+                db,
+                org_id=user.org_id,
+                resource=foreign,
+                source="api.meta.apply_improvement",
+                actor_type="human",
+                actor_id=user.id,
+                payload={"agent_id": str(body.agent_id)},
+            )
+            if evt is not None:
+                await db.commit()
+        except Exception:
+            pass
         raise HTTPException(404, "Agent not found")
     result = await meta_agent.apply_improvement(body.agent_id, body.suggestion, db=db)
     if not result.get("applied"):

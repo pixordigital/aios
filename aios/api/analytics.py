@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import case, func, select
 
 from aios.db.backend import get_db_backend, DatabaseBackend
-from aios.db.models import Agent, Conversation, CrmDeal, Message, Organization, Memory, ChannelConnection
+from aios.db.models import Agent, Conversation, CrmDeal, KpiTarget, KpiTargetEvent, Message, Organization, Memory, ChannelConnection
 from aios.schemas import BaseModel
 from aios.core.cache import cache
 from aios.core.tracing import METRICS
@@ -936,11 +936,95 @@ async def validate_kpi_target(
     )
     result["persistence"] = {
         "persisted": False,
-        "mode": "org_extra_data",
+        "mode": "schema_tables",
         "schema_table": None,
-        "blocker": "Validation-only endpoint; use POST /api/analytics/kpi/targets for durable org_extra_data persistence.",
+        "blocker": "Validation-only endpoint; use POST /api/analytics/kpi/targets for durable kpi_targets persistence.",
     }
     return result
+
+
+_KPI_TARGET_READ_LIMIT = 200
+_KPI_TARGET_TABLE = "kpi_targets"
+_KPI_TARGET_EVENT_TABLE = "kpi_target_events"
+
+
+def _kpi_iso(value) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
+def _kpi_db_dt(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if value:
+        try:
+            return datetime.fromisoformat(str(value)).replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
+def _kpi_target_payload(row: KpiTarget) -> dict:
+    """External target shape, unchanged keys; ORM timestamps become ISO strings."""
+    return {
+        "id": row.id,
+        "metric_key": row.metric_key,
+        "target_value": row.target_value,
+        "baseline_value": row.baseline_value,
+        "baseline_window_days": row.baseline_window_days,
+        "evidence": row.evidence,
+        "owner": row.owner,
+        "balancing_metrics": row.balancing_metrics if isinstance(row.balancing_metrics, list) else [],
+        "status": row.status,
+        "created_at": _kpi_iso(row.created_at),
+        "updated_at": _kpi_iso(row.updated_at),
+        "provenance": row.provenance if isinstance(row.provenance, dict) else {},
+        "guardrails": row.guardrails if isinstance(row.guardrails, dict) else {},
+    }
+
+
+def _kpi_event_payload(row: KpiTargetEvent) -> dict:
+    return {
+        "id": row.id,
+        "event": row.event,
+        "metric_key": row.metric_key,
+        "target_id": row.target_id,
+        "from_status": row.from_status,
+        "to_status": row.to_status,
+        "actor_user_id": row.actor_user_id,
+        "actor_org_id": row.actor_org_id,
+        "at": _kpi_iso(row.at),
+        "evidence": row.evidence,
+        "owner": row.owner,
+        "target_value": row.target_value,
+        "baseline_value": row.baseline_value,
+    }
+
+
+def _kpi_persistence(table: str, *, persisted: bool, blocker: str | None = None) -> dict:
+    data = {
+        "persisted": persisted,
+        "mode": "schema_tables",
+        "schema_table": table,
+        "storage": table,
+        "history_storage": _KPI_TARGET_EVENT_TABLE,
+    }
+    if blocker is not None:
+        data["blocker"] = blocker
+    return data
+
+
+async def _kpi_target_rows(db: DatabaseBackend, org_id: str) -> list[KpiTarget]:
+    result = await db.execute(
+        select(KpiTarget).where(KpiTarget.org_id == org_id)
+        .order_by(KpiTarget.updated_at.desc()).limit(_KPI_TARGET_READ_LIMIT)
+    )
+    return result.scalars().all()
+
+
+async def _kpi_event_count(db: DatabaseBackend, org_id: str) -> int:
+    return (await db.execute(
+        select(func.count(KpiTargetEvent.id)).where(KpiTargetEvent.org_id == org_id)
+    )).scalar() or 0
 
 
 @router.get("/kpi/targets")
@@ -948,9 +1032,19 @@ async def list_kpi_targets_endpoint(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    """List persisted KPI targets from Organization.extra_data (no schema table)."""
-    org = await db.get(Organization, org_id)
-    return list_kpi_targets(org.extra_data if org else {})
+    """List KPI targets from the org-scoped kpi_targets table (bounded)."""
+    rows = await _kpi_target_rows(db, org_id)
+    result = list_kpi_targets({})
+    result.update({
+        "persistence": _kpi_persistence(_KPI_TARGET_TABLE, persisted=True),
+        "storage": _KPI_TARGET_TABLE,
+        "history_storage": _KPI_TARGET_EVENT_TABLE,
+        "schema_table": _KPI_TARGET_TABLE,
+        "targets": [_kpi_target_payload(row) for row in rows],
+        "count": len(rows),
+        "history_count": await _kpi_event_count(db, org_id),
+    })
+    return result
 
 
 @router.get("/kpi/targets/history")
@@ -959,9 +1053,22 @@ async def list_kpi_target_history_endpoint(
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
-    """Append-only KPI target history from Organization.extra_data (bounded)."""
-    org = await db.get(Organization, org_id)
-    return list_kpi_target_history(org.extra_data if org else {}, metric_key=metric_key)
+    """Append-only history from the org-scoped kpi_target_events table (bounded)."""
+    stmt = select(KpiTargetEvent).where(KpiTargetEvent.org_id == org_id)
+    if metric_key:
+        stmt = stmt.where(KpiTargetEvent.metric_key == metric_key)
+    rows = (await db.execute(
+        stmt.order_by(KpiTargetEvent.at.desc()).limit(_KPI_TARGET_READ_LIMIT)
+    )).scalars().all()
+    result = list_kpi_target_history({}, metric_key=metric_key)
+    result.update({
+        "persistence": _kpi_persistence(_KPI_TARGET_EVENT_TABLE, persisted=True),
+        "storage": _KPI_TARGET_EVENT_TABLE,
+        "schema_table": _KPI_TARGET_EVENT_TABLE,
+        "history": [_kpi_event_payload(row) for row in rows],
+        "count": len(rows),
+    })
+    return result
 
 
 @router.post("/kpi/targets")
@@ -971,16 +1078,19 @@ async def set_kpi_target_endpoint(
     user=Depends(get_current_user),
     org_id: str = Depends(get_org_id),
 ):
-    """Persist KPI target in Organization.extra_data. Fail closed on validation/guardrail errors."""
-    from fastapi import HTTPException
-
+    """Upsert an org KPI target + one event in schema tables. Fail closed on guardrails."""
     org = await db.get(Organization, org_id)
     if not org:
         raise HTTPException(404, "Organization not found")
 
+    metric_key = str(payload.get("metric_key") or "")
+    existing = (await db.execute(
+        select(KpiTarget).where(KpiTarget.org_id == org_id, KpiTarget.metric_key == metric_key).limit(1)
+    )).scalars().first()
+    # Validation/guardrails stay in governance.kpi; validation happens before any write.
     result = set_kpi_target(
-        extra_data=org.extra_data if isinstance(org.extra_data, dict) else {},
-        metric_key=str(payload.get("metric_key") or ""),
+        extra_data={"kpi_targets": {"targets": [_kpi_target_payload(existing)] if existing else []}},
+        metric_key=metric_key,
         target_value=payload.get("target_value"),
         baseline_value=payload.get("baseline_value"),
         baseline_window_days=payload.get("baseline_window_days"),
@@ -992,20 +1102,65 @@ async def set_kpi_target_endpoint(
         actor_org_id=org_id,
     )
     if not result.get("ok"):
-        raise HTTPException(422, {"message": "KPI target rejected (fail closed)", **result})
+        raise HTTPException(422, {
+            "message": "KPI target rejected (fail closed)",
+            **result,
+            "persistence": _kpi_persistence(
+                _KPI_TARGET_TABLE, persisted=False, blocker=result["persistence"].get("blocker")
+            ),
+        })
 
-    org.extra_data = result["extra_data"]
+    record = result["target"]
+    was_existing = existing is not None
+    previous_status = existing.status if was_existing else None
+    if was_existing:
+        for field in ("target_value", "baseline_value", "baseline_window_days", "evidence",
+                      "owner", "balancing_metrics", "status", "provenance", "guardrails"):
+            setattr(existing, field, record[field])
+        existing.updated_at = _kpi_db_dt(record["updated_at"])
+    else:
+        existing = KpiTarget(
+            org_id=org_id,
+            id=str(record["id"]),
+            metric_key=metric_key,
+            target_value=record["target_value"],
+            baseline_value=record["baseline_value"],
+            baseline_window_days=record["baseline_window_days"],
+            evidence=record["evidence"],
+            owner=record["owner"],
+            balancing_metrics=record["balancing_metrics"],
+            status=record["status"],
+            provenance=record["provenance"],
+            guardrails=record["guardrails"],
+            created_at=_kpi_db_dt(record["created_at"]),
+            updated_at=_kpi_db_dt(record["updated_at"]),
+        )
+        db.add(existing)
+    db.add(KpiTargetEvent(
+        org_id=org_id,
+        target_id=existing.id,
+        event="target_updated" if was_existing else "target_created",
+        metric_key=metric_key,
+        from_status=previous_status,
+        to_status=record["status"],
+        actor_user_id=user.id,
+        actor_org_id=org_id,
+        at=_kpi_db_dt(record["updated_at"]),
+        evidence=record["evidence"],
+        owner=record["owner"],
+        target_value=record["target_value"],
+        baseline_value=record["baseline_value"],
+    ))
     await db.commit()
-    await db.refresh(org)
-    stored = list_kpi_targets(org.extra_data)
-    target = result["target"]
+    await db.refresh(existing)
+    rows = await _kpi_target_rows(db, org_id)
     return {
         "ok": True,
-        "persistence": result["persistence"],
-        "target": target,
-        "targets": stored["targets"],
-        "count": stored["count"],
-        "history_count": stored.get("history_count", 0),
+        "persistence": _kpi_persistence(_KPI_TARGET_TABLE, persisted=True),
+        "target": _kpi_target_payload(existing),
+        "targets": [_kpi_target_payload(row) for row in rows],
+        "count": len(rows),
+        "history_count": await _kpi_event_count(db, org_id),
         "guardrails": result["guardrails"],
     }
 
@@ -1017,30 +1172,57 @@ async def transition_kpi_target_endpoint(
     user=Depends(get_current_user),
     org_id: str = Depends(get_org_id),
 ):
-    """Transition KPI target status (active/review/retired) with append-only history."""
-    from fastapi import HTTPException
-
+    """Transition an org KPI target status and append one history event (single commit)."""
     org = await db.get(Organization, org_id)
     if not org:
         raise HTTPException(404, "Organization not found")
 
+    metric_key = str(payload.get("metric_key") or "")
+    existing = (await db.execute(
+        select(KpiTarget).where(KpiTarget.org_id == org_id, KpiTarget.metric_key == metric_key).limit(1)
+    )).scalars().first()
     result = transition_kpi_target_status(
-        extra_data=org.extra_data if isinstance(org.extra_data, dict) else {},
-        metric_key=str(payload.get("metric_key") or ""),
+        extra_data={"kpi_targets": {"targets": [_kpi_target_payload(existing)] if existing else []}},
+        metric_key=metric_key,
         status=str(payload.get("status") or ""),
         evidence=payload.get("evidence"),
         actor_user_id=user.id,
         actor_org_id=org_id,
     )
     if not result.get("ok"):
-        raise HTTPException(422, {"message": "KPI target transition rejected (fail closed)", **result})
+        raise HTTPException(422, {
+            "message": "KPI target transition rejected (fail closed)",
+            **result,
+            "persistence": _kpi_persistence(
+                _KPI_TARGET_TABLE, persisted=False, blocker=result["persistence"].get("blocker")
+            ),
+        })
 
-    org.extra_data = result["extra_data"]
+    record = result["target"]
+    previous_status = existing.status
+    existing.status = record["status"]
+    existing.updated_at = _kpi_db_dt(record["updated_at"])
+    existing.provenance = record["provenance"]
+    db.add(KpiTargetEvent(
+        org_id=org_id,
+        target_id=existing.id,
+        event="status_transition",
+        metric_key=metric_key,
+        from_status=previous_status,
+        to_status=record["status"],
+        actor_user_id=user.id,
+        actor_org_id=org_id,
+        at=_kpi_db_dt(record["updated_at"]),
+        evidence=str(record["provenance"].get("last_transition_evidence") or ""),
+        owner=str(existing.owner or ""),
+        target_value=record.get("target_value"),
+        baseline_value=record.get("baseline_value"),
+    ))
     await db.commit()
-    await db.refresh(org)
+    await db.refresh(existing)
     return {
         "ok": True,
-        "persistence": result["persistence"],
-        "target": result["target"],
-        "history_count": result["history_count"],
+        "persistence": _kpi_persistence(_KPI_TARGET_TABLE, persisted=True),
+        "target": _kpi_target_payload(existing),
+        "history_count": await _kpi_event_count(db, org_id),
     }

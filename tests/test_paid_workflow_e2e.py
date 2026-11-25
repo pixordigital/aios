@@ -14,16 +14,24 @@ import contextlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
+from aios.config import settings
 from aios.core.agent import AgentRuntime
 from aios.db.engine import async_session
 from aios.db.models import (
     Agent,
+    AgentPack,
+    AgentPackVersion,
     Conversation,
     CrmDeal,
     PendingAction,
     UsageRecord,
+    User,
 )
+from aios.icm.contracts import manifest_fingerprint
+from aios.icm.dedupe_model import ICMSideEffect
 from aios.verticals.pet_business.workflows import LEAD_CAPTURE
 
 
@@ -84,24 +92,120 @@ def test_paid_workflow_without_icm_binding_refuses():
     assert "requires extra_data['icm']" in str(exc.value)
 
 
-def test_paid_workflow_binds_contract_and_restricts_tools():
-    agent = _agent(
-        extra_data={
-            "workflow_class": "pet_lead_capture",
-            "icm": {"stage_id": "pet_lead_capture", "stage_manifest": LEAD_CAPTURE.model_dump()},
-        }
-    )
-    runtime = AgentRuntime(agent)
+@pytest.mark.asyncio(loop_scope="function")
+async def test_paid_workflow_binds_contract_and_restricts_tools(
+    test_db_session, auth_client, test_org, test_user
+):
+    from aios.api.auth import _hash_password
 
-    assert runtime.stage is not None
-    assert runtime.stage.manifest.id == "pet_lead_capture"
-    # Denylist from the contract is enforced on top of the agent's own policy.
-    assert "execute_code" in runtime._denied_tools
-    # Allowlist is intersected: only tools both the agent and the contract allow.
-    # "__all__" means the contract allowlist becomes the whole policy; the
-    # agent's own `tools` list only narrows what the ToolEngine exposes.
-    assert runtime._allowed_tools == set(LEAD_CAPTURE.allowed_tools)
-    assert runtime._stage_timeout == LEAD_CAPTURE.timeout_seconds
+    approver = User(
+        email="paid-approver@example.com",
+        hashed_password=_hash_password("testpass123"),
+        org_id=test_org.id,
+        role="admin",
+    )
+    pack = AgentPack(
+        org_id=test_org.id,
+        pack_key="paid-approval",
+        name="Paid approval",
+        created_by=test_user.id,
+    )
+    test_db_session.add_all([approver, pack])
+    await test_db_session.flush()
+    version = AgentPackVersion(
+        pack_id=pack.id,
+        org_id=test_org.id,
+        version_semver="1.0.0",
+        manifest_json={},
+        capability_loss_json=[],
+        provenance_json={},
+        created_by=test_user.id,
+    )
+    test_db_session.add(version)
+    await test_db_session.flush()
+    approver_id, pack_id, version_id = approver.id, pack.id, version.id
+    await test_db_session.commit()
+
+    resp = await auth_client.post(
+        f"/api/agent-packs/{pack_id}/activate", json={"version_id": version_id}
+    )
+    assert resp.status_code == 200, resp.text
+    action_id = resp.json()["approval_action"]["id"]
+
+    # POST created the real pending row; bind it to a trusted tool identity
+    # before the second same-org human decides it.
+    row = await test_db_session.get(PendingAction, action_id)
+    assert row.org_id == test_org.id
+    assert row.status == "pending"
+    row.tool_name = "agent_run"
+    await test_db_session.commit()
+
+    import jwt
+
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "sub": approver_id,
+            "org": test_org.id,
+            "type": "access",
+            "iat": now,
+            "exp": now + timedelta(minutes=60),
+        },
+        "test-secret",
+        algorithm="HS256",
+    )
+    resp = await auth_client.post(
+        f"/api/approvals/{action_id}/approve",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with async_session() as sess:
+        approved = await sess.get(PendingAction, action_id)
+    assert approved.status == "approved"
+    assert approved.org_id == test_org.id
+    assert approved.decided_by == approver_id
+    assert approved.tool_name == "agent_run"
+
+    sync_engine = create_engine(settings.database_url.replace("sqlite+aiosqlite", "sqlite", 1))
+    sync_session = None
+    try:
+        ICMSideEffect.__table__.create(sync_engine, checkfirst=True)
+        sync_session = Session(sync_engine)
+        agent = _agent(
+            org_id=test_org.id,
+            extra_data={
+                "workflow_class": "pet_lead_capture",
+                "icm": {
+                    "stage_id": "pet_lead_capture",
+                    "stage_manifest": LEAD_CAPTURE.model_dump(),
+                    "icm_db_session": sync_session,
+                    "preapproved": {
+                        "approved": True,
+                        "approval_id": approved.id,
+                        "approved_fingerprint": manifest_fingerprint(LEAD_CAPTURE),
+                        "actions": ["agent_run"],
+                    },
+                },
+            },
+        )
+        runtime = AgentRuntime(agent)
+
+        assert runtime.stage is not None
+        assert runtime.stage.manifest.id == "pet_lead_capture"
+        assert runtime.stage.approval_bound is not None
+        assert runtime.stage.approval_bound["approval_id"] == approved.id
+        # Denylist from the contract is enforced on top of the agent's own policy.
+        assert "execute_code" in runtime._denied_tools
+        # Allowlist is intersected: only tools both the agent and the contract allow.
+        # "__all__" means the contract allowlist becomes the whole policy; the
+        # agent's own `tools` list only narrows what the ToolEngine exposes.
+        assert runtime._allowed_tools == set(LEAD_CAPTURE.allowed_tools)
+        assert runtime._stage_timeout == LEAD_CAPTURE.timeout_seconds
+    finally:
+        if sync_session is not None:
+            sync_session.close()
+        sync_engine.dispose()
 
 
 # ─── approval from the dashboard ───

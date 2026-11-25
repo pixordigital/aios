@@ -58,18 +58,18 @@ class HttpRequestTool(BaseTool):
         if credential_id:
             try:
                 from aios.db.engine import async_session
-                from sqlalchemy import select
-                from aios.db.models import Credential
+                from aios.core.credential_scope import resolve_scoped_credential
                 from aios.core.secrets import decrypt_secret
                 async with async_session() as sess:
-                    # Credentials are per-tenant. This lookup was scoped by id only, so
-                    # naming another org's credential_id decrypted their API token.
-                    _org = getattr(self, "_org_id", "") or ""
-                    _stmt = select(Credential).where(Credential.id == credential_id)
-                    if _org:
-                        _stmt = _stmt.where(Credential.org_id == _org)
-                    cred = (await sess.execute(_stmt)).scalar_one_or_none()
-                    if cred and cred.data_enc:
+                    cred = await resolve_scoped_credential(
+                        sess, credential_id,
+                        org_id=getattr(self, "_org_id", "") or "",
+                        agent_id=getattr(self, "_agent_id", "") or "",
+                        tool_name=self.name,
+                    )
+                    if cred is None:
+                        return {"error": "credential access denied", "status": 0}
+                    if cred.data_enc:
                         dec = decrypt_secret(cred.data_enc)
                         cdata = json.loads(dec) if dec.startswith("{") else {"value": dec}
                         ct = cred.cred_type
@@ -83,6 +83,7 @@ class HttpRequestTool(BaseTool):
                             headers["Authorization"] = "Basic " + base64.b64encode(raw.encode()).decode()
             except Exception as e:
                 logger.warning("credential resolve failed %s: %s", credential_id, e)
+                return {"error": "credential access denied", "status": 0}
         else:
             if auth_type == "bearer" and auth_value:
                 headers["Authorization"] = f"Bearer {auth_value}"

@@ -232,6 +232,13 @@ def test_schema_spec_unknown_id_fail_closed():
         validate_schema("never_registered.v1", {"anything": 1})
 
 
+def test_company_research_output_accepts_legacy_opaque_payloads():
+    from aios.icm.schemas import validate_schema
+
+    for payload in (None, "", "legacy plain text"):
+        assert validate_schema("company_research_output.v1", payload) is None
+
+
 def test_adapter_known_schema_validation_fail_closed(tmp_path: Path):
     from aios.core.workflow import WorkflowNode
     from aios.icm.adapter import ICMStageAdapter

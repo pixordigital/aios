@@ -1,5 +1,7 @@
 # Reunião Marketing + Copy — Home 178.105.181.38:8777
 
+> **HISTORICAL SIMULATION (2026-09)** — not a current offer. Prices, limits, SLAs and metrics below were hypothetical and are not enforced by current code. See docs/PRINCIPIO_VERDADE.md.
+
 **Data:** 2026-09-13 14:00 — 15:00 (60min)  
 **Participantes:**
 

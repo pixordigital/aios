@@ -17,6 +17,25 @@ from .deps import get_current_user, get_org_id, verify_org_access_async
 router = APIRouter(prefix="/api/channels", tags=["channels"])
 
 
+async def _record_cross_tenant_mismatch(db, org_id, resource, source, *, actor_id=None, actor_type=None, payload=None):
+    # Telemetry only: never alter the endpoint's status, body or auth decision.
+    try:
+        from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+        await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=str(org_id),
+            resource=resource,
+            source=source,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            payload=payload or {},
+        )
+        await db.commit()
+    except Exception:
+        logger.exception("cross-tenant telemetry failed: %s", source)
+
+
 async def _get_channel_or_404(
     db: DatabaseBackend,
     channel_id: str,
@@ -58,10 +77,22 @@ async def create_channel(
     if body.agent_id:
         ag = await db.get(Agent, body.agent_id)
         if not ag or ag.org_id != org_id:
+            if ag is not None and str(ag.org_id) != str(org_id):
+                await _record_cross_tenant_mismatch(
+                    db, org_id, ag, "channels.api.create_channel.agent_mismatch",
+                    actor_id=getattr(user, "id", None), actor_type="human",
+                    payload={"agent_id": str(body.agent_id)},
+                )
             raise HTTPException(400, "agent_id inválido")
     if body.team_id:
         t = await db.get(Team, body.team_id)
         if not t or t.org_id != org_id:
+            if t is not None and str(t.org_id) != str(org_id):
+                await _record_cross_tenant_mismatch(
+                    db, org_id, t, "channels.api.create_channel.team_mismatch",
+                    actor_id=getattr(user, "id", None), actor_type="human",
+                    payload={"team_id": str(body.team_id)},
+                )
             raise HTTPException(400, "team_id inválido")
     # config carries the provider credentials (bot tokens, API keys). It was
     # persisted verbatim, so a Slack bot token POSTed here sat in cleartext in
@@ -406,6 +437,11 @@ async def get_evolution_qrcode(
     """Get QR code for Baileys instance."""
     channel = await db.get(ChannelConnection, channel_id)
     if not channel or channel.org_id != org_id or channel.channel_type != "evolution":
+        if channel is not None and str(channel.org_id) != str(org_id):
+            await _record_cross_tenant_mismatch(
+                db, org_id, channel, "channels.api.evolution_qrcode.channel_mismatch",
+                payload={"channel_id": str(channel_id)},
+            )
         return {"ok": False, "message": "Invalid Evolution channel"}
 
     from aios.channels.manager import manager as channel_mgr

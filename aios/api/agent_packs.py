@@ -22,6 +22,7 @@ from aios.core.agent_pack import (
 from aios.core.audit import log_audit
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import AgentPack, AgentPackActivation, AgentPackVersion, PendingAction
+from aios.governance.security import record_cross_tenant_block_if_mismatch
 
 from .deps import get_current_user, verify_org_access_async
 
@@ -312,6 +313,21 @@ async def _request_activation(
     if version.pack_id != pack.id:
         raise HTTPException(422, "version does not belong to pack")
     if version.org_id != org_id or pack.org_id != org_id:
+        if org_id:
+            try:
+                evt = await record_cross_tenant_block_if_mismatch(
+                    db,
+                    org_id=org_id,
+                    resource=version if version.org_id != org_id else pack,
+                    source="agent_packs.api.request_activation",
+                    actor_type="human",
+                    actor_id=user_id,
+                    payload={"pack_id": str(pack.id), "version_id": str(version.id)},
+                )
+                if evt is not None:
+                    await db.commit()
+            except Exception:
+                pass
         raise HTTPException(404)
 
     tool_name = ACTIVATE_TOOL if action_type == "activate" else ROLLBACK_TOOL
@@ -445,6 +461,24 @@ async def apply_agent_pack_activation(db: DatabaseBackend, approval_action: Pend
 
     org_id = str(approval_action.org_id or "")
     if not org_id or activation.org_id != org_id:
+        if org_id:
+            try:
+                evt = await record_cross_tenant_block_if_mismatch(
+                    db,
+                    org_id=org_id,
+                    resource=activation,
+                    source="agent_packs.api.apply_activation.activation",
+                    actor_type="human",
+                    actor_id=str(approval_action.decided_by or approval_action.requested_by or "") or None,
+                    payload={
+                        "activation_id": str(activation.id),
+                        "approval_action_id": str(approval_action.id),
+                    },
+                )
+                if evt is not None:
+                    await db.commit()
+            except Exception:
+                pass
         return {"ok": False, "reason": "org_mismatch", "activation_id": activation.id}
 
     if activation.status in {"active", "superseded", "rolled_back"}:
@@ -462,6 +496,24 @@ async def apply_agent_pack_activation(db: DatabaseBackend, approval_action: Pend
         await db.commit()
         return {"ok": False, "reason": "pack_or_version_missing", "activation_id": activation.id}
     if pack.org_id != org_id or version.org_id != org_id or version.pack_id != pack.id:
+        if org_id and (pack.org_id != org_id or version.org_id != org_id):
+            try:
+                await record_cross_tenant_block_if_mismatch(
+                    db,
+                    org_id=org_id,
+                    resource=pack if pack.org_id != org_id else version,
+                    source="agent_packs.api.apply_activation.pack",
+                    actor_type="human",
+                    actor_id=str(approval_action.decided_by or approval_action.requested_by or "") or None,
+                    payload={
+                        "activation_id": str(activation.id),
+                        "pack_id": str(pack.id),
+                        "version_id": str(version.id),
+                        "approval_action_id": str(approval_action.id),
+                    },
+                )
+            except Exception:
+                pass
         activation.status = "failed"
         activation.error = "org_or_pack_mismatch"
         activation.decided_at = _now()

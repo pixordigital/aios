@@ -179,3 +179,65 @@ class TestChannelTenantScope:
                 and e.source == source
                 for e in rows
             ), source
+
+    async def test_cross_tenant_create_and_qrcode_refs_record_metric(self, auth_client, test_db_session, test_org, second_org):
+        from sqlalchemy import select
+
+        from aios.db.models import Agent, ChannelConnection, Team
+        from aios.governance.security import SecurityEvent
+
+        other_agent = Agent(name="Other Agent", org_id=second_org.id)
+        other_team = Team(name="Other Team", org_id=second_org.id)
+        other_channel = ChannelConnection(org_id=second_org.id, channel_type="evolution", config={}, label="Other")
+        own_agent = Agent(name="Own Agent", org_id=test_org.id)
+        test_db_session.add_all([other_agent, other_team, other_channel, own_agent])
+        await test_db_session.commit()
+        for row in (other_agent, other_team, other_channel, own_agent):
+            await test_db_session.refresh(row)
+
+        # Mismatched refs keep the exact 400 / ok:false responses.
+        resp = await auth_client.post("/api/channels", json={
+            "label": "x", "channel_type": "web", "config": {}, "agent_id": other_agent.id,
+        })
+        assert resp.status_code == 400 and resp.json()["detail"] == "agent_id inválido"
+        resp = await auth_client.post("/api/channels", json={
+            "label": "x", "channel_type": "web", "config": {}, "team_id": other_team.id,
+        })
+        assert resp.status_code == 400 and resp.json()["detail"] == "team_id inválido"
+        resp = await auth_client.get(f"/api/channels/evolution/qrcode?channel_id={other_channel.id}&instance_name=x")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": False, "message": "Invalid Evolution channel"}
+
+        stmt = select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        rows = (await test_db_session.execute(stmt)).scalars().all()
+        expected = [
+            ("channels.api.create_channel.agent_mismatch", "Agent", "agent_id", other_agent.id),
+            ("channels.api.create_channel.team_mismatch", "Team", "team_id", other_team.id),
+            ("channels.api.evolution_qrcode.channel_mismatch", "ChannelConnection", "channel_id", other_channel.id),
+        ]
+        for source, resource_type, key, resource_id in expected:
+            assert any(
+                e.org_id == test_org.id
+                and e.source == source
+                and e.payload.get("metric") == "cross_tenant_block"
+                and e.payload.get("requested_org_id") == test_org.id
+                and e.payload.get("resource_org_id") == second_org.id
+                and e.payload.get("resource_type") == resource_type
+                and e.payload.get(key) == resource_id
+                for e in rows
+            ), source
+
+        # Same-org and missing refs stay silent.
+        before = len(rows)
+        resp = await auth_client.post("/api/channels", json={
+            "label": "x", "channel_type": "web", "config": {}, "agent_id": own_agent.id,
+        })
+        assert resp.status_code == 200
+        resp = await auth_client.post("/api/channels", json={
+            "label": "x", "channel_type": "web", "config": {}, "agent_id": "missing-id",
+        })
+        assert resp.status_code == 400
+        resp = await auth_client.get("/api/channels/evolution/qrcode?channel_id=missing-id&instance_name=x")
+        assert resp.status_code == 200 and resp.json()["ok"] is False
+        after = (await test_db_session.execute(stmt)).scalars().all()
+        assert len(after) == before

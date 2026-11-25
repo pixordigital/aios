@@ -1,5 +1,7 @@
 # Simulação de Validação de Produto — AIOS Voice Agents
 
+> **HISTORICAL SIMULATION (2026-09)** — not a current offer. Prices, limits, SLAs and metrics below were hypothetical and are not enforced by current code. See docs/PRINCIPIO_VERDADE.md.
+
 **Produto:** AIOS — Plataforma self-hosted de agentes de voz (SDR/Closer/Suporte) com TTS Kokoro $0/min, PT-BR nativo, multi-tenant, white-label. Deploy 1-click Coolify.
 
 **Formato:** Mesa redonda virtual (90 min) — 10 ICPs + PM Lead + 2 observadores (Sales/Eng)

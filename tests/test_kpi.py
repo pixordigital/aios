@@ -1,5 +1,8 @@
 """Authoritative KPIs: deterministic Python calculations."""
 
+from sqlalchemy import select
+
+from aios.db.models import KpiTarget, KpiTargetEvent
 from aios.governance.kpi import (
     average_deal_size,
     conversion_rate,
@@ -231,3 +234,43 @@ def test_transition_kpi_target_status_guardrails_and_history():
     assert hist["history"][0]["event"] == "status_transition"
     assert hist["history"][0]["from_status"] == "active"
     assert hist["history"][0]["to_status"] == "retired"
+
+
+async def test_kpi_target_api_upserts_schema_row_and_appends_events(auth_client, test_db_session, test_org):
+    payload = {
+        "metric_key": "crm.win_rate",
+        "target_value": 0.7,
+        "baseline_value": 0.55,
+        "baseline_window_days": 30,
+        "evidence": "CRM export",
+        "owner": "sales-lead",
+        "balancing_metrics": ["crm.close_rate", "crm.average_deal_size"],
+    }
+    first = await auth_client.post("/api/analytics/kpi/targets", json=payload)
+    assert first.status_code == 200, first.text
+    assert first.json()["persistence"]["mode"] == "schema_tables"
+    assert first.json()["persistence"]["schema_table"] == "kpi_targets"
+
+    payload["target_value"] = 0.75
+    payload["status"] = "review"
+    second = await auth_client.post("/api/analytics/kpi/targets", json=payload)
+    assert second.status_code == 200, second.text
+    assert second.json()["persistence"]["persisted"] is True
+    assert second.json()["count"] == 1
+    assert second.json()["target"]["status"] == "review"
+
+    rows = (await test_db_session.execute(
+        select(KpiTarget).where(KpiTarget.org_id == test_org.id)
+    )).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].target_value == 0.75
+    assert rows[0].status == "review"
+    events = (await test_db_session.execute(
+        select(KpiTargetEvent).where(KpiTargetEvent.org_id == test_org.id)
+    )).scalars().all()
+    assert len(events) == 2
+    assert {e.event for e in events} == {"target_created", "target_updated"}
+    assert all(e.target_id == rows[0].id for e in events)
+
+    await test_db_session.refresh(test_org)
+    assert (test_org.extra_data or {}) == {"plan": "pro"}

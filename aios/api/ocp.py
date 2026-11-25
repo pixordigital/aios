@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from aios.api.deps import get_current_user, get_org_id, verify_org_access_async
 from aios.db.backend import DatabaseBackend, get_db_backend
-from aios.db.models import Organization
+from aios.db.models import Organization, PendingAction as DBAction
 from aios.governance.ocp import (
     APPROVAL_BRIDGE_REF_TYPES,
     APPROVAL_BRIDGE_STATUSES,
@@ -47,6 +47,34 @@ def _is_founder(user, org) -> bool:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+async def _bridge_refs_with_db_verification(db: DatabaseBackend, org_id: str, record: DecisionRecord) -> list[dict]:
+    """Disclose which bridge refs were actually checked against same-org DB rows."""
+    refs = list((record.justification or {}).get("_external_approvals") or [])
+    pending_ids = [
+        str(ref.get("ref_id") or "")
+        for ref in refs
+        if str(ref.get("ref_type") or "").strip().lower() == "pending_action"
+    ]
+    verified_ids = set()
+    if pending_ids:
+        verified_ids = {
+            str(row_id)
+            for row_id in (await db.execute(
+                select(DBAction.id).where(DBAction.org_id == org_id, DBAction.id.in_(pending_ids))
+            )).scalars().all()
+        }
+    return [
+        {
+            **ref,
+            "verified_by_db": (
+                str(ref.get("ref_type") or "").strip().lower() == "pending_action"
+                and str(ref.get("ref_id") or "") in verified_ids
+            ),
+        }
+        for ref in refs
+    ]
 
 
 def _dept(dept: Department) -> dict:
@@ -406,6 +434,8 @@ async def list_grants(
     subject_type: str = "",
     subject_id: str = "",
     department_id: str = "",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
@@ -416,8 +446,11 @@ async def list_grants(
         q = q.where(AuthorityGrant.subject_id == subject_id)
     if department_id:
         q = q.where(AuthorityGrant.department_id == department_id)
-    rows = (await db.execute(q.order_by(AuthorityGrant.created_at.desc()))).scalars().all()
-    return {"items": [_grant(g) for g in rows]}
+    rows = (await db.execute(
+        q.order_by(AuthorityGrant.created_at.desc()).limit(limit + 1).offset(offset)
+    )).scalars().all()
+    truncated = len(rows) > limit
+    return {"items": [_grant(g) for g in rows[:limit]], "truncated": truncated}
 
 
 @router.post("/authority-grants")
@@ -493,6 +526,8 @@ async def list_tasks(
     owner_id: str = "",
     overdue: bool = False,
     my_dept: str = Query("", description="department id for dept view"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: DatabaseBackend = Depends(get_db_backend),
     org_id: str = Depends(get_org_id),
 ):
@@ -515,8 +550,11 @@ async def list_tasks(
         query = query.where(
             (SharedTask.responsible_department_id == my_dept) | (SharedTask.requesting_department_id == my_dept)
         )
-    rows = (await db.execute(query.order_by(SharedTask.updated_at.desc()))).scalars().all()
-    return {"items": [_task(t) for t in rows]}
+    rows = (await db.execute(
+        query.order_by(SharedTask.updated_at.desc()).limit(limit + 1).offset(offset)
+    )).scalars().all()
+    truncated = len(rows) > limit
+    return {"items": [_task(t) for t in rows[:limit]], "truncated": truncated}
 
 
 @router.post("/tasks")
@@ -610,7 +648,7 @@ async def task_approval_links(
             "decision_id": r.id,
             "decision_status": r.status,
             "approval_bridge": approval_bridge_metadata(r),
-            "external_approvals": list((r.justification or {}).get("_external_approvals") or []),
+            "external_approvals": await _bridge_refs_with_db_verification(db, org_id, r),
         })
     total_refs = sum(len(i["external_approvals"]) for i in linked)
     return {
@@ -833,12 +871,22 @@ async def link_decision_approval(
     ref_id = (body.get("ref_id") or "").strip()
     if not ref_type or not ref_id:
         raise HTTPException(400, "ref_type and ref_id are required")
+    status = (body.get("status") or "").strip()
+    if ref_type.strip().lower() == "pending_action":
+        row = (await db.execute(select(DBAction).where(DBAction.id == ref_id))).scalar_one_or_none()
+        await verify_org_access_async(
+            org_id, row, db=db, actor_id=user.id,
+            source="api.ocp.link_decision_approval",
+            payload={"ref_id": ref_id, "resource_type": "PendingAction"},
+        )
+        row_status = (getattr(row, "status", "") or "").strip().lower()
+        status = row_status if row_status in APPROVAL_BRIDGE_STATUSES else "unknown"
     try:
         link_external_approval(
             record,
             ref_type=ref_type,
             ref_id=ref_id,
-            status=(body.get("status") or "").strip(),
+            status=status,
             note=(body.get("note") or "").strip(),
             linked_by_type="human",
             linked_by_id=user.id,
@@ -851,7 +899,9 @@ async def link_decision_approval(
                      payload={"ref_type": ref_type.strip().lower(), "ref_id": ref_id, "status": normalized_status})
     await db.commit()
     await db.refresh(record)
-    return _decision(record)
+    body = _decision(record)
+    body["external_approvals"] = await _bridge_refs_with_db_verification(db, org_id, record)
+    return body
 
 
 @router.get("/decisions/{decision_id}/approval-bridge")
@@ -867,7 +917,7 @@ async def get_decision_approval_bridge(
     """
     record = await db.get(DecisionRecord, decision_id)
     await verify_org_access_async(org_id, record, db=db, actor_id=user.id, source="api.ocp.get_decision_approval_bridge")
-    external_approvals = list((record.justification or {}).get("_external_approvals") or [])
+    external_approvals = await _bridge_refs_with_db_verification(db, org_id, record)
     return {
         "decision_id": record.id,
         "decision_status": record.status,

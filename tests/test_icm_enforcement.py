@@ -23,7 +23,7 @@ def _manifest(**overrides):
     return StageManifest.model_validate(data)
 
 
-def _approved_session(tmp_path, *, approval_id="appr-42", org_id="o", status="approved", decided_by="founder-1"):
+def _approved_session(tmp_path, *, approval_id="appr-42", org_id="o", status="approved", decided_by="founder-1", tool_name="company_lookup", tool_args=None):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
@@ -38,8 +38,8 @@ def _approved_session(tmp_path, *, approval_id="appr-42", org_id="o", status="ap
             org_id=org_id,
             agent_id="agent-1",
             conversation_id="conv-1",
-            tool_name="company_lookup",
-            tool_args={},
+            tool_name=tool_name,
+            tool_args={} if tool_args is None else tool_args,
             status=status,
             decided_by=decided_by,
         )
@@ -159,6 +159,117 @@ def test_adapter_injects_explicit_preapproved_marker(tmp_path):
     assert shared["icm_approval"]["approval_id"] == "appr-42"
     assert shared["icm_approval"]["approved_fingerprint"] == fp
     assert adapter.approval_bound["approval_id"] == "appr-42"
+    session.close()
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["_requested_by", "requested_by", "created_by", "actor_user_id", "human_id"],
+)
+def test_adapter_rejects_self_approved_db_row(tmp_path, key):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    session = _approved_session(
+        tmp_path,
+        approval_id="appr-self",
+        decided_by="user-1",
+        tool_args={key: "  user-1  "},
+    )
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root="data",
+        org_id="o",
+        run_id="r",
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-self",
+            "approved_fingerprint": fp,
+            "actions": ["company_lookup"],
+        },
+        db_session=session,
+    )
+    shared = {}
+    with pytest.raises(PermissionError, match="requires approval"):
+        adapter.enforce_execution(shared, action="company_lookup")
+    assert "icm_approval" not in shared
+    assert adapter.approval_bound is None
+    session.close()
+
+
+def test_adapter_accepts_db_row_approved_by_different_user(tmp_path):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    session = _approved_session(
+        tmp_path,
+        approval_id="appr-other",
+        tool_args={"requested_by": "user-1"},
+    )
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root="data",
+        org_id="o",
+        run_id="r",
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-other",
+            "approved_fingerprint": fp,
+            "actions": ["company_lookup"],
+        },
+        db_session=session,
+    )
+    shared = {}
+    adapter.enforce_execution(shared, action="company_lookup")
+    assert shared["icm_approval"]["source"] == "icm_preapproved"
+    assert shared["icm_approval"]["approval_id"] == "appr-other"
+    session.close()
+
+
+@pytest.mark.parametrize(
+    ("row_tool", "accepted"),
+    [
+        ("routine_side_effect_approve", False),
+        ("crm_update_deal", False),
+        ("company_lookup", True),
+    ],
+)
+def test_adapter_binds_approval_row_to_trusted_tool(tmp_path, row_tool, accepted):
+    from aios.core.workflow import WorkflowNode
+    from aios.icm.adapter import ICMStageAdapter
+
+    manifest = _manifest(approval_required=True, id="needs_approval")
+    fp = manifest_fingerprint(manifest)
+    node = WorkflowNode(id="n1", tool_name="company_lookup", stage_id="needs_approval", stage_manifest=manifest)
+    session = _approved_session(tmp_path, approval_id="appr-tool-binding", tool_name=row_tool)
+    adapter = ICMStageAdapter(
+        node=node,
+        storage_root="data",
+        org_id="o",
+        run_id="r",
+        preapproved={
+            "approved": True,
+            "approval_id": "appr-tool-binding",
+            "approved_fingerprint": fp,
+            "actions": ["company_lookup"],
+        },
+        db_session=session,
+    )
+    shared = {}
+    if accepted:
+        adapter.enforce_execution(shared, action="company_lookup")
+        assert shared["icm_approval"]["approval_id"] == "appr-tool-binding"
+    else:
+        with pytest.raises(PermissionError, match="requires approval"):
+            adapter.enforce_execution(shared, action="company_lookup")
+        assert "icm_approval" not in shared
+        assert adapter.approval_bound is None
     session.close()
 
 

@@ -49,6 +49,25 @@ async def _require_tool_admin(db: DatabaseBackend, user, org_id: str) -> None:
             return
     except Exception:
         pass
+    if db is not None and org_id:
+        source = "api.tools.require_tool_admin"
+        try:
+            from aios.governance.security import record_security_event
+
+            event = await record_security_event(
+                db,
+                org_id=str(org_id),
+                source=source,
+                event_type="security.authz.denied",
+                severity="medium",
+                actor_type="human",
+                actor_id=str(getattr(user, "id", "") or "") or None,
+                payload={"reason": "tool_admin_required", "path_source": source},
+            )
+            if event is not None:
+                await db.commit()
+        except Exception:
+            logging.getLogger(__name__).debug("authz denied metric skipped", exc_info=True)
     raise HTTPException(403, "admin, owner, or founder role required for dynamic/code tools")
 
 
@@ -146,7 +165,9 @@ async def _tool_actor_context(db: DatabaseBackend, user) -> dict:
         from aios.tools.rag_search import resolve_granted_record_ids
 
         granted_record_ids = await resolve_granted_record_ids(
-            str(getattr(user, "org_id", "") or ""), str(getattr(user, "id", "") or "")
+            str(getattr(user, "org_id", "") or ""),
+            str(getattr(user, "id", "") or ""),
+            db=db,
         )
     except Exception:
         granted_record_ids = set()

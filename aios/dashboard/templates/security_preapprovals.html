@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4">
+  <div>
+    <h1>Pré-aprovações armazenadas</h1>
+    <p class="text-sm text-secondary">Registro bruto da política de segurança. Esta página apenas lê o que está gravado; não decide nem aprova ações.</p>
+  </div>
+  <a href="/dashboard/approvals" class="btn btn-sm btn-ghost">Voltar às aprovações</a>
+</div>
+
+<div class="card" style="margin-bottom:0.75rem">
+  <p class="text-sm"><b>preapproved_actions</b></p>
+  <pre style="font-family:var(--mono);font-size:0.6875rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;white-space:pre-wrap;word-break:break-word">{{ preapproved_actions | tojson(indent=2) }}</pre>
+</div>
+
+<div class="card" style="margin-bottom:0.75rem">
+  <p class="text-sm"><b>approvals</b></p>
+  <pre style="font-family:var(--mono);font-size:0.6875rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;white-space:pre-wrap;word-break:break-word">{{ approvals | tojson(indent=2) }}</pre>
+</div>
+
+<p class="text-xs text-tertiary">Armazenamento: <code>{{ storage }}</code></p>
+{% if updated_at or updated_by %}
+<p class="text-xs text-tertiary">
+  {% if updated_at %}atualizado em {{ updated_at }}{% endif %}{% if updated_at and updated_by %} · {% endif %}{% if updated_by %}atualizado por {{ updated_by }}{% endif %}
+</p>
+{% endif %}
+
+<script>
+window.aiosI18n.register({
+  'Pré-aprovações armazenadas': 'Preaprobaciones almacenadas',
+  'Registro bruto da política de segurança. Esta página apenas lê o que está gravado; não decide nem aprova ações.': 'Registro sin procesar de la política de seguridad. Esta página solo lee lo grabado; no decide ni aprueba acciones.',
+  'Voltar às aprovações': 'Volver a las aprobaciones',
+  'Armazenamento:': 'Almacenamiento:',
+  'atualizado em': 'actualizado el',
+  '·': '·',
+  'atualizado por': 'actualizado por'
+});
+</script>
+{% endblock %}

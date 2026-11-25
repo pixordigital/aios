@@ -58,6 +58,7 @@
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">Economia líquida</div><div style="font-weight:700;color:var(--green)">R$ {{ "%.0f"|format(liquido_brl) }}</div><div style="font-size:0.6rem;color:var(--text-tertiary)">*câmbio ref R${{brl_per_usd}}/US$</div></div>
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;text-align:center"><div style="font-size:0.6875rem;color:var(--text-tertiary)">ROI</div><div style="font-weight:700">{{ ("%.0f"|format(roi_pct) ~ "x") if roi_pct is not none else "—" }}</div></div>
     </div>
+    {#- DISABLED TEMPLATE / not-current-offer — rota desativada; R$9k/mês e 70% são ilustrativos, não oferta atual. Ver docs/PRINCIPIO_VERDADE.md. -#}
     <div style="font-size:0.6875rem;color:var(--text-tertiary);margin-top:0.5rem">Cálculo: {{monthly.total_messages}} msgs × 3min × R$25/h = R$ {{ "%.0f"|format(economia) }} — custo AIOS R$ {{"%.2f"|format(monthly.total_cost*5.5)}}. Com 3 atendentes (R$9k/mês) você já economiza 70%.</div>
 </div>
 

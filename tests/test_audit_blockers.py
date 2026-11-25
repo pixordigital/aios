@@ -21,6 +21,9 @@ class TestPublicClaimsRegistry:
     _VOICE_MIN_CLAIM = re.compile(
         r"\d[\d.k]*(?:\s*mil)?\s*min(?:ut[oa]s?)?(?:\s+de)?\s*voz", re.I
     )
+    _CASE_RESULT_CLAIM = re.compile(
+        r"(?:Case|Caso):[^\n]*(?:\d[\d.]*\s*%|R\$\s*\d)", re.I
+    )
 
     def _registry(self) -> dict[str, tuple[str, str]]:
         text = (self.ROOT / "docs/PRINCIPIO_VERDADE.md").read_text()
@@ -61,21 +64,79 @@ class TestPublicClaimsRegistry:
             assert snippet.strip("`,") in body, source
 
     def test_banned_claims_are_absent_from_public_site(self):
-        html = (self.ROOT / "website/index.html").read_text()
         banned = [c for c, (_, kind) in self._registry().items() if kind == "banned"]
         assert banned, "empty banned registry"
         # Prove the detector matches the registered claim and its variants;
         # otherwise this test passes vacuously.
         for sample in banned + ["10 min voz", "10 minutos de voz", "5 min de voz"]:
             assert self._VOICE_MIN_CLAIM.search(sample), f"detector misses {sample!r}"
-        found = self._VOICE_MIN_CLAIM.findall(html)
-        assert not found, f"banned voice-minute claim on site: {found}"
+        paths = sorted((self.ROOT / "website").glob("*.html")) + sorted(
+            (self.ROOT / "aios/dashboard/templates").glob("*.html")
+        )
+        offenders = []
+        for path in paths:
+            found = self._VOICE_MIN_CLAIM.findall(path.read_text())
+            if found:
+                offenders.append(f"{path.relative_to(self.ROOT)}: {found}")
+        assert not offenders, f"NEEDS_DECISION: banned voice-minute claim: {offenders}"
+
+    def test_banned_case_results_are_absent_from_proposal(self):
+        html = (self.ROOT / "aios/dashboard/templates/proposal.html").read_text()
+        # Prove the detector matches both banned result shapes.
+        for sample in (
+            "Case: Clínica São Lucas 30% menos falta",
+            "Case: Loja Fast R$18k/mês",
+            "Caso: Loja Fast R$18k/mes",
+        ):
+            assert self._CASE_RESULT_CLAIM.search(sample), f"detector misses {sample!r}"
+        found = self._CASE_RESULT_CLAIM.findall(html)
+        assert not found, f"banned case-result claim in proposal: {found}"
 
     def test_banned_claims_stay_banned(self):
         registry = self._registry()
         assert registry["10k min voz"][1] == "banned"
         from aios.config import PLANS
         assert "voice_minutes" not in str(PLANS)
+
+
+class TestIllustrativeClaimLabels:
+    """Frozen labels + allowlist: no new offer/result claim slips into examples."""
+
+    ROOT = Path(__file__).resolve().parents[1]
+    _FILES = {
+        "docs/PROMPT_TAGS_ESTRUTURA.md": (
+            "ILLUSTRATIVE",
+            {"Starter R$249", "Pro R$499"},
+        ),
+        "aios/dashboard/templates/billing.html": (
+            "DISABLED TEMPLATE",
+            {"R$9k/mês", "economiza 70%", "ahorras el 70%"},
+        ),
+    }
+    _PRICE = re.compile(
+        r"(?:Starter|Pro)\b[^\n]{0,30}?R\$\s*\d+(?:[.,]\d+)?"
+        r"|R\$\s*\d+(?:[.,]\d+)?[kK]?/mês"
+    )
+    _RESULT = re.compile(
+        r"(?:economiza|economias?|ahorras?)\s+(?:el\s+)?\d[\d,.]*\s*%", re.I
+    )
+
+    def test_labels_and_no_new_claim(self):
+        # Prove detectors match the frozen claims, so the allowlist is not vacuous.
+        for pattern, sample in (
+            (self._PRICE, "Starter R$249"),
+            (self._PRICE, "R$9k/mês"),
+            (self._RESULT, "você já economiza 70%"),
+        ):
+            assert pattern.search(sample), f"detector misses {sample!r}"
+        for rel, (label, allowed) in self._FILES.items():
+            text = (self.ROOT / rel).read_text(encoding="utf-8")
+            assert label in text, f"{rel}: missing {label}"
+            assert "not-current-offer" in text, f"{rel}: missing not-current-offer"
+            assert "docs/PRINCIPIO_VERDADE.md" in text, f"{rel}: missing truth principle"
+            found = set(self._PRICE.findall(text)) | set(self._RESULT.findall(text))
+            new = sorted(found - allowed)
+            assert not new, f"{rel}: new unlabelled pricing/result claim: {new}"
 
 
 class TestAgentRuntimeIsNotAmputated:
@@ -567,7 +628,8 @@ class TestSchedulerBookkeeping:
         n = await scheduler._persist_instance("a1", "", "c1", "queued")
         assert n is None
 
-    def test_capacity_refusal_leaves_the_process_queued(self):
+    @pytest.mark.asyncio
+    async def test_capacity_refusal_leaves_the_process_queued(self):
         from aios.core.scheduler import AgentScheduler, AgentState
 
         s = AgentScheduler()

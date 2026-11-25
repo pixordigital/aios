@@ -43,6 +43,9 @@
   {% set total = knowledge_total|default(records|length)|int %}
   {% set page_offset = knowledge_offset|default(0)|int %}
   {% set page_limit = knowledge_limit|default(50)|int %}
+  {% if knowledge_truncated %}
+  <div class="card mb-3" style="border-color:var(--amber);color:var(--amber)"><span>Total parcial:</span> {{ total }} <span>registros visíveis. Varredura limitada a</span> {{ knowledge_scan_limit|default(2000)|int }} <span>registros; total real desconhecido.</span></div>
+  {% endif %}
   <h2>Registros ({{ total }})</h2>
   <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.5rem">
     {% for item in records %}
@@ -119,6 +122,9 @@ window.aiosI18n.register({
   'Registro promovido a fato.': 'Registro promovido a hecho.',
   'Promoção bloqueada: confirmação humana obrigatória.': 'Promoción bloqueada: confirmación humana obligatoria.',
   'Registro não encontrado.': 'Registro no encontrado.',
+  'Total parcial:': 'Total parcial:',
+  'registros visíveis. Varredura limitada a': 'registros visibles. Escaneo limitado a',
+  'registros; total real desconhecido.': 'registros; total real desconocido.',
   'Ingerir documento governado': 'Ingestar documento gobernado',
   'Provenance obrigatória. Chunks viram KnowledgeRecords; não viram Memory/fato automaticamente.': 'Provenance obligatoria. Los chunks se convierten en KnowledgeRecords; no se convierten en Memory/hecho automáticamente.',
   'Título (obrigatório)': 'Título (obligatorio)',

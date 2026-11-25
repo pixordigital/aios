@@ -1,6 +1,7 @@
 """AI SOC API: security incidents, governed response gateway, metrics, events."""
 
 from datetime import datetime, timedelta, timezone
+import json
 import logging
 from typing import Any
 
@@ -12,13 +13,12 @@ from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization
 from aios.governance.security import (
     RESPONSE_AUTHORITY,
-    SECURITY_METRIC_EVENT_TYPES,
     SecurityEvent,
     SecurityIncident,
     apply_response_gateway,
-    emit_security_metric_event,
     incident_metrics,
     is_founder_authority,
+    record_false_positive,
     record_security_event,
     require_privacy_handoff,
 )
@@ -28,6 +28,9 @@ log = logging.getLogger("aios.security.api")
 
 VALID_STATUSES = {"detected", "investigating", "contained", "eradicated", "recovered", "closed"}
 VALID_SEVERITIES = {"info", "low", "medium", "high", "critical"}
+FALSE_POSITIVE_REASON_MAX = 500
+SECURITY_INGEST_SOURCE = "security.api.ingest"
+SECURITY_INGEST_PAYLOAD_MAX_CHARS = 4096
 
 
 def _now() -> datetime:
@@ -256,6 +259,45 @@ async def respond(
     }
 
 
+@router.post("/incidents/{incident_id}/false-positive")
+async def record_incident_false_positive(
+    incident_id: str,
+    body: dict,
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+    user=Depends(get_current_user),
+):
+    actor_id = str(getattr(user, "id", "") or "") or None
+    incident = await _get_incident(
+        db,
+        org_id,
+        incident_id,
+        actor_type="human",
+        actor_id=actor_id,
+        source="security.api.false_positive",
+    )
+    reason = str(body.get("reason") or "").strip()
+    if not reason or len(reason) > FALSE_POSITIVE_REASON_MAX:
+        raise HTTPException(400, f"reason required and must be <= {FALSE_POSITIVE_REASON_MAX} chars")
+
+    org = await db.get(Organization, org_id)
+    await _require_founder(user, org, db=db, org_id=org_id, source="security.api.false_positive")
+
+    evt = await record_false_positive(
+        db,
+        org_id=org_id,
+        source="security.api.false_positive",
+        incident_id=incident.id,
+        actor_type="human",
+        actor_id=actor_id,
+        payload={"reason": reason},
+    )
+    if evt is None:
+        raise HTTPException(503, "security event storage unavailable")
+    await db.commit()
+    return {"id": evt.id, "event_type": evt.event_type, "metric": "false_positive", "stored": True}
+
+
 @router.post("/incidents/{incident_id}/close")
 async def close_incident(
     incident_id: str,
@@ -338,7 +380,11 @@ async def metrics(
     try:
         event_stmt = (
             select(SecurityEvent.event_type, SecurityEvent.payload)
-            .where(SecurityEvent.org_id == org_id, SecurityEvent.created_at >= since)
+            .where(
+                SecurityEvent.org_id == org_id,
+                SecurityEvent.created_at >= since,
+                SecurityEvent.source != SECURITY_INGEST_SOURCE,
+            )
             .order_by(SecurityEvent.created_at.desc())
             .limit(SECURITY_METRICS_MAX_EVENTS + 1)
         )
@@ -404,10 +450,10 @@ async def ingest_event(
     org_id: str = Depends(get_org_id),
     user=Depends(get_current_user),
 ):
-    metric = str(body.get("metric") or "").strip()
-    event_type = str(body.get("event_type") or "").strip()
-    if not event_type and not metric:
-        raise HTTPException(400, "event_type or metric required")
+    raw_event_type = body.get("event_type")
+    if not isinstance(raw_event_type, str) or not raw_event_type.strip():
+        raise HTTPException(400, "event_type required")
+    event_type = raw_event_type.strip()
     severity = str(body.get("severity") or "info")
     if severity not in VALID_SEVERITIES:
         raise HTTPException(400, f"invalid severity: {severity}")
@@ -429,37 +475,23 @@ async def ingest_event(
                 await db.commit()
             raise
     payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
-    metric = str(body.get("metric") or "").strip()
-    if metric:
-        if metric not in SECURITY_METRIC_EVENT_TYPES:
-            raise HTTPException(400, f"invalid metric: {metric}")
-        evt = await emit_security_metric_event(
-            db,
-            org_id=org_id,
-            metric=metric,
-            source=str(body.get("source") or "security.api.ingest")[:80],
-            severity=severity,
-            incident_id=str(incident_id) if incident_id else None,
-            actor_type="human",
-            actor_id=getattr(user, "id", None),
-            payload=payload,
-        )
-    else:
-        evt = await record_security_event(
-            db,
-            org_id=org_id,
-            source=str(body.get("source") or "security.api.ingest")[:80],
-            event_type=event_type[:80],
-            severity=severity,
-            incident_id=str(incident_id) if incident_id else None,
-            actor_type="human",
-            actor_id=getattr(user, "id", None),
-            payload=payload,
-        )
+    if len(json.dumps(payload, default=str)) > SECURITY_INGEST_PAYLOAD_MAX_CHARS:
+        raise HTTPException(400, "payload too large")
+    evt = await record_security_event(
+        db,
+        org_id=org_id,
+        source=SECURITY_INGEST_SOURCE,
+        event_type=event_type[:80],
+        severity=severity,
+        incident_id=str(incident_id) if incident_id else None,
+        actor_type="human",
+        actor_id=getattr(user, "id", None),
+        payload=payload,
+    )
     if evt is None:
         raise HTTPException(503, "security event storage unavailable")
     await db.commit()
-    return {"id": evt.id, "event_type": evt.event_type, "metric": metric or None, "stored": True}
+    return {"id": evt.id, "event_type": evt.event_type, "metric": None, "stored": True}
 
 
 def _preapproval_payload(org: Organization | None) -> dict[str, Any]:

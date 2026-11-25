@@ -1,29 +1,24 @@
-# CRM Schema Gaps (2026-11-22)
+# CRM Schema / Truth Notes (updated 2026-11-25)
 
-Track: CRM2 intelligence/handoff/360. No schema migrations applied in this track.
+Track: CRM2 intelligence/handoff/360. No new migration and no customer-data rewrite in this fix. Typed nullable deal links already landed in `alembic/versions/schema_gaps_creds_crm_kpi.py`; model columns are `aios/db/models.py:742-747`.
 
-## Gap: deal <-> account/contact has no schema FK
+## Deal <-> account/contact: typed nullable FKs exist (no FK gap)
 
 **Current state**
-- `crm_deals` has no `account_id` / `contact_id` FK columns.
-- `crm_accounts`, `crm_contacts`, `crm_interactions` exist (tables/migrations present), but deal linkage is inferred at read time.
-- Inference lives in `aios/core/crm_intelligence.py`: `find_account_for_deal`, `find_contact_for_deal`.
-- Heuristic order:
-  - Account: `deal.extra_data.account_id` (legacy pointer) -> `extra_data.cnpj` exact -> `lead_name` exact name match.
-  - Contact: `deal.extra_data.contact_id` (legacy pointer) -> `lead_email` exact -> normalized phone digit match scan.
-- API/UI label these as heuristic/inferred; they are not authoritative relational integrity.
+- `crm_deals.account_id` and `crm_deals.contact_id` are typed, indexed, nullable FKs to `crm_accounts.id` / `crm_contacts.id` with `ON DELETE SET NULL`.
+- Migration backfill copied only explicit same-org `extra_data.account_id` / `extra_data.contact_id` pointers. It did not guess from name/phone and did not rewrite ambiguous rows.
+- Legacy `extra_data` mirrors remain readable for backward compatibility. New writes should use typed columns; `DEAL_EXTRA_KEYS` / `_KNOWN_EXTRA_KEYS` still block ad-hoc growth.
+- Readers prefer the typed FK. Heuristic fallback (CNPJ / `lead_name` for account, email / normalized phone for contact) runs only when the typed FK is NULL. An invalid or cross-org typed FK fails closed: no heuristic fallback, no authoritative link.
+- Payloads expose link `kind` / `source` / `authoritative` so typed links are distinguishable from heuristics.
 
-**Why it matters**
-- No DB-enforced integrity or cascade semantics for deal ownership.
-- Name/phone heuristics can mislink; ambiguity is silent without provenance.
-- Duplicate/merge/account merges need deterministic identity.
+**Remaining risk**
+- Legacy mirrors can drift from typed columns; no automatic reconciliation here.
+- Unlinked rows still depend on heuristics; ambiguous matches stay unlabeled as authoritative.
 
-## Proposed FK/migration shape (NOT applied)
-
-Minimal safe schema evolution, future migration:
+## Landed FK shape (already migrated; not re-applied)
 
 ```sql
--- crm_deals: add nullable FKs first (backfill, then tighten policy separately)
+-- crm_deals: nullable FKs, backfill done separately, old rows left untouched
 ALTER TABLE crm_deals ADD COLUMN account_id VARCHAR(36) NULL;
 ALTER TABLE crm_deals ADD COLUMN contact_id VARCHAR(36) NULL;
 
@@ -39,18 +34,10 @@ CREATE INDEX ix_crm_deals_account_id ON crm_deals(account_id);
 CREATE INDEX ix_crm_deals_contact_id ON crm_deals(contact_id);
 ```
 
-Backfill plan (separate data migration/script, audited):
-1. Resolve by explicit `extra_data.account_id/contact_id` only when row exists in same org.
-2. Resolve by strong identifiers: account CNPJ exact; contact email exact.
-3. Do **not** auto-backfill ambiguous name/phone matches; emit report for human/ops review.
-4. Write `CrmDealVersion`/audit record for each backfill with provenance `{"source":"backfill","rule":...}`.
-5. After backfill confidence, keep heuristic read fallback only for legacy/unlinked rows; expose `link_source`.
-
-Model/API follow-up after migration:
-- Add `CrmDeal.account_id/contact_id` mapped columns + relationships.
-- Prefer FK over heuristic; heuristic fallback read-only, explicitly labeled.
-- Block new ad-hoc `extra_data.account_id/contact_id` writes; write typed columns.
-- Add tenant-scoped integrity tests and ambiguity-report tests.
+Backfill already applied (in the migration above):
+1. Explicit `extra_data.account_id/contact_id` only when the target row exists in the same org.
+2. No auto-backfill from CNPJ/name/email/phone guesses; those remain read-time heuristics for unlinked rows only.
+3. Ambiguous rows stay NULL; human/ops review is still the only safe way to resolve them.
 
 ## Legacy extra_data flows
 
@@ -58,37 +45,37 @@ Model/API follow-up after migration:
 - `CrmDeal.extra_data` is legacy/tactical. `DEAL_EXTRA_KEYS` + `_KNOWN_EXTRA_KEYS` guard ad-hoc growth.
 - `crm2.create_deal` blocks unknown extra_data keys.
 - `crm_handoff.record_interaction` still writes legacy mirrors: `sdr_history`, `last_contacted_at`, `last_summary`, `sdr_touched` for compatibility/fast reads.
-- `InteractionEvent` is canonical interaction timeline; extra_data mirrors are not authoritative.
+- `InteractionEvent` is the canonical interaction timeline; extra_data mirrors are not authoritative.
 
 **Gap**
-- Dual-write legacy mirrors can drift from canonical timeline.
-- No schema-level separation of tactical extra_data vs canonical relations.
+- Dual-write legacy mirrors can drift. Typed columns now separate canonical links; legacy mirrors remain only for backward compatibility.
 
 **Safe direction (no migration in this track)**
-- Avoid adding new extra_data writes. Keep existing mirrors only where backward compat requires.
+- Avoid new extra_data writes. Keep existing mirrors only where backward compat requires.
 - Label payloads: `legacy_extra_data_note`, `legacy_extra_keys`.
 - Future: migrate readers to InteractionEvent/typed fields, then remove mirrors behind feature flag.
 
 ## Command center / CS workspace / Revenue Intelligence
 
 **Current state**
-- `GET /api/crm/360/overview` exposes minimal read model: deals/accounts/contacts/interactions counts + recent items.
-- Explicitly unavailable: `cs_workspace=false`, `command_center=false`, `revenue_intelligence="minimal_heuristic_only"`.
-- Prioritization is deterministic heuristic, not validated predictive.
+- `GET /api/crm/360/overview` reports exact org-scoped `COUNT(*)` totals for deals/accounts/contacts/interactions. `recent_*` lists are samples bounded by `limit`; they are not the counts.
+- `month_progress` is reused from `aios/core/sales_goals.py`: deterministic `closed_won` sum from `crm_deals` for the month, with target/status. Payload labels `source: "crm_deals.closed_won"` and states it is not finance/recognized revenue; no LLM.
+- Explicitly unavailable: `cs_workspace=false`, `command_center=false`, `revenue_intelligence="minimal_heuristic_only"`, `validated_predictive_revenue_intelligence=false`.
 
 **Gap**
-- No dedicated command-center models/UI, no CS workspace objects, no validated predictive revenue model.
-- 360 is read-only composition over existing CRM tables; no materialized/optimized 360 read model.
+- No dedicated command-center models/UI, no CS workspace objects, no validated predictive revenue model, no finance-recognition feed.
+- 360 is a read-only composition over existing CRM tables; no materialized/optimized 360 read model.
 
 **Proposed shape (future, separate track)**
 - Command center: dedicated read model/projections (queue, SLA, owner load, risk), not ad-hoc joins in request path.
 - CS workspace: account health timeline, playbooks, commitments, renewals; requires new models + UI.
-- Revenue intelligence: start deterministic + auditable features; only add predictive model with labeled dataset, offline eval, calibration, and explicit `validated_predictive=true` gate.
+- Revenue intelligence: keep deterministic + auditable; add a predictive model only with labeled dataset, offline eval, calibration, and explicit `validated_predictive=true` gate. Finance/recognized revenue needs a separate finance-owned source and policy decision.
 
-## Minimal safe wiring done in this track
+## Minimal safe wiring done in this fix
 
-- No schema migrations.
-- No fake FK. Heuristic links remain heuristic.
-- API payloads expose explicit link provenance/heuristic labels.
-- Read-only 360 endpoints covered by tests for labels and tenant scope.
+- No schema migration, no customer-data rewrite, no stage/commit/deploy.
+- Typed FKs preferred; heuristic links remain heuristic and only cover unlinked rows.
+- Overview counts exact and org-scoped; recent lists explicitly sampled.
+- Month figure deterministic from `crm_deals.closed_won`, labeled as not finance/recognized revenue.
+- Read-only 360 endpoints covered by tests for labels, exact counts, tenant scope, and closed-won sum parity with `month_progress`/SQL.
 - Extra-data writes not expanded; legacy mirrors remain only where already present.

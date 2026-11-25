@@ -1,5 +1,7 @@
 # Simulação ICP — AIOS Voz & Dados Multi-canal
 
+> **HISTORICAL SIMULATION (2026-09)** — not a current offer. Prices, limits, SLAs and metrics below were hypothetical and are not enforced by current code. See docs/PRINCIPIO_VERDADE.md.
+
 **Produto:** AIOS — `Voz (SDR/Closer/Suporte)` + `Dados (Analyst/Scientist)` • `Multi-canal nativo` (WhatsApp hero via Evolution API Cloud API) • `TTS Kokoro $0/min` • `STT Whisper self-hosted` • `SQL+python_sandbox` • PT-BR nativo `pm_alex` • Multi-tenant + white-label • Deploy 1-click Coolify
 
 **Mesa:** PM Lead + 12 ICPs reais + Sales + Eng (observadores)

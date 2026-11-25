@@ -1066,6 +1066,7 @@ async def test_agent_update_merges_extra_data_instead_of_replacing(test_session,
         AgentUpdate(extra_data={"event_subscriptions": ["crm.*"]}),
         SQLAlchemyBackend(test_session),
         test_org.id,
+        user=type("U", (), {"id": "u1"})(),
     )
 
     extra = (await test_session.get(AgentModel, agent.id)).extra_data

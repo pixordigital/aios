@@ -37,7 +37,9 @@ async def _tool_actor_context(db: DatabaseBackend, user) -> dict:
         from aios.tools.rag_search import resolve_granted_record_ids
 
         granted_record_ids = await resolve_granted_record_ids(
-            str(getattr(user, "org_id", "") or ""), str(getattr(user, "id", "") or "")
+            str(getattr(user, "org_id", "") or ""),
+            str(getattr(user, "id", "") or ""),
+            db=db,
         )
     except Exception:
         granted_record_ids = set()

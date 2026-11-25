@@ -1,6 +1,6 @@
 # Security Preapprovals API
 
-Minimal contract for governed response preapprovals. No UI; API-only.
+Minimal contract for governed response preapprovals. Founder UI is read-only at `/dashboard/security/preapprovals`; writes via API/config only. Full approval workflow not implemented.
 
 ## Authz
 
@@ -11,7 +11,7 @@ Minimal contract for governed response preapprovals. No UI; API-only.
 ## Storage
 
 - Stored in `org.extra_data.security_policy`.
-- Shared app DB record; **not independent/append-only storage**.
+- Shared app DB storage only; **no independent/append-only sink**.
 - Shape:
   - `preapproved_actions: string[]` - action names from `RESPONSE_AUTHORITY`.
   - `approvals: object[]` - records like `{id?, action, approved, ticket?, note?}`.

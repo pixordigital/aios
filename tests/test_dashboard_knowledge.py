@@ -214,3 +214,40 @@ async def test_simple_knowledge_warns_not_auto_governed(async_client, test_org, 
     r = await async_client.get("/dashboard/simple/knowledge")
     assert r.status_code == 200
     assert "não viram conhecimento governado automaticamente" in r.text.lower()
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_dashboard_knowledge_truncated_total_is_partial(
+    async_client, test_session, test_org, second_org, test_user, monkeypatch
+):
+    import aios.api.knowledge as knowledge_api
+
+    monkeypatch.setattr(knowledge_api, "KNOWLEDGE_RECORD_SCAN_LIMIT", 2)
+    base = datetime(2026, 1, 1)
+    for index in range(3):
+        test_session.add(KnowledgeRecord(
+            org_id=test_org.id, title=f"Scan {chr(65 + index)}", content="alpha", kind="statement",
+            classification="internal", source_type="meeting", source_id=f"s{index}",
+            provenance={"src": f"s{index}"}, search_text="alpha",
+            created_at=base + timedelta(days=index),
+        ))
+    # Newest foreign record: tenant scope must still exclude it from the scan.
+    test_session.add(KnowledgeRecord(
+        org_id=second_org.id, title="Foreign Scan", content="secret", kind="statement",
+        classification="restricted", source_type="meeting", source_id="foreign",
+        provenance={"src": "foreign"}, search_text="secret",
+        created_at=base + timedelta(days=9),
+    ))
+    await test_session.commit()
+    async_client.cookies.set("aios_token", _cookie_for(test_user))
+
+    page = await async_client.get("/dashboard/knowledge")
+    assert page.status_code == 200, page.text
+    assert "Total parcial:" in page.text
+    assert "Varredura limitada a" in page.text
+    assert "total real desconhecido" in page.text
+    assert "Registros (2)" in page.text
+    assert "Scan C" in page.text
+    assert "Scan B" in page.text
+    assert "Scan A" not in page.text
+    assert "Foreign Scan" not in page.text

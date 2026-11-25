@@ -79,6 +79,34 @@ class TestFunnelPages:
         assert f.extra_data["stages"] == ["prospection", "qualification", "proposal",
                                           "negotiation", "closed_won"]
 
+    async def test_page_aggregates_pipeline_deals_for_page_and_totals(
+        self, async_client: AsyncClient, test_session, test_org, test_user, second_org
+    ):
+        from aios.db.models import CrmDeal
+        f_ent = await _funnel(test_session, test_org.id, name="Enterprise", pipeline="ent")
+        f_default = await _funnel(test_session, test_org.id, name="Padrao", pipeline="default")
+        test_session.add_all([
+            CrmDeal(org_id=test_org.id, lead_name="E1", stage="closed_won", value=100, pipeline="ent"),
+            CrmDeal(org_id=test_org.id, lead_name="E2", stage="closed_won", value=200, pipeline="ent"),
+            CrmDeal(org_id=test_org.id, lead_name="E3", stage="closed_lost", value=50, pipeline="ent"),
+            CrmDeal(org_id=test_org.id, lead_name="D1", stage="closed_won", value=75, pipeline=""),
+            CrmDeal(org_id=test_org.id, lead_name="D2", stage="closed_lost", value=25, pipeline=None),
+            CrmDeal(org_id=test_org.id, lead_name="D3", stage="prospection", value=100, pipeline="default"),
+            CrmDeal(org_id=second_org.id, lead_name="Alien", stage="closed_won", value=9999, pipeline="ent"),
+        ])
+        await test_session.commit()
+        async_client.cookies.set("aios_token", _cookie(test_user))
+        r = await async_client.get("/dashboard/funnels")
+        assert r.status_code == 200
+
+        ent_card = r.text.split(f'href="/dashboard/funnels/{f_ent.id}"', 1)[1].split('href="/dashboard/funnels/', 1)[0]
+        default_card = r.text.split(f'href="/dashboard/funnels/{f_default.id}"', 1)[1].split('href="/dashboard/funnels/', 1)[0]
+        assert "3 <span>negócios</span> • R$ 350" in ent_card
+        assert "3 <span>negócios</span> • R$ 200" in default_card
+        assert 'Negócios em funil</p><p class="stat-value">6</p><span class="text-xs text-tertiary">R$ 550</span>' in r.text
+        assert 'Taxa de ganho</p><p class="stat-value">50%</p>' in r.text
+        assert "Alien" not in r.text
+
 
 class TestPipelineAdvisor:
     async def test_requires_complete_interview_and_confirmation_before_proposal(

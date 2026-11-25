@@ -30,6 +30,8 @@ router = APIRouter(prefix="/api/crm", tags=["crm"])
 
 STAGES = ["prospection","mql","sql","opportunity","closed_won","closed_lost"]
 STAGE_WEIGHT = {"prospection": 0.2, "mql": 0.35, "sql": 0.55, "opportunity": 0.75, "closed_won": 1.0, "closed_lost": 0.0}
+DEAL_SCAN_LIMIT = 200
+ACCOUNT_DETAIL_LIMIT = 50
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -302,20 +304,23 @@ async def get_account(account_id: str, db: DatabaseBackend = Depends(get_db_back
     if not _crm_enabled(org):
         raise HTTPException(402, "CRM IA upsell")
     row = await _account_or_404(db, account_id, org_id)
-    contacts = (await db.execute(select(Contact).where(Contact.org_id == org_id, Contact.account_id == account_id).order_by(Contact.updated_at.desc()).limit(50))).scalars().all()
-    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(200))).scalars().all()
+    contacts = (await db.execute(select(Contact).where(Contact.org_id == org_id, Contact.account_id == account_id).order_by(Contact.updated_at.desc()).limit(ACCOUNT_DETAIL_LIMIT))).scalars().all()
+    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(DEAL_SCAN_LIMIT))).scalars().all()
     linked_deals = []
     for d in deals:
         acc, acc_link = await find_account_for_deal_with_meta(db, d)
         if acc and acc.id == account_id:
             linked_deals.append(deal_360_payload(d, account=acc, account_link=acc_link))
-    interactions = (await db.execute(select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.account_id == account_id).order_by(InteractionEvent.occurred_at.desc()).limit(50))).scalars().all()
-    health_score, health_reason = relationship_health(days_since_last_contact=None if not interactions else max(0, int((datetime.utcnow() - interactions[0].occurred_at).total_seconds() // 86400)), open_commitments=0, overdue_commitments=0, support_tickets_open=0)
+    interactions = (await db.execute(select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.account_id == account_id).order_by(InteractionEvent.occurred_at.desc()).limit(ACCOUNT_DETAIL_LIMIT))).scalars().all()
+    days_since_last_contact = None if not interactions else max(0, int((datetime.utcnow() - interactions[0].occurred_at).total_seconds() // 86400))
+    health_score, health_reason = relationship_health(days_since_last_contact=days_since_last_contact, open_commitments=0, overdue_commitments=0, support_tickets_open=0)
     return {
-        "account": {"id": row.id, "name": row.name, "cnpj": row.cnpj, "industry": row.industry, "status": row.status, "health_score": health_score, "health_reason": health_reason, "health_note": "Deterministic heuristic, not validated predictive."},
+        "account": {"id": row.id, "name": row.name, "cnpj": row.cnpj, "industry": row.industry, "status": row.status, "health_score": health_score, "health_reason": health_reason, "health_inputs": {"days_since_last_contact": days_since_last_contact, "open_commitments": 0, "overdue_commitments": 0, "support_tickets_open": 0, "commitments_status": "unavailable_assumed_zero", "tickets_status": "unavailable_assumed_zero"}, "health_note": "Deterministic heuristic, not validated predictive. Commitment and support-ticket inputs are unavailable in this data model and assumed zero."},
         "contacts": [{"id": c.id, "name": c.name, "email": c.email, "phone": c.phone, "role": c.role} for c in contacts],
-        "deals": linked_deals[:50],
+        "deals": linked_deals[:ACCOUNT_DETAIL_LIMIT],
         "timeline": [interaction_payload(i) for i in interactions],
+        "deals_sample_limit": {"scanned": DEAL_SCAN_LIMIT, "returned": ACCOUNT_DETAIL_LIMIT},
+        "timeline_limit": ACCOUNT_DETAIL_LIMIT,
     }
 
 
@@ -419,11 +424,17 @@ async def create_interaction(body: dict, db: DatabaseBackend = Depends(get_db_ba
 @router.get("/360/overview")
 async def crm_360_overview(limit: int = Query(20, le=100), db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
     """Minimal read-only 360 from existing data. No schema change."""
+    from aios.core.sales_goals import month_progress
     from aios.db.models import Organization
 
     org = await db.get(Organization, org_id)
     if not _crm_enabled(org):
         raise HTTPException(402, "CRM IA upsell")
+    count_deals = (await db.execute(select(func.count(CrmDeal.id)).where(CrmDeal.org_id == org_id))).scalar_one()
+    count_accounts = (await db.execute(select(func.count(Account.id)).where(Account.org_id == org_id))).scalar_one()
+    count_contacts = (await db.execute(select(func.count(Contact.id)).where(Contact.org_id == org_id))).scalar_one()
+    count_interactions = (await db.execute(select(func.count(InteractionEvent.id)).where(InteractionEvent.org_id == org_id))).scalar_one()
+    progress = await month_progress(db, org_id)
     deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(limit))).scalars().all()
     accounts = (await db.execute(select(Account).where(Account.org_id == org_id).order_by(Account.updated_at.desc()).limit(limit))).scalars().all()
     contacts = (await db.execute(select(Contact).where(Contact.org_id == org_id).order_by(Contact.updated_at.desc()).limit(limit))).scalars().all()
@@ -432,18 +443,30 @@ async def crm_360_overview(limit: int = Query(20, le=100), db: DatabaseBackend =
         "available": {"deals": True, "accounts": True, "contacts": True, "interactions": True, "customer_360_read": True, "cs_workspace": False, "revenue_intelligence": "minimal_heuristic_only", "command_center": False},
         "notes": [
             "Customer 360 is minimal read model from existing CRM data; no schema change.",
+            "Recent lists are sampled by limit; counts are exact org-scoped DB totals.",
             "CS/command center unavailable in this track (needs dedicated models/UI).",
             "Prioritization is deterministic heuristic, not validated predictive.",
-            "Deal->account/contact links are heuristic/inferred; no schema FK (see docs/CRM_SCHEMA_GAPS.md).",
+            "Deal->account/contact typed nullable FKs exist; legacy extra_data mirrors remain; heuristic fallback only for unlinked rows (see docs/CRM_SCHEMA_GAPS.md).",
+            "Month progress is a deterministic CRM closed-won sum, not finance/recognized revenue; no LLM.",
         ],
         "gaps": {
-            "deal_account_fk": {"present": False, "kind": "schema_gap", "doc": "docs/CRM_SCHEMA_GAPS.md"},
-            "deal_contact_fk": {"present": False, "kind": "schema_gap", "doc": "docs/CRM_SCHEMA_GAPS.md"},
+            "deal_account_fk": {"present": True, "kind": "typed_nullable_fk", "doc": "docs/CRM_SCHEMA_GAPS.md"},
+            "deal_contact_fk": {"present": True, "kind": "typed_nullable_fk", "doc": "docs/CRM_SCHEMA_GAPS.md"},
             "command_center": {"present": False, "kind": "product_gap"},
             "cs_workspace": {"present": False, "kind": "product_gap"},
             "validated_predictive_revenue_intelligence": {"present": False, "kind": "evidence_gap"},
         },
-        "counts": {"deals": len(deals), "accounts": len(accounts), "contacts": len(contacts), "interactions": len(interactions)},
+        "counts": {"deals": count_deals, "accounts": count_accounts, "contacts": count_contacts, "interactions": count_interactions},
+        "month_progress": {
+            "year_month": progress["year_month"],
+            "won_brl": progress["won_brl"],
+            "deals_won": progress["deals_won"],
+            "target_brl": progress["target_brl"],
+            "status": progress["status"],
+            "source": "crm_deals.closed_won",
+            "note": "Deterministic CRM closed-won sum; not finance/recognized revenue.",
+        },
+        "validated_predictive_revenue_intelligence": False,
         "recent_accounts": [{"id": a.id, "name": a.name, "status": a.status, "health_score": a.health_score} for a in accounts],
         "recent_contacts": [{"id": c.id, "name": c.name, "email": c.email, "account_id": c.account_id} for c in contacts],
         "recent_interactions": [interaction_payload(i) for i in interactions],
@@ -466,7 +489,7 @@ async def crm_360_account(account_id: str, limit: int = Query(50, le=200), db: D
         raise HTTPException(402, "CRM IA upsell")
     account = await _account_or_404(db, account_id, org_id)
     contacts = (await db.execute(select(Contact).where(Contact.org_id == org_id, Contact.account_id == account_id).order_by(Contact.updated_at.desc()).limit(limit))).scalars().all()
-    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(200))).scalars().all()
+    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(DEAL_SCAN_LIMIT))).scalars().all()
     linked_deals = []
     for d in deals:
         acc, acc_link = await find_account_for_deal_with_meta(db, d)
@@ -475,12 +498,14 @@ async def crm_360_account(account_id: str, limit: int = Query(50, le=200), db: D
     interactions = (await db.execute(select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.account_id == account_id).order_by(InteractionEvent.occurred_at.desc()).limit(limit))).scalars().all()
     return {
         "read_only": True,
-        "schema_gap": {"deal_account_fk": False, "deal_contact_fk": False, "doc": "docs/CRM_SCHEMA_GAPS.md"},
+        "schema_gap": {"deal_account_fk": True, "deal_contact_fk": True, "doc": "docs/CRM_SCHEMA_GAPS.md"},
         "account": {"id": account.id, "name": account.name, "cnpj": account.cnpj, "status": account.status},
         "contacts": [{"id": c.id, "name": c.name, "email": c.email, "phone": c.phone} for c in contacts],
         "deals": linked_deals[:limit],
         "timeline": [interaction_payload(i) for i in interactions],
-        "notes": ["Deal links heuristic/inferred; no schema FK."],
+        "deals_sample_limit": {"scanned": DEAL_SCAN_LIMIT, "returned": limit},
+        "timeline_limit": limit,
+        "notes": ["Typed nullable deal FKs exist; legacy extra_data mirrors remain; heuristic fallback only for unlinked rows."],
     }
 
 
@@ -494,7 +519,7 @@ async def crm_360_contact(contact_id: str, limit: int = Query(50, le=200), db: D
         raise HTTPException(402, "CRM IA upsell")
     contact = await _contact_or_404(db, contact_id, org_id)
     interactions = (await db.execute(select(InteractionEvent).where(InteractionEvent.org_id == org_id, InteractionEvent.contact_id == contact_id).order_by(InteractionEvent.occurred_at.desc()).limit(limit))).scalars().all()
-    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(200))).scalars().all()
+    deals = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == org_id).order_by(CrmDeal.updated_at.desc()).limit(DEAL_SCAN_LIMIT))).scalars().all()
     linked_deals = []
     for d in deals:
         c, c_link = await find_contact_for_deal_with_meta(db, d)
@@ -502,11 +527,13 @@ async def crm_360_contact(contact_id: str, limit: int = Query(50, le=200), db: D
             linked_deals.append(deal_360_payload(d, contact=c, contact_link=c_link))
     return {
         "read_only": True,
-        "schema_gap": {"deal_account_fk": False, "deal_contact_fk": False, "doc": "docs/CRM_SCHEMA_GAPS.md"},
+        "schema_gap": {"deal_account_fk": True, "deal_contact_fk": True, "doc": "docs/CRM_SCHEMA_GAPS.md"},
         "contact": {"id": contact.id, "account_id": contact.account_id, "name": contact.name, "email": contact.email, "phone": contact.phone},
         "deals": linked_deals[:limit],
         "timeline": [interaction_payload(i) for i in interactions],
-        "notes": ["Deal links heuristic/inferred; no schema FK."],
+        "deals_sample_limit": {"scanned": DEAL_SCAN_LIMIT, "returned": limit},
+        "timeline_limit": limit,
+        "notes": ["Typed nullable deal FKs exist; legacy extra_data mirrors remain; heuristic fallback only for unlinked rows."],
     }
 
 

@@ -84,6 +84,8 @@ Sucesso = deal criado com score ≥70 no CRM
 - **Estável** (vai no topo do prompt, cacheável): manuais, políticas, tabelas de preço
 - **Transitório** (inject por turno): dados do lead, histórico da conversa
 
+> **ILLUSTRATIVE / not-current-offer** — preços/limites nos exemplos (inclusive o preenchido no fim) são fictícios, não oferta atual. Ver `docs/PRINCIPIO_VERDADE.md`.
+
 ```
 ## Estável
 - Tabela de preços: Starter R$249, Pro R$499, Enterprise sob consulta

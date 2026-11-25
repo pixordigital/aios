@@ -182,10 +182,24 @@ def _require_enabled() -> None:
         raise HTTPException(404, "ARVO integration disabled")
 
 
-def _require_org_allowed(org_id: str | None) -> None:
+async def _require_org_allowed(org_id: str | None) -> None:
     """Deny org outside AIOS_ARVO_ALLOWED_ORGS; empty CSV = unrestricted."""
     allowed = {v.strip() for v in (settings.arvo_allowed_orgs or "").split(",") if v.strip()}
     if allowed and str(org_id or "") not in allowed:
+        try:
+            from aios.db.engine import async_session
+            from aios.governance.security import record_auth_failure
+
+            async with async_session() as s:
+                await record_auth_failure(
+                    s,
+                    org_id=str(org_id or ""),
+                    source="arvo",
+                    payload={"reason": "org_not_allowed"},
+                )
+                await s.commit()
+        except Exception as exc:
+            logger.debug("org-deny telemetry failed: %s", type(exc).__name__)
         raise HTTPException(403, "ARVO org not allowed")
 
 
@@ -235,7 +249,7 @@ async def health_probe():
 @router.post("/context", dependencies=[Depends(_require_auth)])
 async def get_context(body: ContextRequest):
     """Phase 2 — minimal agent-context per contract. No org leak if unknown."""
-    _require_org_allowed(body.org_id)
+    await _require_org_allowed(body.org_id)
     # ponytail: minimal context, reuse existing agents table if org_id provided
     agents_info: list[dict] = []
     plan = "free"
@@ -265,7 +279,7 @@ async def list_deals(request: Request, org_id: str | None = None, limit: int = 1
     (stalled deals, discount exposure, overdue commitments) without owning
     a parallel CRM. org_id is required for any data; without it returns [].
     """
-    _require_org_allowed(org_id)
+    await _require_org_allowed(org_id)
     if not org_id:
         return {"org_id": None, "deals": [], "count": 0}
     cap = max(1, min(int(limit or 100), 500))
@@ -467,7 +481,7 @@ async def ingest_event(
     body: ArvoEvent,
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
-    _require_org_allowed(body.payload.get("org_id"))
+    await _require_org_allowed(body.payload.get("org_id"))
     if body.type not in _ALLOWED_INBOUND_EVENTS:
         raise HTTPException(400, f"Unknown event type: {body.type}")
     if not idempotency_key or len(idempotency_key) > 128:
@@ -541,7 +555,7 @@ async def ingest_event(
 @router.post("/sso-ticket", dependencies=[Depends(_require_auth)])
 async def sso_ticket(identity: SsoTicketRequest):
     """Signed SSO ticket carrying asserted user identity, TTL <= 60s."""
-    _require_org_allowed(identity.org_id)
+    await _require_org_allowed(identity.org_id)
     import json
     import hmac
     import hashlib

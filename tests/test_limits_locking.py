@@ -104,6 +104,58 @@ class _Permissive:
         return []
 
 
+class _AggregateResult:
+    def __init__(self, row):
+        self._row = row
+
+    def one(self):
+        return self._row
+
+
+class _BudgetListResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _AggregateDB(_FakeDB):
+    """Runs past the usage lock so the monthly aggregate can be counted."""
+
+    def __init__(self, *, tokens=0, cost=0.0, whatsapp_cost=0.0, budgets=()):
+        super().__init__("postgresql")
+        self.tokens = tokens
+        self.cost = cost
+        self.whatsapp_cost = whatsapp_cost
+        self.budgets = list(budgets)
+        self.aggregate_calls = []
+
+    async def execute(self, stmt, *a, **k):
+        sql = str(stmt)
+        self.statements.append(sql)
+        upper = sql.upper()
+        if upper.lstrip().startswith("SELECT"):
+            if "SUM(" in upper and "USAGE_RECORDS" in upper:
+                self.aggregate_calls.append(sql)
+                return _AggregateResult((self.tokens, self.cost, self.whatsapp_cost))
+            if "FROM BUDGETS" in upper:
+                return _BudgetListResult(self.budgets)
+        return _Permissive()
+
+
+class _Budget:
+    def __init__(self, amount_brl):
+        self.id = "budget-1"
+        self.name = "test-budget"
+        self.type = "operation"
+        self.scope = {}
+        self.amount_brl = amount_brl
+
+
 @pytest.mark.asyncio
 async def test_is_sqlite_awaits_and_reports_dialect():
     assert await limits._is_sqlite(_FakeDB("postgresql")) is False
@@ -181,3 +233,51 @@ async def test_track_usage_attribution_failure_keeps_counting():
     assert db.added == []
     assert db.statements, "aggregate upsert must still run"
     assert db.commits == 1
+
+
+@pytest.mark.asyncio
+async def test_monthly_usage_is_aggregated_once_across_all_gates(monkeypatch):
+    """Token gate, cost guardrail, budget alert and soft warning share one SUM."""
+    monkeypatch.setattr("aios.config.settings.internal_mode", False)
+    monkeypatch.setattr(limits, "_fx", lambda: 5.5)
+    alerts = []
+
+    async def _enqueue(name, payload):
+        alerts.append((name, payload))
+
+    monkeypatch.setattr("aios.tasks.queue.enqueue_job", _enqueue)
+
+    plan = limits.PLANS["free"]
+    monkeypatch.setitem(plan, "max_tokens_per_month", 1000)
+    monkeypatch.setitem(plan, "max_cost_brl", 1000)
+    db = _AggregateDB(
+        tokens=850, cost=10.0, whatsapp_cost=2.0, budgets=[_Budget(75)]
+    )
+    assert await limits.check_org_limits("org-1", db) == (True, "")
+    assert db.commits == 0, "check_org_limits must not commit caller state"
+    assert len(db.aggregate_calls) == 1, db.statements
+    assert ("aios.tasks.jobs.quota_alert_job", {
+        "org_id": "org-1", "pct": 85.0, "plan": "free",
+    }) in alerts
+    assert any(
+        name == "aios.tasks.jobs.budget_alert_job" and payload["pct"] == 88
+        for name, payload in alerts
+    ), alerts
+
+    # Token gate reads the same aggregate, with no second SUM.
+    monkeypatch.setitem(plan, "max_tokens_per_month", 800)
+    token_db = _AggregateDB(tokens=850, cost=10.0, whatsapp_cost=2.0)
+    assert await limits.check_org_limits("org-1", token_db) == (
+        False, "Monthly token limit reached (800/free plan)"
+    )
+    assert len(token_db.aggregate_calls) == 1, token_db.statements
+
+    # Cost guardrail reads the same aggregate, with no second SUM.
+    monkeypatch.setitem(plan, "max_tokens_per_month", 999999999)
+    monkeypatch.setitem(plan, "max_cost_brl", 60)
+    cost_db = _AggregateDB(tokens=850, cost=10.0, whatsapp_cost=2.0)
+    assert await limits.check_org_limits("org-1", cost_db) == (
+        False,
+        "Teto custo estimado R$60 atingido (uso R$66.00 no mês) — plano free. Upgrade em /dashboard/billing",
+    )
+    assert len(cost_db.aggregate_calls) == 1, cost_db.statements

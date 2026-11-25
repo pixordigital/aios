@@ -630,3 +630,126 @@ async def test_api_vote_conflict_vs_not_found(swarm_api_client) -> None:
             if row:
                 await db.delete(row)
                 await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_api_dispatch_foreign_conversation_404_records_telemetry(swarm_api_client) -> None:
+    """Cross-tenant conversation still 404s; one cross-tenant block event is emitted."""
+    from aios.governance.security import SecurityEvent
+
+    conv_id = "conv-foreign-telemetry"
+    async with db_session() as db:
+        db.add(Conversation(id=conv_id, org_id="org-b", team_id="team-b", channel="web"))
+        await db.commit()
+    try:
+        resp = await swarm_api_client.post(
+            "/api/swarms/team-a/dispatch",
+            json={"task_type": "agent_call", "conversation_id": conv_id},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "conversation not found"
+
+        async with db_session() as db:
+            rows = (await db.execute(
+                select(SecurityEvent).where(
+                    SecurityEvent.event_type == "security.cross_tenant.blocked",
+                    SecurityEvent.org_id == "org-a",
+                )
+            )).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].source == "tenant_guard"
+            assert rows[0].payload["metric"] == "cross_tenant_block"
+            assert rows[0].payload["requested_org_id"] == "org-a"
+            assert rows[0].payload["resource_org_id"] == "org-b"
+            assert rows[0].payload["conversation_id"] == conv_id
+    finally:
+        async with db_session() as db:
+            conv = await db.get(Conversation, conv_id)
+            if conv:
+                await db.delete(conv)
+            events = (await db.execute(
+                select(SecurityEvent).where(SecurityEvent.org_id == "org-a")
+            )).scalars().all()
+            for event in events:
+                await db.delete(event)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_api_dispatch_foreign_agent_404_records_telemetry(swarm_api_client) -> None:
+    """Cross-tenant agent still 404s; one cross-tenant block event is emitted."""
+    from aios.governance.security import SecurityEvent
+
+    agent_id = "agent-b1"
+    try:
+        resp = await swarm_api_client.post(
+            "/api/swarms/team-a/dispatch",
+            json={"task_type": "agent_call", "agent_id": agent_id},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "agent not found in team"
+
+        async with db_session() as db:
+            rows = (await db.execute(
+                select(SecurityEvent).where(
+                    SecurityEvent.event_type == "security.cross_tenant.blocked",
+                    SecurityEvent.org_id == "org-a",
+                )
+            )).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].source == "tenant_guard"
+            assert rows[0].actor_type == "human"
+            assert rows[0].actor_id == "user-a"
+            assert rows[0].payload["metric"] == "cross_tenant_block"
+            assert rows[0].payload["requested_org_id"] == "org-a"
+            assert rows[0].payload["resource_org_id"] == "org-b"
+            assert rows[0].payload["resource_type"] == "Agent"
+            assert rows[0].payload["agent_id"] == agent_id
+    finally:
+        async with db_session() as db:
+            events = (await db.execute(
+                select(SecurityEvent).where(SecurityEvent.org_id == "org-a")
+            )).scalars().all()
+            for event in events:
+                await db.delete(event)
+            await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_api_dispatch_foreign_dependency_404_records_telemetry(swarm_api_client) -> None:
+    """Cross-tenant dependency still 404s; one cross-tenant block event is emitted."""
+    from aios.governance.security import SecurityEvent
+
+    dep_id = "task-b1"
+    try:
+        resp = await swarm_api_client.post(
+            "/api/swarms/team-a/dispatch",
+            json={"task_type": "agent_call", "depends_on": [dep_id]},
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "dependency not found"
+
+        async with db_session() as db:
+            rows = (await db.execute(
+                select(SecurityEvent).where(
+                    SecurityEvent.event_type == "security.cross_tenant.blocked",
+                    SecurityEvent.org_id == "org-a",
+                )
+            )).scalars().all()
+            assert len(rows) == 1
+            assert rows[0].source == "tenant_guard"
+            assert rows[0].actor_type == "human"
+            assert rows[0].actor_id == "user-a"
+            assert rows[0].payload["metric"] == "cross_tenant_block"
+            assert rows[0].payload["requested_org_id"] == "org-a"
+            assert rows[0].payload["resource_org_id"] == "org-b"
+            assert rows[0].payload["resource_type"] == "SwarmTask"
+            assert rows[0].payload["dependency_id"] == dep_id
+    finally:
+        async with db_session() as db:
+            events = (await db.execute(
+                select(SecurityEvent).where(SecurityEvent.org_id == "org-a")
+            )).scalars().all()
+            for event in events:
+                await db.delete(event)
+            await db.commit()

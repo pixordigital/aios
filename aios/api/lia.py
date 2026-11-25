@@ -1,6 +1,6 @@
 """LIA API: acquisition sources, campaigns, suppression and deterministic contact gate (§12)."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
 from aios.api.deps import get_current_user, get_org_id
@@ -204,13 +204,26 @@ async def approve_campaign(
 
 
 @router.get("/suppression")
-async def list_suppression(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
-    rows = (await db.execute(select(SuppressionEntry).where(SuppressionEntry.org_id == org_id))).scalars().all()
+async def list_suppression(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    rows = (await db.execute(
+        select(SuppressionEntry)
+        .where(SuppressionEntry.org_id == org_id)
+        .order_by(SuppressionEntry.created_at.desc(), SuppressionEntry.id.desc())
+        .limit(limit + 1)
+        .offset(offset)
+    )).scalars().all()
+    truncated = len(rows) > limit
     return {
         "items": [
             {"id": e.id, "kind": e.kind, "value": e.value, "reason": e.reason}
-            for e in rows
-        ]
+            for e in rows[:limit]
+        ],
+        "truncated": truncated,
     }
 
 

@@ -19,6 +19,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
 
 
+async def _record_cross_tenant_mismatch(db, org_id, resource, source, *, actor_id=None, actor_type=None, payload=None):
+    # Telemetry only: never alter the endpoint's status, body or auth decision.
+    try:
+        from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+        await record_cross_tenant_block_if_mismatch(
+            db,
+            org_id=str(org_id),
+            resource=resource,
+            source=source,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            payload=payload or {},
+        )
+        await db.commit()
+    except Exception:
+        logger.exception("cross-tenant telemetry failed: %s", source)
+
+
 async def _get_conversation_or_404(
     db: DatabaseBackend,
     conversation_id: str,
@@ -233,6 +252,11 @@ async def get_inbox_conversation(
         # conv itself is org-checked above; this keeps a row that somehow points
         # outside the tenant from leaking another tenant's channel label.
         if channel is not None and channel.org_id != org_id:
+            await _record_cross_tenant_mismatch(
+                db, org_id, channel, "inbox.api.get_conversation.channel_mismatch",
+                actor_id=getattr(user, "id", None), actor_type="human",
+                payload={"channel_id": str(conv.channel_connection_id)},
+            )
             channel = None
     
     # Get assignee
@@ -241,6 +265,11 @@ async def get_inbox_conversation(
     if assigned_to:
         assignee = await db.get(User, assigned_to)
         if assignee is not None and assignee.org_id != org_id:
+            await _record_cross_tenant_mismatch(
+                db, org_id, assignee, "inbox.api.get_conversation.assignee_mismatch",
+                actor_id=getattr(user, "id", None), actor_type="human",
+                payload={"user_id": str(assigned_to)},
+            )
             assignee = None
             assigned_to = None
     
@@ -300,6 +329,12 @@ async def assign_conversation(
     # Verify assignee is in same org
     assignee = await db.get(User, assignee_id)
     if not assignee or assignee.org_id != org_id:
+        if assignee is not None and str(assignee.org_id) != str(org_id):
+            await _record_cross_tenant_mismatch(
+                db, org_id, assignee, "inbox.api.assign.assignee_mismatch",
+                actor_id=getattr(user, "id", None), actor_type="human",
+                payload={"user_id": str(assignee_id)},
+            )
         raise HTTPException(400, "Invalid assignee")
     
     extra = dict(conv.extra_data or {})

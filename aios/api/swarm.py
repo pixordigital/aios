@@ -1,5 +1,7 @@
 """Swarm API — team swarm config, task dispatch, consensus, shared memory."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -10,6 +12,7 @@ from aios.db.backend import db_session
 from aios.db.models import Agent, Conversation, SwarmTask, Team, User, team_agents
 
 router = APIRouter(prefix="/api/swarms", tags=["swarms"])
+logger = logging.getLogger(__name__)
 
 
 async def _team_in_org(team_id: str, org_id: str) -> bool:
@@ -19,9 +22,11 @@ async def _team_in_org(team_id: str, org_id: str) -> bool:
         ).scalar_one_or_none() is not None
 
 
-async def _agent_in_team_org(agent_id: str, team_id: str, org_id: str) -> bool:
+async def _agent_in_team_org(
+    agent_id: str, team_id: str, org_id: str, *, actor_id: str | None = None
+) -> bool:
     async with db_session() as db:
-        return (
+        found = (
             await db.execute(
                 select(team_agents.c.agent_id)
                 .join(Agent, Agent.id == team_agents.c.agent_id)
@@ -32,17 +37,50 @@ async def _agent_in_team_org(agent_id: str, team_id: str, org_id: str) -> bool:
                 )
             )
         ).scalar_one_or_none() is not None
+        if not found:
+            agent = await db.get(Agent, agent_id)
+            if agent is not None and str(agent.org_id) != str(org_id):
+                try:
+                    from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+                    await record_cross_tenant_block_if_mismatch(
+                        db,
+                        org_id=str(org_id),
+                        resource=agent,
+                        actor_type="human",
+                        actor_id=actor_id,
+                        payload={"agent_id": agent_id, "team_id": team_id},
+                    )
+                    await db.commit()
+                except Exception as exc:
+                    logger.debug("agent mismatch telemetry failed: %s", type(exc).__name__)
+        return found
 
 
 async def _conversation_in_team_org(conversation_id: str, team_id: str, org_id: str) -> bool:
     async with db_session() as db:
         conv = await db.get(Conversation, conversation_id)
         if not conv or conv.org_id != org_id:
+            if conv is not None:
+                try:
+                    from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+                    await record_cross_tenant_block_if_mismatch(
+                        db,
+                        org_id=org_id,
+                        resource=conv,
+                        payload={"conversation_id": conversation_id, "team_id": team_id},
+                    )
+                    await db.commit()
+                except Exception as exc:
+                    logger.debug("conversation mismatch telemetry failed: %s", type(exc).__name__)
             return False
         return not conv.team_id or conv.team_id == team_id
 
 
-async def _depends_on_in_team_org(depends_on: list[str], team_id: str, org_id: str) -> bool:
+async def _depends_on_in_team_org(
+    depends_on: list[str], team_id: str, org_id: str, *, actor_id: str | None = None
+) -> bool:
     deps = [d for d in depends_on if isinstance(d, str) and d]
     if not deps:
         return True
@@ -56,8 +94,39 @@ async def _depends_on_in_team_org(depends_on: list[str], team_id: str, org_id: s
                 )
             )
         ).all()
-    known = {v for row in rows for v in row if v}
-    return all(d in known for d in deps)
+        known = {v for row in rows for v in row if v}
+        ok = all(d in known for d in deps)
+        if not ok:
+            other = (
+                await db.execute(
+                    select(SwarmTask)
+                    .where(
+                        SwarmTask.org_id != str(org_id),
+                        (SwarmTask.id.in_(deps) | SwarmTask.task_id.in_(deps)),
+                    )
+                    .limit(1)
+                )
+            ).scalars().first()
+            if other is not None:
+                try:
+                    from aios.governance.security import record_cross_tenant_block_if_mismatch
+
+                    await record_cross_tenant_block_if_mismatch(
+                        db,
+                        org_id=str(org_id),
+                        resource=other,
+                        actor_type="human",
+                        actor_id=actor_id,
+                        payload={
+                            "dependency_id": other.id,
+                            "depends_on": deps,
+                            "team_id": team_id,
+                        },
+                    )
+                    await db.commit()
+                except Exception as exc:
+                    logger.debug("dependency mismatch telemetry failed: %s", type(exc).__name__)
+        return ok
 
 
 # ── Config ──
@@ -128,14 +197,14 @@ async def dispatch_task(
         raise HTTPException(400, "task_type required")
     if not await _team_in_org(team_id, org_id):
         raise HTTPException(404, "team not found")
-    if body.agent_id and not await _agent_in_team_org(body.agent_id, team_id, org_id):
+    if body.agent_id and not await _agent_in_team_org(body.agent_id, team_id, org_id, actor_id=user.id):
         raise HTTPException(404, "agent not found in team")
     if body.conversation_id and not await _conversation_in_team_org(body.conversation_id, team_id, org_id):
         raise HTTPException(404, "conversation not found")
     deps = [d for d in body.depends_on if isinstance(d, str) and d]
     if body.depends_on and not deps:
         raise HTTPException(400, "depends_on must contain task ids")
-    if not await _depends_on_in_team_org(deps, team_id, org_id):
+    if not await _depends_on_in_team_org(deps, team_id, org_id, actor_id=user.id):
         raise HTTPException(404, "dependency not found")
     task = await swarm.dispatch(
         team_id=team_id, org_id=org_id, task_type=task_type,
@@ -257,7 +326,7 @@ async def put_shared_memory(
 ):
     if not await _team_in_org(team_id, org_id):
         raise HTTPException(404, "team not found")
-    if body.sender_id and not await _agent_in_team_org(body.sender_id, team_id, org_id):
+    if body.sender_id and not await _agent_in_team_org(body.sender_id, team_id, org_id, actor_id=user.id):
         raise HTTPException(404, "agent not found in team")
     msg = await swarm.put_shared(
         team_id=team_id, org_id=org_id, key=body.key,

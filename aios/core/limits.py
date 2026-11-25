@@ -48,8 +48,10 @@ async def _is_sqlite(db) -> bool:
 async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     """Check if org can execute another agent run. Returns (allowed, reason).
 
-    Uses atomic SELECT FOR UPDATE on UsageRecord to prevent double-spending
-    on concurrent runs — same pattern as Paperclip's atomic task checkout.
+    Best-effort SELECT FOR UPDATE on today's UsageRecord row reduces
+    double-spending on concurrent runs. The lock is held only until the
+    caller's next commit (track_usage uses the same session), not for the
+    whole run. No run-long atomicity is claimed.
     """
     org = await db.get(Organization, org_id)
     if not org:
@@ -92,6 +94,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     _mc = limits.get("max_cost_brl")
     max_cost_brl: float | None = float(_mc) if isinstance(_mc, (int, float)) else None
     monthly_tokens_val: int | None = None
+    monthly_spend_usd = 0.0
 
     if max_msgs != 99999 or max_tokens != 999999999 or (max_cost_brl and max_cost_brl != 999999):
         # Lock the current day's usage row (creates if missing) to prevent races.
@@ -106,10 +109,9 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
                 ON CONFLICT (org_id, date) DO NOTHING
             """).bindparams(id=_uuid.uuid4().hex, org_id=org_id, date=today),
         )
-        # ponytail: commits the caller's session too, so the FOR UPDATE below is
-        # released at the caller's next commit rather than held for the run. A
-        # per-run DB session would hold it properly; costs a session per run.
-        await db.commit()
+        # No commit here: committing would flush unrelated caller state. The
+        # row lock below is best-effort — held only until the caller's next
+        # commit, not for the whole run.
 
         # Now lock the row for update. FOR UPDATE is Postgres/MySQL only —
         # SQLite rejects it outright, and it serialises writers anyway.
@@ -130,26 +132,25 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
         if max_msgs != 99999 and msgs_used >= max_msgs:
             return False, f"Daily message limit reached ({max_msgs}/{plan_name} plan)"
 
+        # One org-scoped monthly aggregate feeds token, cost, budget and soft
+        # warning gates — the old four call sites issued three duplicate SUMs.
+        agg = (await db.execute(
+            select(
+                func.coalesce(func.sum(UsageRecord.llm_tokens), 0),
+                func.coalesce(func.sum(UsageRecord.cost_usd), 0),
+                func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0),
+            ).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month)
+        )).one()
+        monthly_tokens_val = int(agg[0])
+        monthly_spend_usd = float(agg[1]) + float(agg[2])
+
         # Check monthly token limit (sum from start of month)
         if max_tokens != 999999999:
-            monthly_tokens_val = int((await db.execute(
-                select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(
-                    UsageRecord.org_id == org_id, UsageRecord.date >= start_month
-                )
-            )).scalar() or 0)
             if monthly_tokens_val >= max_tokens:
                 return False, f"Monthly token limit reached ({max_tokens}/{plan_name} plan)"
 
         # Check monthly cost guardrail (BRL estimate: USD * 5.5)
-        monthly_spend_usd: float | None = None
         if max_cost_brl and max_cost_brl != 999999:
-            row = (await db.execute(
-                select(
-                    func.coalesce(func.sum(UsageRecord.cost_usd), 0),
-                    func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0),
-                ).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month)
-            )).one()
-            monthly_spend_usd = float(row[0]) + float(row[1])
             total_brl = monthly_spend_usd * _fx()
             if total_brl >= max_cost_brl:
                 return False, f"Teto custo estimado R${max_cost_brl:.0f} atingido (uso R${total_brl:.2f} no mês) — plano {plan_name}. Upgrade em /dashboard/billing"
@@ -162,14 +163,6 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
             budgets = (await db.execute(select(Budget).where(Budget.org_id == org_id))).scalars().all()
             alertable = [b for b in budgets if b.type != "creation" and not (b.scope and b.scope.get("agents"))]
             if alertable:
-                if monthly_spend_usd is None:
-                    row = (await db.execute(
-                        select(
-                            func.coalesce(func.sum(UsageRecord.cost_usd), 0),
-                            func.coalesce(func.sum(UsageRecord.whatsapp_cost_usd), 0),
-                        ).where(UsageRecord.org_id == org_id, UsageRecord.date >= start_month)
-                    )).one()
-                    monthly_spend_usd = float(row[0]) + float(row[1])
                 spent_brl = monthly_spend_usd * _fx()
                 for b in alertable:
                     pct = (spent_brl / b.amount_brl * 100) if b.amount_brl else 0
@@ -188,13 +181,7 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     # soft limit warnings (80/90) without blocking
     try:
         pct = 0
-        if max_tokens != 999999999:
-            if monthly_tokens_val is None:
-                monthly_tokens_val = int((await db.execute(
-                    select(func.coalesce(func.sum(UsageRecord.llm_tokens), 0)).where(
-                        UsageRecord.org_id == org_id, UsageRecord.date >= start_month
-                    )
-                )).scalar() or 0)
+        if max_tokens != 999999999 and monthly_tokens_val is not None:
             pct = round(monthly_tokens_val / max_tokens * 100, 1) if max_tokens else 0
         if 80 <= pct < 100:
             logger.warning("Quota soft limit %s%% for org %s (plan %s)", pct, org_id, plan_name)

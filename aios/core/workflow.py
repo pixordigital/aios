@@ -488,10 +488,6 @@ class WorkflowEngine:
                     run_id=shared.get("run_id") or conv_id,
                     db_session=shared.get("icm_db_session"),
                 )
-                preapproved = shared.get("preapproved")
-                if isinstance(preapproved, dict) and "icm_approval" not in shared:
-                    shared.setdefault("icm_preapproved", preapproved)
-                    stage_adapter.check_approval(shared)
                 stage_adapter.pre_execute(ctx, shared)
                 # Approval/side-effect gate before any execution. Duplicate side
                 # effects are skipped when a prior output exists.

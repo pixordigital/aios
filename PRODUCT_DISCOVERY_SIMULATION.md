@@ -1,5 +1,7 @@
 # Simulação de Descoberta de Produto — AIOS Voice Agents
 
+> **HISTORICAL SIMULATION (2026-09)** — not a current offer. Prices, limits, SLAs and metrics below were hypothetical and are not enforced by current code. See docs/PRINCIPIO_VERDADE.md.
+
 **Contexto:** Produto = AIOS (AI Operating System) — plataforma self-hosted para criar agentes de voz (SDR/Closer/Suporte) com TTS Kokoro ($0/min), orquestração multi-agente, integração WhatsApp/Evolution, CRM nativo. Preços: Free / Starter R$89/mês / Pro R$249/mês / Enterprise custom.
 
 ---

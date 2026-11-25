@@ -650,6 +650,20 @@ async def test_arvo_allowlist_deals(test_session, monkeypatch):
             hdr2 = sign_request("GET", path, None, "kid-1", "secret-1", query="org_id=blocked-org")
             r2 = await c.get(f"{path}?org_id=blocked-org", headers=hdr2)
             assert r2.status_code == 403
+
+            from sqlalchemy import select
+
+            from aios.governance.security import SecurityEvent
+
+            events = (await test_session.execute(
+                select(SecurityEvent).where(
+                    SecurityEvent.event_type == "security.auth.failure",
+                    SecurityEvent.org_id == "blocked-org",
+                )
+            )).scalars().all()
+            assert len(events) == 1
+            assert events[0].source == "arvo"
+            assert events[0].payload == {"reason": "org_not_allowed", "metric": "auth_failure"}
     finally:
         _clear_nonces()
         _clear_events()
@@ -696,6 +710,20 @@ async def test_arvo_allowlist_events(test_session, monkeypatch):
 
             r2 = await post_event("blocked-org", "idem-blocked-org")
             assert r2.status_code == 403
+
+            from sqlalchemy import select
+
+            from aios.governance.security import SecurityEvent
+
+            events = (await test_session.execute(
+                select(SecurityEvent).where(
+                    SecurityEvent.event_type == "security.auth.failure",
+                    SecurityEvent.org_id == "blocked-org",
+                )
+            )).scalars().all()
+            assert len(events) == 1
+            assert events[0].source == "arvo"
+            assert events[0].payload == {"reason": "org_not_allowed", "metric": "auth_failure"}
     finally:
         _clear_nonces()
         _clear_events()

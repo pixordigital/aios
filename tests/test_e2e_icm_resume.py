@@ -163,7 +163,7 @@ async def test_workflow_explicit_preapproved_populates_icm_approval(tmp_path):
         )
         session.commit()
         shared = {
-            "preapproved": {
+            "icm_preapproved": {
                 "approved": True,
                 "approval_id": "appr-valid",
                 "approved_fingerprint": fp,
@@ -182,7 +182,7 @@ async def test_workflow_explicit_preapproved_populates_icm_approval(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_workflow_preapproved_wrong_fingerprint_fails():
+async def test_workflow_generic_preapproved_does_not_authorize_icm():
     manifest = StageManifest(
         id="approved_stage",
         version="1.0.0",
@@ -198,6 +198,38 @@ async def test_workflow_preapproved_wrong_fingerprint_fails():
     )
     shared = {
         "preapproved": {
+            "approved": True,
+            "approval_id": "appr-valid",
+            "approved_fingerprint": manifest_fingerprint(manifest),
+            "actions": ["calculator"],
+        }
+    }
+    result = WorkflowResult()
+
+    with pytest.raises(PermissionError):
+        await WorkflowEngine()._execute_node(node, "conv-generic-preapproved", shared, result)
+
+    assert result.node_status["n1"] == "failed"
+    assert "icm_approval" not in shared
+
+
+@pytest.mark.asyncio
+async def test_workflow_preapproved_wrong_fingerprint_fails():
+    manifest = StageManifest(
+        id="approved_stage",
+        version="1.0.0",
+        mode="deterministic",
+        approval_required=True,
+        allowed_tools=["calculator"],
+    )
+    node = WorkflowNode(
+        id="n1",
+        tool_name="calculator",
+        tool_args={"expression": "2+2"},
+        stage_manifest=manifest,
+    )
+    shared = {
+        "icm_preapproved": {
             "approved": True,
             "approval_id": "appr-bad",
             "approved_fingerprint": "bad-fingerprint",

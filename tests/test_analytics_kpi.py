@@ -2,7 +2,9 @@
 
 from datetime import datetime, timedelta, timezone
 
-from aios.db.models import AuditLog, CrmDeal, PendingAction, User
+from sqlalchemy import select
+
+from aios.db.models import AuditLog, CrmDeal, KpiTarget, KpiTargetEvent, PendingAction, User
 from aios.api.auth import _create_access_token
 
 
@@ -98,13 +100,13 @@ async def test_target_validation_rejects_missing_baseline_and_evidence(auth_clie
     body = resp.json()
     assert body["ok"] is False
     assert body["persistence"]["persisted"] is False
-    assert body["persistence"]["mode"] == "org_extra_data"
+    assert body["persistence"]["mode"] == "schema_tables"
     assert body["persistence"]["schema_table"] is None
     assert any("baseline" in e for e in body["errors"])
     assert any("evidence" in e for e in body["errors"])
 
 
-async def test_kpi_target_set_and_list_persisted_in_org_extra_data(auth_client, test_db_session, test_org):
+async def test_kpi_target_set_and_list_persisted_in_schema_tables(auth_client, test_db_session, test_org):
     payload = {
         "metric_key": "crm.win_rate",
         "target_value": 0.7,
@@ -118,29 +120,53 @@ async def test_kpi_target_set_and_list_persisted_in_org_extra_data(auth_client, 
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["ok"] is True
-    assert body["persistence"]["persisted"] is True
-    assert body["persistence"]["mode"] == "org_extra_data"
-    assert body["persistence"]["schema_table"] is None
+    assert body["persistence"] == {
+        "persisted": True,
+        "mode": "schema_tables",
+        "schema_table": "kpi_targets",
+        "storage": "kpi_targets",
+        "history_storage": "kpi_target_events",
+    }
     assert body["target"]["metric_key"] == "crm.win_rate"
     assert body["target"]["provenance"]["actor_org_id"] == test_org.id
     assert body["count"] == 1
     assert body["history_count"] == 1
 
+    rows = (await test_db_session.execute(
+        select(KpiTarget).where(KpiTarget.org_id == test_org.id)
+    )).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].metric_key == "crm.win_rate"
+    assert rows[0].owner == "sales-lead"
+    events = (await test_db_session.execute(
+        select(KpiTargetEvent).where(KpiTargetEvent.org_id == test_org.id)
+    )).scalars().all()
+    assert len(events) == 1
+    assert events[0].event == "target_created"
+    assert events[0].target_id == rows[0].id
+    assert events[0].actor_org_id == test_org.id
+    assert events[0].at
+
     await test_db_session.refresh(test_org)
-    store = (test_org.extra_data or {}).get("kpi_targets", {})
-    assert store.get("persistence") == "org_extra_data"
-    assert len(store.get("targets", [])) == 1
-    hist = (test_org.extra_data or {}).get("kpi_target_history", [])
-    assert len(hist) == 1
+    assert (test_org.extra_data or {}) == {"plan": "pro"}
 
     listed = await auth_client.get("/api/analytics/kpi/targets")
     assert listed.status_code == 200, listed.text
     lb = listed.json()
-    assert lb["persistence"] == "org_extra_data"
-    assert lb["schema_table"] is None
+    assert lb["persistence"] == {
+        "persisted": True,
+        "mode": "schema_tables",
+        "schema_table": "kpi_targets",
+        "storage": "kpi_targets",
+        "history_storage": "kpi_target_events",
+    }
+    assert lb["schema_table"] == "kpi_targets"
+    assert lb["storage"] == "kpi_targets"
+    assert lb["history_storage"] == "kpi_target_events"
     assert lb["count"] == 1
     assert lb["history_count"] == 1
     assert lb["targets"][0]["owner"] == "sales-lead"
+    assert lb["targets"][0]["id"] == rows[0].id
 
 
 async def test_kpi_target_set_fail_closed_no_persist(auth_client, test_db_session, test_org):
@@ -158,15 +184,20 @@ async def test_kpi_target_set_fail_closed_no_persist(auth_client, test_db_sessio
     detail = resp.json()["detail"]
     assert detail["ok"] is False
     assert detail["persistence"]["persisted"] is False
+    assert detail["persistence"]["mode"] == "schema_tables"
+    assert detail["persistence"]["schema_table"] == "kpi_targets"
     assert any("baseline" in e for e in detail["errors"])
     assert any("evidence" in e for e in detail["errors"])
 
     await test_db_session.refresh(test_org)
-    assert "kpi_targets" not in (test_org.extra_data or {})
+    assert (test_org.extra_data or {}) == {"plan": "pro"}
+    assert (await test_db_session.execute(select(KpiTarget))).scalars().all() == []
+    assert (await test_db_session.execute(select(KpiTargetEvent))).scalars().all() == []
 
     listed = await auth_client.get("/api/analytics/kpi/targets")
     assert listed.status_code == 200
     assert listed.json()["count"] == 0
+    assert listed.json()["history_count"] == 0
 
 
 async def test_kpi_target_history_and_transition_endpoints(auth_client, test_db_session, test_org):
@@ -188,6 +219,13 @@ async def test_kpi_target_history_and_transition_endpoints(auth_client, test_db_
         "evidence": "",
     })
     assert bad.status_code == 422, bad.text
+    bad_detail = bad.json()["detail"]
+    assert bad_detail["persistence"]["persisted"] is False
+    assert bad_detail["persistence"]["mode"] == "schema_tables"
+    assert bad_detail["persistence"]["schema_table"] == "kpi_targets"
+    assert len((await test_db_session.execute(
+        select(KpiTargetEvent).where(KpiTargetEvent.org_id == test_org.id)
+    )).scalars().all()) == 1
 
     ok = await auth_client.post("/api/analytics/kpi/targets/transition", json={
         "metric_key": "crm.win_rate",
@@ -195,15 +233,103 @@ async def test_kpi_target_history_and_transition_endpoints(auth_client, test_db_
         "evidence": "weekly governance review",
     })
     assert ok.status_code == 200, ok.text
-    assert ok.json()["target"]["status"] == "review"
+    ob = ok.json()
+    assert ob["persistence"]["persisted"] is True
+    assert ob["persistence"]["schema_table"] == "kpi_targets"
+    assert ob["target"]["status"] == "review"
+    assert ob["history_count"] == 2
+
+    rows = (await test_db_session.execute(
+        select(KpiTarget).where(KpiTarget.org_id == test_org.id)
+    )).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].status == "review"
+    events = (await test_db_session.execute(
+        select(KpiTargetEvent).where(KpiTargetEvent.org_id == test_org.id)
+        .order_by(KpiTargetEvent.at.desc())
+    )).scalars().all()
+    assert len(events) == 2
+    assert events[0].event == "status_transition"
+    assert events[0].from_status == "active"
+    assert events[0].to_status == "review"
+    assert events[0].evidence == "weekly governance review"
+    assert events[0].actor_org_id == test_org.id
+    assert events[1].event == "target_created"
 
     hist = await auth_client.get("/api/analytics/kpi/targets/history?metric_key=crm.win_rate")
     assert hist.status_code == 200, hist.text
     hb = hist.json()
+    assert hb["persistence"] == {
+        "persisted": True,
+        "mode": "schema_tables",
+        "schema_table": "kpi_target_events",
+        "storage": "kpi_target_events",
+        "history_storage": "kpi_target_events",
+    }
+    assert hb["storage"] == "kpi_target_events"
+    assert hb["schema_table"] == "kpi_target_events"
+    assert hb["max_entries"] == 200
     assert hb["count"] == 2
     assert hb["history"][0]["event"] == "status_transition"
+    assert hb["history"][0]["from_status"] == "active"
     assert hb["history"][0]["to_status"] == "review"
-    assert hb["schema_table"] is None
+    assert hb["history"][1]["event"] == "target_created"
+
+
+async def test_kpi_target_endpoints_are_org_scoped(auth_client, test_db_session, test_org, second_org):
+    test_db_session.add_all([
+        KpiTarget(
+            org_id=second_org.id, metric_key="crm.win_rate", target_value=0.9,
+            baseline_value=0.8, baseline_window_days=30, evidence="other org", owner="other",
+        ),
+    ])
+    await test_db_session.flush()
+    other_target = (await test_db_session.execute(
+        select(KpiTarget).where(KpiTarget.org_id == second_org.id)
+    )).scalars().one()
+    test_db_session.add(KpiTargetEvent(
+        org_id=second_org.id, target_id=other_target.id, event="target_created",
+        metric_key="crm.win_rate", to_status="active", actor_org_id=second_org.id,
+    ))
+    await test_db_session.commit()
+
+    listed = await auth_client.get("/api/analytics/kpi/targets")
+    assert listed.status_code == 200, listed.text
+    lb = listed.json()
+    assert lb["count"] == 0
+    assert lb["history_count"] == 0
+    assert lb["targets"] == []
+
+    hist = await auth_client.get("/api/analytics/kpi/targets/history")
+    assert hist.status_code == 200, hist.text
+    assert hist.json()["count"] == 0
+    assert hist.json()["history"] == []
+
+    # Writing the same metric in the authenticated org must not touch the other org row.
+    created = await auth_client.post("/api/analytics/kpi/targets", json={
+        "metric_key": "crm.win_rate",
+        "target_value": 0.7,
+        "baseline_value": 0.55,
+        "baseline_window_days": 30,
+        "evidence": "CRM export",
+        "owner": "sales-lead",
+        "balancing_metrics": ["crm.close_rate", "crm.average_deal_size"],
+    })
+    assert created.status_code == 200, created.text
+    assert created.json()["count"] == 1
+    assert created.json()["target"]["provenance"]["actor_org_id"] == test_org.id
+
+    other_rows = (await test_db_session.execute(
+        select(KpiTarget).where(KpiTarget.org_id == second_org.id)
+    )).scalars().all()
+    assert len(other_rows) == 1
+    assert other_rows[0].id == other_target.id
+    assert other_rows[0].evidence == "other org"
+    other_events = (await test_db_session.execute(
+        select(KpiTargetEvent).where(KpiTargetEvent.org_id == second_org.id)
+    )).scalars().all()
+    assert len(other_events) == 1
+    assert other_events[0].actor_org_id == second_org.id
 
 
 async def test_process_global_metrics_require_superadmin(async_client, test_db_session, test_org):

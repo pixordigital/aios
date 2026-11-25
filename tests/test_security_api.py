@@ -188,7 +188,16 @@ async def test_security_events_list_ingest(auth_client):
     assert any(i["event_type"] == "security.unauthorized_attempt" for i in items)
 
 
-async def test_security_metric_ingest_and_metrics(auth_client):
+async def test_security_metric_ingest_and_metrics(auth_client, test_db_session, test_org, test_user):
+    from sqlalchemy import select
+    from aios.governance.security import (
+        SecurityEvent,
+        record_auth_failure,
+        record_recovery_drill,
+        record_vuln_reported,
+        record_vuln_resolved,
+    )
+
     created = await auth_client.post("/api/security/incidents", json={"title": "MetricEvt", "severity": "low"})
     incident_id = created.json()["id"]
 
@@ -200,27 +209,111 @@ async def test_security_metric_ingest_and_metrics(auth_client):
         ("vuln_reported", {"vuln_id": "CVE-TEST-1", "critical": True}),
         ("vuln_resolved", {"vuln_id": "CVE-TEST-1", "critical": True}),
     ]:
-        resp = await auth_client.post(
+        bad = await auth_client.post(
             "/api/security/events",
             json={"metric": metric, "incident_id": incident_id, "payload": payload},
         )
+        assert bad.status_code == 400, bad.text
+        assert bad.json()["detail"] == "event_type required"
+    missing = await auth_client.post("/api/security/events", json={})
+    assert missing.status_code == 400, missing.text
+    invalid = await auth_client.post("/api/security/events", json={"event_type": 123})
+    assert invalid.status_code == 400, invalid.text
+
+    await record_auth_failure(
+        test_db_session, org_id=test_org.id, actor_id=test_user.id, payload={"ip": "trusted"}
+    )
+    await record_recovery_drill(
+        test_db_session, org_id=test_org.id, success=True, payload={"drill": "backup"}
+    )
+    await record_vuln_reported(
+        test_db_session, org_id=test_org.id, vuln_id="CVE-TEST-1", critical=True
+    )
+    await record_vuln_resolved(
+        test_db_session, org_id=test_org.id, vuln_id="CVE-TEST-1", critical=True
+    )
+    await test_db_session.commit()
+
+    before_resp = await auth_client.get("/api/security/metrics")
+    assert before_resp.status_code == 200, before_resp.text
+    before = before_resp.json()
+    assert before["unauthorized_attempts"] == 1
+    assert before["recovery_test_success_rate"] == 1.0
+    assert before["unresolved_critical_vulns"] == 0
+    assert before["metric_sources"]["unresolved_critical_vulns"] == "security_events.vuln_reported/vuln_resolved"
+
+    forged_types = [
+        "security.auth.failure",
+        "security.cross_tenant.blocked",
+        "security.recovery.drill",
+        "security.detection.false_positive",
+        "security.vuln.reported",
+        "security.vuln.resolved",
+        "security.response.allowed",
+    ]
+    for event_type in forged_types:
+        resp = await auth_client.post(
+            "/api/security/events",
+            json={
+                "event_type": event_type,
+                "source": "vuln_scanner",
+                "severity": "critical",
+                "incident_id": incident_id,
+                "payload": {"vuln_id": "CVE-FAKE", "critical": True, "success": False},
+            },
+        )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["metric"] == metric
+        body = resp.json()
+        assert body["event_type"] == event_type
+        assert body["metric"] is None
+        assert body["stored"] is True
 
-    bad = await auth_client.post("/api/security/events", json={"metric": "not_a_metric"})
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(
+                SecurityEvent.incident_id == incident_id,
+                SecurityEvent.source == "security.api.ingest",
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == len(forged_types)
+    assert all(e.source == "security.api.ingest" for e in rows)
+    assert all(e.actor_type == "human" and e.actor_id == test_user.id for e in rows)
+
+    after_resp = await auth_client.get("/api/security/metrics")
+    assert after_resp.status_code == 200, after_resp.text
+    after = after_resp.json()
+    for key in (
+        "unauthorized_attempts",
+        "cross_tenant_violations",
+        "false_positive_rate",
+        "recovery_test_success_rate",
+        "unresolved_critical_vulns",
+        "metric_sources",
+        "coverage",
+    ):
+        assert after[key] == before[key]
+
+
+async def test_security_event_ingest_payload_bound(auth_client):
+    import json
+
+    max_chars = 4096
+    overhead = len(json.dumps({"blob": ""}))
+    ok = await auth_client.post(
+        "/api/security/events",
+        json={"event_type": "security.audit.note", "payload": {"blob": "x" * (max_chars - overhead)}},
+    )
+    assert ok.status_code == 200, ok.text
+    bad = await auth_client.post(
+        "/api/security/events",
+        json={
+            "event_type": "security.audit.note",
+            "payload": {"blob": "x" * (max_chars - overhead + 1)},
+        },
+    )
     assert bad.status_code == 400, bad.text
-
-    metrics = await auth_client.get("/api/security/metrics")
-    assert metrics.status_code == 200, metrics.text
-    m = metrics.json()
-    assert m["unauthorized_attempts"] >= 1
-    assert m["cross_tenant_violations"] >= 1
-    assert m["false_positive_rate"] is not None
-    assert m["recovery_test_success_rate"] == 1.0
-    assert m["unresolved_critical_vulns"] == 0
-    assert m["metric_sources"]["unresolved_critical_vulns"] == "security_events.vuln_reported/vuln_resolved"
-    assert m["coverage"]["recovery_test_events"] >= 1
-    assert m["coverage"]["false_positive_events"] >= 1
+    assert bad.json()["detail"] == "payload too large"
 
 
 async def test_respond_closed_incident_conflict(auth_client):
@@ -243,6 +336,203 @@ async def _make_founder(test_org, test_user, test_db_session):
     test_org.extra_data = {**(test_org.extra_data or {}), "founder_user_id": test_user.id}
     await test_db_session.commit()
     await test_db_session.refresh(test_org)
+
+
+async def test_false_positive_records_bounded_telemetry_without_state_change(
+    auth_client, test_db_session, test_org, test_user
+):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent, SecurityIncident
+
+    await _make_founder(test_org, test_user, test_db_session)
+    created = await auth_client.post(
+        "/api/security/incidents", json={"title": "FP telemetry", "severity": "low"}
+    )
+    assert created.status_code == 200, created.text
+    incident_id = created.json()["id"]
+
+    resp = await auth_client.post(
+        f"/api/security/incidents/{incident_id}/false-positive",
+        json={
+            "reason": "  benign duplicate alert  ",
+            "event_type": "security.vuln.reported",
+            "metric": "vuln_reported",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["stored"] is True
+    assert body["metric"] == "false_positive"
+    assert "reason" not in body
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.incident_id == incident_id)
+        )
+    ).scalars().all()
+    fps = [e for e in rows if e.event_type == "security.detection.false_positive"]
+    assert len(fps) == 1
+    evt = fps[0]
+    assert evt.id == body["id"]
+    assert evt.org_id == test_org.id
+    assert evt.actor_type == "human"
+    assert evt.actor_id == test_user.id
+    assert evt.source == "security.api.false_positive"
+    assert evt.payload["reason"] == "benign duplicate alert"
+    assert set(evt.payload) == {"reason", "metric"}
+    assert not any(
+        e.event_type in {"security.vuln.reported", "security.recovery.drill"} for e in rows
+    )
+    assert not any(
+        e.event_type in {"security.response.allowed", "security.response.denied"}
+        or (e.payload or {}).get("action") == "accept_risk"
+        for e in rows
+    )
+
+    inc = (
+        await test_db_session.execute(
+            select(SecurityIncident).where(SecurityIncident.id == incident_id)
+        )
+    ).scalar_one()
+    assert inc.status == "detected"
+    assert inc.timeline == []
+
+
+async def test_false_positive_requires_founder(auth_client, test_db_session):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent, SecurityIncident
+
+    created = await auth_client.post(
+        "/api/security/incidents", json={"title": "FP authz", "severity": "low"}
+    )
+    assert created.status_code == 200, created.text
+    incident_id = created.json()["id"]
+
+    denied_query = select(SecurityEvent).where(
+        SecurityEvent.source == "security.api.false_positive",
+        SecurityEvent.event_type == "security.authz.denied",
+    )
+    before_denied = (await test_db_session.execute(denied_query)).scalars().all()
+
+    resp = await auth_client.post(
+        f"/api/security/incidents/{incident_id}/false-positive", json={"reason": "benign"}
+    )
+    assert resp.status_code == 403, resp.text
+
+    after_denied = (await test_db_session.execute(denied_query)).scalars().all()
+    assert len(after_denied) == len(before_denied) + 1
+    assert all(e.payload.get("reason") == "founder_required" for e in after_denied)
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.incident_id == incident_id)
+        )
+    ).scalars().all()
+    assert not any(
+        e.event_type == "security.detection.false_positive"
+        or e.event_type in {"security.response.allowed", "security.response.denied"}
+        or (e.payload or {}).get("action") == "accept_risk"
+        for e in rows
+    )
+
+    inc = (
+        await test_db_session.execute(
+            select(SecurityIncident).where(SecurityIncident.id == incident_id)
+        )
+    ).scalar_one()
+    assert inc.status == "detected"
+    assert inc.timeline == []
+
+
+async def test_false_positive_reason_bounds(auth_client, test_org, test_user, test_db_session):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent
+
+    await _make_founder(test_org, test_user, test_db_session)
+    created = await auth_client.post(
+        "/api/security/incidents", json={"title": "FP bounds", "severity": "low"}
+    )
+    assert created.status_code == 200, created.text
+    incident_id = created.json()["id"]
+
+    for reason in ("", "   ", "x" * 501):
+        bad = await auth_client.post(
+            f"/api/security/incidents/{incident_id}/false-positive", json={"reason": reason}
+        )
+        assert bad.status_code == 400, bad.text
+
+    ok = await auth_client.post(
+        f"/api/security/incidents/{incident_id}/false-positive",
+        json={"reason": f" {'x' * 500} "},
+    )
+    assert ok.status_code == 200, ok.text
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(
+                SecurityEvent.incident_id == incident_id,
+                SecurityEvent.event_type == "security.detection.false_positive",
+            )
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert len(rows[0].payload["reason"]) == 500
+
+    all_rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.incident_id == incident_id)
+        )
+    ).scalars().all()
+    assert not any(
+        e.event_type in {"security.response.allowed", "security.response.denied"}
+        or (e.payload or {}).get("action") == "accept_risk"
+        for e in all_rows
+    )
+
+
+async def test_cross_tenant_false_positive_records_metric(auth_client, test_db_session, second_org):
+    from sqlalchemy import select
+    from aios.governance.security import SecurityEvent, SecurityIncident
+
+    other = SecurityIncident(
+        org_id=second_org.id,
+        incident_key="other-inc-fp",
+        title="Other org FP incident",
+        severity="low",
+        status="detected",
+    )
+    test_db_session.add(other)
+    await test_db_session.commit()
+    await test_db_session.refresh(other)
+
+    resp = await auth_client.post(
+        f"/api/security/incidents/{other.id}/false-positive", json={"reason": "benign"}
+    )
+    assert resp.status_code == 404, resp.text
+
+    rows = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(SecurityEvent.event_type == "security.cross_tenant.blocked")
+        )
+    ).scalars().all()
+    assert any(
+        e.payload.get("metric") == "cross_tenant_block"
+        and e.payload.get("resource_type") == "SecurityIncident"
+        and e.payload.get("resource_org_id") == second_org.id
+        and e.payload.get("incident_id") == other.id
+        and e.source == "security.api.false_positive"
+        for e in rows
+    )
+
+    fps = (
+        await test_db_session.execute(
+            select(SecurityEvent).where(
+                SecurityEvent.incident_id == other.id,
+                SecurityEvent.event_type == "security.detection.false_positive",
+            )
+        )
+    ).scalars().all()
+    assert fps == []
 
 
 async def test_preapprovals_require_founder(auth_client):

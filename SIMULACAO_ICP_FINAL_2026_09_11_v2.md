@@ -1,5 +1,7 @@
 # Simulação Final — AIOS Voz & Dados Multi-canal 1-Click BYOK
 
+> **HISTORICAL SIMULATION (2026-09)** — not a current offer. Prices, limits, SLAs and metrics below were hypothetical and are not enforced by current code. See docs/PRINCIPIO_VERDADE.md.
+
 **Produto hoje:** `Voz (SDR/Closer/Suporte WhatsApp-first)` + `Dados (Analyst gpt-4o + Scientist o3-mini)` • `Multi-canal` `WhatsApp hero Evolution API Cloud API` • `CRM 100% IA` `kanban + HITL` • `TTS Kokoro $0/min` + `Whisper $0` • `1 comando curl BYOK` `VPS dele + key dele` • `Multi-tenant white-label` • `Deploy Coolify ou VPS puro`
 
 **Mesa:** PM Lead + 11 ICPs + Sales + Eng

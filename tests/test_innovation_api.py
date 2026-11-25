@@ -1,5 +1,7 @@
 """Innovation API: declared experiments, deterministic results, Founder decisions."""
 
+from datetime import datetime, timedelta
+
 from sqlalchemy import select
 
 from aios.db.models import Organization
@@ -223,3 +225,68 @@ async def test_create_experiment_cross_tenant_hypothesis_emits_metric(auth_clien
         and e.payload.get("resource_org_id") == other.id
     ]
     assert mismatch
+
+
+async def test_experiment_list_bounded_page_and_offset(
+    auth_client, test_db_session, test_org, second_org
+):
+    base_created = datetime(2026, 1, 1)
+    own = [
+        Experiment(
+            org_id=test_org.id, title=f"Own {i}",
+            created_at=base_created + timedelta(minutes=i),
+        )
+        for i in range(3)
+    ]
+    foreign = Experiment(org_id=second_org.id, title="Foreign experiment")
+    test_db_session.add_all([*own, foreign])
+    await test_db_session.commit()
+
+    all_resp = await auth_client.get("/api/innovation/experiments")
+    assert all_resp.status_code == 200, all_resp.text
+    all_body = all_resp.json()
+    assert all_body["truncated"] is False
+    assert "total" not in all_body
+    assert {e["title"] for e in all_body["items"]} == {e.title for e in own}
+    assert set(all_body["items"][0]) == {
+        "id", "hypothesis_id", "title", "mvp_type", "metric_name", "result", "decision"
+    }
+
+    first = await auth_client.get("/api/innovation/experiments", params={"limit": 2})
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert len(body["items"]) == 2
+    assert body["truncated"] is True
+    assert "total" not in body
+
+    second = await auth_client.get(
+        "/api/innovation/experiments", params={"limit": 2, "offset": 2}
+    )
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert len(body["items"]) == 1
+    assert body["truncated"] is False
+
+    expected_order = [
+        e.id for e in sorted(own, key=lambda e: (e.created_at, e.id), reverse=True)
+    ]
+    assert [e["id"] for e in all_body["items"]] == expected_order
+    assert [e["id"] for e in first.json()["items"]] == expected_order[:2]
+    assert [e["id"] for e in second.json()["items"]] == expected_order[2:]
+
+    own_ids = {e["id"] for e in all_body["items"]}
+    first_ids = {e["id"] for e in first.json()["items"]}
+    second_ids = {e["id"] for e in second.json()["items"]}
+    assert first_ids | second_ids == own_ids
+    assert first_ids.isdisjoint(second_ids)
+
+    first_repeat = await auth_client.get("/api/innovation/experiments", params={"limit": 2})
+    assert [e["id"] for e in first_repeat.json()["items"]] == expected_order[:2]
+    second_repeat = await auth_client.get(
+        "/api/innovation/experiments", params={"limit": 2, "offset": 2}
+    )
+    assert [e["id"] for e in second_repeat.json()["items"]] == expected_order[2:]
+
+    for params in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        bad = await auth_client.get("/api/innovation/experiments", params=params)
+        assert bad.status_code == 422, bad.text

@@ -67,6 +67,28 @@ class TestSqlOrgScoping:
 
 
 class TestSuperadminGate:
+    class _EventDB:
+        def __init__(self, org=None):
+            self.org = org
+            self.events = []
+            self.commits = 0
+
+        def add(self, event):
+            self.events.append(event)
+
+        async def flush(self):
+            return None
+
+        async def commit(self):
+            self.commits += 1
+
+        async def get(self, _model, _id):
+            return self.org
+
+    @pytest.fixture(autouse=True)
+    def _no_audit_disk(self, monkeypatch):
+        monkeypatch.setattr("aios.core.audit_sink.append", lambda *a, **k: {})
+
     @pytest.mark.asyncio
     async def test_owner_and_superadmin_pass(self):
 
@@ -75,7 +97,7 @@ class TestSuperadminGate:
 
         for role in ("owner", "superadmin"):
             u = User(email=f"{role}@x.com", hashed_password="x", org_id="o", role=role)
-            assert await get_superadmin(u) is u
+            assert await get_superadmin(u, self._EventDB()) is u
 
     @pytest.mark.asyncio
     async def test_member_blocked(self):
@@ -84,10 +106,58 @@ class TestSuperadminGate:
         from aios.api.deps import get_superadmin
         from aios.db.models import User
 
-        u = User(email="m@x.com", hashed_password="x", org_id="o", role="admin")
+        u = User(id="u-member", email="m@x.com", hashed_password="x", org_id="o", role="admin")
+        db = self._EventDB()
         with pytest.raises(HTTPException) as e:
-            await get_superadmin(u)
+            await get_superadmin(u, db)
         assert e.value.status_code == 403
+        assert e.value.detail == "requer administrador"
+        assert len(db.events) == 1
+        event = db.events[0]
+        assert event.event_type == "security.authz.denied"
+        assert event.severity == "medium"
+        assert event.actor_type == "human"
+        assert event.actor_id == "u-member"
+        assert event.org_id == "o"
+        assert event.source == "api.deps.superadmin"
+        assert event.payload == {
+            "reason": "superadmin_required",
+            "path_source": "api.deps.superadmin",
+        }
+        assert db.commits == 1
+
+    @pytest.mark.asyncio
+    async def test_tool_admin_denied(self):
+        from fastapi import HTTPException
+
+        from aios.api.tools import _require_tool_admin
+
+        class _User:
+            id = "u-tool"
+            org_id = "org-tool"
+            role = "member"
+
+        class _Org:
+            extra_data = {}
+
+        db = self._EventDB(org=_Org())
+        with pytest.raises(HTTPException) as e:
+            await _require_tool_admin(db, _User(), "org-tool")
+        assert e.value.status_code == 403
+        assert e.value.detail == "admin, owner, or founder role required for dynamic/code tools"
+        assert len(db.events) == 1
+        event = db.events[0]
+        assert event.event_type == "security.authz.denied"
+        assert event.severity == "medium"
+        assert event.actor_type == "human"
+        assert event.actor_id == "u-tool"
+        assert event.org_id == "org-tool"
+        assert event.source == "api.tools.require_tool_admin"
+        assert event.payload == {
+            "reason": "tool_admin_required",
+            "path_source": "api.tools.require_tool_admin",
+        }
+        assert db.commits == 1
 
     async def test_dev_console_forbidden_for_member(self, auth_client: AsyncClient):
         """Test user is role=admin: code-exec console must 403."""

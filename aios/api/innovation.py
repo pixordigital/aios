@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
 from aios.api.deps import get_current_user, get_org_id
@@ -114,8 +114,20 @@ async def create_hypothesis(
 
 
 @router.get("/experiments")
-async def list_experiments(db: DatabaseBackend = Depends(get_db_backend), org_id: str = Depends(get_org_id)):
-    rows = (await db.execute(select(Experiment).where(Experiment.org_id == org_id))).scalars().all()
+async def list_experiments(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: DatabaseBackend = Depends(get_db_backend),
+    org_id: str = Depends(get_org_id),
+):
+    rows = (await db.execute(
+        select(Experiment)
+        .where(Experiment.org_id == org_id)
+        .order_by(Experiment.created_at.desc(), Experiment.id.desc())
+        .limit(limit + 1)
+        .offset(offset)
+    )).scalars().all()
+    truncated = len(rows) > limit
     return {
         "items": [
             {
@@ -123,8 +135,9 @@ async def list_experiments(db: DatabaseBackend = Depends(get_db_backend), org_id
                 "mvp_type": e.mvp_type, "metric_name": e.metric_name,
                 "result": e.result, "decision": e.decision,
             }
-            for e in rows
-        ]
+            for e in rows[:limit]
+        ],
+        "truncated": truncated,
     }
 
 
