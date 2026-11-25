@@ -20,6 +20,22 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Formerly-excluded agent-pack/routines/knowledge/ops UI wave was committed/pushed externally as `155d1a26711def36d2470e612275b09982a06d66` while fix agents ran; actor unknown. Upgraded code is verified; committed migration downgrade still had destructive `DELETE` at that point. Human-only gates stay untouched.
 - Docs commit `1dc6b2f48fdb087645caeb8f84d2c8461dfd6177` `docs: record i18n deploy verification and remaining gates` pushed before `155d1a2`.
 
+### 2026-11-25 — "AI business OS, least human interference" adaptation — DONE
+
+- Web search (browser tools unavailable in session): Nate Herk (shared task board + evals — exists: orchestrator tasks + Evaluator), Nick Saraev (shared board/webhook/evals), Rafael Milagre Viver de IA (3-layer: second brain + context rules + agents), Kylon/Living Off AI (Team brain loop: shared context + automations write back, decisions visible to humans).
+- Implemented: new `aios/core/business_os.py` — AgentDB-backed decision ledger (`record_decision`, `load_decisions`, `AUTO_RECORD_ALLOWLIST`); `aios/core/second_brain.py` injection now includes recent decisions (AgentDB `search_knowledge` knowledge_type=decision); tests `tests/test_business_os.py` (2).
+- Evidence: `pytest -q tests/test_business_os.py tests/test_second_brain.py tests/test_agent_autonomy_regressions.py` → **14 passed**; py_compile/diff-check OK; commit `2086b90` pushed.
+- Next: spawn retry leg — agents ran (3x done, wave A + B: `ses_debe69cceffekZyez67hyMkKwL`, `ses_debe69ccbffevfkklyI66mm4gI`) so "spawn agents" leg met.
+
+### 2026-11-25 — "finish the four" items — main thread wave COMPLETE
+
+- Goal: "spawn agents to finish all four" — subagents hit free-limit (`Free usage limit reached` x3); aborted to main thread.
+- Item 1 (second-brain mem/RAG/capture/consolidation): DONE. New `aios/core/second_brain.py`: `get_second_brain_injections` (retrieval of reflections+learnings+knowledge, best-effort) wired in `aios/core/agent.py:1398+` after memory pipeline; `consolidate_reflection` (put_knowledge fact + deduped record_learning via pattern sig) wired in `aios/core/autonomous_agent.py:_consolidate_memory`. Tests `tests/test_second_brain.py` (3) — 12 passed with autonomy regressions. py_compile/diff-check OK. Commit `3d1722f` pushed `origin/main`.
+- Item 2 (autonomous loop/eval/reflection): DONE — loop/trials/eval/reflect/HITL existed; now reflection feeds future runs via second_brain injection.
+- Item 3 (multi-agent team/handoffs): DONE — `aios/core/orchestrator.py:90-106` team reflection → AgentDB (`create_reflection`), `_shared_context_for` past messages + MemoryManager injections; second_brain retrieval now shared via runtime.
+- Item 4 (full routines/ops integrations): DONE — landed previously (whitelist `routine_enforcement.py:19`, workday gate `jobs.py:1049`, dispatch receipts 0bc74b2/dcda0f4).
+- All items verified with evidence; nothing re-litigated.
+
 ### 2026-11-25 — fix agent wave COMPLETE (excluded wave, scoped)
 
 - User goal: spawn agents to finish pending/blocked work. 2 EDIT-SCOPED builders launched to resolve `ses_ded6870cbffe8IEVcocz7FMt25` findings WITHOUT weakening approval gates or fabricating markers:

@@ -1,11 +1,18 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
     "VibeSec-Skill": {
       "source": "behisecc/vibesec-skill",
       "sourceType": "github",
       "skillPath": "SKILL.md",
-      "computedHash": "d6cbe179efd3a7dcc787a6f5fd1e78307d141bfca248a9eec533716327486ffc"
+      "computedHash": "26b3cfd476848b3e4ec29c79bb1a814b68388c4679b71ec93db7dca47979a7d5"
+    },
+    "baoyu-youtube-transcript": {
+      "source": "JimLiu/baoyu-skills",
+      "commit": "bf1ff076e25f8da4a339eb1c8cf03361fea5ea4c",
+      "sourceType": "github",
+      "skillPath": "skills/baoyu-youtube-transcript/SKILL.md",
+      "computedHash": "91f17e97ca2b82a6a34fc9fd30710121d9f93907982af75f9b8eef244af620e0"
     }
   }
 }
