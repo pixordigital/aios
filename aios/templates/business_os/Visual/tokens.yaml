@@ -1,0 +1,32 @@
+# Visual tokens — generic, OnePersonOS. Replace as needed. NO brand copying.
+# This is a one-person business; keep it personal to the owner.
+
+colors:
+  primary: "#1e40af"   # dark blue — trust
+  secondary: "#8b5cf6" # violet — differentiation
+  background: "#0b0f19" # deep night mode
+  surface: "#131a2e"
+  text: "#e2e8f0"
+  muted: "#94a3b8"
+  accent: "#22d3ee"     # cyan — action
+  danger: "#f87171"     # red — alerts only
+
+typography:
+  family: "-apple-system, Inter, 'Geist', Arial, sans-serif"
+  heading_size: "1.05em"
+  body_size: "0.875rem"
+
+spacing:
+  small: 4
+  medium: 8
+  large: 16
+  xlarge: 24
+
+shapes:
+  radius_sm: 4
+  radius_md: 8
+  radius_lg: 14
+
+animation:
+  micro_ms: 160   # micro transitions
+  focus_ms: 300   # focus pulls
