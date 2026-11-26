@@ -33,6 +33,7 @@ ALLOWED_KEYS = {
     "google_calendar_token_expiry",
     "google_calendar_email",
     "google_calendar_connected_at",
+    "calcom_link",
 }
 
 PROVIDER_KEY_MAP = {

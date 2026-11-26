@@ -69,26 +69,12 @@
     </div>
 
     <div class="card" style="border-left:3px solid var(--accent)">
-      <h3>📅 Google Calendar — Agendamento Real</h3>
-      <p class="text-xs text-tertiary" style="margin:0.25rem 0 0.75rem">Conecte para SDR agendar consulta/visita direto no Calendar (Roberto/Mariana). Sem isso, agente só usa <code>calculator</code>.</p>
-      {% if request.query_params.get('calendar_connected') %}<div class="card" style="background:var(--green-subtle);border-color:var(--green);color:var(--green);padding:0.5rem 0.75rem;margin-bottom:0.75rem;font-size:0.8125rem">✓ Google Calendar conectado com sucesso!</div>{% endif %}
-      <div style="display:flex;gap:0.75rem;align-items:center;padding:0.75rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;margin-bottom:0.75rem">
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:0.875rem">Conectar com Google OAuth</div>
-          <div class="text-xs text-tertiary">{% if secrets.google_calendar_email %}✓ Conectado como {{ secrets.google_calendar_email }} (expira {{ secrets.google_calendar_token_expiry or '' }}){% else %}Clique para autorizar acesso ao Calendar — 1 clique, sem JSON{% endif %}</div>
-        </div>
-        <button type="button" class="btn btn-primary btn-sm" onclick="connectGoogleCalendar(event)">{% if secrets.google_calendar_email %}Reconectar{% else %}Conectar Google{% endif %}</button>
-        {% if secrets.google_calendar_email %}<button type="button" class="btn btn-ghost btn-sm" onclick="disconnectCalendar()">Desconectar</button>{% endif %}
-      </div>
-      <div style="text-align:center;color:var(--text-tertiary);font-size:0.7rem;margin:0.5rem 0">— ou use service account (avançado) —</div>
-      <div class="grid-2">
-        <div style="grid-column:1 / -1"><label>Google Calendar Credentials (JSON service account) <span class="text-tertiary">{{ '✓ configurado' if secrets.google_calendar_credentials else '— vazio' }}</span></label><textarea class="input input-mono" name="google_calendar_credentials" rows="3" placeholder='{"type":"service_account","project_id":"...","private_key":"-----BEGIN PRIVATE KEY-----..."}'>{{ secrets.google_calendar_credentials or '' }}</textarea><p class="text-xs text-tertiary" style="margin-top:0.25rem">Cole JSON do service account OU defina <code>AIOS_GOOGLE_CALENDAR_CREDENTIALS</code> no .env. <a href="https://console.cloud.google.com/iam-admin/serviceaccounts" target="_blank" style="color:var(--accent)">Criar service account →</a></p></div>
-        <div><label>Calendar ID</label><input class="input" name="google_calendar_id" value="{{ secrets.google_calendar_id or '' }}" placeholder="primary ou email@group.calendar.google.com"><p class="text-xs text-tertiary">Default: primary</p></div>
-        <div><label>Calendar Webhook URL (Calendly/Zapier)</label><input class="input" name="calendar_webhook_url" value="{{ secrets.calendar_webhook_url or '' }}" placeholder="https://hooks.zapier.com/..."><p class="text-xs text-tertiary">Opcional: webhook para n8n/Zapier</p></div>
-      </div>
-      <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="testCalendar()">Testar Calendar</button><span id="test-calendar" class="text-xs"></span>
-        <a href="https://calendar.google.com/calendar/r/settings" target="_blank" class="btn btn-ghost btn-sm">Abrir Calendar →</a>
+      <h3>{{ t('📅 Agendamento — Cal.com') if false else '📅 Agendamento — Cal.com' }}</h3>
+      <p class="text-xs text-tertiary" style="margin:0.25rem 0 0.75rem">Use o Cal.com para agendar reuniões. Cole seu link de agendamento (ex: <code>https://cal.com/sua-equipe/30min</code>). Integração completa em breve.</p>
+      <div>
+        <label>Link de agendamento (Cal.com)</label>
+        <input class="input" name="calcom_link" value="{{ secrets.calcom_link or '' }}" placeholder="https://cal.com/sua-equipe/30min">
+        <p class="text-xs text-tertiary" style="margin-top:0.25rem">Se preenchido, agentes podem usar este link para orientar o cliente a agendar.</p>
       </div>
     </div>
 
@@ -188,19 +174,11 @@ window.aiosI18n.register({
   'SMTP — E-mail':'SMTP — Correo electrónico',
   'Relatório semanal:':'Informe semanal:',
   'Se vazio, usamos o primeiro administrador da organização. Se SMTP não estiver configurado, o envio aparece como indisponível no relatório; o Slack continua funcionando.':'Si está vacío, usamos el primer administrador de la organización. Si SMTP no está configurado, el envío aparece como no disponible en el informe; Slack sigue funcionando.',
-  '📅 Google Calendar — Agendamento Real':'📅 Google Calendar — Programación Real',
-  'Conecte para SDR agendar consulta/visita direto no Calendar (Roberto/Mariana). Sem isso, agente só usa':'Conecte para que SDR programe consulta/visita directamente en Calendar (Roberto/Mariana). Sin esto, el agente solo usa',
-  '✓ Google Calendar conectado com sucesso!':'✓ Google Calendar conectado con éxito!',
-  'Conectar com Google OAuth':'Conectar con Google OAuth',
-  'Clique para autorizar acesso ao Calendar — 1 clique, sem JSON':'Haga clic para autorizar el acceso a Calendar — 1 clic, sin JSON',
-  '— ou use service account (avançado) —':'— o use service account (avanzado) —',
-  '— vazio':'— vacío',
-  'Cole JSON do service account OU defina':'Pegue el JSON del service account O defina',
-  'no .env.':'en .env.',
-  'Criar service account →':'Crear service account →',
-  'primary ou email@group.calendar.google.com':'primary o email@group.calendar.google.com',
-  'Default: primary':'Predeterminado: primary',
-  'Testar Calendar':'Probar Calendar',
+  '📅 Agendamento — Cal.com':'📅 Programación — Cal.com',
+  'Use o Cal.com para agendar reuniões. Cole seu link de agendamento (ex:':'Use Cal.com para programar reuniones. Pegue su enlace de programación (ej:',
+  'Integração completa em breve.':'Integración completa próximamente.',
+  'Link de agendamento (Cal.com)':'Enlace de programación (Cal.com)',
+  'Se preenchido, agentes podem usar este link para orientar o cliente a agendar.':'Si se completa, los agentes pueden usar este enlace para orientar al cliente a programar.',
   '⏰ Alertas — Expiração por organização':'⏰ Alertas — Expiración por organización',
   'Alertas `PendingAction` (Deal Desk) expiram automaticamente. Padrão 7 dias, configurável por negócio.':'Alertas `PendingAction` (Deal Desk) expiran automáticamente. Predeterminado 7 días, configurable por negocio.',
   'Expiração (dias)':'Expiración (días)',
@@ -227,11 +205,6 @@ window.aiosI18n.register({
   'existir um agente ativo com deals abertos.':'que exista un agente activo con deals abiertos.',
   'Stripe / OAuth / Outros':'Stripe / OAuth / Otros',
   'Salvar chaves':'Guardar claves',
-  'Falha ao iniciar OAuth':'Fallo al iniciar OAuth',
-  '\n\nConfigure no Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nE no Google Cloud Console adicione redirect URI:\n':'\n\nConfigure en Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nY en Google Cloud Console añada la redirect URI:\n',
-  '\n\nSessão expirada — recarregue a página (F5) e faça login novamente.':'\n\nSesión expirada — recargue la página (F5) e inicie sesión nuevamente.',
-  'Erro: ':'Error: ',
-  'Desconectar Google Calendar?':'¿Desconectar Google Calendar?',
   'Falha':'Fallo',
   'testando...':'probando...',
   'erro':'error'
@@ -243,45 +216,6 @@ const t=window.aiosI18n.t;
   sel.value=localStorage.getItem('aios_lang')||'pt';
   sel.addEventListener('change',function(){ localStorage.setItem('aios_lang',sel.value); location.reload(); });
 })();
-async function connectGoogleCalendar(e){
-  const btn=e ? (e.currentTarget||e.target) : event.target; const origText=btn.textContent; btn.textContent='Conectando...'; btn.disabled=true;
-  try{
-    const r=await fetch('/api/auth/google/calendar/login', {credentials:'include'});
-    const j=await r.json();
-    if(j.authorization_url){ window.location.href=j.authorization_url; }
-    else {
-      const msg=j.error||j.detail||j.title||j.message||t('Falha ao iniciar OAuth');
-      // Se não configurado, mostra instruções
-      if(msg.includes('não configurado')){
-        alert(msg + t('\n\nConfigure no Coolify → AIOS → Environment:\nAIOS_GOOGLE_CLIENT_ID + AIOS_GOOGLE_CLIENT_SECRET\n\nE no Google Cloud Console adicione redirect URI:\n') + window.location.origin + '/api/auth/google/calendar/callback');
-      } else if(r.status===401){
-        alert(msg + t('\n\nSessão expirada — recarregue a página (F5) e faça login novamente.'));
-      } else {
-        alert(msg);
-      }
-      btn.textContent=origText; btn.disabled=false;
-    }
-  }catch(e){ alert(t('Erro: ')+e.message); btn.textContent=origText; btn.disabled=false; }
-}
-async function disconnectCalendar(){
-  if(!confirm(t('Desconectar Google Calendar?'))) return;
-  try{
-    const r=await fetch('/api/auth/google/calendar/disconnect', {method:'POST', credentials:'include'});
-    const j=await r.json();
-    if(j.ok) location.reload(); else alert(j.error||t('Falha'));
-  }catch(e){ alert(t('Erro: ')+e.message); }
-}
-async function testCalendar(){
-  const el=document.getElementById('test-calendar');
-  el.textContent=t('testando...'); el.style.color='var(--text-tertiary)';
-  const fd=new FormData(document.querySelector('form'));
-  try{
-    const r=await fetch('/dashboard/settings/test-calendar',{method:'POST', body: fd});
-    const j=await r.json();
-    el.textContent=j.ok?'✓ ok':'✗ '+(j.error||j.status);
-    el.style.color=j.ok?'var(--green)':'var(--red)';
-  }catch(e){ el.textContent=t('erro'); el.style.color='var(--red)';}
-}
 async function testKey(provider){
   const el=document.getElementById('test-'+provider);
   el.textContent=t('testando...'); el.style.color='var(--text-tertiary)';
