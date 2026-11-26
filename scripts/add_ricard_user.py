@@ -15,7 +15,7 @@ from aios.config import settings
 from aios.db.backend import db_session
 from aios.db.models import Organization, OrganizationMembership, User
 
-EMAIL = "Ricard.Spinellis@icloud.com"
+EMAIL = "Ricardo.Spinellis@icloud.com"
 PASSWORD = "Ricardo@aios123-"
 MEMBERSHIPS = [("pixor", "member"), ("showcar", "owner")]
 
