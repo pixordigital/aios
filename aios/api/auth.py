@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 logger = logging.getLogger(__name__)
 
@@ -541,7 +541,7 @@ async def login(request: Request, body: LoginRequest, db: DatabaseBackend = Depe
     _ip = request.client.host if request and request.client else "unknown"
     await _rate_limit(f"{body.email.lower().strip()}|{_ip}")
 
-    result = await db.execute(select(User).where(User.email == body.email.lower().strip()))
+    result = await db.execute(select(User).where(func.lower(User.email) == body.email.lower().strip()))
     user = result.scalar_one_or_none()
     # Always spend the bcrypt cost, even for an unknown email. Skipping it made
     # "no such user" measurably faster than "wrong password", which enumerates
