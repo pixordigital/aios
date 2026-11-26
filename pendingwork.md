@@ -752,3 +752,17 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - [x] Prod UI org-switcher verification with real login (human runner if browser needed).
 - [ ] Alembic migration for `organization_memberships`.
 - [x] Stale-user cleanup: Ricard user removed (old id 9c193f92 gone; prod now 2 users: pixordigital + Ricardo new).
+
+### 2026-11-26 night — org-scoped ICM contracts fix
+
+- User: "org pixor shouldnt have ICM contracts of the car dealership vertical... only showcar org should have them."
+- Root cause: GET /dashboard/contracts rendered global car_dealership_us WORKFLOW_CONTRACTS regardless of resolved org.
+- Fix: contracts_page now fetches org via _org_filter; contracts list cleared unless org.slug == "showcar".
+- Tests: test_icm_paid_contract + test_verticals_car_dealership_us + test_wizard_car_dealership_us → 16 passed.
+- Commit 81ab34a, deploy #860 finished 12:42:10Z.
+
+### Open items (2026-11-26 close-out, updated)
+
+- [ ] Post-deploy #860: verify /dashboard/contracts returns empty for pixor org, contracts for showcar (human/browser verify).
+- [ ] Alembic migration for `organization_memberships`.
+- [ ] Human gates remain: real dealership pilot data, LGPD sign-off, Founder activation §6, Slack migration gate, token rotations, prod TLS/secrets/provider re-verify.
