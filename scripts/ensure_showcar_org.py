@@ -40,18 +40,43 @@ async def main() -> int:
             await db.rollback()
             return 2
 
+        org_id, user_id = org.id, user.id
+        if created_org:
+            await db.commit()
         now = datetime.now(timezone.utc)
-        mem_row = (await db.execute(
-            text("SELECT id, role FROM organization_memberships WHERE user_id = :uid AND org_id = :oid LIMIT 1")
-            .bindparams(uid=user.id, oid=org.id)
-        )).first()
         created_mem = False
+        try:
+            mem_row = (await db.execute(
+                text("SELECT id, role FROM organization_memberships WHERE user_id = :uid AND org_id = :oid LIMIT 1")
+                .bindparams(uid=user_id, oid=org_id)
+            )).first()
+        except Exception:
+            await db.rollback()
+            await db.execute(text("""
+                CREATE TABLE IF NOT EXISTS organization_memberships (
+                    id VARCHAR(36) PRIMARY KEY,
+                    user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    org_id VARCHAR(36) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                    role VARCHAR(50) NOT NULL DEFAULT 'admin',
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP,
+                    CONSTRAINT uq_org_membership_user_org UNIQUE (user_id, org_id)
+                )
+            """))
+            await db.execute(text("CREATE INDEX IF NOT EXISTS ix_org_memberships_user_id ON organization_memberships (user_id)"))
+            await db.execute(text("CREATE INDEX IF NOT EXISTS ix_org_memberships_org_id ON organization_memberships (org_id)"))
+            await db.commit()
+            org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
+            mem_row = (await db.execute(
+                text("SELECT id, role FROM organization_memberships WHERE user_id = :uid AND org_id = :oid LIMIT 1")
+                .bindparams(uid=user_id, oid=org_id)
+            )).first()
         if not mem_row:
             await db.execute(
                 text("""
                     INSERT INTO organization_memberships (id, user_id, org_id, role, created_at, updated_at)
                     VALUES (:id, :uid, :oid, :role, :now, :now)
-                """).bindparams(id=str(uuid.uuid4()), uid=user.id, oid=org.id, role="owner", now=now)
+                """).bindparams(id=str(uuid.uuid4()), uid=user_id, oid=org_id, role="owner", now=now)
             )
             created_mem = True
         elif mem_row[1] != "owner":
@@ -60,17 +85,18 @@ async def main() -> int:
                 .bindparams(id=mem_row[0], now=now)
             )
 
-        extra = dict(org.extra_data or {})
+        org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalars().first()
+        extra = dict((org.extra_data if org else None) or {})
         if not extra.get("founder_user_id"):
-            extra["founder_user_id"] = user.id
-            org.extra_data = extra
-
+            extra["founder_user_id"] = user_id
+            if org:
+                org.extra_data = extra
         await db.commit()
         print(
             "OK "
-            f"org_id={org.id} org_slug={org.slug} "
+            f"org_id={org_id} org_slug={ORG_SLUG} "
             f"created_org={created_org} "
-            f"owner_user_id={user.id} owner_email={OWNER_EMAIL} "
+            f"owner_user_id={user_id} owner_email={OWNER_EMAIL} "
             f"created_membership={created_mem} membership_role=owner"
         )
         return 0
