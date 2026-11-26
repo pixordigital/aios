@@ -370,7 +370,7 @@ async def login_action(request: Request, email: str = Form(...), password: str =
     except HTTPException:
         return await login_page(request, error="Muitas tentativas de login. Tente novamente mais tarde.")
     async with db_session() as db:
-        result = await db.execute(select(User).where(User.email == email.lower().strip()))
+        result = await db.execute(select(User).where(func.lower(User.email) == email.lower().strip()))
         user = result.scalar_one_or_none()
         # Burn the bcrypt cost for unknown addresses too, matching /api/auth/login:
         # without it the response time alone reveals which emails are registered.

@@ -502,7 +502,7 @@ async def register(request: Request, body: RegisterRequest, db: DatabaseBackend 
     except Exception:
         pass
 
-    existing = await db.execute(select(User).where(User.email == body.email))
+    existing = await db.execute(select(User).where(func.lower(User.email) == body.email.lower().strip()))
     if existing.scalar_one_or_none():
         raise HTTPException(409, "E-mail já registrado")
 
@@ -766,7 +766,7 @@ async def verify_email(token: str = Query(...), db: DatabaseBackend = Depends(ge
 @router.post("/forgot-password")
 async def forgot_password(email: str = Query(...), db: DatabaseBackend = Depends(get_db_backend)):
     """Send password reset email."""
-    result = await db.execute(select(User).where(User.email == email.lower().strip()))
+    result = await db.execute(select(User).where(func.lower(User.email) == email.lower().strip()))
     user = result.scalar_one_or_none()
     # Generic response either way; no reset email leaves the server for
     # non-allowlisted addresses.
@@ -1245,7 +1245,7 @@ async def _oauth_login_or_register(db: DatabaseBackend, provider: str, provider_
             return TokenResponse(access_token=token, refresh_token=refresh, user_id=user.id, org_id=user.org_id)
 
     # Check if user exists by email
-    result = await db.execute(select(User).where(User.email == email))
+    result = await db.execute(select(User).where(func.lower(User.email) == email.lower().strip()))
     user = result.scalar_one_or_none()
 
     if not user:
