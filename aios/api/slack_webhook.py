@@ -76,10 +76,18 @@ async def _find_connection(db, slack_channel_id: str = ""):
     )
     conns = result.scalars().all()
     if slack_channel_id:
+        matches = []
         for c in conns:
             cfg = c.config or {}
             if isinstance(cfg, dict) and cfg.get("slack_channel_id") == slack_channel_id:
-                return c
+                matches.append(c)
+        if matches:
+            # Collab channels may have multiple connections (one per team).
+            # Pick deterministically: prefer primary (no "__" in label), then
+            # stable by label. Inbound goes to one team; outbound/reporting
+            # uses per-team connections separately.
+            matches.sort(key=lambda c: ("__" in (c.label or ""), c.label or ""))
+            return matches[0]
     # No fallback to another tenant's connection. The previous `conns[0]` handed
     # an unmatched event to whichever tenant's row the database returned first;
     # the per-connection signature check downstream rejected it, but resolving

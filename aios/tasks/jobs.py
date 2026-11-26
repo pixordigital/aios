@@ -1567,6 +1567,7 @@ async def weekly_standup_job(ctx):
             if mgr_ids:
                 managers = {a.id: a for a in (await db.execute(
                     select(Agent).where(Agent.id.in_(mgr_ids)))).scalars().all()}
+            seen_channels: set[str] = set()
             for conn in wanted:
                 cfg = conn.config or {}
                 channel = cfg.get("slack_channel_id", "")
@@ -1574,6 +1575,12 @@ async def weekly_standup_job(ctx):
                 team = teams.get(conn.team_id)
                 if not team or not channel or not token:
                     continue
+                # Collab channels have multiple connections (one per team) sharing
+                # slack_channel_id; post standup once per channel to avoid spam.
+                dedupe = f"{token[:12]}:{channel}"
+                if dedupe in seen_channels:
+                    continue
+                seen_channels.add(dedupe)
                 manager = managers.get(team.manager_agent_id) if team.manager_agent_id else None
                 stats = await team_week_stats(db, org.id, team.id)
                 try:
