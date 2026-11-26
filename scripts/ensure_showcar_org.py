@@ -9,17 +9,15 @@ Run inside app container / deployment environment:
 import asyncio
 import os
 import sys
+import uuid
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from aios.db.backend import db_session
-from aios.db.models import Base, Organization, User
-
-OrganizationMembership = Base.registry._class_registry.get("OrganizationMembership")
-if OrganizationMembership is None:
-    from aios.db.models import OrganizationMembership  # type: ignore[attr-defined]
+from aios.db.models import Organization, User
 
 ORG_SLUG = "showcar"
 ORG_NAME = "Showcar"
@@ -36,29 +34,31 @@ async def main() -> int:
             await db.flush()
             created_org = True
 
-        user = (
-            await db.execute(select(User).where(User.email == OWNER_EMAIL))
-        ).scalars().first()
+        user = (await db.execute(select(User).where(User.email == OWNER_EMAIL))).scalars().first()
         if not user:
             print(f"ERROR:user_not_found email={OWNER_EMAIL}")
             await db.rollback()
             return 2
 
-        mem = (
-            await db.execute(
-                select(OrganizationMembership).where(
-                    OrganizationMembership.user_id == user.id,
-                    OrganizationMembership.org_id == org.id,
-                )
-            )
-        ).scalars().first()
+        now = datetime.now(timezone.utc)
+        mem_row = (await db.execute(
+            text("SELECT id, role FROM organization_memberships WHERE user_id = :uid AND org_id = :oid LIMIT 1")
+            .bindparams(uid=user.id, oid=org.id)
+        )).first()
         created_mem = False
-        if not mem:
-            mem = OrganizationMembership(user_id=user.id, org_id=org.id, role="owner")
-            db.add(mem)
+        if not mem_row:
+            await db.execute(
+                text("""
+                    INSERT INTO organization_memberships (id, user_id, org_id, role, created_at, updated_at)
+                    VALUES (:id, :uid, :oid, :role, :now, :now)
+                """).bindparams(id=str(uuid.uuid4()), uid=user.id, oid=org.id, role="owner", now=now)
+            )
             created_mem = True
-        elif mem.role != "owner":
-            mem.role = "owner"
+        elif mem_row[1] != "owner":
+            await db.execute(
+                text("UPDATE organization_memberships SET role = 'owner', updated_at = :now WHERE id = :id")
+                .bindparams(id=mem_row[0], now=now)
+            )
 
         extra = dict(org.extra_data or {})
         if not extra.get("founder_user_id"):
