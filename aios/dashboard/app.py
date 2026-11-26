@@ -35,6 +35,7 @@ from aios.db.models import Agent, AgentInstance, AgentPack, AgentPackActivation,
 from aios.core.audit import log_audit
 from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
+from aios.api.auth import _validate_password
 from aios.config import settings
 from aios.config import MODEL_COST_IN_OUT as MODEL_PRICING
 
@@ -401,91 +402,88 @@ async def login_action(request: Request, email: str = Form(...), password: str =
         return resp
 
 
-# Multi-tenant signup: creates an Organization from a public form. Internal
-# tool first, so self-service account creation is disabled; the operator
-# provisions accounts. Restore together with /api/auth/register.
-# @router.get("/register", response_class=HTMLResponse)
-# async def register_page(request: Request, error: str = ""):
-#     from aios.config import settings as _s
-#     if not _s.registration_enabled:
-#         return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
-#     return await _render("register.html", request, title="Registrar", error=error)
+@router.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request, error: str = ""):
+    from aios.config import settings as _s
+    if not _s.registration_enabled:
+        return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
+    return await _render("register.html", request, title="Registrar", error=error)
 
 
-# @router.post("/register", response_class=HTMLResponse)
-# async def register_action(
-#     request: Request,
-#     name: str = Form(...), email: str = Form(...),
-#     password: str = Form(...), org_name: str = Form(...),
-# ):
-#     from aios.config import settings as _s
-#     if not _s.registration_enabled:
-#         return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
-#     # Same gate as /api/auth/register: even with registration on, only
-#     # allowlisted addresses may create accounts — otherwise the first
-#     # registrant would mint themselves superadmin below.
-#     from aios.api.auth import _is_login_allowed as _allow
-#     if not _allow(email):
-#         return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
-#     try:
-#         _validate_password(password)
-#     except Exception as e:
-#         return await register_page(request, error=str(e.detail) if hasattr(e, "detail") else str(e))
+@router.post("/register", response_class=HTMLResponse)
+async def register_action(
+    request: Request,
+    name: str = Form(...), email: str = Form(...),
+    password: str = Form(...), org_name: str = Form(...),
+):
+    from aios.config import settings as _s
+    if not _s.registration_enabled:
+        return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
+    # Same gate as /api/auth/register: even with registration on, only
+    # allowlisted addresses may create accounts — otherwise the first
+    # registrant would mint themselves superadmin below.
+    from aios.api.auth import _is_login_allowed as _allow
+    if not _allow(email):
+        return HTMLResponse("<h2>Cadastros fechados</h2><p>Cadastros temporariamente fechados — entre em contato.</p><a href='/'>Voltar</a>", status_code=403)
+    try:
+        _validate_password(password)
+    except Exception as e:
+        return await register_page(request, error=str(e.detail) if hasattr(e, "detail") else str(e))
 
-#     from aios.api.auth import _hash_password
-#     async with db_session() as db:
-#         from sqlalchemy import select
-#         existing = await db.execute(select(User).where(User.email == email.lower().strip()))
-#         if existing.scalar_one_or_none():
-#             return await register_page(request, error="E-mail já registrado")
+    from aios.api.auth import _hash_password
+    async with db_session() as db:
+        from sqlalchemy import select
+        existing = await db.execute(select(User).where(User.email == email.lower().strip()))
+        if existing.scalar_one_or_none():
+            return await register_page(request, error="E-mail já registrado")
 
-#         # first-ever user gets superadmin — count BEFORE creating the org so two
-#         # concurrent registrations can't both read 0 and both become superadmin
-#         user_count = (await db.execute(select(func.count(User.id)))).scalar() or 0
-#         role = "superadmin" if user_count == 0 else "org_admin"
+        # first-ever user gets superadmin — count BEFORE creating the org so two
+        # concurrent registrations can't both read 0 and both become superadmin
+        user_count = (await db.execute(select(func.count(User.id)))).scalar() or 0
+        role = "superadmin" if user_count == 0 else "org_admin"
 
-#         slug = org_name.lower().strip().replace(" ", "-")
-#         slug = "".join(c for c in slug if c.isalnum() or c in "-_") or "org"
-#         if slug in ("pixor", "default", "admin", "api", "dashboard"):
-#             return await register_page(request, error="Nome da organização reservado. Escolha outro nome.")
-#         existing_org = await db.execute(select(Organization).where(Organization.slug == slug))
-#         if existing_org.scalar_one_or_none():
-#             return await register_page(request, error="Nome da organização já existe. Escolha outro nome.")
-#         org = Organization(name=org_name, slug=slug)
-#         db.add(org)
-#         try:
-#             await db.flush()
-#         except Exception as e:
-#             from sqlalchemy.exc import IntegrityError
-#             if isinstance(e, IntegrityError) or "UniqueViolation" in type(e).__name__ or "duplicate key" in str(e).lower():
-#                 await db.rollback()
-#                 return await register_page(request, error="Nome da organização já existe. Escolha outro nome.")
-#             raise
-#         user = User(
-#             email=email.lower().strip(),
-#             hashed_password=_hash_password(password),
-#             org_id=org.id,
-#             role=role,
-#         )
-#         db.add(user)
-#         try:
-#             await db.commit()
-#         except Exception as e:
-#             from sqlalchemy.exc import IntegrityError
-#             if isinstance(e, IntegrityError) or "duplicate key" in str(e).lower():
-#                 await db.rollback()
-#                 return await register_page(request, error="E-mail já registrado")
-#             raise
+        slug = org_name.lower().strip().replace(" ", "-")
+        slug = "".join(c for c in slug if c.isalnum() or c in "-_") or "org"
+        if slug in ("pixor", "default", "admin", "api", "dashboard"):
+            return await register_page(request, error="Nome da organização reservado. Escolha outro nome.")
+        existing_org = await db.execute(select(Organization).where(Organization.slug == slug))
+        if existing_org.scalar_one_or_none():
+            return await register_page(request, error="Nome da organização já existe. Escolha outro nome.")
+        org = Organization(name=org_name, slug=slug)
+        db.add(org)
+        try:
+            await db.flush()
+        except Exception as e:
+            from sqlalchemy.exc import IntegrityError
+            if isinstance(e, IntegrityError) or "UniqueViolation" in type(e).__name__ or "duplicate key" in str(e).lower():
+                await db.rollback()
+                return await register_page(request, error="Nome da organização já existe. Escolha outro nome.")
+            raise
+        user = User(
+            email=email.lower().strip(),
+            hashed_password=_hash_password(password),
+            org_id=org.id,
+            role=role,
+        )
+        db.add(user)
+        try:
+            await db.commit()
+        except Exception as e:
+            from sqlalchemy.exc import IntegrityError
+            if isinstance(e, IntegrityError) or "duplicate key" in str(e).lower():
+                await db.rollback()
+                return await register_page(request, error="E-mail já registrado")
+            raise
 
-#         token = create_jwt_token(user.id, user.org_id)
-#         resp = RedirectResponse("/dashboard", status_code=303)
-#         is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
-#         resp.set_cookie(
-#             key=COOKIE_NAME, value=token,
-#             max_age=86400 * 7, httponly=True, secure=is_https, samesite="strict",
-#             path="/",
-#         )
-#         return resp
+        token = create_jwt_token(user.id, user.org_id)
+        resp = RedirectResponse("/dashboard", status_code=303)
+        is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+        resp.set_cookie(
+            key=COOKIE_NAME, value=token,
+            max_age=86400 * 7, httponly=True, secure=is_https, samesite="strict",
+            path="/",
+        )
+        return resp
 
 
 @router.get("/logout")
@@ -2983,82 +2981,79 @@ async def admin_backup_restore(request: Request, backup_name: str = Form(...), c
         return JSONResponse({"ok": False, "error": f"Restore error: {e}"}, status_code=500)
 
 
-# Billing is a commercial surface. AIOS ships as an internal tool first, so
-# this page is disabled instead of maintained: no subscriber, no Stripe
-# lifecycle to verify. Restore from version control if that changes.
-# # ─── Billing page ───
+# ─── Billing page ───
 
-# @router.get("/billing", response_class=HTMLResponse)
-# async def billing_page(request: Request):
-#     from aios.config import PLANS
-#     org_id = await _org_filter(request)
-#     async with db_session() as db:
-#         org = await db.get(Organization, org_id)
-#         agent_count = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
-#         team_count = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
-#     current_plan = org.extra_data.get("plan", "free") if org else "free"
-#     plan_limits = PLANS.get(current_plan, PLANS["free"])
+@router.get("/billing", response_class=HTMLResponse)
+async def billing_page(request: Request):
+    from aios.config import PLANS
+    org_id = await _org_filter(request)
+    async with db_session() as db:
+        org = await db.get(Organization, org_id)
+        agent_count = (await db.execute(select(func.count(Agent.id)).where(Agent.org_id == org_id))).scalar() or 0
+        team_count = (await db.execute(select(func.count(Team.id)).where(Team.org_id == org_id))).scalar() or 0
+    current_plan = org.extra_data.get("plan", "free") if org else "free"
+    plan_limits = PLANS.get(current_plan, PLANS["free"])
 
-#     from aios.core.limits import get_usage_summary, get_monthly_usage, get_agent_usage_breakdown
-#     async with db_session() as db:
-#         usage = await get_usage_summary(org_id, db)
-#         monthly = await get_monthly_usage(org_id, db)
-#         agent_breakdown = await get_agent_usage_breakdown(org_id, db)
-#         # model breakdown inline
-#         from sqlalchemy import select as _select
-#         from aios.db.models import AgentMetric, Agent as _Agent
+    from aios.core.limits import get_usage_summary, get_monthly_usage, get_agent_usage_breakdown
+    async with db_session() as db:
+        usage = await get_usage_summary(org_id, db)
+        monthly = await get_monthly_usage(org_id, db)
+        agent_breakdown = await get_agent_usage_breakdown(org_id, db)
+        # model breakdown inline
+        from sqlalchemy import select as _select
+        from aios.db.models import AgentMetric, Agent as _Agent
 
-#         rows = (await db.execute(_select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(AgentMetric.hour.desc()).limit(200))).scalars().all()
-#         model_map: dict = {}
-#         if rows:
-#             aids = list({r.agent_id for r in rows})
-#             agents_q = (await db.execute(_select(_Agent).where(_Agent.id.in_(aids)))).scalars().all()
-#             amap = {a.id: a.llm_config.get("model", "openai/gpt-4o-mini") for a in agents_q}
-#             for r in rows:
-#                 m = amap.get(r.agent_id, "unknown")
-#                 model_map.setdefault(m, {"model": m, "tokens": 0, "cost": 0})
-#                 model_map[m]["tokens"] += r.tokens
-#                 from aios.core.tracing import estimate_cost
+        rows = (await db.execute(_select(AgentMetric).where(AgentMetric.org_id == org_id).order_by(AgentMetric.hour.desc()).limit(200))).scalars().all()
+        model_map: dict = {}
+        if rows:
+            aids = list({r.agent_id for r in rows})
+            agents_q = (await db.execute(_select(_Agent).where(_Agent.id.in_(aids)))).scalars().all()
+            amap = {a.id: a.llm_config.get("model", "openai/gpt-4o-mini") for a in agents_q}
+            for r in rows:
+                m = amap.get(r.agent_id, "unknown")
+                model_map.setdefault(m, {"model": m, "tokens": 0, "cost": 0})
+                model_map[m]["tokens"] += r.tokens
+                from aios.core.tracing import estimate_cost
 
-#                 model_map[m]["cost"] += estimate_cost(m, r.tokens)
-#             for v in model_map.values():
-#                 v["cost"] = round(v["cost"], 4)
-#         model_breakdown = sorted(model_map.values(), key=lambda x: x["tokens"], reverse=True)
-#         # budgets
-#         from aios.db.models import Budget as _Budget
+                model_map[m]["cost"] += estimate_cost(m, r.tokens)
+            for v in model_map.values():
+                v["cost"] = round(v["cost"], 4)
+        model_breakdown = sorted(model_map.values(), key=lambda x: x["tokens"], reverse=True)
+        # budgets
+        from aios.db.models import Budget as _Budget
 
-#         budgets = (await db.execute(_select(_Budget).where(_Budget.org_id == org_id).order_by(_Budget.created_at.desc()))).scalars().all()
-#         # forecast para orçamento principal (primeiro operation ou maior amount)
-#         budget_forecast = None
-#         try:
-#             op_b = next((b for b in budgets if b.type == "operation"), budgets[0] if budgets else None)
-#             if op_b:
-#                 daily_brl = (monthly.get("avg_daily_cost", 0) * 5.5) or 1
-#                 spent_brl = monthly.get("total_cost", 0) * 5.5
-#                 remaining = max(op_b.amount_brl - spent_brl, 0)
-#                 days_left = int(remaining / daily_brl) if daily_brl > 0 else 999
-#                 from datetime import date, timedelta as _td
+        budgets = (await db.execute(_select(_Budget).where(_Budget.org_id == org_id).order_by(_Budget.created_at.desc()))).scalars().all()
+        # forecast para orçamento principal (primeiro operation ou maior amount)
+        budget_forecast = None
+        try:
+            op_b = next((b for b in budgets if b.type == "operation"), budgets[0] if budgets else None)
+            if op_b:
+                daily_brl = (monthly.get("avg_daily_cost", 0) * 5.5) or 1
+                spent_brl = monthly.get("total_cost", 0) * 5.5
+                remaining = max(op_b.amount_brl - spent_brl, 0)
+                days_left = int(remaining / daily_brl) if daily_brl > 0 else 999
+                from datetime import date, timedelta as _td
 
-#                 date_end = (date.today() + _td(days=days_left)).isoformat() if days_left < 999 else None
-#                 budget_forecast = {"budget": op_b, "spent_brl": round(spent_brl, 2), "daily_burn_brl": round(daily_brl, 2), "remaining_brl": round(remaining, 2), "days_left": days_left, "date_end": date_end}
-#         except Exception:
-#             budget_forecast = None
-#     daily_msgs = usage["messages_today"]
+                date_end = (date.today() + _td(days=days_left)).isoformat() if days_left < 999 else None
+                budget_forecast = {"budget": op_b, "spent_brl": round(spent_brl, 2), "daily_burn_brl": round(daily_brl, 2), "remaining_brl": round(remaining, 2), "days_left": days_left, "date_end": date_end}
+        except Exception:
+            budget_forecast = None
+    daily_msgs = usage["messages_today"]
 
-#     stripe_prices = {}
-#     from aios.config import settings
-#     if settings.stripe_price_starter:
-#         stripe_prices["starter"] = settings.stripe_price_starter
-#     if settings.stripe_price_pro:
-#         stripe_prices["pro"] = settings.stripe_price_pro
+    stripe_prices = {}
+    from aios.config import settings
+    if settings.stripe_price_starter:
+        stripe_prices["starter"] = settings.stripe_price_starter
+    if settings.stripe_price_pro:
+        stripe_prices["pro"] = settings.stripe_price_pro
 
-#     return await _render("billing.html", request, title="Cobrança",
-#                    current_plan=current_plan, plan_limits=plan_limits,
-#                    agent_count=agent_count, team_count=team_count,
-#                    daily_msgs=daily_msgs, monthly=monthly, agent_breakdown=agent_breakdown, model_breakdown=model_breakdown, plans=PLANS,
-#                    org_id=org_id, stripe_prices=json.dumps(stripe_prices),
-#                    subscription_id=org.extra_data.get("stripe_subscription_id") if org else None,
-#                    budgets=budgets, budget_forecast=budget_forecast)
+    return await _render("billing.html", request, title="Cobrança",
+                   current_plan=current_plan, plan_limits=plan_limits,
+                   agent_count=agent_count, team_count=team_count,
+                   daily_msgs=daily_msgs, monthly=monthly, agent_breakdown=agent_breakdown, model_breakdown=model_breakdown, plans=PLANS,
+                   org_id=org_id, stripe_prices=json.dumps(stripe_prices),
+                   subscription_id=org.extra_data.get("stripe_subscription_id") if org else None,
+                   budgets=budgets, budget_forecast=budget_forecast)
 
 
 @router.get("/promptlab", response_class=HTMLResponse)
