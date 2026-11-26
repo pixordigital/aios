@@ -15,7 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import select
 
 from aios.db.backend import db_session
-from aios.db.models import Organization, OrganizationMembership, User
+from aios.db.models import Base, Organization, User
+
+OrganizationMembership = Base.registry._class_registry.get("OrganizationMembership")
+if OrganizationMembership is None:
+    from aios.db.models import OrganizationMembership  # type: ignore[attr-defined]
 
 ORG_SLUG = "showcar"
 ORG_NAME = "Showcar"
