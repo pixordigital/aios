@@ -1,30 +1,30 @@
-"""ICM-X contracts for the workflows this vertical actually sells.
+"""ICM-X contracts for US car dealership paid workflows.
 
-These are the paid workflow classes: an agent that declares one of them in
-``extra_data["workflow_class"]`` cannot run without the matching contract
-(``aios.icm.agent_binding.assert_paid_workflow_contract``). Opt-in ICM-X stays
-available for experiments and internal utilities.
+Agents declaring these workflow_class values must bind to the matching
+contract (enforced by aios.icm.agent_binding). Opt-in ICM-X remains available
+for experiments/internal agents.
 """
 
 from __future__ import annotations
 
 from aios.icm.contracts import ContextPolicy, RetryPolicy, StageManifest
 
-# ─── lead capture: inbound enquiry -> qualified lead or escalation ───
+# ─── lead capture: inbound inquiry -> qualified lead or escalation ───
 LEAD_CAPTURE = StageManifest(
-    id="pet_lead_capture",
+    id="car_dealership_us_lead_capture",
     version="1.0.0",
     description=(
-        "Answer an inbound WhatsApp enquiry from the approved business profile, "
-        "qualify the customer and hand off to a human when the request is "
-        "outside the profile or clinically sensitive."
+        "Answer an inbound inquiry (web/phone/text relay) from approved "
+        "dealership profile, qualify the shopper (vehicle interest, timeline, "
+        "trade-in), and hand off when outside profile, financing/legal sensitive, "
+        "or pricing not approved."
     ),
     mode="llm",
     timeout_seconds=90,
     max_llm_calls=4,
     max_cost_usd=0.10,
-    inputs_schema="pet.enquiry.v1",
-    outputs_schema="pet.qualified_lead.v1",
+    inputs_schema="cdus.enquiry.v1",
+    outputs_schema="cdus.qualified_lead.v1",
     context=ContextPolicy(
         layers=["identity", "stage", "static_references"],
         max_context_tokens=6_000,
@@ -36,21 +36,20 @@ LEAD_CAPTURE = StageManifest(
     retry=RetryPolicy(max_attempts=2),
 )
 
-# ─── follow-up: recover an unanswered/abandoned conversation ───
+# ─── follow-up: recover unanswered/abandoned conversation ───
 LEAD_FOLLOW_UP = StageManifest(
-    id="pet_lead_follow_up",
+    id="car_dealership_us_lead_follow_up",
     version="1.0.0",
     description=(
-        "Send a bounded follow-up only when the customer has not opted out, "
-        "the follow-up cap and minimum interval are respected, and the message "
-        "quotes approved information."
+        "Send a bounded follow-up only if customer not opted out, cadence/cap "
+        "respected, and message quotes approved info only (no made-up pricing)."
     ),
     mode="llm",
     timeout_seconds=60,
     max_llm_calls=2,
     max_cost_usd=0.05,
-    inputs_schema="pet.lead_context.v1",
-    outputs_schema="pet.follow_up_result.v1",
+    inputs_schema="cdus.lead_context.v1",
+    outputs_schema="cdus.follow_up_result.v1",
     context=ContextPolicy(
         layers=["identity", "stage", "dynamic_references"],
         max_context_tokens=4_000,
@@ -62,16 +61,14 @@ LEAD_FOLLOW_UP = StageManifest(
     retry=RetryPolicy(max_attempts=1, retry_on=["timeout"]),
 )
 
-# Workflow class name -> contract. The name is what an agent declares; the
-# contract is what the runtime enforces.
 WORKFLOW_CONTRACTS: dict[str, StageManifest] = {
-    "pet_lead_capture": LEAD_CAPTURE,
-    "pet_lead_follow_up": LEAD_FOLLOW_UP,
+    "car_dealership_us_lead_capture": LEAD_CAPTURE,
+    "car_dealership_us_lead_follow_up": LEAD_FOLLOW_UP,
 }
 
 
 class UnknownPaidWorkflow(KeyError):
-    """Declared a paid workflow class that has no contract owned by any vertical."""
+    """Declared paid workflow class has no contract in this vertical."""
 
 
 def contract_for(workflow_class: str) -> StageManifest:
@@ -82,7 +79,6 @@ def contract_for(workflow_class: str) -> StageManifest:
 
 
 def paid_workflow_class(extra_data: dict | None) -> str | None:
-    """The workflow class an agent declares, or ``None`` for internal agents."""
     if not isinstance(extra_data, dict):
         return None
     value = extra_data.get("workflow_class")

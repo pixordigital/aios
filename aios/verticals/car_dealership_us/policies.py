@@ -1,14 +1,13 @@
-"""Consent, cadence and escalation rules for the pet business vertical.
+"""Consent, cadence, escalation rules for US car dealership vertical.
 
-Pure decisions, no I/O: the caller supplies the facts from the DB, so the same
-rules are testable and cannot accidentally query the wrong tenant.
+Pure decisions, no I/O. Caller supplies facts from DB/config.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .profile import PetBusinessProfile
+from .profile import CarDealershipUSProfile
 
 
 @dataclass(frozen=True)
@@ -23,18 +22,14 @@ def _contains_opt_out(text: str, phrases: tuple[str, ...]) -> bool:
 
 
 def may_follow_up(
-    profile: PetBusinessProfile,
+    profile: CarDealershipUSProfile,
     *,
     customer_text: str = "",
     opted_out: bool = False,
     follow_ups_sent: int = 0,
     hours_since_last_contact: float = 0.0,
 ) -> FollowUpDecision:
-    """Whether one more follow-up may be sent right now, with the reason.
-
-    Order matters: consent outranks cadence, cadence outranks the cap. A denied
-    follow-up is recorded, never silently skipped.
-    """
+    """Whether one more follow-up may be sent now. Consent > cadence > cap."""
     if opted_out or _contains_opt_out(customer_text, profile.opt_out_phrases):
         return FollowUpDecision(False, "customer opted out")
     if hours_since_last_contact < profile.min_hours_between_follow_ups:
@@ -51,9 +46,9 @@ def may_follow_up(
 
 
 def requires_human(
-    profile: PetBusinessProfile, text: str
+    profile: CarDealershipUSProfile, text: str
 ) -> tuple[bool, str | None]:
-    """Return ``(True, destination)`` when the message matches an escalation rule."""
+    """(True, destination) if message matches any escalation rule keyword."""
     lowered = (text or "").lower()
     for keyword, destination in profile.escalation_rules.items():
         if keyword and keyword in lowered:

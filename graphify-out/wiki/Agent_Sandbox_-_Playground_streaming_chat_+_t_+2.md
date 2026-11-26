@@ -1,12 +1,11 @@
 # Agent Sandbox / Playground (streaming chat + t +2
 
-> 7 nodes · cohesion 0.29
+> 6 nodes · cohesion 0.29
 
 ## Key Concepts
 
 - **Agent Sandbox / Playground (streaming chat + tool execution)** (3 connections) — `aios/dashboard/templates/lab.html`
 - **Lab IDE Template (tool test, traces, workflows, versions)** (3 connections) — `aios/dashboard/templates/lab.html`
-- **Flow Editor Template (ReactFlow Zap+Voz+Dado palette)** (2 connections) — `aios/dashboard/templates/flow_editor.html`
 - **Workflow Engine / Flow Builder (Zap+Voz+Dado DAG)** (1 connections) — `aios/dashboard/templates/lab.html`
 - **Sandbox Chat Template (agent playground with streaming)** (1 connections) — `aios/dashboard/templates/sandbox.html`
 - **Versions Template (workflow/agent version history)** (1 connections) — `aios/dashboard/templates/versions.html`
@@ -18,7 +17,6 @@
 
 ## Source Files
 
-- `aios/dashboard/templates/flow_editor.html`
 - `aios/dashboard/templates/lab.html`
 - `aios/dashboard/templates/sandbox.html`
 - `aios/dashboard/templates/versions.html`

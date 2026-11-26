@@ -45,9 +45,9 @@ def _paid_workflow_registry(agent):
             getattr(mod, "paid_workflow_class"),
             getattr(mod, "has_contract"),
         )
-    # Backward-compatible fallback for existing pet vertical agents.
+    # Backward-compatible fallback for existing car dealership (US) vertical agents.
     try:
-        mod = import_module("aios.verticals.pet_business.workflows")
+        mod = import_module("aios.verticals.car_dealership_us.workflows")
         return (
             getattr(mod, "paid_workflow_class"),
             getattr(mod, "has_contract"),

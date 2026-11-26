@@ -32,7 +32,7 @@ from aios.db.models import (
 )
 from aios.icm.contracts import manifest_fingerprint
 from aios.icm.dedupe_model import ICMSideEffect
-from aios.verticals.pet_business.workflows import LEAD_CAPTURE
+from aios.verticals.car_dealership_us.workflows import LEAD_CAPTURE
 
 
 @contextlib.asynccontextmanager
@@ -64,7 +64,7 @@ async def _cookie(client, user):
 def _agent(**overrides) -> Agent:
     data = {
         "id": "agent-paid-1",
-        "name": "pet-lead-capture",
+        "name": "cd-us-lead-capture",
         "org_id": "org-1",
         "llm_config": {"model": "openai/gpt-4o"},
         "tools": ["rag_search", "web_search", "execute_code", "notify_human"],
@@ -79,14 +79,14 @@ def _agent(**overrides) -> Agent:
 
 
 def test_paid_workflow_without_contract_refuses():
-    agent = _agent(extra_data={"workflow_class": "pet_vet_triage"})
+    agent = _agent(extra_data={"workflow_class": "unknown_paid_workflow"})
     with pytest.raises(Exception) as exc:
         AgentRuntime(agent)
     assert "not owned by any vertical contract" in str(exc.value)
 
 
 def test_paid_workflow_without_icm_binding_refuses():
-    agent = _agent(extra_data={"workflow_class": "pet_lead_capture"})
+    agent = _agent(extra_data={"workflow_class": "car_dealership_us_lead_capture"})
     with pytest.raises(Exception) as exc:
         AgentRuntime(agent)
     assert "requires extra_data['icm']" in str(exc.value)
@@ -175,9 +175,9 @@ async def test_paid_workflow_binds_contract_and_restricts_tools(
         agent = _agent(
             org_id=test_org.id,
             extra_data={
-                "workflow_class": "pet_lead_capture",
+                "workflow_class": "car_dealership_us_lead_capture",
                 "icm": {
-                    "stage_id": "pet_lead_capture",
+                    "stage_id": "car_dealership_us_lead_capture",
                     "stage_manifest": LEAD_CAPTURE.model_dump(),
                     "icm_db_session": sync_session,
                     "preapproved": {
@@ -192,7 +192,7 @@ async def test_paid_workflow_binds_contract_and_restricts_tools(
         runtime = AgentRuntime(agent)
 
         assert runtime.stage is not None
-        assert runtime.stage.manifest.id == "pet_lead_capture"
+        assert runtime.stage.manifest.id == "car_dealership_us_lead_capture"
         assert runtime.stage.approval_bound is not None
         assert runtime.stage.approval_bound["approval_id"] == approved.id
         # Denylist from the contract is enforced on top of the agent's own policy.
@@ -418,8 +418,8 @@ async def test_contracts_page_shows_contract_and_governed_agent(
             name="pet-lead-capture",
             org_id=test_org.id,
             extra_data={
-                "workflow_class": "pet_lead_capture",
-                "icm": {"stage_id": "pet_lead_capture"},
+                "workflow_class": "car_dealership_us_lead_capture",
+                "icm": {"stage_id": "car_dealership_us_lead_capture"},
             },
         )
     )
@@ -428,8 +428,8 @@ async def test_contracts_page_shows_contract_and_governed_agent(
     async with _cookie(auth_client, test_user):
         page = await auth_client.get("/dashboard/contracts")
     assert page.status_code == 200
-    assert "pet_lead_capture" in page.text
-    assert "pet_lead_follow_up" in page.text
+    assert "car_dealership_us_lead_capture" in page.text
+    assert "car_dealership_us_lead_follow_up" in page.text
     assert "pet-lead-capture" in page.text
 
 

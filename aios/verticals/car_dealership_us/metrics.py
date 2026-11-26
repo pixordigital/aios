@@ -1,9 +1,7 @@
-"""Business-outcome arithmetic for the vertical.
+"""Business-outcome arithmetic for US car dealership vertical.
 
-The owner-facing question is "is this generating enough value to justify the
-cost?" — not how many tokens were spent. Every rate here is computed from
-counted rows; nothing is projected, and attribution is reported with its source
-and confidence instead of being presented as revenue truth.
+Owner question: value vs cost. Rates from counted rows only; attribution
+reported with source/confidence, never as assumed revenue truth.
 """
 
 from __future__ import annotations
@@ -19,7 +17,7 @@ class OutcomeCounts:
     follow_ups_attempted: int = 0
     follow_ups_completed: int = 0
     deals_attributed: int = 0
-    attributed_value_brl: float = 0.0
+    attributed_value: float = 0.0  # primary (currency set by caller/reporting); legacy alias kept in output
     human_handoffs: int = 0
     failed: int = 0
 
@@ -33,13 +31,9 @@ def summarize_outcomes(
     *,
     attribution_source: str,
     attribution_confidence: str = "medium",
+    currency: str = "USD",
 ) -> dict:
-    """Rates plus the raw counts they came from.
-
-    ``attribution_confidence`` is deliberately explicit: a deal linked to an
-    agent is evidence of involvement, not proof that the agent caused the
-    purchase. Consumers must render the label, not drop it.
-    """
+    val = round(counts.attributed_value, 2)
     return {
         "enquiries": counts.enquiries,
         "answered": counts.answered,
@@ -57,7 +51,9 @@ def summarize_outcomes(
         "failed": counts.failed,
         "failure_pct": _pct(counts.failed, counts.enquiries),
         "deals_attributed": counts.deals_attributed,
-        "attributed_value_brl": round(counts.attributed_value_brl, 2),
+        "attributed_value": val,
+        "attributed_value_brl": val,
+        "currency": currency,
         "attribution_source": attribution_source,
         "attribution_confidence": attribution_confidence,
     }

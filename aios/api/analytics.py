@@ -136,7 +136,7 @@ async def _outcome_snapshot(
 ) -> dict:
     """Outcome counts for one time window. Every value is read from rows."""
     from aios.db.models import CrmDeal, PendingAction
-    from aios.verticals.pet_business.metrics import OutcomeCounts, summarize_outcomes
+    from aios.verticals.car_dealership_us.metrics import OutcomeCounts, summarize_outcomes
 
     conv_q = select(Conversation.id).where(Conversation.org_id == org_id)
     if since:
@@ -216,11 +216,12 @@ async def _outcome_snapshot(
             answered=answered,
             qualified_leads=qualified,
             deals_attributed=attributed,
-            attributed_value_brl=attributed_value,
+            attributed_value=attributed_value,
             human_handoffs=handoff_count,
         ),
         attribution_source="crm_deal.agent_id",
         attribution_confidence="medium",
+        currency="USD",
     )
     summary["avg_first_response_seconds"] = (
         int(sum(first_response_seconds) / len(first_response_seconds))
@@ -272,6 +273,7 @@ async def business_outcomes(
             "qualification_pct",
             "follow_up_completion_pct",
             "deals_attributed",
+            "attributed_value",
             "attributed_value_brl",
             "human_handoffs",
             "human_handoff_pct",

@@ -19,7 +19,7 @@ def test_internal_agent_needs_no_contract():
 def test_paid_workflow_without_icm_binding_is_refused():
     with pytest.raises(ICMContractRequired, match="extra_data\\['icm'\\]"):
         assert_paid_workflow_contract(
-            _agent({"workflow_class": "pet_lead_capture"})
+            _agent({"workflow_class": "car_dealership_us_lead_capture"})
         )
 
 
@@ -39,8 +39,8 @@ def test_paid_workflow_with_binding_passes():
     assert_paid_workflow_contract(
         _agent(
             {
-                "workflow_class": "pet_lead_capture",
-                "icm": {"workspace_id": "pet_ops", "stage_id": "pet_lead_capture"},
+                "workflow_class": "car_dealership_us_lead_capture",
+                "icm": {"workspace_id": "cd_us_ops", "stage_id": "car_dealership_us_lead_capture"},
             }
         )
     )

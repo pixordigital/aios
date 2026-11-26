@@ -1,9 +1,8 @@
-"""Business profile for one pet-business customer.
+"""Business profile for one US car dealership.
 
-Stored as configuration (currently the agent/org ``extra_data``), never
-hardcoded in the runtime. The profile is what the answer layer is allowed to
-quote: if a price, service or hours entry is not here, the agent must escalate
-instead of inventing it.
+Stored as configuration (e.g. org/agent extra_data), never hardcoded in the
+runtime. The answer layer may only quote facts present here; if price,
+availability, hours, or policy is not listed, the agent must escalate.
 """
 
 from __future__ import annotations
@@ -18,24 +17,29 @@ REQUIRED_FIELDS = (
     "escalation_rules",
 )
 
+# Common opt-out phrases (EN + common ES) to stop follow-ups.
 DEFAULT_OPT_OUT_PHRASES = (
+    "stop",
+    "unsubscribe",
+    "do not contact",
+    "don't contact",
+    "remove me",
+    "opt out",
+    "no more messages",
     "pare",
     "parar",
-    "não quero",
-    "nao quero",
-    "descadastrar",
-    "sair",
+    "no quiero",
+    "baja",
 )
 
 
 @dataclass(frozen=True)
 class ServiceItem:
-    """One sellable service. ``price_brl`` is ``None`` when the business has not
-    approved a public price — the agent must then say it will confirm."""
+    """One sellable/service offering. ``price_usd`` None means not publicly
+    approved — agent must say it will confirm."""
 
     name: str
-    price_brl: float | None = None
-    duration_minutes: int | None = None
+    price_usd: float | None = None
     notes: str = ""
 
     @classmethod
@@ -43,42 +47,37 @@ class ServiceItem:
         name = str(data.get("name", "")).strip()
         if not name:
             raise ValueError("service requires a name")
-        price = data.get("price_brl")
+        price = data.get("price_usd")
+        if price is None:
+            price = data.get("price")  # allow generic key
         return cls(
             name=name,
-            price_brl=float(price) if price is not None else None,
-            duration_minutes=(
-                int(data["duration_minutes"]) if data.get("duration_minutes") else None
-            ),
+            price_usd=float(price) if price is not None else None,
             notes=str(data.get("notes", "")).strip(),
         )
 
 
 @dataclass(frozen=True)
-class PetBusinessProfile:
+class CarDealershipUSProfile:
     business_name: str
     services: tuple[ServiceItem, ...]
-    # e.g. {"mon": "09:00-18:00", "sun": "closed"}
+    # e.g. {"mon": "09:00-19:00", "sun": "closed"}
     hours: dict[str, str]
-    # Keyword -> human destination. First match wins.
+    # Keyword (lowercased match) -> human destination/team.
     escalation_rules: dict[str, str] = field(default_factory=dict)
-    # Phrases that mean "stop messaging me". Honoured before any follow-up.
     opt_out_phrases: tuple[str, ...] = DEFAULT_OPT_OUT_PHRASES
-    # Follow-ups are capped to avoid turning a lead into spam.
     max_follow_ups: int = 2
     min_hours_between_follow_ups: float = 24.0
-    # Attribution is only claimed when the CRM row can be linked back to a
-    # conversation; confidence is reported, never assumed.
     attribution_source: str = "crm_deal.agent_id"
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "PetBusinessProfile":
+    def from_dict(cls, data: dict[str, Any]) -> "CarDealershipUSProfile":
         missing = [f for f in REQUIRED_FIELDS if not data.get(f)]
         if missing:
-            raise ValueError(f"pet business profile missing: {', '.join(missing)}")
+            raise ValueError(f"car dealership (US) profile missing: {', '.join(missing)}")
         services = tuple(ServiceItem.from_dict(s) for s in data["services"])
         if not services:
-            raise ValueError("pet business profile requires at least one service")
+            raise ValueError("car dealership (US) profile requires at least one service/offering")
         return cls(
             business_name=str(data["business_name"]).strip(),
             services=services,
@@ -98,20 +97,19 @@ class PetBusinessProfile:
         )
 
     def validate(self) -> list[str]:
-        """Return human-readable problems; empty means onboarding is complete."""
         issues: list[str] = []
         if not self.business_name:
             issues.append("business_name is empty")
         if not self.services:
-            issues.append("no services configured")
+            issues.append("no services/offerings configured")
         if not self.hours:
-            issues.append("no opening hours configured")
+            issues.append("no hours configured")
         if not self.escalation_rules:
             issues.append("no escalation rules configured")
         if self.max_follow_ups < 0:
             issues.append("max_follow_ups cannot be negative")
         if not self.opt_out_phrases:
-            issues.append("opt-out phrases are empty — follow-ups cannot be stopped")
+            issues.append("opt-out phrases empty — follow-ups cannot be stopped")
         return issues
 
     def service_names(self) -> Iterable[str]:
