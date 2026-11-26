@@ -728,6 +728,17 @@ window.aiosI18n.register({
     </nav>
 
     <main class="main">
+        {% if show_org_switcher and orgs %}
+        <div class="md:hidden" style="margin-bottom:0.75rem">
+            <label style="font-size:0.65rem;color:var(--text-tertiary);display:block;margin-bottom:0.2rem">Organização</label>
+            <select style="width:100%;font-size:0.8rem;padding:0.45rem 0.6rem;background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text)" onchange="if(this.value) window.location.href='/dashboard/switch-org/'+this.value">
+                {% if is_impersonating %}<option value="clear">← Minha organização</option>{% endif %}
+                {% for o in orgs %}
+                <option value="{{ o.id }}" {% if o.id == active_org_id %}selected{% endif %}>{{ o.name }}{% if o.slug == 'pixor' %} (Pixor){% elif o.slug == 'showcar' %} (Showcar){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
         <div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem">
             <div style="background:var(--bg-raised);border:1px solid var(--border);border-radius:999px;padding:3px;display:inline-flex;gap:3px;font-family:'JetBrains Mono',monospace">
                 <a href="/dashboard/view-mode/simple" style="padding:3px 12px;border-radius:999px;font-size:0.75rem;text-decoration:none;font-weight:{% if view_mode == 'simple' %}600{% else %}400{% endif %};background:{% if view_mode == 'simple' %}var(--accent){% else %}transparent{% endif %};color:{% if view_mode == 'simple' %}#0a0a0a{% else %}var(--text-secondary){% endif %};transition:all 0.15s">
