@@ -35,6 +35,8 @@ async def main() -> int:
             db.add(user)
             await db.flush()
             created_user = True
+        if user.email != EMAIL:
+            user.email = EMAIL
 
         created = {}
         for slug, role in MEMBERSHIPS:
