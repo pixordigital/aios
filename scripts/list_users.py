@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""List users (id, email, active) for ops debugging.
+"""List users (id, email, email_verified) for ops debugging.
 
 Idempotent read-only.
 
@@ -16,9 +16,9 @@ from aios.db.models import User
 
 async def main() -> int:
     async with db_session() as db:
-        users = (await db.execute(select(User.id, User.email, User.is_active))).all()
-        for uid, email, active in users:
-            print(f"USER id={uid} email={email} active={active}")
+        users = (await db.execute(select(User.id, User.email, User.email_verified))).all()
+        for uid, email, verified in users:
+            print(f"USER id={uid} email={email} email_verified={verified}")
         print(f"USER count={len(users)}")
         return 0
 
