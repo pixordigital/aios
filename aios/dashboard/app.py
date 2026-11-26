@@ -289,9 +289,26 @@ async def _render(name: str, request: Request, **kw) -> str:
     orgs = None
     active_org_id = None
     is_sa = getattr(state, "is_superadmin", False) if state else False
+    user_email = getattr(state, "user_email", None) if state else None
+    user_id = getattr(state, "user_id", None) if state else None
+    show_org_switcher = False
     if is_sa:
+        show_org_switcher = True
         async with db_session() as db:
             orgs = (await db.execute(select(Organization).order_by(Organization.name))).scalars().all()
+    elif (user_email or "").lower() == "pixordigital@gmail.com":
+        show_org_switcher = True
+        async with db_session() as db:
+            orgs = (await db.execute(select(Organization).where(Organization.is_active == True).order_by(Organization.name))).scalars().all()
+    elif user_id:
+        # check memberships
+        async with db_session() as db:
+            from aios.db.models import OrganizationMembership
+            mems = (await db.execute(select(OrganizationMembership).where(OrganizationMembership.user_id == user_id))).scalars().all()
+            if len(mems) > 1:
+                show_org_switcher = True
+                org_ids = [m.org_id for m in mems]
+                orgs = (await db.execute(select(Organization).where(Organization.id.in_(org_ids)).order_by(Organization.name))).scalars().all()
     active_org_id = getattr(state, "org_id", None) if state else None
     if "agent_templates" not in kw:
         kw["agent_templates"] = TEMPLATES
@@ -299,12 +316,13 @@ async def _render(name: str, request: Request, **kw) -> str:
     return t.render({
         "request": request,
         "view_mode": view_mode,
-        "user_email": getattr(state, "user_email", None) if state else None,
+        "user_email": user_email,
         "is_superadmin": is_sa,
         "internal_mode": settings.internal_mode,
         "is_impersonating": getattr(state, "is_impersonating", False) if state else False,
         "orgs": orgs,
         "active_org_id": active_org_id,
+        "show_org_switcher": show_org_switcher,
         **kw,
     })
 
@@ -484,7 +502,6 @@ async def register_action(
             path="/",
         )
         return resp
-
 
 @router.get("/logout")
 async def logout():
@@ -5940,8 +5957,32 @@ async def settings_test_calendar(request: Request):
 @router.get("/switch-org/{org_id}")
 async def switch_org(request: Request, org_id: str):
     from aios.api.deps import get_dashboard_user
+    from aios.db.backend import db_session
+    from aios.db.models import Organization, OrganizationMembership
+    from sqlalchemy import select
     user = await get_dashboard_user(request)
-    if not user or user.role != "superadmin":
+    if not user:
+        return RedirectResponse("/dashboard", status_code=303)
+    # allow superadmin or pixordigital@gmail.com or any user with membership
+    allowed = False
+    if user.role == "superadmin" or (user.email or "").lower() == "pixordigital@gmail.com":
+        allowed = True
+    else:
+        async with db_session() as db:
+            row = (await db.execute(select(OrganizationMembership).where(
+                OrganizationMembership.user_id == user.id,
+                OrganizationMembership.org_id == org_id
+            ))).scalars().first()
+            if row:
+                allowed = True
+    if not allowed:
+        # also check org exists for special email
+        if (user.email or "").lower() == "pixordigital@gmail.com":
+            async with db_session() as db:
+                org = await db.get(Organization, org_id)
+                if org and org.is_active:
+                    allowed = True
+    if not allowed:
         return RedirectResponse("/dashboard", status_code=303)
     resp = RedirectResponse("/dashboard", status_code=303)
     resp.set_cookie(

@@ -96,6 +96,22 @@ class User(Base, TimestampMixin):
     totp_backup_codes: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
 
     organization = relationship("Organization", back_populates="users")
+    memberships = relationship("OrganizationMembership", back_populates="user", cascade="all, delete-orphan")
+
+
+class OrganizationMembership(Base, TimestampMixin):
+    __tablename__ = "organization_memberships"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(50), default="admin")
+
+    user = relationship("User", back_populates="memberships")
+    organization = relationship("Organization")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "org_id", name="uq_org_membership_user_org"),
+    )
 
 
 # --- Agent ---

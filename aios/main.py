@@ -512,6 +512,29 @@ _DASHBOARD_MUTATING_GET_ACTIONS = frozenset({
 })
 
 
+async def _impersonation_allowed(user, org_id: str) -> bool:
+    """Superadmin, owner of an active org (pixordigital), or org member."""
+    if user.role == "superadmin":
+        return True
+    if (user.email or "").lower() == "pixordigital@gmail.com":
+        from aios.db.backend import db_session
+        from aios.db.models import Organization
+        async with db_session() as db:
+            org = await db.get(Organization, org_id)
+            return bool(org and org.is_active)
+    from aios.db.backend import db_session
+    from aios.db.models import OrganizationMembership
+    from sqlalchemy import select
+    async with db_session() as db:
+        row = (await db.execute(
+            select(OrganizationMembership).where(
+                OrganizationMembership.user_id == user.id,
+                OrganizationMembership.org_id == org_id,
+            )
+        )).scalars().first()
+        return bool(row)
+
+
 @app.middleware("http")
 async def dashboard_auth(request: Request, call_next):
     path = request.url.path
@@ -528,7 +551,7 @@ async def dashboard_auth(request: Request, call_next):
         request.state.user_email = user.email
         request.state.is_superadmin = user.role == "superadmin"
         imp_org = request.cookies.get("aios_impersonate_org")
-        if user.role == "superadmin" and imp_org:
+        if imp_org and await _impersonation_allowed(user, imp_org):
             request.state.org_id = imp_org
             request.state.is_impersonating = True
         else:

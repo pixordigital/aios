@@ -77,7 +77,33 @@ async def get_current_user(
     raise HTTPException(401, "Not authenticated")
 
 
-async def get_org_id(user: User = Depends(get_current_user)) -> str:
+async def get_org_id(
+    request: FastAPIRequest = None,  # type: ignore[assignment]
+    user: User = Depends(get_current_user),
+    db: DatabaseBackend = Depends(get_db_backend),
+) -> str:
+    # Allow org override via header if user is a member (multi-org support)
+    header_org = None
+    if request is not None:
+        header_org = request.headers.get("x-org-id") or request.headers.get("X-Org-Id")
+    if header_org:
+        from sqlalchemy import select
+        from aios.db.models import Organization, OrganizationMembership
+        row = (
+            await db.execute(
+                select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,
+                    OrganizationMembership.org_id == header_org,
+                )
+            )
+        ).scalars().first()
+        if row:
+            return header_org
+        if (user.email or "").lower() == "pixordigital@gmail.com":
+            org = await db.get(Organization, header_org)
+            if org and org.is_active:
+                return header_org
+        raise HTTPException(403, "Not a member of this organization")
     return user.org_id
 
 

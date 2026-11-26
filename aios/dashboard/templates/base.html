@@ -577,14 +577,14 @@ window.aiosI18n.register({
         </nav>
         <div class="sidebar-foot" style="display:flex;flex-direction:column;gap:0.25rem">
             {% if user_email %}<div style="font-size:0.6875rem;color:var(--text-secondary)">{{ user_email }}</div>{% endif %}
-            {% if is_superadmin and orgs %}
+            {% if show_org_switcher and orgs %}
             <form method="GET" action="/dashboard/switch-org" style="margin:0.125rem 0" id="org-switcher">
                 <select name="org_id" class="input-sm" style="font-size:0.65rem;padding:0.2rem 0.375rem;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);outline:none;cursor:pointer" onchange="if(this.value) window.location.href='/dashboard/switch-org/'+this.value">
                     {% if is_impersonating %}
                     <option value="clear">← Minha organização</option>
                     {% endif %}
                     {% for o in orgs %}
-                    <option value="{{ o.id }}" {% if o.id == active_org_id %}selected{% endif %}>{{ o.name }}</option>
+                    <option value="{{ o.id }}" {% if o.id == active_org_id %}selected{% endif %}>{{ o.name }}{% if o.slug == 'pixor' %} (Pixor){% elif o.slug == 'showcar' %} (Showcar){% endif %}</option>
                     {% endfor %}
                 </select>
             </form>
