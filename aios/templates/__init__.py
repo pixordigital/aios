@@ -40,6 +40,10 @@ from aios.templates.media_growth import (
     CONTENT_STRATEGIST_TEMPLATE,
     CONTENT_PRODUCER_TEMPLATE,
 )
+from aios.templates.car_dealership_us import (
+    CAR_DEALERSHIP_US_LEAD_CAPTURE_TEMPLATE,
+    CAR_DEALERSHIP_US_LEAD_FOLLOW_UP_TEMPLATE,
+)
 
 _SCAFFOLD_MARKER = "# Camada 1 — Papel e escopo"
 _PROMPT_SCAFFOLD = """
@@ -93,6 +97,8 @@ TEMPLATES = {
     "backend": BACKEND_TEMPLATE,
     "red": RED_TEMPLATE,
     "blue": BLUE_TEMPLATE,
+    "car_dealership_us_lead_capture": CAR_DEALERSHIP_US_LEAD_CAPTURE_TEMPLATE,
+    "car_dealership_us_lead_follow_up": CAR_DEALERSHIP_US_LEAD_FOLLOW_UP_TEMPLATE,
 }
 
 

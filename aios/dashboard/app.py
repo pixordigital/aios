@@ -242,6 +242,8 @@ def _agent_type_label(value: str) -> str:
         "market_intelligence": "Inteligência de Mercado",
         "content_strategist": "Estrategista de Conteúdo",
         "content_producer": "Produtor de Conteúdo",
+        "car_dealership_us_lead_capture": "Concessionária (EUA) — Captação de Leads",
+        "car_dealership_us_lead_follow_up": "Concessionária (EUA) — Follow-up de Leads",
     }
     return LABELS.get(value, value)
 
@@ -878,7 +880,7 @@ async def contracts_page(request: Request):
     ceiling per run, and whether a human approval is required.
     """
     org_id = await _org_filter(request)
-    from aios.verticals.pet_business.workflows import (
+    from aios.verticals.car_dealership_us.workflows import (
         WORKFLOW_CONTRACTS,
         has_contract,
         paid_workflow_class,
@@ -990,7 +992,7 @@ async def agent_canvas(request: Request):
 
 # ─── Agent CRUD ───
 
-AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "lead_finder", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor", "media_manager", "market_intelligence", "content_strategist", "content_producer"]
+AGENT_TYPES = ["custom", "orchestrator", "manager", "manager_sales", "manager_dev", "manager_red", "manager_blue", "manager_data", "sdr", "lead_finder", "closer", "support", "data_analyst", "data_scientist", "deal_auditor", "pricing_guardian", "evidence_compiler", "performance_watcher", "human_auditor", "media_manager", "market_intelligence", "content_strategist", "content_producer", "car_dealership_us_lead_capture", "car_dealership_us_lead_follow_up"]
 ROUTING_STRATEGIES = ["supervisor", "round_robin", "broadcast", "semantic"]
 
 
@@ -1197,6 +1199,34 @@ async def agent_save(
 
     if agent_type not in AGENT_TYPES:
         return HTMLResponse(f"<h2>Tipo inválido: {agent_type}</h2><a href='/dashboard/agents'>Voltar</a>", status_code=422)
+    # Seed paid-workflow binding for known vertical templates.
+    if agent_type in ("car_dealership_us_lead_capture", "car_dealership_us_lead_follow_up"):
+        _cd_profile = {
+            "business_name": "Example Motors (US)",
+            "services": [
+                {"name": "New vehicle sales", "notes": "Quote from approved inventory/pricing system"},
+                {"name": "Used vehicle sales"},
+                {"name": "Trade-in appraisal", "notes": "Schedule in-person appraisal"},
+            ],
+            "hours": {
+                "mon": "09:00-19:00", "tue": "09:00-19:00", "wed": "09:00-19:00",
+                "thu": "09:00-19:00", "fri": "09:00-19:00", "sat": "10:00-18:00", "sun": "closed",
+            },
+            "escalation_rules": {
+                "lawyer": "general_manager", "attorney": "general_manager",
+                "lemon law": "general_manager", "warranty dispute": "service_manager",
+                "financing complaint": "finance_manager",
+            },
+            "max_follow_ups": 2,
+            "min_hours_between_follow_ups": 24,
+        }
+        seed = {
+            "workflow_class": agent_type,
+            "workflow_registry": "aios.verticals.car_dealership_us.workflows",
+            "icm": {"workspace_id": "cd_us_ops", "stage_id": agent_type},
+        }
+        extra_data = {**seed, **extra_data}
+        extra_data.setdefault("car_dealership_us_profile", _cd_profile)
     if not (0 <= temperature <= 2):
         return HTMLResponse("<h2>temperature 0..2</h2>", status_code=422)
     if not (256 <= max_tokens <= 16384):
@@ -4092,9 +4122,44 @@ async def wizard_create(request: Request, phone: str = Form(...), vertical: str 
     # cria agente do vertical
     tpl_map = {"clinica": "support", "imobiliaria": "sdr", "ecommerce": "support"}
     atype = tpl_map.get(vertical, vertical)
-    tpl = apply_template(atype) if atype in ["sdr","support","closer","manager"] else apply_template("support")
+    tpl = apply_template(atype) if atype in TEMPLATES else apply_template("support")
+    extra_data: dict = {}
+    if atype in ("car_dealership_us_lead_capture", "car_dealership_us_lead_follow_up"):
+        extra_data = {
+            "workflow_class": atype,
+            "workflow_registry": "aios.verticals.car_dealership_us.workflows",
+            "icm": {"workspace_id": "cd_us_ops", "stage_id": atype},
+            "car_dealership_us_profile": {
+                "business_name": "Example Motors (US)",
+                "services": [
+                    {"name": "New vehicle sales", "notes": "Quote from approved inventory/pricing system"},
+                    {"name": "Used vehicle sales"},
+                    {"name": "Trade-in appraisal", "notes": "Schedule in-person appraisal"},
+                ],
+                "hours": {
+                    "mon": "09:00-19:00", "tue": "09:00-19:00", "wed": "09:00-19:00",
+                    "thu": "09:00-19:00", "fri": "09:00-19:00", "sat": "10:00-18:00", "sun": "closed",
+                },
+                "escalation_rules": {
+                    "lawyer": "general_manager", "attorney": "general_manager",
+                    "lemon law": "general_manager", "warranty dispute": "service_manager",
+                    "financing complaint": "finance_manager",
+                },
+                "max_follow_ups": 2,
+                "min_hours_between_follow_ups": 24,
+            },
+        }
     async with db_session() as db:
-        ag = Agent(org_id=org_id, name=f"Bot {vertical.capitalize()}", agent_type=atype, system_prompt=tpl.get("system_prompt",""), llm_config=tpl.get("llm_config",{}), tools=tpl.get("tools",[]), memory_config=tpl.get("memory_config",{}))
+        ag = Agent(
+            org_id=org_id,
+            name=f"Bot {vertical.capitalize()}",
+            agent_type=atype,
+            system_prompt=tpl.get("system_prompt", ""),
+            llm_config=tpl.get("llm_config", {}),
+            tools=tpl.get("tools", []),
+            memory_config=tpl.get("memory_config", {}),
+            extra_data=extra_data or None,
+        )
         db.add(ag)
         await db.flush()
         # cria instância evolution com uuid para evitar colisão
