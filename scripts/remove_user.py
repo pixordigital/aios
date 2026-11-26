@@ -8,7 +8,7 @@ Run inside app container / deployment environment:
 """
 import asyncio
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from aios.db.backend import db_session
 from aios.db.models import OrganizationMembership, RefreshToken, User
@@ -16,9 +16,9 @@ from aios.db.models import OrganizationMembership, RefreshToken, User
 
 async def main() -> int:
     async with db_session() as db:
-        user = (await db.execute(select(User).where(User.email == "Ricard.Spinellis@icloud.com"))).scalars().first()
+        user = (await db.execute(select(User).where(func.lower(User.email) == "ricard.spinellis@icloud.com"))).scalars().first()
         if not user:
-            print("OK user_not_found email=Ricard.Spinellis@icloud.com")
+            print("OK user_not_found email=ricard.spinellis@icloud.com")
             return 0
         await db.execute(delete(OrganizationMembership).where(OrganizationMembership.user_id == user.id))
         await db.execute(delete(RefreshToken).where(RefreshToken.user_id == user.id))
