@@ -902,6 +902,7 @@ async def contracts_page(request: Request):
     )
 
     async with db_session() as db:
+        org = await db.get(Organization, org_id)
         agents = (
             await db.execute(select(Agent).where(Agent.org_id == org_id).order_by(Agent.name))
         ).scalars().all()
@@ -927,6 +928,11 @@ async def contracts_page(request: Request):
                 "max_attempts": manifest.retry.max_attempts,
             }
         )
+
+    # ICM paid-workflow contracts belong to the dealership tenant (showcar).
+    # Operator orgs (pixor) must not surface dealership contracts.
+    if org is None or org.slug != "showcar":
+        contracts = []
 
     governed = []
     for a in agents:
