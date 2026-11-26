@@ -9,20 +9,20 @@ Run inside app container / deployment environment:
 import asyncio
 
 import bcrypt
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from aios.config import settings
 from aios.db.backend import db_session
 from aios.db.models import Organization, OrganizationMembership, User
 
-EMAIL = "ricard.spinellis@icloud.com"
+EMAIL = "Ricard.Spinellis@icloud.com"
 PASSWORD = "Ricardo@aios123-"
 MEMBERSHIPS = [("pixor", "member"), ("showcar", "owner")]
 
 
 async def main() -> int:
     async with db_session() as db:
-        user = (await db.execute(select(User).where(User.email == EMAIL))).scalars().first()
+        user = (await db.execute(select(User).where(func.lower(User.email) == EMAIL.lower()))).scalars().first()
         created_user = False
         if not user:
             org = (await db.execute(select(Organization).where(Organization.slug == "showcar"))).scalars().first()
