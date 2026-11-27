@@ -22,6 +22,12 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Backend already existed: `aios/core/limits.py::get_agent_usage_breakdown` + `GET /api/analytics/usage/agents` (pre-existing, verified).
 - This session: added `tests/test_agent_usage_breakdown.py` (1 passed) — per-agent tokens aggregation + name enrichment.
 - Phase 3 next: surface breakdown in dashboard/UI (usage page) for teams. Then Phase 4 (designer).
+- Phase 4 STARTED: `design_team_pack(base_key, vertical, addon)` em `aios/core/solution_pack.py` (clone/adapt base → pack nomeado, MVP deterministic). Tests `tests/test_team_designer.py` (1 passed) + suite agent-packs/usage 13 passed.
+
+### 2026-11-27 — Phase 4 started, Phase 3 concluded
+
+- Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
+- Phase 4 in progress: designer MVP done; next = wire designer into dashboard/API (design endpoint) then Phase 5.
 
 
 ### 2026-11-25 shell-enabled resume — agent verification wave RUNNING
