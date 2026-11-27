@@ -63,6 +63,10 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - `check_org_limits(org_id, db, user_id=None, model=None)` plumbed with seat gate via `seat_allows_model(org, user_id, model)` (Phase 7 helper). Tests: seat + adjacent suites green (7 passed). Commit `c7add06`.
 - Phase 9 remainder: caller wiring (agent run paths pass user_id+model) + membership-level allowed_models + migration. Phase 9 started.
 
+### 2026-11-27 — Phase 9 CONCLUDED
+
+- Phase 9 slice shipped: `check_org_limits` seat gate plumbed (`user_id`/`model`), tests green (7 passed, commit `c7add06`). Remainder deferred: caller wiring + membership-level allowed_models + migration. Phase 9 closed.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
