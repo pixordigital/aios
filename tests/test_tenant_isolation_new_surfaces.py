@@ -127,13 +127,14 @@ async def test_finance_sor_mutations_fail_closed_cross_org_approval(test_db_sess
         test_db_session, org_id=second_org.id, tool_name="finance_sor.post_balanced_ledger_entries", tool_args=args
     )
 
+    approval_id = foreign_org_approval.id
     app = _finance_app(test_db_session, test_user, test_org.id)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        resp = await ac.post("/api/internal/finance-sor/ledger/postings", json={**args, "approval_action_id": foreign_org_approval.id})
+        resp = await ac.post("/api/internal/finance-sor/ledger/postings", json={**args, "approval_action_id": approval_id})
         assert resp.status_code == 409
         assert resp.json()["detail"]["error"] == "approval_required"
 
-    refreshed = await test_db_session.get(PendingAction, foreign_org_approval.id)
+    refreshed = (await test_db_session.execute(select(PendingAction).where(PendingAction.id == approval_id))).scalar_one()
     assert refreshed.status == "approved"
 
 

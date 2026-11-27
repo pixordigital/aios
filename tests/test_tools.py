@@ -58,7 +58,7 @@ async def test_mcp_call_wires_actor_context(monkeypatch):
             captured["names"] = names
             captured["kwargs"] = kwargs
 
-        async def execute(self, name, args_json):
+        async def execute(self, name, args_json, **_kwargs):
             captured["exec"] = (name, args_json)
             return '{"ok":true}'
 
@@ -104,7 +104,7 @@ async def test_tools_test_endpoint_wires_actor_context(monkeypatch):
             captured["names"] = names
             captured["kwargs"] = kwargs
 
-        async def execute(self, name, args_json):
+        async def execute(self, name, args_json, **_kwargs):
             return '{"ok":true}'
 
     class _FakeTool:
@@ -150,7 +150,7 @@ async def _run_gated_tool(monkeypatch, *, tool_name="rag_search", args=None, org
         def __init__(self, names, **kwargs):
             pass
 
-        async def execute(self, name, args_json):
+        async def execute(self, name, args_json, **_kwargs):
             executed.append((name, args_json))
             return '{"ok":true}'
 
@@ -229,11 +229,12 @@ async def test_tools_test_endpoint_blocks_dynamic_code_tool_before_execution(mon
 
 @pytest.mark.asyncio
 async def test_tools_test_endpoint_blocks_missing_org_context(monkeypatch):
-    out, executed = await _run_gated_tool(monkeypatch, org_id="")
-    assert out["ok"] is False
-    assert out["requires_approval"] is True
-    assert out["error"] == "HITL: org context missing"
-    assert executed == []
+    from fastapi import HTTPException
+
+    # Org-scope verification runs before HITL classification; missing org is denied at the boundary.
+    with pytest.raises(HTTPException) as exc:
+        await _run_gated_tool(monkeypatch, org_id="")
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -372,7 +373,7 @@ async def test_dashboard_lab_tool_run_allows_admin(monkeypatch):
         def __init__(self, names, **kwargs):
             self.kwargs = kwargs
 
-        async def execute(self, name, args_json):
+        async def execute(self, name, args_json, **_kwargs):
             return "2"
 
     monkeypatch.setattr("aios.api.deps.get_dashboard_user", _admin)
@@ -404,7 +405,7 @@ async def _run_lab_tool(monkeypatch, *, tool_name="calculator", args=None, org_e
         def __init__(self, names, **kwargs):
             pass
 
-        async def execute(self, name, args_json):
+        async def execute(self, name, args_json, **_kwargs):
             executed.append((name, args_json))
             return "2"
 
@@ -487,7 +488,7 @@ async def test_mcp_call_hides_internal_exception(monkeypatch):
         def __init__(self, names, **kwargs):
             pass
 
-        async def execute(self, name, args_json):
+        async def execute(self, name, args_json, **_kwargs):
             raise RuntimeError("secret db uri postgresql://user:pw@host/db")
 
     class _FakeTool:
@@ -545,7 +546,7 @@ async def test_dashboard_lab_tool_run_hides_internal_exception(monkeypatch):
         def __init__(self, names, **kwargs):
             pass
 
-        async def execute(self, name, args_json):
+        async def execute(self, name, args_json, **_kwargs):
             raise RuntimeError("secret token sk-live-123")
 
     async def _actor(_request):

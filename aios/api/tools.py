@@ -276,6 +276,8 @@ async def test_tool(
     user=Depends(get_current_user),
 ):
     tool = await db.get(Tool, tool_id)
+    if not org_id or str(getattr(user, "org_id", "") or "") != str(org_id):
+        return {"ok": False, "error": "HITL: org context missing", "requires_approval": True}
     await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.test_tool")
     args = body.get("args") or body.get("arguments") or {}
     approval_action_id = body.get("approval_action_id")
