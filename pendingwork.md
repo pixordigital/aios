@@ -23,6 +23,7 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - This session: added `tests/test_agent_usage_breakdown.py` (1 passed) — per-agent tokens aggregation + name enrichment.
 - Phase 3 next: surface breakdown in dashboard/UI (usage page) for teams. Then Phase 4 (designer).
 - Phase 4 STARTED: `design_team_pack(base_key, vertical, addon)` em `aios/core/solution_pack.py` (clone/adapt base → pack nomeado, MVP deterministic). Tests `tests/test_team_designer.py` (1 passed) + suite agent-packs/usage 13 passed.
+- Phase 4 progress: `POST /api/agent-packs/design` adicionado (base_key/vertical/addon → manifest, 400 unknown base). Tests `tests/test_agent_packs_api.py` design cases passed. Commit `527149b`. UI wiring do designer = próximo slice.
 
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
