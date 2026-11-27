@@ -49,6 +49,11 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - `seat_allows_model(org, user_id, model)` em `aios/core/limits.py` via `org.extra_data.seats` ({user_id: [model]}). Empty seat -> allow (org plan governs); listed -> exact match, deny else. Enforcement wiring into run path deferred. Tests `tests/test_seat_limits.py` (4 passed). Commit `d09e8fa`.
 - Fase 7 CONCLUDED (2026-11-27): slice shipped; remainder deferred (enforcement wiring + membership-level allowed_models + migration). Phase 7 closed.
 
+### 2026-11-27 — Phase 8 started
+
+- `POST /api/agent-packs/design/install` added (design from base + install/publish version in one step; reuses `_install_manifest` refactor). Test `design_install_publishes_version` passed (suite 12 passed). Commit `cd8cbb8`.
+- Phase 8 remainder: execution install into openbot dir (core install CLI) + dashboard wiring for design/install. Phase 8 started.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
