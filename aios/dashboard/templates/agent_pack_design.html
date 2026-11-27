@@ -23,12 +23,33 @@
       <label>Negocio / vertical</label>
       <input class="input" name="vertical" placeholder="ex: clinica de estetica" required>
     </div>
+    <div>
+      <label>Runtime target</label>
+      <select class="input" name="runtime_target">
+        <option value="docker">docker</option>
+        <option value="openbot">openbot</option>
+        <option value="openclaw">openclaw</option>
+        <option value="claude_code">claude_code</option>
+        <option value="codex">codex</option>
+        <option value="opencode">opencode</option>
+      </select>
+    </div>
     <div style="grid-column: 1 / -1">
       <label>Adicionar ao prompt</label>
       <textarea class="input" name="addon" rows="4" placeholder="Instrução de escopo do time..." required></textarea>
     </div>
     <div style="grid-column: 1 / -1">
-      <button class="btn btn-primary" type="submit">Desenhar time</button>
+      <label>Install local (opcional): consent phrase</label>
+      <input class="input" name="consent_phrase" placeholder="ex: UNSIGNED_RISK_ACCEPTED install into /minha/pasta">
+      <label style="margin-top:0.375rem">Diretório destino (vazio = padrão do target)</label>
+      <input class="input" name="target_root" placeholder="ex: /home/user/.openbot">
+      <label style="margin-top:0.375rem"><input type="checkbox" name="allow_unsigned" value="true"> Aceitar bundle unsigned</label>
+      <label style="margin-top:0.375rem"><input type="checkbox" name="accept_capability_loss" value="true"> Aceitar perda de capacidade do export</label>
+      <p class="text-sm text-tertiary">Escrita local de arquivos, sem exec/network. Bundles unsigned exigem "UNSIGNED_RISK_ACCEPTED" na frase.</p>
+    </div>
+    <div style="grid-column: 1 / -1;display:flex;gap:0.5rem">
+      <button class="btn btn-primary" type="submit" name="action" value="design">Desenhar time</button>
+      <button class="btn" type="submit" name="action" value="install">Desenhar e instalar</button>
     </div>
   </form>
 </div>
@@ -46,8 +67,10 @@
     <div><span class="text-tertiary">identity_id:</span> <span class="font-mono">{{ design.identity_id }}</span></div>
     <div><span class="text-tertiary">identity_name:</span> <span>{{ design.identity_name }}</span></div>
     <div><span class="text-tertiary">version:</span> <span class="font-mono">{{ design.version }}</span></div>
-    <div><span class="text-tertiary">checksum:</span> <span class="font-mono" style="word-break:break-all">{{ design.checksum }}</span></div>
+    <div><span class="text-tertiary">runtime_target:</span> <span class="font-mono">{{ design.runtime_target or '-' }}</span></div>
+    <div><span class="text-tertiary">checksum:</span> <span class="font-mono" style="word-break:break-all">{{ design.checksum or '-' }}</span></div>
     <div><span class="text-tertiary">description:</span> <span class="text-secondary">{{ design.description }}</span></div>
+    {% if design.installed is defined %}<div><span class="text-tertiary">install:</span> {{ 'ok' if design.installed else 'falha' }} em <span class="font-mono">{{ design.install_root or '-' }}</span></div>{% endif %}
   </div>
 </div>
 {% endif %}

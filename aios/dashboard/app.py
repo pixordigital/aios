@@ -4095,7 +4095,7 @@ async def agent_pack_export(request: Request, pack_id: str, version_id: str, tar
         raise HTTPException(status_code=500, detail="Falha ao exportar bundle") from e
 
 
-@router.get("/agent-packs/design")
+@router.get("/agent-packs/design", response_class=HTMLResponse)
 async def agent_pack_design_page(request: Request):
     from aios.core.solution_pack import build_solution_pack, solution_pack_keys
 
@@ -4115,20 +4115,67 @@ async def agent_pack_design_page(request: Request):
     return await _render("agent_pack_design.html", request, title="Desenhar Time", solutions=solutions, design=None, error="")
 
 
-@router.post("/agent-packs/design")
+@router.post("/agent-packs/design", response_class=HTMLResponse)
 async def agent_pack_design_create(
     request: Request,
     base_key: str = Form(""),
     vertical: str = Form(...),
     addon: str = Form(...),
+    runtime_target: str = Form("docker"),
+    action: str = Form("design"),
+    consent_phrase: str = Form(""),
+    target_root: str = Form(""),
+    allow_unsigned: bool = Form(False),
+    accept_capability_loss: bool = Form(False),
 ):
     design = None
     error = ""
-    if base_key:
+    if not base_key:
+        error = "Selecione uma Solution base"
+    elif action == "install":
+        try:
+            from aios.api.agent_packs import AgentPackDesignBody, design_install_agent_pack
+            from aios.api.deps import get_dashboard_user
+
+            user = await get_dashboard_user(request)
+            if not user:
+                raise ValueError("Sessão expirada")
+            async with db_session() as db:
+                result = await design_install_agent_pack(
+                    body=AgentPackDesignBody(
+                        base_key=base_key,
+                        vertical=vertical,
+                        addon=addon,
+                        runtime_target=runtime_target,
+                        execute_install=True,
+                        consent_phrase=consent_phrase or None,
+                        allow_unsigned=allow_unsigned,
+                        accept_capability_loss=accept_capability_loss,
+                        target_root=target_root or None,
+                    ),
+                    db=db,
+                    user=user,
+                )
+            design = {
+                "base_key": base_key,
+                "vertical": vertical,
+                "addon": addon,
+                "identity_id": result["pack"]["pack_key"],
+                "identity_name": result["pack"]["name"],
+                "agent_type": result["pack"]["agent_type"],
+                "description": "",
+                "version": result["version"]["version_semver"],
+                "runtime_target": result["design"]["runtime_target"],
+                "installed": result["local_install"]["ok"],
+                "install_root": result["local_install"]["target_root"],
+            }
+        except Exception as e:
+            error = str(e)
+    else:
         try:
             from aios.core.solution_pack import design_team_pack
 
-            m = design_team_pack(base_key, vertical, addon)
+            m = design_team_pack(base_key, vertical, addon, runtime_target=runtime_target)
             design = {
                 "base_key": base_key,
                 "vertical": vertical,
@@ -4139,6 +4186,7 @@ async def agent_pack_design_create(
                 "description": str(m.identity.description or ""),
                 "version": m.version,
                 "checksum": str(m.provenance.checksum_sha256 or ""),
+                "runtime_target": runtime_target,
             }
         except Exception as e:
             error = str(e)

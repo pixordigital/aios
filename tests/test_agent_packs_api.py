@@ -148,6 +148,41 @@ async def test_design_install_publishes_version(test_db_session, auth_client):
 
 
 @pytest.mark.asyncio
+async def test_design_install_apply_local_openbot_bundle(test_db_session, auth_client, tmp_path):
+    target_root = tmp_path / "openbot"
+    r = await auth_client.post(
+        "/api/agent-packs/design/install",
+        json={
+            "base_key": "vender",
+            "vertical": "clinica de estetica",
+            "addon": "Voce e o time comercial da clinica.",
+            "runtime_target": "openbot",
+            "execute_install": True,
+            "consent_phrase": "UNSIGNED_RISK_ACCEPTED install into test dir",
+            "accept_capability_loss": True,
+            "allow_unsigned": True,
+            "target_root": str(target_root),
+            "records_dir": str(tmp_path / "records"),
+        },
+    )
+    assert r.status_code == 200, r.text
+    local = r.json()["local_install"]
+    assert local["ok"] is True
+    assert local["target"] == "openbot"
+    assert local["target_root"] == str(target_root.resolve())
+    assert (target_root / "openbot" / "agent.bundle.json").is_file()
+
+    r = await auth_client.post(
+        "/api/agent-packs/design/install",
+        json={
+            "base_key": "vender", "vertical": "clinica", "addon": "x",
+            "runtime_target": "openbot", "execute_install": True,
+        },
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_approve_applies_activation_idempotent(test_db_session, auth_client, test_org, test_user):
     # create second admin user as approver (self-approval forbidden)
     approver = User(email="approver@example.com", hashed_password=_hash_password("testpass123"), org_id=test_org.id, role="admin")

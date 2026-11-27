@@ -7,6 +7,7 @@ Activation/rollback are HITL-gated via PendingAction; no mutation before approva
 from __future__ import annotations
 
 import logging
+import tempfile
 from datetime import datetime, timezone
 from typing import Any
 
@@ -278,6 +279,56 @@ async def install_agent_pack(
     return {"pack": _pack_summary(pack), "version": _version_summary(ver)}
 
 
+_INSTALL_TARGETS = ("claude_code", "codex", "opencode", "openclaw", "openbot")
+
+
+def _apply_design_bundle(
+    manifest,
+    *,
+    actor_id: str,
+    target: str,
+    consent_phrase: str | None,
+    accept_capability_loss: bool,
+    allow_unsigned: bool,
+    target_root: str | None,
+    records_dir: str | None,
+) -> dict[str, Any]:
+    """Apply an exported bundle locally. No exec/network; consent-gated file writes."""
+    if target not in _INSTALL_TARGETS:
+        raise HTTPException(status_code=400, detail=f"runtime_target not installable locally: {target}")
+    if not consent_phrase:
+        raise HTTPException(status_code=422, detail="execute_install requires consent_phrase")
+    from aios.core.agent_pack_export import export_agent_pack
+    from aios.core.agent_pack_install import InstallConsent, apply_install, plan_install
+
+    with tempfile.TemporaryDirectory(prefix="aios-agent-pack-") as tmp:
+        export_agent_pack(manifest, target=target, output_dir=tmp)  # type: ignore[arg-type]
+        plan = plan_install(tmp, target, target_root=target_root, records_dir=records_dir)  # type: ignore[arg-type]
+        consent = InstallConsent(
+            actor=actor_id,
+            bundle_hash=plan.bundle_hash,
+            target=plan.target,
+            plan_hash=plan.plan_hash,
+            capability_loss_ack=bool(accept_capability_loss or not plan.requires_capability_loss_ack),
+            consent_phrase=consent_phrase,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            allow_unsigned=allow_unsigned,
+        )
+        result = apply_install(plan, consent=consent, records_dir=records_dir)
+    summary = {
+        "ok": result.ok,
+        "target": result.target,
+        "target_root": plan.target_root,
+        "applied": len(result.applied),
+        "errors": result.errors,
+        "warnings": result.warnings,
+        "install_record_path": result.install_record_path,
+    }
+    if not result.ok:
+        raise HTTPException(status_code=422, detail=summary)
+    return summary
+
+
 @router.post("/design/install")
 async def design_install_agent_pack(
     body: AgentPackDesignBody,
@@ -287,6 +338,10 @@ async def design_install_agent_pack(
     """Design a named team pack and install it (publish version) in one step."""
     if body.base_key not in solution_pack_keys():
         raise HTTPException(status_code=400, detail=f"Unknown base solution: {body.base_key}")
+    if body.execute_install and body.runtime_target not in _INSTALL_TARGETS:
+        raise HTTPException(status_code=400, detail=f"runtime_target not installable locally: {body.runtime_target}")
+    if body.execute_install and not body.consent_phrase:
+        raise HTTPException(status_code=422, detail="execute_install requires consent_phrase")
     m = design_team_pack(body.base_key, body.vertical, body.addon, runtime_target=body.runtime_target)
     pack, ver = await _install_manifest(
         db,
@@ -296,7 +351,24 @@ async def design_install_agent_pack(
         capability_loss=[],
         accept_high_severity_loss=False,
     )
-    return {"pack": _pack_summary(pack), "version": _version_summary(ver), "design": {"base_key": body.base_key, "vertical": body.vertical, "runtime_target": body.runtime_target}}
+    local_install = None
+    if body.execute_install:
+        local_install = _apply_design_bundle(
+            m,
+            actor_id=user.id,
+            target=body.runtime_target,
+            consent_phrase=body.consent_phrase,
+            accept_capability_loss=body.accept_capability_loss,
+            allow_unsigned=body.allow_unsigned,
+            target_root=body.target_root,
+            records_dir=body.records_dir,
+        )
+    return {
+        "pack": _pack_summary(pack),
+        "version": _version_summary(ver),
+        "design": {"base_key": body.base_key, "vertical": body.vertical, "runtime_target": body.runtime_target},
+        "local_install": local_install,
+    }
 
 
 @router.get("")
@@ -329,6 +401,13 @@ class AgentPackDesignBody(BaseModel):
     vertical: str = Field(min_length=1, max_length=120)
     addon: str = Field(min_length=1, max_length=4000)
     runtime_target: str = "docker"
+    # Opt-in local bundle apply (no exec/network). Requires explicit consent phrase.
+    execute_install: bool = False
+    consent_phrase: str | None = Field(default=None, max_length=255)
+    accept_capability_loss: bool = False
+    allow_unsigned: bool = False
+    target_root: str | None = Field(default=None, max_length=512)
+    records_dir: str | None = Field(default=None, max_length=512)
 
 
 @router.post("/design")
