@@ -15,6 +15,7 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - `aios/api/agent_packs.py`: `GET /api/agent-packs/solutions` — install-ready named packs, no DB writes (built before `/{pack_id}`).
 - Tests: `tests/test_agent_packs_solutions.py` 3 passed; full agent-pack suite green (11 passed combined with vitrine/api tests).
 - Next: wire solutions into dashboard vitrine/UI; then Phase 3 (custo por agente/team).
+- Phase 2 follow-up done: `agent_packs_list` now appends solution packs (source=solution, active v1.0.0, counts) — commits `1db795a` + `a9c2ce7`. Phase 2 CLOSED. Next: Phase 3.
 
 
 ### 2026-11-25 shell-enabled resume — agent verification wave RUNNING
