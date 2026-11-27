@@ -25,6 +25,16 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Phase 4 STARTED: `design_team_pack(base_key, vertical, addon)` em `aios/core/solution_pack.py` (clone/adapt base → pack nomeado, MVP deterministic). Tests `tests/test_team_designer.py` (1 passed) + suite agent-packs/usage 13 passed.
 - Phase 4 progress: `POST /api/agent-packs/design` adicionado (base_key/vertical/addon → manifest, 400 unknown base). Tests `tests/test_agent_packs_api.py` design cases passed. Commit `527149b`. UI wiring do designer = próximo slice.
 
+### 2026-11-27 — Phase 4 progress: design page
+
+- `GET /dashboard/agent-packs/design` + `POST /dashboard/agent-packs/design` (Form: base_key/vertical/addon) → render `agent_pack_design.html` com design gerado (identity/version/checksum) ou erro.
+- Commit `05b83c0 feat(dashboard): add agent pack design page`. Tests agent-packs suite 12 passed; py_compile + Jinja OK; diff-check OK.
+
+### 2026-11-27 — Phase 5/6 status
+
+- Fase 5 pendente: importer conversas → second brain; seat models/caps.
+- Fase 6 pendente: install no OpenClaw/OpenBot (per org). `_AGENT_PACK_EXPORT_TARGETS` já inclui openclaw/openbot — gap é escopo org no install.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
