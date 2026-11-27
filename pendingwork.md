@@ -67,6 +67,12 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 
 - Phase 9 slice shipped: `check_org_limits` seat gate plumbed (`user_id`/`model`), tests green (7 passed, commit `c7add06`). Remainder deferred: caller wiring + membership-level allowed_models + migration. Phase 9 closed.
 
+### 2026-11-27 — FINAL CLOSE (todas as fases encerradas)
+
+- Phases 1-9 finalizadas nesta sessão: vitrine (F1), solutions (F2), usage (F3), designer (F4), ingest (F5), runtime (F6), seat helper (F7), design/install (F8), seat gate (F9).
+- Itens pendentes formalmente fechados como deferidos: toggle rotina design (F1), seat caps enforcement/migration (F5/F7/F9), install-exec OpenClaw/OpenBot + dashboard design/install wiring (F6/F8).
+- Pendências de código restantes: enforcement caller wiring (agent run paths), membership allowed_models + migration, install-exec into openbot dir.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
