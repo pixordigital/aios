@@ -20,6 +20,7 @@ from aios.core.agent_pack import (
     validate_agent_pack,
 )
 from aios.core.audit import log_audit
+from aios.core.solution_pack import build_solution_pack_dict, solution_pack_keys
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import AgentPack, AgentPackActivation, AgentPackVersion, PendingAction
 from aios.governance.security import record_cross_tenant_block_if_mismatch
@@ -262,6 +263,18 @@ async def list_agent_packs(
         await db.execute(select(AgentPack).where(AgentPack.org_id == user.org_id).order_by(AgentPack.created_at.desc()))
     ).scalars().all()
     return {"packs": [_pack_summary(p) for p in rows]}
+
+
+@router.get("/solutions")
+async def list_solution_packs(user=Depends(get_current_user)) -> list[dict[str, Any]]:
+    """Named Solution packs as install-ready manifests (no DB writes)."""
+    out: list[dict[str, Any]] = []
+    for key in solution_pack_keys():
+        try:
+            out.append(build_solution_pack_dict(key))
+        except Exception as e:
+            logger.warning("solution pack build failed key=%s err=%s", key, e)
+    return out
 
 
 @router.get("/{pack_id}")
