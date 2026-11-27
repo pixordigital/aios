@@ -30,10 +30,8 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - `GET /dashboard/agent-packs/design` + `POST /dashboard/agent-packs/design` (Form: base_key/vertical/addon) → render `agent_pack_design.html` com design gerado (identity/version/checksum) ou erro.
 - Commit `05b83c0 feat(dashboard): add agent pack design page`. Tests agent-packs suite 12 passed; py_compile + Jinja OK; diff-check OK.
 
-### 2026-11-27 — Phase 5/6 status
-
-- Fase 5 pendente: importer conversas → second brain; seat models/caps.
-- Fase 6 pendente: install no OpenClaw/OpenBot (per org). `_AGENT_PACK_EXPORT_TARGETS` já inclui openclaw/openbot — gap é escopo org no install.
+- Fase 4 remainder: dashboard designer UI + commit. Next: Phase 5.
+- Fase 5 started: `second_brain.ingest_conversation(agent_id, org_id, conversation_id, text, source)` → put_knowledge(knowledge_type=reflection). Tests `tests/test_second_brain_ingest.py` (2 passed) + business_os 5 passed. Commit `7e0091c`. Fase 5 remainder: seat models/caps + maybe API endpoint to trigger ingest from transcript cache.
 
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
