@@ -136,6 +136,18 @@ async def test_design_agent_pack_from_base_solution(test_db_session, auth_client
 
 
 @pytest.mark.asyncio
+async def test_design_install_publishes_version(test_db_session, auth_client):
+    r = await auth_client.post(
+        "/api/agent-packs/design/install",
+        json={"base_key": "vender", "vertical": "clinica de estetica", "addon": "Voce e o time comercial da clinica.", "runtime_target": "openbot"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["design"]["runtime_target"] == "openbot"
+    assert body["version"]["version_semver"] == "1.0.0"
+
+
+@pytest.mark.asyncio
 async def test_approve_applies_activation_idempotent(test_db_session, auth_client, test_org, test_user):
     # create second admin user as approver (self-approval forbidden)
     approver = User(email="approver@example.com", hashed_password=_hash_password("testpass123"), org_id=test_org.id, role="admin")

@@ -207,15 +207,16 @@ async def _create_version(
     return ver
 
 
-@router.post("/install")
-async def install_agent_pack(
-    body: AgentPackInstallBody,
-    db: DatabaseBackend = Depends(get_db_backend),
-    user=Depends(get_current_user),
-):
-    org_id = user.org_id
-    manifest = _validate_manifest_or_422(body.manifest)
-    if _has_high_severity_loss(body.capability_loss) and not body.accept_high_severity_loss:
+async def _install_manifest(
+    db: DatabaseBackend,
+    *,
+    org_id: str,
+    actor_id: str,
+    manifest: Any,
+    capability_loss: list[dict[str, Any]],
+    accept_high_severity_loss: bool,
+) -> tuple[AgentPack, AgentPackVersion]:
+    if _has_high_severity_loss(capability_loss) and not accept_high_severity_loss:
         raise HTTPException(422, "high-severity capability_loss requires accept_high_severity_loss=true")
 
     pack_key = manifest.identity.id
@@ -231,14 +232,14 @@ async def install_agent_pack(
             name=manifest.identity.name,
             description=manifest.identity.description,
             agent_type=manifest.identity.agent_type,
-            created_by=user.id,
+            created_by=actor_id,
         )
         db.add(pack)
         await db.commit()
         await db.refresh(pack)
         await log_audit(
             db, org_id, "agent_pack.install", "agent_pack",
-            user_id=user.id, resource_id=pack.id,
+            user_id=actor_id, resource_id=pack.id,
             details={"pack_key": pack_key, "version": manifest.version},
         )
 
@@ -246,12 +247,56 @@ async def install_agent_pack(
         db,
         org_id=org_id,
         pack=pack,
-        manifest_dict=body.manifest,
+        manifest_dict=body_manifest(manifest),
+        capability_loss=capability_loss,
+        accept_high_severity_loss=accept_high_severity_loss,
+        actor_id=actor_id,
+    )
+    return pack, ver
+
+
+def body_manifest(manifest: Any) -> dict[str, Any]:
+    return manifest.model_dump(mode="json") if hasattr(manifest, "model_dump") else dict(manifest)
+
+
+@router.post("/install")
+async def install_agent_pack(
+    body: AgentPackInstallBody,
+    db: DatabaseBackend = Depends(get_db_backend),
+    user=Depends(get_current_user),
+):
+    org_id = user.org_id
+    manifest = _validate_manifest_or_422(body.manifest)
+    pack, ver = await _install_manifest(
+        db,
+        org_id=org_id,
+        actor_id=user.id,
+        manifest=manifest,
         capability_loss=body.capability_loss,
         accept_high_severity_loss=body.accept_high_severity_loss,
-        actor_id=user.id,
     )
     return {"pack": _pack_summary(pack), "version": _version_summary(ver)}
+
+
+@router.post("/design/install")
+async def design_install_agent_pack(
+    body: AgentPackDesignBody,
+    db: DatabaseBackend = Depends(get_db_backend),
+    user=Depends(get_current_user),
+) -> dict[str, Any]:
+    """Design a named team pack and install it (publish version) in one step."""
+    if body.base_key not in solution_pack_keys():
+        raise HTTPException(status_code=400, detail=f"Unknown base solution: {body.base_key}")
+    m = design_team_pack(body.base_key, body.vertical, body.addon, runtime_target=body.runtime_target)
+    pack, ver = await _install_manifest(
+        db,
+        org_id=user.org_id,
+        actor_id=user.id,
+        manifest=m,
+        capability_loss=[],
+        accept_high_severity_loss=False,
+    )
+    return {"pack": _pack_summary(pack), "version": _version_summary(ver), "design": {"base_key": body.base_key, "vertical": body.vertical, "runtime_target": body.runtime_target}}
 
 
 @router.get("")
