@@ -9,6 +9,13 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Phase 1 partial: **vitrine feita**; **toggle rotina por org pendente decisão de design** (sources: `AutomationTrigger.is_active` / event subs `enabled`+agent status).
 - Next: toggle rotina (decidir design) OR Phase 2 catálogo de times prontos.
 
+### 2026-11-27 — Phase 2 (named solution packs) — IMPLEMENTED
+
+- `aios/core/solution_pack.py`: `build_solution_pack(key)`, `solution_pack_keys()`, `build_solution_pack_dict(key)` — SOLUTIONS (`vender`/`atender`/`recuperar`) → validated `AgentPackManifest` v1.0.0 (docker runtime, ask_tools approvals, conversation+agent memory, scaffolded prompt, checksum fingerprint).
+- `aios/api/agent_packs.py`: `GET /api/agent-packs/solutions` — install-ready named packs, no DB writes (built before `/{pack_id}`).
+- Tests: `tests/test_agent_packs_solutions.py` 3 passed; full agent-pack suite green (11 passed combined with vitrine/api tests).
+- Next: wire solutions into dashboard vitrine/UI; then Phase 3 (custo por agente/team).
+
 
 ### 2026-11-25 shell-enabled resume — agent verification wave RUNNING
 
