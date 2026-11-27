@@ -929,6 +929,15 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - Verified after fix: `18 passed, 17 warnings` for `test_finance_sor_api.py`, `test_whatsapp_approval_hardening.py`, `test_side_effect_hardening.py`; `py_compile` + `git diff --check` clean.
 - Full prepush rerun in background shell `sh_21f2d889d001jgI1nZ14UuM60j`. Remote note: external commit `7738d5b` (`fix(dashboard): make sidebar nav scrollable`) landed on `main`; local HEAD == `origin/main` == `7738d5b`, no divergence. Do not push until prepush2 exits green.
 
+### 2026-11-27 — test-tools flake fixed, prepush4 running
+
+- Prepush2 killed by 600s shell timeout (no test failure). Prepush3 finished `3 failed, 166 passed, 1 skipped`: all in `tests/test_tools.py`.
+- Root causes:
+  - `test_tool` now passes `approved=` into `ToolEngine.execute`; fake engines in tests rejected the kwarg. Fixed all fake `execute` signatures to accept `**_kwargs`.
+  - Missing-org case now denied earlier by `verify_org_access_async` (404) before HITL classification; test updated to expect `HTTPException` 404 instead of HITL dict.
+- Verified: `tests/test_tools.py` `39 passed` in full-file run; focused missing-org test passes isolated. Focused finance + WhatsApp + side-effect suite `18 passed`.
+- Full prepush rerun in background shell `sh_21f5317210018XnKwR1dKDLgeB` (worker `prepush4`, 30m timeout). Prod baseline before ship: `/health/live` 200, `/health/ready` 200 with all checks ok. Commit stage to be frozen only after prepush4 green because other sessions are still editing dashboard templates.
+
 ### 2026-11-27 — business readiness consolidation (docs-only)
 
 - Created `docs/BUSINESS_READINESS_STATUS.md` (factual, no overclaim): verdict not fully/safely/autonomously business-ready; uncommitted wave summary (billing fail-closed, action policy/HITL evidence, durable idempotency/fail-closed/TTL, finance SOR schema/service/read API/posting skeleton, provider sandbox stubs, RLS/audit/DR/LGPD/KMS scaffolds, side-effect guards); reported evidence (finance 19, exec 36+1, idempotency controlled 15, adapters/stubs 46/15/29, side-effect 22, mcp 4, approval replay 8, rls+audit 16, restore drill 3, migration chain upgrade/downgrade ok); known gaps (3 WhatsApp approval hardening failures under fix; SQLite env flakiness); blockers/missing (real rails/creds, money movement/reconciliation, real contract/e-sign/payroll/tax/fiscal, Postgres RLS enable+verify, WORM audit sink, DR/oncall/KMS/LGPD DPO signoff, DSAR execution evidence, full green suite); human-gated decisions; safe rollout order.
