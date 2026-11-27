@@ -1,0 +1,35 @@
+# Alertmanager scaffold - NO SECRETS, NO PROD RECEIVERS.
+# Copy and fill real receivers/integrations in secret-managed deploy config.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default-null
+  group_by: ['alertname', 'service', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers:
+        - severity="critical"
+      receiver: oncall-critical
+      continue: false
+    - matchers:
+        - severity="warning"
+      receiver: oncall-warning
+
+receivers:
+  - name: default-null
+  - name: oncall-critical
+    # TODO: configure human-approved receiver (PagerDuty/Opsgenie/Slack/email/webhook).
+    # Example webhook placeholder (do not enable without auth/TLS/review):
+    # webhook_configs:
+    #   - url: https://alert-receiver.example.invalid/critical
+    #     send_resolved: true
+  - name: oncall-warning
+    # TODO: configure lower-urgency receiver.
+
+inhibit_rules:
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: ['alertname', 'service']

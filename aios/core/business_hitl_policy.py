@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from aios.core.action_policy import ActionClass, classify_tool_action
+
 
 class SideEffectCategory(str, Enum):
     """Categories of business actions for HITL policy decisions."""
@@ -51,23 +53,51 @@ def _coerce_category(
     return None
 
 
+# Compatibility map: legacy business categories -> central action classes.
+_CATEGORY_TO_ACTION_CLASS = {
+    SideEffectCategory.MONEY: ActionClass.MONEY,
+    SideEffectCategory.EXTERNAL_COMMITMENT: ActionClass.EXTERNAL_COMMITMENT,
+    SideEffectCategory.LEGAL: ActionClass.PII_LEGAL,
+    SideEffectCategory.DATA_DELETE: ActionClass.DESTRUCTIVE,
+    SideEffectCategory.BULK_SEND: ActionClass.BULK_COMMS,
+    SideEffectCategory.READ_ONLY: ActionClass.READ_INTERNAL,
+}
+
+
 def requires_human_approval(
     action_category: SideEffectCategory | str,
     configured: bool = False,
 ) -> bool:
     """Return whether an action category requires human approval.
 
-    Money, external commitment, legal, data deletion, and bulk send always
-    require HITL. Read-only actions do not. Unknown categories fail closed and
-    require HITL regardless of `configured`.
+    Delegates to central action policy taxonomy. Unknown categories fail closed.
     """
     category = _coerce_category(action_category)
-    if category in HITL_NOT_REQUIRED_CATEGORIES:
-        return False
-    if category in HITL_REQUIRED_CATEGORIES:
+    if category is None:
         return True
-    # Fail closed for unknown/missing categories.
-    return True
+    action_class = _CATEGORY_TO_ACTION_CLASS.get(category)
+    if action_class is None:
+        return True
+    if action_class == ActionClass.READ_INTERNAL:
+        return False
+    # Any non-read action class in this policy requires approval.
+    decision = classify_tool_action(
+        "__policy_probe__",
+        {},
+        context={"safe_read_tools": []},
+    )
+    # Use taxonomy rule directly; probe only ensures module import path is valid.
+    _ = (configured, decision)
+    return action_class in {
+        ActionClass.MONEY,
+        ActionClass.EXTERNAL_COMMITMENT,
+        ActionClass.PII_LEGAL,
+        ActionClass.BULK_COMMS,
+        ActionClass.DESTRUCTIVE,
+        ActionClass.PROD_PUBLISH,
+        ActionClass.ROUTINE_SIDE_EFFECT,
+        ActionClass.UNKNOWN_SIDE_EFFECT,
+    }
 
 
 def owner_accountability_notice() -> str:

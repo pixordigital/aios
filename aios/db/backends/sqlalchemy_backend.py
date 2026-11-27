@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aios.db.backend import DatabaseBackend
 from aios.db.engine import async_session
+from aios.db.rls import apply_rls_org_context
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,37 @@ class SQLAlchemyBackend(DatabaseBackend):
     Each instance creates its own session — never shared across requests.
     """
 
-    def __init__(self, session: AsyncSession | None = None):
+    def __init__(self, session: AsyncSession | None = None, org_id: str | None = None):
         self._session: AsyncSession | None = session
+        self._org_id = org_id
+        self._rls_applied = False
+
+    async def _apply_rls_if_needed(self, session: AsyncSession) -> None:
+        if self._rls_applied:
+            return
+        applied = await apply_rls_org_context(session, org_id=self._org_id)
+        # Mark attempted to avoid repeating no-op checks on every call in this
+        # session lifecycle; org context is task-scoped for the request.
+        self._rls_applied = True
+        if applied:
+            logger.debug("RLS org context applied")
+
+    async def bind_org(self, org_id: str | None) -> bool:
+        """Bind org context for RLS-enabled mode. Background jobs: pass org_id."""
+        self._org_id = org_id
+        self._rls_applied = False
+        session = self._session or async_session()
+        self._session = session
+        applied = await apply_rls_org_context(session, org_id=self._org_id)
+        self._rls_applied = True
+        if applied:
+            logger.debug("RLS org context applied")
+        return applied
 
     async def _sess(self) -> AsyncSession:
         if self._session is None:
             self._session = async_session()
+        await self._apply_rls_if_needed(self._session)
         return self._session
 
     async def get(self, model: type, ident: Any, *args, **kwargs) -> Any | None:

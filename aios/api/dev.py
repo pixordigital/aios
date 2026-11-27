@@ -30,22 +30,52 @@ class ReviewIn(BaseModel):
     prompt: str = ""
     cwd: str = ""
 
+def _dev_subprocess_enabled() -> bool:
+    import os
+    raw = os.getenv("AIOS_DEV_SUBPROCESS_ENABLED")
+    if raw is not None:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    try:
+        from aios.config import settings
+
+        return bool(getattr(settings, "dev_subprocess_enabled", False))
+    except Exception:
+        return False
+
+
+def _audit_dev_api(action: str, details: dict) -> None:
+    try:
+        from aios.core.audit_sink import append as _audit_append
+
+        _audit_append("system", action, {"component": "api.dev", **details})
+    except Exception:
+        pass
+
+
 @router.get("/status")
 async def status(user=Depends(get_superadmin)):
     import shutil
+    enabled = _dev_subprocess_enabled()
     return {
-        "claude": {"path": shutil.which("claude"), "version": await _ver("claude")},
-        "codex": {"path": shutil.which("codex"), "version": await _ver("codex")},
+        "enabled": enabled,
+        "claude": {"path": shutil.which("claude"), "version": await _ver("claude") if enabled else "disabled"},
+        "codex": {"path": shutil.which("codex"), "version": await _ver("codex") if enabled else "disabled"},
         "opencode": {"path": shutil.which("opencode")},
     }
 
 async def _ver(cmd: str) -> str:
     import asyncio
+    if not _dev_subprocess_enabled():
+        return "disabled"
     try:
+        _audit_dev_api("dev.subprocess.start", {"cmd": cmd, "mode": "version"})
         p = await asyncio.create_subprocess_exec(cmd, "--version", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         out, _ = await asyncio.wait_for(p.communicate(), timeout=5)
-        return out.decode().strip()[:80]
+        ver = out.decode().strip()[:80]
+        _audit_dev_api("dev.subprocess.completed", {"cmd": cmd, "mode": "version", "rc": p.returncode})
+        return ver
     except Exception:
+        _audit_dev_api("dev.subprocess.failed", {"cmd": cmd, "mode": "version"})
         return ""
 
 @router.post("/claude")

@@ -50,6 +50,18 @@ class Settings(BaseSettings):
     s3_versioning_enabled: bool = True  # Bucket versioning for ransomware protection
     db_backend: str = "sqlalchemy"  # "sqlalchemy"
     db_replica_backend: str = ""  # failover backend type, empty = no failover
+    # Audit sink plumbing (fail-safe defaults; no external creds/SDK).
+    audit_sink_path: str = ""  # AIOS_AUDIT_SINK_PATH
+    audit_sink_mirror_path: str = ""  # AIOS_AUDIT_SINK_MIRROR_PATH (legacy file mirror)
+    audit_sink_mirror_required: bool = False  # AIOS_AUDIT_SINK_MIRROR_REQUIRED
+    audit_sink_external_kind: str = ""  # webhook_stub | file_queue_stub
+    audit_sink_external_target: str = ""  # URL for webhook_stub, dir for file_queue_stub
+    audit_sink_required: bool = False  # AIOS_AUDIT_SINK_REQUIRED (external stub/mirror strict)
+    # Optional Postgres RLS org context. When True, DB sessions set
+    # app.current_org_id from request/org context (SET LOCAL via set_config).
+    # Fail-safe no-op on SQLite or when no org context is present. Default off:
+    # enabling requires RLS scaffold rollout + app wiring validation.
+    rls_context_enabled: bool = False
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     litellm_api_key: str = "sk-litellm"
@@ -86,9 +98,10 @@ class Settings(BaseSettings):
     # Fleet verification probes N agents at once. 2 matches the deploy semaphore
     # so a fleet run cannot starve a manual deploy of provider capacity.
     fleet_verify_concurrency: int = 2
-    # Stripe is a commercial surface and is not wired up in the internal build:
-    # the billing router is not mounted. The fields stay declared so an old
-    # `.env` does not fail validation, but nothing reads them.
+    # Commercial billing surface (Stripe). Fail-closed by default: internal build
+    # ships without a wired subscription lifecycle, so router/dashboard routes
+    # stay unmounted unless explicitly enabled.
+    billing_enabled: bool = False  # env AIOS_BILLING_ENABLED
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_starter: str = ""
@@ -145,6 +158,9 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str = ""
 
     codex_model: str = "gpt-5.4"
+    # Dev CLI subprocesses (claude/codex). Default off: explicit opt-in required.
+    dev_subprocess_enabled: bool = False  # env AIOS_DEV_SUBPROCESS_ENABLED
+    subagent_spawn_enabled: bool = True  # env AIOS_SUBAGENT_SPAWN_ENABLED (fail-closed when false)
     voice_provider: str = "selfhosted"  # "elevenlabs" | "vapi" | "retell" | "selfhosted"
     elevenlabs_api_key: str = ""
     elevenlabs_voice_id: str = ""
@@ -199,8 +215,68 @@ class Settings(BaseSettings):
     calcom_api_key: str = ""  # env AIOS_CALCOM_API_KEY
     calcom_api_version: str = "2024-08-13"  # env AIOS_CALCOM_API_VERSION (slots pin 2024-09-04)
     calcom_event_type_id: int = 0  # default event type for SDR bookings (env AIOS_CALCOM_EVENT_TYPE_ID)
+    calcom_event_type: str = ""  # business execution adapter event type/slug (env AIOS_CALCOM_EVENT_TYPE)
+    calcom_webhook_secret: str = ""  # inbound/webhook verification for calendar adapter (env AIOS_CALCOM_WEBHOOK_SECRET)
     calcom_timezone: str = "America/Sao_Paulo"  # env AIOS_CALCOM_TIMEZONE
     calendar_webhook_url: str = ""  # webhook Calendly/Zapier/n8n (env CALENDAR_WEBHOOK_URL / AIOS_CALENDAR_WEBHOOK_URL)
+
+    # ─── Business execution adapters (fail-closed) ───
+    # CSV or explicit per-adapter flags. Default deny: no adapter approved unless named.
+    execution_approved_adapters: str = ""  # CSV: crm_internal,email_resend,... (env AIOS_EXECUTION_APPROVED_ADAPTERS)
+    # When True, side-effect execution fails closed if durable idempotency store
+    # is unavailable (no silent in-memory fallback). Safe default.
+    # Set AIOS_BUSINESS_IDEMPOTENCY_REQUIRED=false for local dev/test convenience
+    # only when you explicitly accept process-local, non-durable claims.
+    business_idempotency_required: bool = True
+    # Stale processing TTL for durable business idempotency claims. If a duplicate
+    # claim finds a `processing` record older than this, execution fails closed with
+    # explicit stale-processing error (no auto-retry, no double-exec). Ops/test can
+    # inspect/reclaim via DBIdempotencyStore.reclaim_stale_processing().
+    business_idempotency_processing_ttl_seconds: int = 300
+    execution_adapter_crm_internal_approved: bool = False
+    execution_adapter_whatsapp_evolution_approved: bool = False
+    execution_adapter_email_resend_approved: bool = False
+    execution_adapter_calendar_calcom_approved: bool = False
+    execution_adapter_calendar_google_approved: bool = False
+    execution_adapter_fulfillment_service_approved: bool = False
+    execution_adapter_billing_stripe_approved: bool = False
+    execution_adapter_accounting_erp_approved: bool = False
+    execution_adapter_fiscal_provider_approved: bool = False
+    execution_adapter_contract_esign_approved: bool = False
+    execution_adapter_payroll_provider_approved: bool = False
+    execution_adapter_tax_fiscal_approved: bool = False
+    execution_adapter_accounting_erp_approved: bool = False
+    execution_adapter_fiscal_provider_approved: bool = False
+    # Resend (email execution adapter)
+    resend_api_key: str = ""  # env AIOS_RESEND_API_KEY
+    resend_from_email: str = ""  # env AIOS_RESEND_FROM_EMAIL
+    # Stripe billing/payments adapter stub (sandbox-only; never real calls)
+    stripe_sandbox_mode: bool = False  # env AIOS_STRIPE_SANDBOX_MODE
+    # Accounting/ERP adapter stub (sandbox-only; no real sync/money movement)
+    accounting_erp_api_key: str = ""  # env AIOS_ACCOUNTING_ERP_API_KEY
+    accounting_erp_base_url: str = ""  # env AIOS_ACCOUNTING_ERP_BASE_URL
+    accounting_erp_sandbox_mode: bool = False  # env AIOS_ACCOUNTING_ERP_SANDBOX_MODE
+    # Fiscal/NF-e/tax provider stub (sandbox-only; no real emission/tax calc)
+    fiscal_provider_api_key: str = ""  # env AIOS_FISCAL_PROVIDER_API_KEY
+    fiscal_provider_base_url: str = ""  # env AIOS_FISCAL_PROVIDER_BASE_URL
+    fiscal_provider_sandbox_mode: bool = False  # env AIOS_FISCAL_PROVIDER_SANDBOX_MODE
+    # Contract/e-sign adapter stub (sandbox-only; no real provider calls/legal logic)
+    contract_esign_api_key: str = ""  # env AIOS_CONTRACT_ESIGN_API_KEY
+    contract_esign_sandbox_mode: bool = False  # env AIOS_CONTRACT_ESIGN_SANDBOX_MODE
+    # Payroll provider adapter stub (sandbox-only; no real provider calls/payroll calc)
+    payroll_provider_api_key: str = ""  # env AIOS_PAYROLL_PROVIDER_API_KEY
+    payroll_provider_sandbox_mode: bool = False  # env AIOS_PAYROLL_PROVIDER_SANDBOX_MODE
+    # Tax/fiscal adapter stub (sandbox-only; no real provider calls/tax calc)
+    tax_fiscal_api_key: str = ""  # env AIOS_TAX_FISCAL_API_KEY
+    tax_fiscal_sandbox_mode: bool = False  # env AIOS_TAX_FISCAL_SANDBOX_MODE
+    # Accounting/ERP adapter stub (sandbox-only; never real sync/money movement)
+    accounting_erp_api_key: str = ""  # env AIOS_ACCOUNTING_ERP_API_KEY
+    accounting_erp_base_url: str = ""  # env AIOS_ACCOUNTING_ERP_BASE_URL
+    accounting_erp_sandbox_mode: bool = False  # env AIOS_ACCOUNTING_ERP_SANDBOX_MODE
+    # Fiscal/NF-e/tax provider adapter stub (sandbox-only; never real emission/tax calc)
+    fiscal_provider_api_key: str = ""  # env AIOS_FISCAL_PROVIDER_API_KEY
+    fiscal_provider_base_url: str = ""  # env AIOS_FISCAL_PROVIDER_BASE_URL
+    fiscal_provider_sandbox_mode: bool = False  # env AIOS_FISCAL_PROVIDER_SANDBOX_MODE
     # AIOS ↔ ARVO integration (Fase 1A — feature-flag off por padrão)
     arvo_integration_enabled: bool = False
     arvo_base_url: str = ""

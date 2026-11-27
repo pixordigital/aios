@@ -21,7 +21,7 @@ Checklist de entrada (concluir antes de expor para operação real):
 |---|---|---|
 | Banco de dados | `AIOS_DATABASE_URL` / deploy env | Migrações via Alembic; confirmar head antes de deploy. |
 | Redis | `REDIS_URL` | Filas, cache e coordenação. |
-| Segredos | Secret manager / env do deploy | Nunca commitar segredos; rotacionar conforme política. |
+| Segredos | Secret manager / env do deploy | Nunca commitar segredos; rotacionar conforme política. Scaffold: `docs/SECRETS_KMS_ROTATION_SCAFFOLD.md`. |
 | Auth/JWT | Config de auth/JWT do AIOS | Revisar chaves, expiração e papéis. |
 | Planos/limites | `aios/config.py`, `aios/core/limits.py` | Fonte de verdade; UI/docs não podem divergir. |
 | Observabilidade | Logs, health checks, métricas | `/health/ready` e logs do app/worker antes de declarar saudável. |
@@ -39,12 +39,57 @@ Checklist de entrada (concluir antes de expor para operação real):
 
 ### Backup
 
-- Usar scripts/deploy existentes como base: `scripts/backup-cron.sh`, `deploy/backup.sh`, `deploy/aios-backup.service`, `deploy/aios-backup.timer`.
+- Usar scripts/deploy existentes como base: `scripts/backup-cron.sh`, `scripts/backup.sh`, `deploy/backup.sh`, `deploy/aios-backup.service`, `deploy/aios-backup.timer`.
 - Incluir: banco Postgres (`pg_dump`), arquivos/config críticos e segredos **referenciados** (não copiar segredo para lugar inseguro).
 - Definir retenção e destino (local + offsite/S3 quando configurado).
 - Registrar data, checksum/tamanho e resultado do backup.
+- Verificar backup não-vazio: `gzip -t` + tamanho mínimo; `deploy/backup.sh` já falha em dump vazio.
 
-### Restore
+### Restore drill (obrigatório, ambiente isolado)
+
+Nunca restaurar drill em produção. Exigir aprovação humana e alvo descartável.
+
+**Script automatizado (preferido):** `deploy/restore_drill.sh`
+
+```bash
+# Postgres (alvo isolado; nome deve conter drill/restore_test/tmp_restore/smoke_restore)
+AIOS_RESTORE_DRILL_TARGET_URL='postgresql://user:pass@localhost:5432/aios_restore_drill' \
+AIOS_RESTORE_DRILL_CONFIRM=I_UNDERSTAND_THIS_IS_ISOLATED \
+deploy/restore_drill.sh /data/backups/aios_YYYYMMDD_HHMMSS.sql.gz \
+  --report /tmp/restore-drill-evidence.json
+
+# SQLite smoke (temp-only, sem psql/pg_dump)
+AIOS_RESTORE_DRILL_TARGET_URL='sqlite:///./tmp_restore_drill.db' \
+AIOS_RESTORE_DRILL_CONFIRM=I_UNDERSTAND_THIS_IS_ISOLATED \
+deploy/restore_drill.sh /path/to/backup.sqlite.gz --report /tmp/restore-drill-evidence.json
+```
+
+**Fail-closed:** script recusa alvo ausente, confirmação ausente, alvo igual a `AIOS_DATABASE_URL/DATABASE_URL`, nome/path sem marcador de drill, ou alvo prod-like.
+
+**Passos manuais (fallback):**
+1. **Selecionar artefato**: backup recente + checksum/SHA256 + tamanho/mtime.
+2. **Integridade**: `sha256sum <backup.sql.gz>` e `gzip -t <backup.sql.gz>`.
+3. **Restaurar isolado**: criar DB descartável; `gunzip -c ... | psql ...` ou `pg_restore` conforme formato.
+4. **Migração**: `AIOS_DATABASE_URL=<restore> .venv/bin/alembic upgrade head` e `alembic current`.
+5. **Smoke**: `/health/ready` equivalente/app boot, login, tabelas críticas, contagens básicas.
+6. **Validar dados**: orgs/users/agents/conversations/messages/audit_logs; spot-check registros recentes; isolamento por org.
+7. **Evidência**: operador, horário UTC, artefato, checksum, duração restore, resultado migração/smoke, RPO/RTO observados, issues, sign-off.
+8. **Cleanup**: dropar DB descartável.
+
+**Evidence checklist (anexar ao ticket/change):**
+- [ ] Artefato: caminho, SHA256, tamanho, mtime/idade (RPO observado).
+- [ ] Alvo isolado: URL redigida/tipo, confirmação humana, não-produto.
+- [ ] Restore: status, duração (RTO observado), log/erros.
+- [ ] Integridade: `gzip -t`/`pg_restore --list`/`PRAGMA integrity_check` conforme formato.
+- [ ] Migração: `alembic current`/head esperado (Postgres).
+- [ ] Smoke: tabelas críticas presentes, contagens básicas, `/health/ready` ou boot equivalente.
+- [ ] Spot-check: registros recentes, isolamento por org/tenant.
+- [ ] Cleanup: alvo descartável removido.
+- [ ] Sign-off: operador + responsável humano.
+
+Comandos de referência: `docs/SECURITY_RELIABILITY_HARDENING.md`.
+
+### Restore de produção (human-gated)
 
 1. Declarar incidente/mudança e acionar dono humano.
 2. Escolher snapshot/backup válido e verificar integridade.
@@ -61,6 +106,19 @@ Checklist de entrada (concluir antes de expor para operação real):
 - **Pós-deploy smoke**: health ready, login/dashboard, endpoint crítico, worker/filas, logs sem erro novo.
 - **Rollback**: ter imagem/commit anterior identificado; rollback de schema só com plano compatível e backup.
 - **Mudanças de config**: tratar segredo/config como mudança auditada; nunca expor valor em chat/log.
+
+## LGPD / privacidade operacional
+
+- Scaffold operacional (templates/checklists, human-gated): `docs/LGPD_COMPLIANCE_SCAFFOLD.md`.
+- Antes de tratar dado pessoal em produção: preencher data map, base legal, DPO/owner, retenção, rota DSAR, revisão legal. Sem alegação de certificação.
+- Incidente com dado pessoal: seguir seção de incidente abaixo + [`docs/SECURITY_LGPD_COMPLIANCE.md`](./SECURITY_LGPD_COMPLIANCE.md) (checklist de handoff privacy/legal, signoff, evidência). **[HUMAN-GATED]** decisão de notificação.
+
+## LGPD/compliance scaffold
+
+- Template operacional (docs-only, sem certificação legal): [`docs/SECURITY_LGPD_COMPLIANCE.md`](./SECURITY_LGPD_COMPLIANCE.md).
+- Cobertura: data map, DPO/owner checklist, base legal, DSAR/export/delete, retenção, incidente/signoff legal.
+- Hardening/restore: [`docs/SECURITY_RELIABILITY_HARDENING.md`](./SECURITY_RELIABILITY_HARDENING.md). Limites legais: [`docs/business-os-legal-boundaries.md`](./business-os-legal-boundaries.md).
+- Qualquer ação com dado real/prod, notificação, exclusão, exportação sujeita a exceção legal, ou interpretação jurídica exige dono humano + revisão qualificada.
 
 ## Incidente e suporte
 

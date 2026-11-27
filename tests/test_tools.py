@@ -27,6 +27,9 @@ class _FakeDB:
         self.depts = list(depts or [])
 
     async def execute(self, _q):
+        s = str(_q).lower()
+        if "knowledge_grants" in s or "knowledge_record_grants" in s:
+            return _ScalarResult([])
         return _ScalarResult(self.depts)
 
     async def get(self, _model, _id):

@@ -293,6 +293,9 @@ register_error_handlers(app)
 
 # Dashboard + webhooks mounted at build time so they're reachable in tests
 # and don't depend on lifespan startup order (ponytail: one place, no guard).
+from aios.core.business_execution_service import get_business_idempotency_store  # noqa: E402
+app.state.business_idempotency_store = get_business_idempotency_store()
+
 from aios.dashboard.app import router as dash_router  # noqa: E402
 app.include_router(dash_router)
 from aios.api.evolution_webhook import router as evo_router  # noqa: E402
@@ -603,20 +606,35 @@ async def trace_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def rls_middleware(request: Request, call_next):
-    if request.url.path.startswith("/api/") and request.url.path not in ("/api/docs", "/api/redoc", "/openapi.json"):
-        auth = request.headers.get("authorization", "") or request.headers.get("Authorization", "")
-        if not auth and not request.cookies.get("aios_token"):
-            pass
-        elif not getattr(request.state, "org_id", None):
-            try:
-                from aios.api.deps import get_dashboard_user
+    """Resolve org for API requests and bind optional RLS DB context.
 
-                user = await get_dashboard_user(request)
-                if user:
-                    request.state.org_id = user.org_id
-            except Exception:
+    RLS DB context is fail-safe no-op unless AIOS_RLS_CONTEXT_ENABLED=true
+    and backend is Postgres. Context is task-scoped via contextvar.
+    """
+    from aios.db.rls import reset_rls_org_id, set_rls_org_id
+
+    token = None
+    try:
+        if request.url.path.startswith("/api/") and request.url.path not in ("/api/docs", "/api/redoc", "/openapi.json"):
+            auth = request.headers.get("authorization", "") or request.headers.get("Authorization", "")
+            if not auth and not request.cookies.get("aios_token"):
                 pass
-    return await call_next(request)
+            elif not getattr(request.state, "org_id", None):
+                try:
+                    from aios.api.deps import get_dashboard_user
+
+                    user = await get_dashboard_user(request)
+                    if user:
+                        request.state.org_id = user.org_id
+                except Exception:
+                    pass
+        org_id = getattr(request.state, "org_id", None)
+        if org_id:
+            token = set_rls_org_id(str(org_id))
+        return await call_next(request)
+    finally:
+        if token is not None:
+            reset_rls_org_id(token)
 
 
 @app.middleware("http")
@@ -650,6 +668,26 @@ async def request_logging(request: Request, call_next):
             },
         )
     return response
+
+
+# Disabled commercial surfaces must answer 404 before HTTPS/CSRF/auth middlewares.
+# Registered last so Starlette's LIFO chain runs it first; enabled routes fall
+# through to the unchanged gates.
+_DISABLED_BILLING_PATHS = {
+    "/dashboard/billing",
+    "/dashboard/billing/trial",
+    "/dashboard/proposal",
+}
+
+
+@app.middleware("http")
+async def disabled_billing_404(request: Request, call_next):
+    if not settings.billing_enabled and request.url.path in _DISABLED_BILLING_PATHS:
+        return JSONResponse(
+            status_code=404,
+            content=_problem(404, detail="Not found", instance=request.url.path),
+        )
+    return await call_next(request)
 
 
 # ─── Landing page + legal pages ───

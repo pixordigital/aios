@@ -125,3 +125,129 @@ def test_append_after_rotation_starts_new_chain(sink):
     assert rotated["seq"] == 1
     assert rotated["prev_hash"] == audit_sink.GENESIS_HASH
     assert len(rows) == 1 and rows[0]["hash"] == rotated["hash"]
+
+
+def test_external_mirror_receives_same_record(sink, tmp_path, monkeypatch):
+    mirror = tmp_path / "worm" / "audit-mirror.jsonl"
+    monkeypatch.setenv("AIOS_AUDIT_SINK_MIRROR_PATH", str(mirror))
+
+    record = audit_sink.append("org-a", "security.auth.failure", {"ip": "1.2.3.4"})
+
+    primary = sink.read_text(encoding="utf-8").splitlines()
+    mirrored = mirror.read_text(encoding="utf-8").splitlines()
+    assert len(primary) == 1
+    assert primary == mirrored
+    assert json.loads(mirrored[0])["hash"] == record["hash"]
+
+
+def test_external_mirror_failure_is_best_effort_by_default(sink, tmp_path, monkeypatch):
+    mirror = tmp_path / "worm" / "audit-mirror.jsonl"
+    monkeypatch.setenv("AIOS_AUDIT_SINK_MIRROR_PATH", str(mirror))
+
+    def boom(payload, mirror_path=None):
+        raise OSError("mirror down")
+
+    monkeypatch.setattr(audit_sink, "_mirror_payload", boom)
+
+    record = audit_sink.append("org-a", "telemetry.flush", {"messages": 1})
+    rows = audit_sink.read()
+    assert len(rows) == 1 and rows[0]["hash"] == record["hash"]
+
+
+def test_external_mirror_failure_fails_closed_when_required(sink, tmp_path, monkeypatch):
+    mirror = tmp_path / "worm" / "audit-mirror.jsonl"
+    monkeypatch.setenv("AIOS_AUDIT_SINK_MIRROR_PATH", str(mirror))
+    monkeypatch.setenv("AIOS_AUDIT_SINK_MIRROR_REQUIRED", "1")
+
+    def boom(payload, mirror_path=None):
+        raise OSError("mirror down")
+
+    monkeypatch.setattr(audit_sink, "_mirror_payload", boom)
+
+    with pytest.raises(audit_sink.AuditChainError):
+        audit_sink.append("org-a", "security.auth.failure", {"x": 1})
+    assert not sink.exists() or sink.read_text(encoding="utf-8") == ""
+
+
+def test_emit_event_alias_and_local_chain_default(sink):
+    rec = audit_sink.emit_event("org-a", "audit.test", {"ok": True})
+    rows = audit_sink.read(org_id="org-a")
+    assert len(rows) == 1
+    assert rows[0]["hash"] == rec["hash"]
+    assert rows[0]["event"] == "audit.test"
+
+
+def test_file_queue_stub_sink_writes_queue(sink, tmp_path, monkeypatch):
+    target = tmp_path / "queue"
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_KIND", "file_queue_stub")
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_TARGET", str(target))
+
+    rec = audit_sink.append("org-a", "security.test", {"k": "v"})
+
+    rows = audit_sink.read(org_id="org-a")
+    assert len(rows) == 1 and rows[0]["hash"] == rec["hash"]
+    queued = (target / "audit-queue.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(queued) == 1
+    payload = json.loads(queued[0])
+    assert payload["sink"] == "file_queue_stub"
+    assert payload["record"]["hash"] == rec["hash"]
+
+
+def test_webhook_stub_sink_spools_without_network(sink, monkeypatch):
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_KIND", "webhook_stub")
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_TARGET", "https://example.invalid/audit?token=secret")
+
+    rec = audit_sink.append("org-a", "security.test", {"x": 1})
+
+    spool = sink.with_name("audit-webhook-stub.jsonl")
+    assert spool.exists()
+    payload = json.loads(spool.read_text(encoding="utf-8").splitlines()[0])
+    assert payload["sink"] == "webhook_stub"
+    assert payload["record"]["hash"] == rec["hash"]
+    # no secrets/URL details leaked
+    assert payload["target"] == "https://<redacted>"
+    assert "secret" not in spool.read_text(encoding="utf-8")
+
+
+def test_external_stub_failure_best_effort_by_default(sink, tmp_path, monkeypatch):
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_KIND", "file_queue_stub")
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_TARGET", str(tmp_path / "queue"))
+
+    class Boom(audit_sink.FileQueueStubSink):
+        def emit(self, record):
+            raise OSError("disk down")
+
+    monkeypatch.setattr(audit_sink, "FileQueueStubSink", Boom)
+
+    rec = audit_sink.append("org-a", "telemetry.flush", {"m": 1})
+    rows = audit_sink.read(org_id="org-a")
+    assert len(rows) == 1 and rows[0]["hash"] == rec["hash"]
+
+
+def test_external_stub_failure_fails_closed_when_required(sink, tmp_path, monkeypatch):
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_KIND", "file_queue_stub")
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_TARGET", str(tmp_path / "queue"))
+    monkeypatch.setenv("AIOS_AUDIT_SINK_REQUIRED", "1")
+
+    class Boom(audit_sink.FileQueueStubSink):
+        def emit(self, record):
+            raise OSError("disk down")
+
+    monkeypatch.setattr(audit_sink, "FileQueueStubSink", Boom)
+
+    with pytest.raises(audit_sink.AuditChainError):
+        audit_sink.append("org-a", "security.test", {"x": 1})
+    assert not sink.exists() or sink.read_text(encoding="utf-8") == ""
+
+
+def test_external_stub_misconfig_fails_closed_only_when_required(sink, monkeypatch):
+    monkeypatch.setenv("AIOS_AUDIT_SINK_EXTERNAL_KIND", "unknown_sink")
+    monkeypatch.delenv("AIOS_AUDIT_SINK_REQUIRED", raising=False)
+    rec = audit_sink.append("org-a", "telemetry.flush", {"m": 1})
+    assert audit_sink.read(org_id="org-a")[0]["hash"] == rec["hash"]
+
+    sink.unlink(missing_ok=True)
+    monkeypatch.setenv("AIOS_AUDIT_SINK_REQUIRED", "1")
+    with pytest.raises(audit_sink.AuditChainError):
+        audit_sink.append("org-a", "telemetry.flush", {"m": 2})
+    assert not sink.exists() or sink.read_text(encoding="utf-8") == ""

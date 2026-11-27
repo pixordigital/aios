@@ -16,13 +16,13 @@ def _clean_kpi_sources():
 
 
 def test_execution_registry_no_adapter_denies():
-    registry = ExecutionRegistry()
+    registry = ExecutionRegistry(idempotency_store=None, require_durable_idempotency=False)
 
     with pytest.raises(ExecutionDenied, match="not configured"):
         registry.execute(
             adapter="missing_adapter",
             action="invoice.create",
-            payload={"customer": "acme"},
+            payload={"customer": "acme", "org_id": "org1"},
             idempotency_key="idem-scope-1",
         )
 

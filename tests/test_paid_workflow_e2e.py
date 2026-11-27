@@ -413,6 +413,7 @@ async def test_dashboard_founder_approve_still_allowed(auth_client, test_session
 async def test_contracts_page_shows_contract_and_governed_agent(
     auth_client, test_session, test_org, test_user
 ):
+    test_org.slug = "showcar"
     test_session.add(
         Agent(
             name="pet-lead-capture",

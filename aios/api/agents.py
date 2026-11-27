@@ -551,20 +551,23 @@ async def spawn_subagent(
         raise HTTPException(400, "prompt is required")
 
     timeout = body.get("timeout", 120.0)
-    from aios.core.subagent import subagent_pool
-    result = await subagent_pool.spawn(
-        agent_config={
-            "id": agent.id,
-            "name": agent.name,
-            "llm_config": agent.llm_config,
-            "system_prompt": agent.system_prompt,
-            "tools": agent.tools or [],
-            "governance_config": agent.governance_config or {},
-            "org_id": agent.org_id,
-        },
-        task_prompt=task_prompt,
-        timeout=timeout,
-    )
+    from aios.core.subagent import SubagentSpawnError, subagent_pool
+    try:
+        result = await subagent_pool.spawn(
+            agent_config={
+                "id": agent.id,
+                "name": agent.name,
+                "llm_config": agent.llm_config,
+                "system_prompt": agent.system_prompt,
+                "tools": agent.tools or [],
+                "governance_config": agent.governance_config or {},
+                "org_id": agent.org_id,
+            },
+            task_prompt=task_prompt,
+            timeout=timeout,
+        )
+    except SubagentSpawnError as exc:
+        raise HTTPException(403, str(exc)) from exc
     return {
         "task_id": result.task_id,
         "status": result.status,

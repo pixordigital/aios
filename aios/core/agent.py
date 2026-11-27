@@ -22,6 +22,7 @@ from aios.core.providers import (
     STREAM_TOKEN, STREAM_DONE, STREAM_ERROR, STREAM_TOOL_CALL,
 )
 from aios.core import router
+from aios.core.action_policy import classify_tool_action
 from aios.core.router import floor_from_extra, route, should_escalate, model_runtime_eligible
 from aios.core.scheduler import scheduler
 from aios.core.syscalls import (
@@ -877,7 +878,7 @@ class AgentRuntime:
                                         result = cached_result
                                     else:
                                         try:
-                                            result = await self.tool_engine.execute(fn_name, fn_args)
+                                            result = await self.tool_engine.execute(fn_name, fn_args, approved=True)
                                             tool_cache.set(fn_name, fn_args, result, self.agent.org_id)
                                         except Exception as e:
                                             logger.exception("Tool execution failed: %s", fn_name)
@@ -1130,50 +1131,27 @@ class AgentRuntime:
     def _hitl_tool_reason(self, fn_name: str, fn_args) -> str:
         """Why this tool call needs a human, empty when it does not.
 
-        Pure policy on tool args, not on model prose: the prose check in
-        AutonomousAgent runs after the side effect and can only file a report.
+        Central action policy authoritative for risky/unknown/fail-closed classes.
+        Agent HITL config can tighten (explicit tool list) but not silently bypass high-risk.
         """
-        if not self._hitl_enabled:
-            return ""
         if fn_name in self._hitl_tools:
             return f"tool '{fn_name}' requires approval by agent policy"
-        if fn_name in ("crm_delete_deal", "crm_merge_deals"):
-            return f"destructive tool '{fn_name}' requires approval"
-        # Dynamic tools register arbitrary names; name-based rules cannot see them.
-        from aios.tools.registry import TOOL_REGISTRY
-        entry = TOOL_REGISTRY.get(fn_name)
-        if isinstance(entry, dict) and entry.get("dynamic") is True:
-            return f"dynamic tool '{fn_name}' requires approval"
-        if isinstance(fn_args, str):
-            try:
-                fn_args = json.loads(fn_args)
-            except (TypeError, ValueError):
+
+        decision = classify_tool_action(
+            fn_name, fn_args,
+            context={
+                "hitl_value_threshold": self._hitl_value_threshold,
+                "hitl_discount_threshold": self._hitl_discount_threshold,
+            },
+        )
+        if decision.requires_approval:
+            # If operator disabled HITL globally, preserve legacy behavior only for
+            # non-fail-closed, non-destructive classes; still block fail-closed/unknown.
+            if not self._hitl_enabled and not decision.fail_closed and decision.action_class.value not in {
+                "destructive", "prod_publish", "unknown_side_effect", "pii_legal",
+            }:
                 return ""
-        args = fn_args if isinstance(fn_args, dict) else None
-        if not isinstance(args, dict):
-            return ""
-        if fn_name == "crm_update_deal" and str(args.get("stage", "")).lower() in ("closed_won", "closed_lost"):
-            return f"closing deal at {args['stage']} requires approval"
-        if fn_name == "send_email":
-            recipients = args.get("to", args.get("to_emails", []))
-            if isinstance(recipients, (list, tuple, set)) and len(recipients) >= 100:
-                return f"bulk email to {len(recipients)} recipients requires approval"
-        destructive = ("DELETE ", "DROP ", "TRUNCATE ", "PG_")
-        if fn_name in ("code", "python_sandbox", "sql_query"):
-            payload = str(args).upper()
-            if any(word in payload for word in destructive):
-                return f"destructive {fn_name} call requires approval"
-        payload = " ".join(str(args.get(k, "")) for k in ("code", "sql", "query", "script")).upper()
-        if any(word in payload for word in destructive):
-            return f"destructive payload in {fn_name} args requires approval"
-        for key in ("value", "amount", "valor"):
-            val = args.get(key)
-            if isinstance(val, (int, float)) and not isinstance(val, bool) and val >= self._hitl_value_threshold:
-                return f"{key}={val} at or above HITL ceiling {self._hitl_value_threshold}"
-        for key in ("discount", "desconto"):
-            pct = args.get(key)
-            if isinstance(pct, (int, float)) and not isinstance(pct, bool) and pct >= self._hitl_discount_threshold:
-                return f"{key}={pct}% at or above HITL ceiling {self._hitl_discount_threshold}%"
+            return decision.reason or f"{decision.action_class.value} requires approval"
         return ""
 
     def _icm_enforce_tool(self, fn_name: str, conversation_id: str = "") -> None:
@@ -1185,20 +1163,26 @@ class AgentRuntime:
 
     async def _spawn_subagent(self, task_prompt: str, timeout: float = 120.0) -> str:
         """Spawn an isolated subprocess agent. Returns result output."""
-        from aios.core.subagent import subagent_pool
-        result = await subagent_pool.spawn(
-            agent_config={
-                "id": self.agent.id,
-                "name": self.agent.name,
-                "llm_config": self.agent.llm_config,
-                "system_prompt": self.agent.system_prompt,
-                "tools": self.agent.tools or [],
-                "governance_config": self.agent.governance_config or {},
-                "org_id": self.agent.org_id,
-            },
-            task_prompt=task_prompt,
-            timeout=timeout,
-        )
+        from aios.core.subagent import SubagentSpawnError, subagent_pool
+        try:
+            result = await subagent_pool.spawn(
+                agent_config={
+                    "id": self.agent.id,
+                    "name": self.agent.name,
+                    "llm_config": self.agent.llm_config,
+                    "system_prompt": self.agent.system_prompt,
+                    "tools": self.agent.tools or [],
+                    "governance_config": self.agent.governance_config or {},
+                    "org_id": self.agent.org_id,
+                },
+                task_prompt=task_prompt,
+                timeout=timeout,
+            )
+        except SubagentSpawnError as exc:
+            return f"Subagent denied: {exc}"
+        except Exception as exc:
+            logger.warning("subagent spawn failed for agent %s: %s", self.agent.id, exc)
+            return f"Subagent failed: {exc}"
         return result.output or f"Subagent {result.status}: {result.error}"
 
     async def load_project_skills(self, project_path: str) -> str:

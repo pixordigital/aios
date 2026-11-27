@@ -171,15 +171,18 @@ async def init_backends():
 
 
 @asynccontextmanager
-async def db_session() -> AsyncGenerator[DatabaseBackend, None]:
+async def db_session(org_id: str | None = None) -> AsyncGenerator[DatabaseBackend, None]:
     """Context manager yielding a fresh backend with dedicated session per call.
 
-    Each async with creates a new SQLAlchemy session.
+    Optional org_id binds RLS context for this session (Postgres + flag only).
     Safe for concurrent use — no shared session state.
+    Background jobs/workers: pass org_id for RLS-enabled mode.
     """
     backend = _fresh_backend()
     if not backend:
         raise RuntimeError("Database backend not initialized. Call init_backends() on startup.")
+    if org_id is not None and hasattr(backend, "_org_id"):
+        backend._org_id = org_id  # type: ignore[attr-defined]
     try:
         yield backend
     finally:

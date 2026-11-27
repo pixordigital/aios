@@ -282,7 +282,12 @@ class ApprovalManager:
                 [tool_name], org_id=org_id, agent_id=agent_id,
                 actor_user_id=decided_by,
             )
-            await engine.execute(tool_name, json.dumps(args))
+            # DB-approved replay: action policy defense-in-depth still applies inside execute.
+            try:
+                await engine.execute(tool_name, json.dumps(args), approved=True)
+            except TypeError:
+                # Compatibility with test doubles/older engines without approved kwarg.
+                await engine.execute(tool_name, json.dumps(args))
             logger.info("Replayed approved action %s via %s", action_id, tool_name)
         except Exception:
             logger.exception("approval replay failed for %s", action_id)

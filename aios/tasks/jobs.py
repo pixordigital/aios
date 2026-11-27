@@ -155,6 +155,39 @@ def _reply_meta(agent_or_team) -> dict:
     return {"agent_id": agent_or_team.id, "extra_data": {}}
 
 
+async def _inbound_seat_identity(db, org_id, channel_type, msg, extra, agent_or_team):
+    """Seat identity only for authenticated websocket turns; never for webhooks.
+
+    Webhook user ids are provider contacts, not org members. The websocket path
+    persists user.id on this turn's Message, so verify it is still a membership.
+    """
+    if channel_type != "web" or (extra or {}).get("source") != "websocket":
+        return None, None
+    user_id = (msg.extra_data or {}).get("user_id")
+    if not user_id:
+        return None, None
+
+    from sqlalchemy import select
+
+    from aios.db.models import OrganizationMembership
+
+    member_id = (await db.execute(
+        select(OrganizationMembership.id).where(
+            OrganizationMembership.org_id == org_id,
+            OrganizationMembership.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    if not member_id:
+        return None, None
+
+    agent = agent_or_team
+    if hasattr(agent_or_team, "agents"):
+        agents = list(agent_or_team.agents)
+        agent = agents[0] if agents else None
+    model = str((getattr(agent, "llm_config", None) or {}).get("model") or "") or None
+    return user_id, model
+
+
 async def _process_inbound_once(
     ctx,
     channel_type: str,
@@ -183,6 +216,9 @@ async def _process_inbound_once(
         if not conn:
             logger.warning("process_inbound: channel %s not found", channel_connection_id)
             return
+        # Background jobs: pass org_id for RLS-enabled mode.
+        if hasattr(db, "bind_org"):
+            await db.bind_org(conn.org_id)
 
         # Find or create the conversation for THIS contact.
         #
@@ -286,8 +322,28 @@ async def _process_inbound_once(
                 return
             raise
 
-        # check org limits
-        allowed, reason = await check_org_limits(conn.org_id, db)
+        # resolve agent or team
+        agent_or_team = None
+        if conn.agent_id:
+            agent_or_team = await db.get(Agent, conn.agent_id)
+        elif conn.team_id:
+            agent_or_team = await db.get(
+                Team, conn.team_id, options=[selectinload(Team.agents)]
+            )
+
+        if not agent_or_team:
+            logger.warning("process_inbound: no agent/team for channel %s", channel_connection_id)
+            return
+
+        # Seat gate: only authenticated websocket turns carry a persisted org
+        # member id. Provider webhook ids are contacts, not seats, so they stay
+        # on the legacy org-plan-only check.
+        seat_user_id, seat_model = await _inbound_seat_identity(
+            db, conn.org_id, channel_type, msg, extra, agent_or_team
+        )
+        allowed, reason = await check_org_limits(
+            conn.org_id, db, user_id=seat_user_id, model=seat_model
+        )
         if not allowed:
             # Deliberate refusal, not a crash: retrying cannot help. Record it
             # in the DLQ so the message is visible instead of silently dropped.
@@ -307,19 +363,6 @@ async def _process_inbound_once(
                 channel_connection_id=channel_connection_id,
                 conversation_id=conv.id or None,
             )
-            return
-
-        # resolve agent or team
-        agent_or_team = None
-        if conn.agent_id:
-            agent_or_team = await db.get(Agent, conn.agent_id)
-        elif conn.team_id:
-            agent_or_team = await db.get(
-                Team, conn.team_id, options=[selectinload(Team.agents)]
-            )
-
-        if not agent_or_team:
-            logger.warning("process_inbound: no agent/team for channel %s", channel_connection_id)
             return
 
         # run agent with retry + team failover
@@ -570,23 +613,29 @@ async def agent_run(ctx, payload: dict):
     attempt = payload.get("attempt", 1)
     try:
         from aios.db.models import Agent as AgentModel
+        from aios.db.rls import bind_session_rls, reset_rls_org_id
 
         from aios.db.engine import async_session as _sess
         async with _sess() as sess:
-            agent = await sess.get(AgentModel, agent_id)
-            if not agent:
-                return {"error": "agent not found"}
-            gov = (agent.governance_config or {})
-            is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
-            if is_autonomous:
-                from aios.core.autonomous_agent import AutonomousAgent
-                auto = AutonomousAgent(agent)
-                out = await auto.run(conv_id, text, sess)
-            else:
-                from aios.core.agent import AgentRuntime
-                rt = AgentRuntime(agent)
-                out = await rt.run(conv_id, text)
-            return {"ok": True, "output": out[:2000]}
+            rls_token = await bind_session_rls(sess, org_id or None)
+            try:
+                agent = await sess.get(AgentModel, agent_id)
+                if not agent:
+                    return {"error": "agent not found"}
+                gov = (agent.governance_config or {})
+                is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
+                if is_autonomous:
+                    from aios.core.autonomous_agent import AutonomousAgent
+                    auto = AutonomousAgent(agent)
+                    out = await auto.run(conv_id, text, sess)
+                else:
+                    from aios.core.agent import AgentRuntime
+                    rt = AgentRuntime(agent)
+                    out = await rt.run(conv_id, text)
+                return {"ok": True, "output": out[:2000]}
+            finally:
+                if rls_token is not None:
+                    reset_rls_org_id(rls_token)
     except Exception as exc:
         if attempt < 3:
             from aios.tasks.queue import get_redis_pool
@@ -626,7 +675,7 @@ async def conversation_turn_job(ctx, payload: dict):
     text = payload.get("text", "")
     org_id = payload.get("org_id", "")
 
-    async with db_session() as db:
+    async with db_session(org_id=org_id or None) as db:
         msg = await db.get(Message, message_id)
         if not msg or (msg.extra_data or {}).get("turn_done"):
             return {"skipped": "already done"}
@@ -693,22 +742,32 @@ async def workflow_run_job(ctx, payload: dict):
         from aios.core.workflow import WorkflowDef, WorkflowNode as WNode, WorkflowEngine
         from sqlalchemy.orm import selectinload
         from aios.db.engine import async_session as _sess
+        from aios.db.rls import bind_session_rls, reset_rls_org_id
         async with _sess() as sess:
-            wf = await sess.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
-            run = await sess.get(WorkflowRun, run_id)
-            if not wf or not run:
-                return
-            wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id)
-            for n in wf.nodes:
-                wdef.nodes[n.id] = WNode(id=n.id, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=n.tool_args or {}, depends_on=n.depends_on or [], condition=n.condition, output_key=n.output_key, timeout=n.timeout_seconds)
-            eng = WorkflowEngine()
-            res = await eng.run(wdef, run.conversation_id or run.id, (run.inputs or {}).get("input", ""))
-            run.status = "done" if res.ok() else "failed"
-            run.outputs = res.outputs
-            run.node_status = res.node_status
-            if res.errors:
-                run.error = str(res.errors)
-            await sess.commit()
+            rls_token = await bind_session_rls(sess, None)
+            try:
+                wf = await sess.get(Workflow, wf_id, options=[selectinload(Workflow.nodes)])
+                run = await sess.get(WorkflowRun, run_id)
+                if not wf or not run:
+                    return
+                org_id = getattr(run, "org_id", None) or getattr(wf, "org_id", None)
+                if rls_token is not None:
+                    reset_rls_org_id(rls_token)
+                    rls_token = await bind_session_rls(sess, org_id)
+                wdef = WorkflowDef(id=wf.id, name=wf.name, timeout=wf.timeout_seconds, entry_node=wf.entry_node_id)
+                for n in wf.nodes:
+                    wdef.nodes[n.id] = WNode(id=n.id, agent_id=n.agent_id, tool_name=n.tool_name, tool_args=n.tool_args or {}, depends_on=n.depends_on or [], condition=n.condition, output_key=n.output_key, timeout=n.timeout_seconds)
+                eng = WorkflowEngine()
+                res = await eng.run(wdef, run.conversation_id or run.id, (run.inputs or {}).get("input", ""))
+                run.status = "done" if res.ok() else "failed"
+                run.outputs = res.outputs
+                run.node_status = res.node_status
+                if res.errors:
+                    run.error = str(res.errors)
+                await sess.commit()
+            finally:
+                if rls_token is not None:
+                    reset_rls_org_id(rls_token)
     except Exception as exc:
         from aios.core.dead_letter import write_dlq
         await write_dlq(direction="outbound", channel_type="workflow", job_name="aios.tasks.jobs.workflow_run_job", payload=payload, error=str(exc))
@@ -768,6 +827,7 @@ async def proactive_event_job(ctx, payload: dict):
     )
     from aios.db.engine import async_session as _sess
     from aios.db.models import Agent as AgentModel
+    from aios.db.rls import bind_session_rls, reset_rls_org_id
 
     event = payload.get("event") or {}
     agent_id = payload.get("agent_id", "")
@@ -777,158 +837,163 @@ async def proactive_event_job(ctx, payload: dict):
 
     try:
         async with _sess() as sess:
-            agent = await sess.get(AgentModel, agent_id)
-            # org check is the tenant boundary: a dispatched agent that is not
-            # in the event's org is a routing bug, not a transient failure.
-            if not agent or agent.org_id != org_id:
-                logger.error("proactive_event_job: agent %s not in org %s", agent_id, org_id)
-                return {"error": "agent not found in org"}
+            rls_token = await bind_session_rls(sess, org_id or None)
+            try:
+                agent = await sess.get(AgentModel, agent_id)
+                # org check is the tenant boundary: a dispatched agent that is not
+                # in the event's org is a routing bug, not a transient failure.
+                if not agent or agent.org_id != org_id:
+                    logger.error("proactive_event_job: agent %s not in org %s", agent_id, org_id)
+                    return {"error": "agent not found in org"}
 
-            # Re-check the subscription: it may have been removed between
-            # publish and dispatch, and a stale run must not execute.
-            if not any(ev_type_matches(ev.event_type, s) for s in subscriptions_for(agent)):
-                logger.info(
-                    "proactive_event_job: %s no longer subscribes to %s", agent_id, ev.event_type
-                )
-                return {"skipped": "unsubscribed"}
-
-            routine_id = str(
-                routine_meta.get("routine_id")
-                or f"event_subscription:{agent_id}:{ev.event_type}"
-            )
-            action = "proactive_event_dispatch"
-            idem = str(
-                routine_meta.get("idempotency_key")
-                or routine_idempotency_key(routine_id, action, ev.idempotency_key or ev.event_id)
-            )
-            # Only an explicitly configured routine policy may add a
-            # routine-level gate. The agent runtime already HITL-gates tools;
-            # inventing a deny-all policy here would block every event with no
-            # approval to find.
-            if routine_meta:
-                side_effects = routine_meta.get("side_effects") or []
-                approval_required = bool(routine_meta.get("approval_required", True))
-                approved = bool(routine_meta.get("approved", False))
-                approval_fingerprint = routine_meta.get("approval_fingerprint")
-                effects = list(side_effects) if isinstance(side_effects, list) else [str(side_effects)]
-                routine = type(
-                    "Routine",
-                    (),
-                    {
-                        "routine_id": routine_id,
-                        "org_id": org_id,
-                        "source_type": str(routine_meta.get("source_type") or "event_subscription"),
-                        "mode": str(routine_meta.get("mode") or "reactive"),
-                    },
-                )()
-                try:
-                    await enforce_routine_side_effect(
-                        db=sess,
-                        routine=routine,
-                        action=action,
-                        side_effects=effects,
-                        approval_required=approval_required,
-                        idempotency_key=idem,
-                        approved=approved,
-                        approval_fingerprint=str(approval_fingerprint) if approval_fingerprint else None,
+                # Re-check the subscription: it may have been removed between
+                # publish and dispatch, and a stale run must not execute.
+                if not any(ev_type_matches(ev.event_type, s) for s in subscriptions_for(agent)):
+                    logger.info(
+                        "proactive_event_job: %s no longer subscribes to %s", agent_id, ev.event_type
                     )
-                except RoutineSideEffectBlocked as exc:
-                    logger.warning("proactive_event_job blocked: %s", exc)
-                    approval = None
-                    try:
-                        from aios.core.routine_enforcement import request_routine_side_effect_approval
+                    return {"skipped": "unsubscribed"}
 
-                        dispatch_payload = {
-                            "agent_id": agent_id,
-                            "org_id": org_id,
-                            "event": event,
-                            "routine": {
-                                **routine_meta,
-                                "routine_id": routine_id,
-                                "idempotency_key": idem,
-                                "approval_fingerprint": str(approval_fingerprint) if approval_fingerprint else None,
-                                "side_effects": effects,
-                                "approval_required": approval_required,
-                                "source_type": str(routine_meta.get("source_type") or "event_subscription"),
-                                "mode": str(routine_meta.get("mode") or "reactive"),
-                            },
-                        }
-                        approval = await request_routine_side_effect_approval(
-                            sess,
-                            org_id=org_id,
-                            routine_id=routine_id,
-                            action=action,
-                            idempotency_key=idem,
-                            side_effects=effects,
-                            mode=str(routine_meta.get("mode") or "reactive"),
-                            source_type=str(routine_meta.get("source_type") or "event_subscription"),
-                            context_summary=f"Proactive event {ev.event_type} agent={agent_id}",
-                            requested_by=None,
-                            approval_fingerprint=str(approval_fingerprint) if approval_fingerprint else None,
-                            dispatch_job="proactive_event_job",
-                            dispatch_payload=dispatch_payload,
-                        )
-                    except Exception:
-                        logger.debug("proactive_event_job: approval request failed", exc_info=True)
-                    return {
-                        "blocked": True,
-                        "routine_id": routine_id,
-                        "action": action,
-                        "idempotency_key": idem,
-                        "reason": str(exc),
-                        "approval_requested": bool(approval),
-                        "approval": approval,
-                    }
-
-            instruction = render_event_instruction(ev)
-            gov = agent.governance_config or {}
-            is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
-
-            # Same execution path as inbound runs, so governance, model routing,
-            # memory and tool guards behave identically for proactive work.
-            if is_autonomous:
-                from aios.core.autonomous_agent import AutonomousAgent
-
-                runner = AutonomousAgent(agent)
-                out = await runner.run("", instruction, sess)
-                provenance = getattr(runner.runtime, "stage_provenance", None)
-            else:
-                from aios.core.agent import AgentRuntime
-
-                # No db arg: AgentRuntime takes a DatabaseBackend, not the
-                # AsyncSession this job holds. Same call shape as agent_run.
-                runtime = AgentRuntime(agent)
-                out = await runtime.run("", instruction)
-                provenance = getattr(runtime, "stage_provenance", None)
-
-            # Same screening as the inbound path: a failure notice or HITL
-            # reflection is not a result. Publishing it would mark the event
-            # done and wake downstream automations on a run that did nothing.
-            from aios.core.agent import is_failed_run
-
-            if is_failed_run(out):
-                logger.error(
-                    "proactive_event_job: run failed for agent=%s event=%s, not publishing completion: %s",
-                    agent_id, ev.event_type, str(out)[:200],
+                routine_id = str(
+                    routine_meta.get("routine_id")
+                    or f"event_subscription:{agent_id}:{ev.event_type}"
                 )
-                return {"ok": False, "agent_id": agent_id, "output": str(out)[:2000]}
+                action = "proactive_event_dispatch"
+                idem = str(
+                    routine_meta.get("idempotency_key")
+                    or routine_idempotency_key(routine_id, action, ev.idempotency_key or ev.event_id)
+                )
+                # Only an explicitly configured routine policy may add a
+                # routine-level gate. The agent runtime already HITL-gates tools;
+                # inventing a deny-all policy here would block every event with no
+                # approval to find.
+                if routine_meta:
+                    side_effects = routine_meta.get("side_effects") or []
+                    approval_required = bool(routine_meta.get("approval_required", True))
+                    approved = bool(routine_meta.get("approved", False))
+                    approval_fingerprint = routine_meta.get("approval_fingerprint")
+                    effects = list(side_effects) if isinstance(side_effects, list) else [str(side_effects)]
+                    routine = type(
+                        "Routine",
+                        (),
+                        {
+                            "routine_id": routine_id,
+                            "org_id": org_id,
+                            "source_type": str(routine_meta.get("source_type") or "event_subscription"),
+                            "mode": str(routine_meta.get("mode") or "reactive"),
+                        },
+                    )()
+                    try:
+                        await enforce_routine_side_effect(
+                            db=sess,
+                            routine=routine,
+                            action=action,
+                            side_effects=effects,
+                            approval_required=approval_required,
+                            idempotency_key=idem,
+                            approved=approved,
+                            approval_fingerprint=str(approval_fingerprint) if approval_fingerprint else None,
+                        )
+                    except RoutineSideEffectBlocked as exc:
+                        logger.warning("proactive_event_job blocked: %s", exc)
+                        approval = None
+                        try:
+                            from aios.core.routine_enforcement import request_routine_side_effect_approval
 
-            # Emit what the agent did so downstream automations can react too.
-            await publish(
-                "agent.proactive_completed",
-                org_id,
-                {
-                    "agent_id": agent_id,
-                    "agent_name": agent.name,
-                    "source_event": ev.event_type,
-                    "source_event_id": ev.event_id,
-                    "output": str(out)[:4000],
-                    "icm_provenance": provenance,
-                },
-                actor_id=agent_id,
-                idempotency_key=f"{ev.idempotency_key}:{agent_id}:done",
-            )
-            return {"ok": True, "agent_id": agent_id, "output": str(out)[:2000]}
+                            dispatch_payload = {
+                                "agent_id": agent_id,
+                                "org_id": org_id,
+                                "event": event,
+                                "routine": {
+                                    **routine_meta,
+                                    "routine_id": routine_id,
+                                    "idempotency_key": idem,
+                                    "approval_fingerprint": str(approval_fingerprint) if approval_fingerprint else None,
+                                    "side_effects": effects,
+                                    "approval_required": approval_required,
+                                    "source_type": str(routine_meta.get("source_type") or "event_subscription"),
+                                    "mode": str(routine_meta.get("mode") or "reactive"),
+                                },
+                            }
+                            approval = await request_routine_side_effect_approval(
+                                sess,
+                                org_id=org_id,
+                                routine_id=routine_id,
+                                action=action,
+                                idempotency_key=idem,
+                                side_effects=effects,
+                                mode=str(routine_meta.get("mode") or "reactive"),
+                                source_type=str(routine_meta.get("source_type") or "event_subscription"),
+                                context_summary=f"Proactive event {ev.event_type} agent={agent_id}",
+                                requested_by=None,
+                                approval_fingerprint=str(approval_fingerprint) if approval_fingerprint else None,
+                                dispatch_job="proactive_event_job",
+                                dispatch_payload=dispatch_payload,
+                            )
+                        except Exception:
+                            logger.debug("proactive_event_job: approval request failed", exc_info=True)
+                        return {
+                            "blocked": True,
+                            "routine_id": routine_id,
+                            "action": action,
+                            "idempotency_key": idem,
+                            "reason": str(exc),
+                            "approval_requested": bool(approval),
+                            "approval": approval,
+                        }
+
+                instruction = render_event_instruction(ev)
+                gov = agent.governance_config or {}
+                is_autonomous = gov.get("autonomous", True) or gov.get("autonomy") == "autonomous"
+
+                # Same execution path as inbound runs, so governance, model routing,
+                # memory and tool guards behave identically for proactive work.
+                if is_autonomous:
+                    from aios.core.autonomous_agent import AutonomousAgent
+
+                    runner = AutonomousAgent(agent)
+                    out = await runner.run("", instruction, sess)
+                    provenance = getattr(runner.runtime, "stage_provenance", None)
+                else:
+                    from aios.core.agent import AgentRuntime
+
+                    # No db arg: AgentRuntime takes a DatabaseBackend, not the
+                    # AsyncSession this job holds. Same call shape as agent_run.
+                    runtime = AgentRuntime(agent)
+                    out = await runtime.run("", instruction)
+                    provenance = getattr(runtime, "stage_provenance", None)
+
+                # Same screening as the inbound path: a failure notice or HITL
+                # reflection is not a result. Publishing it would mark the event
+                # done and wake downstream automations on a run that did nothing.
+                from aios.core.agent import is_failed_run
+
+                if is_failed_run(out):
+                    logger.error(
+                        "proactive_event_job: run failed for agent=%s event=%s, not publishing completion: %s",
+                        agent_id, ev.event_type, str(out)[:200],
+                    )
+                    return {"ok": False, "agent_id": agent_id, "output": str(out)[:2000]}
+
+                # Emit what the agent did so downstream automations can react too.
+                await publish(
+                    "agent.proactive_completed",
+                    org_id,
+                    {
+                        "agent_id": agent_id,
+                        "agent_name": agent.name,
+                        "source_event": ev.event_type,
+                        "source_event_id": ev.event_id,
+                        "output": str(out)[:4000],
+                        "icm_provenance": provenance,
+                    },
+                    actor_id=agent_id,
+                    idempotency_key=f"{ev.idempotency_key}:{agent_id}:done",
+                )
+                return {"ok": True, "agent_id": agent_id, "output": str(out)[:2000]}
+            finally:
+                if rls_token is not None:
+                    reset_rls_org_id(rls_token)
     except Exception as exc:
         logger.exception("proactive_event_job failed agent=%s event=%s", agent_id, ev.event_type)
         from aios.core.dead_letter import write_dlq
@@ -986,6 +1051,9 @@ async def workday_job(ctx, payload: dict | None = None):
 
     async with db_session() as db:
         if target_agent_id:
+            # Background jobs: pass org_id for RLS-enabled mode when known.
+            if target_org_id and hasattr(db, "bind_org"):
+                await db.bind_org(target_org_id)
             agent = await db.get(Agent, target_agent_id)
             if not agent or (target_org_id and agent.org_id != target_org_id):
                 logger.warning("workday_job: target agent missing/cross-org agent=%s org=%s", target_agent_id, target_org_id)
@@ -1005,19 +1073,23 @@ async def workday_job(ctx, payload: dict | None = None):
             # re-enable a paused org on its own.
             live = [o for o in orgs if org_workday_enabled(o)]
             paused = len(orgs) - len(live)
-            agents = (
-                await db.execute(
-                    select(Agent).where(
-                        Agent.org_id.in_([o.id for o in live]), Agent.status == "active"
-                    )
-                )
-            ).scalars().all()
+            agents = []
+            for o in live:
+                # Background jobs: pass org_id for RLS-enabled mode.
+                async with db_session(org_id=o.id) as org_db:
+                    org_agents = (
+                        await org_db.execute(
+                            select(Agent).where(Agent.org_id == o.id, Agent.status == "active")
+                        )
+                    ).scalars().all()
+                    agents.extend(org_agents)
 
     for agent in agents:
         if not should_work_day(agent):
             continue
         try:
-            async with db_session() as db:
+            # Background jobs: pass org_id for RLS-enabled mode.
+            async with db_session(org_id=agent.org_id) as db:
                 fresh = await db.get(Agent, agent.id)
                 if not fresh or not should_work_day(fresh):
                     continue
@@ -1254,6 +1326,9 @@ async def transcribe_voice_recording(ctx, recording_id: str, language: str = "pt
             if not recording:
                 logger.error("Recording %s not found", recording_id)
                 return {"error": "Recording not found"}
+            # Background jobs: pass org_id for RLS-enabled mode.
+            if hasattr(db, "bind_org"):
+                await db.bind_org(recording.org_id)
             
             if not recording.recording_storage_path:
                 recording.transcript_status = "failed"
@@ -1319,6 +1394,8 @@ async def transcribe_voice_recording(ctx, recording_id: str, language: str = "pt
             async with db_session() as db:
                 recording = await db.get(VoiceRecording, recording_id)
                 if recording:
+                    if hasattr(db, "bind_org"):
+                        await db.bind_org(recording.org_id)
                     recording.transcript_status = "failed"
                     await db.commit()
         except Exception:
@@ -1358,6 +1435,9 @@ async def download_voice_recording(ctx, recording_id: str, recording_url: str):
             if not recording:
                 logger.error("Recording %s not found", recording_id)
                 return {"error": "Recording not found"}
+            # Background jobs: pass org_id for RLS-enabled mode.
+            if hasattr(db, "bind_org"):
+                await db.bind_org(recording.org_id)
             
             # Download audio file
             async with httpx.AsyncClient(timeout=60) as client:
@@ -1397,6 +1477,49 @@ async def download_voice_recording(ctx, recording_id: str, recording_url: str):
         return {"error": str(e)}
 
 
+def _commitment_audit(action: str, org_id: str, details: dict) -> None:
+    try:
+        from aios.core.audit_sink import append as _audit_append
+
+        _audit_append(org_id or "system", action, {"component": "jobs.process_commitment_at_risk", **details})
+    except Exception:
+        logger.debug("commitment audit failed action=%s", action, exc_info=True)
+
+
+async def _enqueue_commitment_outbox(event_type: str, payload: dict, *, business_trace_id: str, idempotency_key: str, org_id: str):
+    if event_type != "agent.action.completed":
+        _commitment_audit("commitment.outbox.rejected", org_id, {"event_type": event_type, "reason": "unexpected_event"})
+        raise ValueError(f"unexpected commitment outbox event: {event_type}")
+    _commitment_audit(
+        "commitment.outbox.enqueue",
+        org_id,
+        {
+            "event_type": event_type,
+            "business_trace_id": str(business_trace_id),
+            "idempotency_key": str(idempotency_key),
+            "status": payload.get("status", "completed"),
+        },
+    )
+    from aios.integrations.arvo.publisher import enqueue_outbox
+
+    await enqueue_outbox(
+        event_type,
+        payload,
+        business_trace_id=str(business_trace_id),
+        idempotency_key=idempotency_key,
+    )
+    _commitment_audit(
+        "commitment.outbox.enqueued",
+        org_id,
+        {
+            "event_type": event_type,
+            "business_trace_id": str(business_trace_id),
+            "idempotency_key": str(idempotency_key),
+            "status": payload.get("status", "completed"),
+        },
+    )
+
+
 async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str | None = None):
     """Run agent for commitment.at_risk and publish agent.action.completed via outbox."""
     from aios.config import settings
@@ -1408,11 +1531,17 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
 
     from aios.db.engine import async_session
     from aios.db.models import Agent
+    from aios.db.rls import bind_session_rls, reset_rls_org_id
     from sqlalchemy import select
 
     org_id = payload.get("org_id") or payload.get("orgId") or ""
     finding_id = payload.get("finding_id") or payload.get("opportunity_id") or payload.get("id") or "unknown"
     business_trace_id = business_trace_id or payload.get("business_trace_id") or str(finding_id)
+    _commitment_audit(
+        "commitment.at_risk.received",
+        org_id,
+        {"finding_id": str(finding_id), "business_trace_id": str(business_trace_id), "has_org": bool(org_id)},
+    )
 
     failed_payload = {
         "finding_id": str(finding_id),
@@ -1433,8 +1562,13 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
     if org_id:
         try:
             async with async_session() as s:
-                q = await s.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active").limit(1))
-                agent = q.scalars().first()
+                rls_token = await bind_session_rls(s, org_id)
+                try:
+                    q = await s.execute(select(Agent).where(Agent.org_id == org_id, Agent.status == "active").limit(1))
+                    agent = q.scalars().first()
+                finally:
+                    if rls_token is not None:
+                        reset_rls_org_id(rls_token)
         except Exception:
             logger.exception("commitment.at_risk agent lookup failed")
 
@@ -1446,12 +1580,12 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
         failed_payload["output"] = "no agent executed"
         failed_payload["reason"] = "no active agent"
         try:
-            from aios.integrations.arvo.publisher import enqueue_outbox
-            await enqueue_outbox(
+            await _enqueue_commitment_outbox(
                 "agent.action.completed",
                 failed_payload,
                 business_trace_id=str(business_trace_id),
                 idempotency_key=f"{failed_base}:failed:{failed_payload['reason']}"[:128],
+                org_id=org_id,
             )
         except Exception:
             logger.exception("publish failed agent.action.completed for no active agent failed")
@@ -1476,12 +1610,12 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
         failed_payload["output"] = "agent execution failed"
         failed_payload["reason"] = "agent execution failed"
         try:
-            from aios.integrations.arvo.publisher import enqueue_outbox
-            await enqueue_outbox(
+            await _enqueue_commitment_outbox(
                 "agent.action.completed",
                 failed_payload,
                 business_trace_id=str(business_trace_id),
                 idempotency_key=f"{failed_base}:failed:{failed_payload['reason']}"[:128],
+                org_id=org_id,
             )
         except Exception:
             logger.exception("publish failed agent.action.completed after agent failure failed")
@@ -1492,19 +1626,23 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
         from aios.db.models import AuditLog
 
         async with async_session() as s:
-            s.add(AuditLog(
-                org_id=org_id,
-                action="agent.execution",
-                resource_type="agent",
-                resource_id=str(agent.id),
-                details={"business_trace_id": str(business_trace_id), "finding_id": str(finding_id), "event_type": "commitment.at_risk"},
-            ))
-            await s.commit()
+            rls_token = await bind_session_rls(s, org_id)
+            try:
+                s.add(AuditLog(
+                    org_id=org_id,
+                    action="agent.execution",
+                    resource_type="agent",
+                    resource_id=str(agent.id),
+                    details={"business_trace_id": str(business_trace_id), "finding_id": str(finding_id), "event_type": "commitment.at_risk"},
+                ))
+                await s.commit()
+            finally:
+                if rls_token is not None:
+                    reset_rls_org_id(rls_token)
     except Exception:
         logger.exception("commitment.at_risk execution audit failed")
 
     try:
-        from aios.integrations.arvo.publisher import enqueue_outbox
         completed_payload = {
             "finding_id": str(finding_id),
             "org_id": org_id,
@@ -1515,11 +1653,12 @@ async def process_commitment_at_risk(ctx, payload: dict, business_trace_id: str 
         for amount_field in ("exposure_amount", "verified_amount", "recovery_amount", "currency"):
             if amount_field in payload:
                 completed_payload[amount_field] = payload[amount_field]
-        await enqueue_outbox(
+        await _enqueue_commitment_outbox(
             "agent.action.completed",
             completed_payload,
             business_trace_id=str(business_trace_id),
             idempotency_key=f"agent.action.completed:{business_trace_id}"[:128],
+            org_id=org_id,
         )
     except Exception:
         logger.exception("publish agent.action.completed failed")
@@ -1542,11 +1681,13 @@ async def weekly_standup_job(ctx):
     from aios.db.models import Agent, ChannelConnection, Organization, Team
 
     posted, failed = 0, 0
-    async with db_session() as db:
-        import asyncio as _aio
+    import asyncio as _aio
 
+    async with db_session() as db:
         orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
-        for org in orgs:
+    for org in orgs:
+        # Background jobs: pass org_id for RLS-enabled mode.
+        async with db_session(org_id=org.id) as db:
             conns = (await db.execute(select(ChannelConnection).where(
                 ChannelConnection.org_id == org.id,
                 ChannelConnection.channel_type == "slack",
@@ -1618,13 +1759,15 @@ async def _post_team_reports(kind: str, year_month: str | None = None,
     from sqlalchemy import select
 
     posted, failed, no_manager, silent = 0, 0, 0, 0
-    async with db_session() as db:
-        import asyncio as _aio
+    import asyncio as _aio
 
+    async with db_session() as db:
         orgs = (await db.execute(
             select(Organization).where(Organization.is_active == True)  # noqa: E712
         )).scalars().all()
-        for org in orgs:
+    for org in orgs:
+        # Background jobs: pass org_id for RLS-enabled mode.
+        async with db_session(org_id=org.id) as db:
             conns = (await db.execute(select(ChannelConnection).where(
                 ChannelConnection.org_id == org.id,
                 ChannelConnection.channel_type == "slack",
@@ -1704,7 +1847,9 @@ async def weekly_report_job(ctx):
     created = sent = failed = unavailable = 0
     async with db_session() as db:
         orgs = (await db.execute(select(Organization).where(Organization.is_active == True))).scalars().all()  # noqa: E712
-        for org in orgs:
+    for org in orgs:
+        # Background jobs: pass org_id for RLS-enabled mode.
+        async with db_session(org_id=org.id) as db:
             report = (await db.execute(select(WeeklySalesReport).where(
                 WeeklySalesReport.org_id == org.id, WeeklySalesReport.week_start == start))).scalar_one_or_none()
             if report is None:
@@ -2220,7 +2365,8 @@ async def night_shift_job(ctx):
             "digest": None,
         }
         try:
-            async with db_session() as db:
+            # Background jobs: pass org_id for RLS-enabled mode.
+            async with db_session(org_id=org_id) as db:
                 if await _ns_claimed(db, org_id, date_str):
                     totals["skipped_idempotent"] += 1
                     org_result["status"] = "skipped_idempotent"
@@ -2236,10 +2382,10 @@ async def night_shift_job(ctx):
         for subjob in _NIGHT_SHIFT_SUBJOBS:
             if subjob == "morning_digest":
                 continue
-            async with db_session() as db:
+            async with db_session(org_id=org_id) as db:
                 await _ns_audit(db, org_id, f"night_shift.{subjob}.start", {"date": date_str, "subjob": subjob}, resource_id=date_str)
             try:
-                async with db_session() as db:
+                async with db_session(org_id=org_id) as db:
                     if subjob == "security_scan":
                         res = await _night_shift_security_scan(db, org_id, since, now)
                     elif subjob == "stale_sweep":
@@ -2252,7 +2398,7 @@ async def night_shift_job(ctx):
                         res = {"status": "skipped", "reason": "unknown_subjob"}
                     await db.commit()
                 org_result["subjobs"][subjob] = res
-                async with db_session() as db:
+                async with db_session(org_id=org_id) as db:
                     await _ns_audit(db, org_id, f"night_shift.{subjob}.complete", {"date": date_str, "subjob": subjob, "status": res.get("status")}, resource_id=date_str)
             except Exception as exc:
                 err = str(exc)[:300]
@@ -2260,7 +2406,7 @@ async def night_shift_job(ctx):
                 org_result["subjobs"][subjob] = {"status": "failed", "error": err}
                 org_result["failures"].append([subjob, err])
                 totals["subjob_failures"] += 1
-                async with db_session() as db:
+                async with db_session(org_id=org_id) as db:
                     await _ns_audit(db, org_id, f"night_shift.{subjob}.failed", {"date": date_str, "subjob": subjob, "error": err}, resource_id=date_str)
                 try:
                     from aios.core.dead_letter import write_dlq
@@ -2278,15 +2424,15 @@ async def night_shift_job(ctx):
 
         # Digest after subjobs; digest failure isolated.
         digest_res = None
-        async with db_session() as db:
+        async with db_session(org_id=org_id) as db:
             await _ns_audit(db, org_id, "night_shift.morning_digest.start", {"date": date_str, "subjob": "morning_digest"}, resource_id=date_str)
         try:
             digest_res = await _night_shift_morning_digest(org_id, date_str, org_result["subjobs"], org_result["failures"])
             org_result["digest"] = digest_res
             if digest_res.get("reason") == "no_owner_slack_dm":
-                async with db_session() as db:
+                async with db_session(org_id=org_id) as db:
                     await _ns_audit(db, org_id, "night_shift.morning_digest.no_target", {"date": date_str, "reason": "no_owner_slack_dm"}, resource_id=date_str)
-            async with db_session() as db:
+            async with db_session(org_id=org_id) as db:
                 await _ns_audit(db, org_id, "night_shift.morning_digest.complete", {"date": date_str, "subjob": "morning_digest", "sent": digest_res.get("sent"), "targets": digest_res.get("targets")}, resource_id=date_str)
         except Exception as exc:
             err = str(exc)[:300]
@@ -2294,11 +2440,11 @@ async def night_shift_job(ctx):
             org_result["digest"] = {"sent": 0, "targets": 0, "reason": "digest_failed", "error": err}
             org_result["failures"].append(["morning_digest", err])
             totals["subjob_failures"] += 1
-            async with db_session() as db:
+            async with db_session(org_id=org_id) as db:
                 await _ns_audit(db, org_id, "night_shift.morning_digest.failed", {"date": date_str, "subjob": "morning_digest", "error": err}, resource_id=date_str)
 
         org_result["status"] = "ok" if not org_result["failures"] else "completed_with_failures"
-        async with db_session() as db:
+        async with db_session(org_id=org_id) as db:
             await _ns_mark_complete(db, org_id, date_str, {
                 "status": org_result["status"],
                 "failures": org_result["failures"],
@@ -2349,18 +2495,29 @@ async def channel_sync_job(ctx, channel_id: str, is_active: bool):
     from aios.db.models import Agent, ChannelConnection, Team
 
     async with async_session() as db:
-        conn = await db.get(ChannelConnection, channel_id)
-        if conn is None or not conn.is_active:
-            await channel_mgr.stop_by_id(channel_id)
-            return
-        agent_or_team = None
-        if conn.agent_id:
-            agent_or_team = await db.get(Agent, conn.agent_id)
-        elif conn.team_id:
-            agent_or_team = await db.get(
-                Team, conn.team_id, options=[selectinload(Team.agents)]
-            )
-        await channel_mgr.sync(conn, True, agent_or_team, db)
+        # Background jobs: pass org_id for RLS-enabled mode when known.
+        from aios.db.rls import bind_session_rls, reset_rls_org_id
+
+        rls_token = await bind_session_rls(db, None)
+        try:
+            conn = await db.get(ChannelConnection, channel_id)
+            if conn is None or not conn.is_active:
+                await channel_mgr.stop_by_id(channel_id)
+                return
+            if rls_token is not None:
+                reset_rls_org_id(rls_token)
+                rls_token = await bind_session_rls(db, conn.org_id)
+            agent_or_team = None
+            if conn.agent_id:
+                agent_or_team = await db.get(Agent, conn.agent_id)
+            elif conn.team_id:
+                agent_or_team = await db.get(
+                    Team, conn.team_id, options=[selectinload(Team.agents)]
+                )
+            await channel_mgr.sync(conn, True, agent_or_team, db)
+        finally:
+            if rls_token is not None:
+                reset_rls_org_id(rls_token)
 
 
 FUNCTIONS = [
@@ -2417,7 +2574,8 @@ async def template_status_reconcile_job(ctx, payload: dict | None = None):
     checked = updated = 0
     for conn in conns:
         try:
-            async with db_session() as db:
+            # Background jobs: pass org_id for RLS-enabled mode.
+            async with db_session(org_id=conn.org_id) as db:
                 pending = (await db.execute(
                     select(WhatsappTemplate).where(
                         WhatsappTemplate.org_id == conn.org_id,

@@ -1,18 +1,25 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="flex-between mb-4"><div><h1>Dev — Claude + Codex</h1><p class="text-sm text-secondary">Construção e review dual direto na VPS (claude 2.1.260 + codex 0.153.1 + opencode 1.15.13)</p></div><span id="dev-status" class="badge">checando...</span></div>
+<div class="flex-between mb-4"><div><h1>Dev — Claude + Codex</h1><p class="text-sm text-secondary">{% if dev_subprocess_enabled %}Construção e review dual direto na VPS (claude 2.1.260 + codex 0.153.1 + opencode 1.15.13){% else %}Ferramentas dev por subprocesso desativadas por padrão (fail-closed).{% endif %}</p></div><span id="dev-status" class="badge">checando...</span></div>
+
+{% if not dev_subprocess_enabled %}
+<div class="card mb-4" style="border-color:var(--amber);background:var(--amber-subtle,rgba(251,191,36,.12))">
+  <p style="font-weight:600;margin-bottom:0.25rem">Dev subprocess desativado</p>
+  <p class="text-sm text-secondary">Backend fail-closed: <code>AIOS_DEV_SUBPROCESS_ENABLED=false</code>. Ações de build/review não executam até habilitar explicitamente.</p>
+</div>
+{% endif %}
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem" class="mb-4">
   <div class="card">
     <h2>▶ Construir</h2><p class="text-xs text-tertiary">Envia prompt para claude e codex em paralelo (workspace-write)</p>
-    <textarea id="build-prompt" class="input" rows="4" placeholder="Ex: crie endpoint POST /api/lead com validação"></textarea>
-    <div style="display:flex;gap:0.5rem;margin-top:0.5rem"><button class="btn btn-primary btn-sm" onclick="runBuild()">Claude+Codex Build</button><button class="btn btn-ghost btn-sm" onclick="runOne('claude')">Só Claude</button><button class="btn btn-ghost btn-sm" onclick="runOne('codex')">Só Codex</button></div>
+    <textarea id="build-prompt" class="input" rows="4" placeholder="Ex: crie endpoint POST /api/lead com validação" {% if not dev_subprocess_enabled %}disabled{% endif %}></textarea>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem"><button class="btn btn-primary btn-sm" onclick="runBuild()" {% if not dev_subprocess_enabled %}disabled title="AIOS_DEV_SUBPROCESS_ENABLED=false"{% endif %}>Claude+Codex Build</button><button class="btn btn-ghost btn-sm" onclick="runOne('claude')" {% if not dev_subprocess_enabled %}disabled title="AIOS_DEV_SUBPROCESS_ENABLED=false"{% endif %}>Só Claude</button><button class="btn btn-ghost btn-sm" onclick="runOne('codex')" {% if not dev_subprocess_enabled %}disabled title="AIOS_DEV_SUBPROCESS_ENABLED=false"{% endif %}>Só Codex</button></div>
     <pre id="build-out" class="font-mono" style="display:none;margin-top:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.6875rem;white-space:pre-wrap;max-height:320px;overflow:auto"></pre>
   </div>
   <div class="card">
     <h2>🔍 Review Dual</h2><p class="text-xs text-tertiary">1 linha por achado L&lt;linha&gt;: severidade problema. fix.</p>
-    <textarea id="review-prompt" class="input" rows="4" placeholder="Cole diff ou deixe vazio para git diff HEAD~1"></textarea>
-    <div style="display:flex;gap:0.5rem;margin-top:0.5rem"><button class="btn btn-primary btn-sm" onclick="runReview()">Dual Review</button><button class="btn btn-ghost btn-sm" onclick="runCodexReview()">Codex review</button></div>
+    <textarea id="review-prompt" class="input" rows="4" placeholder="Cole diff ou deixe vazio para git diff HEAD~1" {% if not dev_subprocess_enabled %}disabled{% endif %}></textarea>
+    <div style="display:flex;gap:0.5rem;margin-top:0.5rem"><button class="btn btn-primary btn-sm" onclick="runReview()" {% if not dev_subprocess_enabled %}disabled title="AIOS_DEV_SUBPROCESS_ENABLED=false"{% endif %}>Dual Review</button><button class="btn btn-ghost btn-sm" onclick="runCodexReview()" {% if not dev_subprocess_enabled %}disabled title="AIOS_DEV_SUBPROCESS_ENABLED=false"{% endif %}>Codex review</button></div>
     <pre id="review-out" class="font-mono" style="display:none;margin-top:0.5rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;font-size:0.6875rem;white-space:pre-wrap;max-height:320px;overflow:auto"></pre>
   </div>
 </div>
@@ -21,7 +28,17 @@
 
 <script>
 async function checkStatus(){
-  try{const r=await fetch('/api/dev/status'); const j=await r.json(); document.getElementById('dev-status').textContent=`claude ${j.claude.version?.slice(0,12)||'?'} • codex ${j.codex.version?.slice(0,12)||'?'}`; document.getElementById('dev-status').style.borderColor='var(--green)';}catch(e){document.getElementById('dev-status').textContent='offline';}
+  try{
+    const r=await fetch('/api/dev/status'); const j=await r.json();
+    const el=document.getElementById('dev-status');
+    if(j.enabled === false){
+      el.textContent='desativado (fail-closed)';
+      el.style.borderColor='var(--amber)'; el.style.color='var(--amber)';
+      return;
+    }
+    el.textContent=`claude ${j.claude.version?.slice(0,12)||'?'} • codex ${j.codex.version?.slice(0,12)||'?'}`;
+    el.style.borderColor='var(--green)';
+  }catch(e){document.getElementById('dev-status').textContent='offline';}
 }
 checkStatus();
 function escapeAnsi(s){ return s.replace(/\x1b\[[0-9;]*m/g,''); }
@@ -53,6 +70,9 @@ async function runCodexReview(){
 window.aiosI18n.register({
   'Construção e review dual direto na VPS (claude 2.1.260 + codex 0.153.1 + opencode 1.15.13)': 'Construcción y revisión dual directamente en la VPS (claude 2.1.260 + codex 0.153.1 + opencode 1.15.13)',
   'checando...': 'comprobando...',
+  'Ferramentas dev por subprocesso desativadas por padrão (fail-closed).': 'Herramientas dev por subproceso desactivadas por defecto (fail-closed).',
+  'Dev subprocess desativado': 'Subproceso dev desactivado',
+  'Backend fail-closed: <code>AIOS_DEV_SUBPROCESS_ENABLED=false</code>. Ações de build/review não executam até habilitar explicitamente.': 'Backend fail-closed: <code>AIOS_DEV_SUBPROCESS_ENABLED=false</code>. Las acciones de build/review no se ejecutan hasta habilitar explícitamente.',
   'Envia prompt para claude e codex em paralelo (workspace-write)': 'Envía prompt a claude y codex en paralelo (workspace-write)',
   'Ex: crie endpoint POST /api/lead com validação': 'Ej: crea endpoint POST /api/lead con validación',
   'Só Claude': 'Solo Claude',

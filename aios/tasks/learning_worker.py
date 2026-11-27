@@ -27,35 +27,41 @@ async def pattern_extraction_job(ctx):
             refs = (await db.execute(
                 select(AgentReflection).where(AgentReflection.created_at >= cutoff).limit(100)
             )).scalars().all()
-            if not refs:
-                return
-            # naive pattern extraction: group by key_insight prefix
+        if not refs:
+            return
+        # naive pattern extraction: group by key_insight prefix, per org for RLS mode
+        by_org: dict[str, list] = {}
+        for r in refs:
+            by_org.setdefault(r.org_id, []).append(r)
+        for org_id, org_refs in by_org.items():
             insights: dict[str, int] = {}
-            for r in refs:
+            for r in org_refs:
                 key = (r.key_insight or "")[:80].strip().lower()
                 if key:
                     insights[key] = insights.get(key, 0) + 1
-            # record top insights as learnings
-            for text, cnt in sorted(insights.items(), key=lambda x: -x[1])[:5]:
-                if cnt < 2:
-                    continue
-                exists = (await db.execute(
-                    select(AgentLearning).where(
-                        AgentLearning.trigger_context == text, AgentLearning.learning_type == "success_pattern"
-                    ).limit(1)
-                )).scalar_one_or_none()
-                if exists:
-                    continue
-                db.add(AgentLearning(
-                    agent_id=refs[0].agent_id, org_id=refs[0].org_id,
-                    learning_type="success_pattern", trigger_context=text,
-                    action_taken="reuse when similar task detected",
-                    outcome=f"seen {cnt} times in 24h", success=True,
-                    metrics={"count": cnt}, pattern_signature=text[:64],
-                    confidence=min(0.5 + cnt * 0.1, 0.95),
-                ))
-            await db.commit()
-            logger.info("pattern_extraction: %d patterns", len(insights))
+            async with db_session(org_id=org_id) as db:
+                for text, cnt in sorted(insights.items(), key=lambda x: -x[1])[:5]:
+                    if cnt < 2:
+                        continue
+                    exists = (await db.execute(
+                        select(AgentLearning).where(
+                            AgentLearning.org_id == org_id,
+                            AgentLearning.trigger_context == text,
+                            AgentLearning.learning_type == "success_pattern",
+                        ).limit(1)
+                    )).scalar_one_or_none()
+                    if exists:
+                        continue
+                    db.add(AgentLearning(
+                        agent_id=org_refs[0].agent_id, org_id=org_id,
+                        learning_type="success_pattern", trigger_context=text,
+                        action_taken="reuse when similar task detected",
+                        outcome=f"seen {cnt} times in 24h", success=True,
+                        metrics={"count": cnt}, pattern_signature=text[:64],
+                        confidence=min(0.5 + cnt * 0.1, 0.95),
+                    ))
+                await db.commit()
+        logger.info("pattern_extraction: %d reflections", len(refs))
     except Exception:
         logger.exception("pattern_extraction failed")
 
@@ -70,24 +76,30 @@ async def memory_consolidation_job(ctx):
             skills = (await db.execute(
                 select(Skill).where(Skill.usage_count >= 5).limit(20)
             )).scalars().all()
-            for s in skills:
-                # create a learning entry capturing the skill
-                exists = (await db.execute(
-                    select(AgentLearning).where(
-                        AgentLearning.pattern_signature == s.id
-                    ).limit(1)
-                )).scalar_one_or_none()
-                if exists:
-                    continue
-                db.add(AgentLearning(
-                    agent_id=s.agent_id, org_id=s.org_id,
-                    learning_type="skill_synthesis", trigger_context=s.name,
-                    action_taken=s.content[:500], outcome=f"skill used {s.usage_count} times",
-                    success=True, pattern_signature=s.id, confidence=s.success_rate,
-                ))
-            await db.commit()
-            if skills:
-                logger.info("memory_consolidation: %d skills consolidated", len(skills))
+        by_org: dict[str, list] = {}
+        for s in skills:
+            by_org.setdefault(s.org_id, []).append(s)
+        for org_id, org_skills in by_org.items():
+            async with db_session(org_id=org_id) as db:
+                for s in org_skills:
+                    # create a learning entry capturing the skill
+                    exists = (await db.execute(
+                        select(AgentLearning).where(
+                            AgentLearning.org_id == org_id,
+                            AgentLearning.pattern_signature == s.id,
+                        ).limit(1)
+                    )).scalar_one_or_none()
+                    if exists:
+                        continue
+                    db.add(AgentLearning(
+                        agent_id=s.agent_id, org_id=s.org_id,
+                        learning_type="skill_synthesis", trigger_context=s.name,
+                        action_taken=s.content[:500], outcome=f"skill used {s.usage_count} times",
+                        success=True, pattern_signature=s.id, confidence=s.success_rate,
+                    ))
+                await db.commit()
+        if skills:
+            logger.info("memory_consolidation: %d skills consolidated", len(skills))
     except Exception:
         logger.exception("memory_consolidation failed")
 
@@ -101,34 +113,42 @@ async def optimization_review_job(ctx):
             metrics = (await db.execute(
                 select(AgentMetric).where(AgentMetric.hour >= cutoff.strftime("%Y-%m-%d-%H")).limit(200)
             )).scalars().all()
-            by_agent: dict[str, list] = {}
-            for m in metrics:
-                by_agent.setdefault(m.agent_id, []).append(m)
-            for aid, rows in by_agent.items():
-                total_m = sum(r.messages for r in rows) or 1
-                total_e = sum(r.errors for r in rows)
-                err_rate = total_e / total_m
-                avg_lat = sum(r.avg_response_ms for r in rows) / len(rows) if rows else 0
-                if err_rate > 0.08 or avg_lat > 4000:
-                    # queue optimization record for review, don't auto-apply
-                    exists = (await db.execute(
-                        select(OptimizationRecord).where(
-                            OptimizationRecord.agent_id == aid,
-                            OptimizationRecord.created_at >= cutoff,
-                        ).limit(1)
-                    )).scalar_one_or_none()
-                    if exists:
-                        continue
-                    db.add(OptimizationRecord(
-                        agent_id=aid, org_id=rows[0].org_id,
-                        optimization_type="prompt" if err_rate > 0.08 else "performance",
-                        target_metric="success_rate" if err_rate > 0.08 else "latency",
-                        before_value=err_rate if err_rate > 0.08 else avg_lat,
-                        after_value=0, improvement_pct=0,
-                        change_summary=f"flagged: err={err_rate:.1%} lat={avg_lat:.0f}ms",
-                        validation_method="eval",
-                    ))
-            await db.commit()
+        by_agent: dict[str, list] = {}
+        for m in metrics:
+            by_agent.setdefault(m.agent_id, []).append(m)
+        by_org: dict[str, list[tuple[str, list]]] = {}
+        for aid, rows in by_agent.items():
+            org_id = rows[0].org_id if rows else None
+            if org_id:
+                by_org.setdefault(org_id, []).append((aid, rows))
+        for org_id, agent_rows in by_org.items():
+            async with db_session(org_id=org_id) as db:
+                for aid, rows in agent_rows:
+                    total_m = sum(r.messages for r in rows) or 1
+                    total_e = sum(r.errors for r in rows)
+                    err_rate = total_e / total_m
+                    avg_lat = sum(r.avg_response_ms for r in rows) / len(rows) if rows else 0
+                    if err_rate > 0.08 or avg_lat > 4000:
+                        # queue optimization record for review, don't auto-apply
+                        exists = (await db.execute(
+                            select(OptimizationRecord).where(
+                                OptimizationRecord.org_id == org_id,
+                                OptimizationRecord.agent_id == aid,
+                                OptimizationRecord.created_at >= cutoff,
+                            ).limit(1)
+                        )).scalar_one_or_none()
+                        if exists:
+                            continue
+                        db.add(OptimizationRecord(
+                            agent_id=aid, org_id=org_id,
+                            optimization_type="prompt" if err_rate > 0.08 else "performance",
+                            target_metric="success_rate" if err_rate > 0.08 else "latency",
+                            before_value=err_rate if err_rate > 0.08 else avg_lat,
+                            after_value=0, improvement_pct=0,
+                            change_summary=f"flagged: err={err_rate:.1%} lat={avg_lat:.0f}ms",
+                            validation_method="eval",
+                        ))
+                await db.commit()
     except Exception:
         logger.exception("optimization_review failed")
 
@@ -141,22 +161,28 @@ async def eval_review_job(ctx):
             runs = (await db.execute(
                 select(EvalRun).where(EvalRun.avg_score < 0.6).order_by(desc(EvalRun.created_at)).limit(10)
             )).scalars().all()
-            for run in runs:
-                exists = (await db.execute(
-                    select(AgentLearning).where(
-                        AgentLearning.pattern_signature == f"eval_{run.id}",
-                    ).limit(1)
-                )).scalar_one_or_none()
-                if exists:
-                    continue
-                db.add(AgentLearning(
-                    agent_id=run.agent_id, org_id=run.org_id,
-                    learning_type="failure_pattern", trigger_context=f"eval score {run.avg_score:.2f}",
-                    action_taken="review prompt + tools; see eval results",
-                    outcome=f"low score on dataset {run.dataset_id}", success=False,
-                    metrics={"score": run.avg_score}, pattern_signature=f"eval_{run.id}",
-                ))
-            await db.commit()
+        by_org: dict[str, list] = {}
+        for run in runs:
+            by_org.setdefault(run.org_id, []).append(run)
+        for org_id, org_runs in by_org.items():
+            async with db_session(org_id=org_id) as db:
+                for run in org_runs:
+                    exists = (await db.execute(
+                        select(AgentLearning).where(
+                            AgentLearning.org_id == org_id,
+                            AgentLearning.pattern_signature == f"eval_{run.id}",
+                        ).limit(1)
+                    )).scalar_one_or_none()
+                    if exists:
+                        continue
+                    db.add(AgentLearning(
+                        agent_id=run.agent_id, org_id=run.org_id,
+                        learning_type="failure_pattern", trigger_context=f"eval score {run.avg_score:.2f}",
+                        action_taken="review prompt + tools; see eval results",
+                        outcome=f"low score on dataset {run.dataset_id}", success=False,
+                        metrics={"score": run.avg_score}, pattern_signature=f"eval_{run.id}",
+                    ))
+                await db.commit()
     except Exception:
         logger.exception("eval_review failed")
 

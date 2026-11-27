@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from aios.tools.registry import TOOL_REGISTRY
+from aios.core.action_policy import classify_tool_action
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ class ToolEngine:
             logger.debug("actor_resolver failed; keeping fail-closed actor context", exc_info=True)
             self._actor_resolved = True
 
-    async def execute(self, name: str, args_json: str) -> str:
+    async def execute(self, name: str, args_json: str, *, approved: bool = False) -> str:
         tool = self.tools.get(name)
         if not tool:
             raise ToolExecutionError(f"Unknown tool: {name}")
@@ -206,6 +207,23 @@ class ToolEngine:
             args = json.loads(args_json)
         except json.JSONDecodeError:
             raise ToolExecutionError("Invalid JSON args")
+
+        # Central action policy — defense-in-depth, fail-closed for unknown/risky side effects.
+        decision = classify_tool_action(
+            name,
+            args,
+            context={
+                "org_id": self.org_id,
+                "agent_id": self.agent_id,
+                "approved": approved,
+            },
+        )
+        if decision.requires_approval and not approved:
+            logger.warning(
+                "Action policy blocked tool=%s class=%s org=%s agent=%s reason=%s",
+                name, decision.action_class.value, self.org_id, self.agent_id, decision.reason,
+            )
+            raise ToolExecutionError(f"HITL/action policy: {decision.reason or 'approval required'}")
 
         # audit tracking
         _TOOL_CALL_TRACKING[name] = _TOOL_CALL_TRACKING.get(name, 0) + 1

@@ -20,7 +20,9 @@ from aios.config import settings
 # One sqlite file per xdist worker: _fresh_db deletes the file before each
 # test, so sharing one path makes workers delete each other's tables.
 TEST_WORKER = os.getenv("PYTEST_XDIST_WORKER", "main")
-TEST_DB_PATH = os.path.join(os.path.dirname(__file__), f"test.db.{TEST_WORKER}")
+TEST_DB_PATH = os.getenv("AIOS_TEST_DB_PATH") or os.path.join(
+    os.path.dirname(__file__), f"test.db.{TEST_WORKER}"
+)
 TEST_DATABASE_URL = f"sqlite+aiosqlite:///{TEST_DB_PATH}"
 settings.jwt_secret = "test-secret"
 settings.debug = True
@@ -95,6 +97,9 @@ async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture(loop_scope="function")
 async def test_db_session(test_session: AsyncSession) -> AsyncGenerator[AsyncSession, None]:
     """Override get_db and get_db_backend dependencies for tests."""
+    from contextlib import asynccontextmanager
+
+    import aios.db.backend as backend_mod
     from aios.db.backend import get_db_backend, registry
     from aios.db.backends.sqlalchemy_backend import SQLAlchemyBackend
 
@@ -107,11 +112,23 @@ async def test_db_session(test_session: AsyncSession) -> AsyncGenerator[AsyncSes
     async def _get_db_backend():
         yield test_backend
 
+    @asynccontextmanager
+    async def _test_db_session(org_id: str | None = None):
+        # Share test session so commits are visible to fixtures; don't close.
+        if org_id is not None and hasattr(test_backend, "_org_id"):
+            test_backend._org_id = org_id  # type: ignore[attr-defined]
+        yield test_backend
+
+    orig_db_session = backend_mod.db_session
+    backend_mod.db_session = _test_db_session
     app.dependency_overrides[get_db] = _get_db
     app.dependency_overrides[get_db_backend] = _get_db_backend
     # Auth overrides removed; using real authentication flow
-    yield test_session
-    app.dependency_overrides.clear()
+    try:
+        yield test_session
+    finally:
+        backend_mod.db_session = orig_db_session
+        app.dependency_overrides.clear()
 
 
 

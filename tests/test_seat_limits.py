@@ -69,3 +69,47 @@ def test_check_org_limits_denies_membership_model_mismatch():
     allowed, reason = asyncio.run(check_org_limits("org-1", _DB(), user_id="u1", model="openai/gpt-4o"))
     assert allowed is False
     assert "not allowed for model" in reason
+
+
+def test_worker_websocket_seat_identity_enforces_model():
+    """Worker resolves a seat only from authenticated, persisted member context."""
+    import asyncio
+
+    from aios.core.limits import check_org_limits
+    from aios.tasks.jobs import _inbound_seat_identity
+
+    class _Result:
+        def __init__(self, value):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class _DB:
+        async def get(self, model, ident):
+            org = _org({"seats": {"u1": ["openai/gpt-4o-mini"]}})
+            org.is_active = True
+            org.license_status = "active"
+            return org
+
+        async def execute(self, stmt, *a, **k):
+            sql = str(stmt)
+            assert "organization_memberships" in sql
+            if "allowed_models" in sql:
+                return _Result(["openai/gpt-4o-mini"])
+            return _Result("m1")
+
+    agent = SimpleNamespace(llm_config={"model": "openai/gpt-4o"})
+    msg = SimpleNamespace(extra_data={"user_id": "u1"})
+    db = _DB()
+
+    identity = asyncio.run(
+        _inbound_seat_identity(db, "org-1", "web", msg, {"source": "websocket"}, agent)
+    )
+    assert identity == ("u1", "openai/gpt-4o")
+    assert asyncio.run(check_org_limits("org-1", db, *identity))[0] is False
+
+    # Provider webhook identity is a contact, never a seat.
+    assert asyncio.run(
+        _inbound_seat_identity(db, "org-1", "evolution", msg, {"source": "websocket"}, agent)
+    ) == (None, None)

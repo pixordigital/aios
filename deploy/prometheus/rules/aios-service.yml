@@ -1,0 +1,76 @@
+# AIOS service alert scaffold.
+# Safe template: no prod wiring/secrets. Tune thresholds/labels to real scrape jobs.
+# Metrics referenced here must exist in /metrics or recording rules before enabling.
+groups:
+  - name: aios_service
+    rules:
+      # Service down: assumes Prometheus scrapes AIOS with job label; adjust selector.
+      - alert: AIOSServiceDown
+        expr: up{job=~"aios.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: aios
+        annotations:
+          summary: "AIOS target down (job={{ $labels.job }}, instance={{ $labels.instance }})"
+          description: "Prometheus cannot scrape AIOS. Check container/process, health endpoints, and network."
+          runbook: "docs/ONCALL_ALERTING_RUNBOOK.md#aiosservicedown"
+
+      # Error rate: TODO - aios_http_requests_total has no status label in aios/metrics.py today.
+      # Add status/method/path labels or an explicit error counter, then enable.
+      # Example after instrumentation:
+      # - alert: AIOSHTTPErrorRateHigh
+      #   expr: |
+      #     sum(rate(aios_http_requests_total{status=~"5.."}[5m]))
+      #     /
+      #     clamp_min(sum(rate(aios_http_requests_total[5m])), 1) > 0.05
+      #   for: 10m
+      #   labels: {severity: warning, service: aios}
+      #   annotations:
+      #     summary: "AIOS HTTP 5xx rate > 5%"
+      #     runbook: "docs/ONCALL_ALERTING_RUNBOOK.md#aioshttperrorratehigh"
+
+      # Latency: uses existing histogram aios_http_request_duration_seconds.
+      # Verify histogram buckets/labels match deployed metrics before enabling.
+      - alert: AIOSHTTPLatencyP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(aios_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: aios
+        annotations:
+          summary: "AIOS HTTP p95 latency > 2s"
+          description: "p95 latency {{ $value | humanizeDuration }} over 10m. Check DB, workers, upstream LLM/providers."
+          runbook: "docs/ONCALL_ALERTING_RUNBOOK.md#aioshttplatencyp95high"
+
+      # Queue lag: TODO - no queue lag metric found in repo metrics. Add gauge/counter
+      # (e.g., aios_queue_lag_seconds, aios_queue_depth) from worker/Redis queue before enabling.
+      # - alert: AIOSQueueLagHigh
+      #   expr: max(aios_queue_lag_seconds{queue=~".+"}) > 300
+      #   for: 10m
+      #   labels: {severity: warning, service: aios}
+      #   annotations:
+      #     summary: "AIOS queue lag > 5m"
+      #     runbook: "docs/ONCALL_ALERTING_RUNBOOK.md#aiosqueuelaghigh"
+
+      # Backup age/failure: TODO - deploy/backup.sh produces files/logs but no Prometheus metric.
+      # Export aios_backup_last_success_timestamp_seconds and/or aios_backup_last_success_bool via
+      # node_exporter textfile collector, pushgateway, or cron wrapper before enabling.
+      # - alert: AIOSBackupStale
+      #   expr: time() - max(aios_backup_last_success_timestamp_seconds) > 93600
+      #   for: 30m
+      #   labels: {severity: critical, service: aios}
+      #   annotations:
+      #     summary: "AIOS backup stale (>26h)"
+      #     runbook: "docs/ONCALL_ALERTING_RUNBOOK.md#aiosbackupstale"
+      # - alert: AIOSBackupFailed
+      #   expr: max(aios_backup_last_success_bool) == 0
+      #   for: 15m
+      #   labels: {severity: critical, service: aios}
+      #   annotations:
+      #     summary: "AIOS backup reported failure"
+      #     runbook: "docs/ONCALL_ALERTING_RUNBOOK.md#aiosbackupfailed"

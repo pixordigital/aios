@@ -1,8 +1,11 @@
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 
+from aios.core.approval_evidence import verify_and_consume_approval
+from aios.core.audit import log_audit
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import Organization, Tool
 from aios.governance.ocp import DepartmentMember
@@ -11,6 +14,27 @@ from .deps import get_current_user, get_org_id
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
+
+
+def _approval_tool_args_match(*, tool_name: str, args: dict[str, Any], tool_args: Any) -> bool:
+    if not isinstance(tool_args, dict):
+        return False
+    expected_name = str(tool_name or "")
+    if "tool_name" in tool_args and str(tool_args.get("tool_name") or "") != expected_name:
+        return False
+    candidates = [tool_args]
+    for k in ("args", "arguments", "payload", "input"):
+        v = tool_args.get(k)
+        if isinstance(v, dict):
+            candidates.append(v)
+    for cand in candidates:
+        if cand == args:
+            return True
+        if args and all(k in cand and cand.get(k) == v for k, v in args.items()):
+            if "args" in cand or "arguments" in cand or "payload" in cand or "input" in cand:
+                continue
+            return True
+    return False
 
 
 async def _tool_actor_context(db: DatabaseBackend, user) -> dict:
@@ -91,6 +115,7 @@ async def mcp_call(
 
     name = body.get("name") or body.get("tool")
     args = body.get("arguments") or body.get("args") or {}
+    approval_action_id = body.get("approval_action_id")
     if not name:
         return {"ok": False, "error": "name required"}
     tool = (
@@ -111,8 +136,47 @@ async def mcp_call(
     try:
         out = await eng.execute(name, json.dumps(args))
         return {"ok": True, "output": out}
-    except Exception:
+    except Exception as e:
         logger.exception("MCP tool call failed org=%s tool=%s", org_id, name)
+        msg = str(e)
+        if "HITL/action policy" in msg or "requires approval" in msg:
+            if not approval_action_id:
+                return {"ok": False, "error": msg, "requires_approval": True}
+            approval = await verify_and_consume_approval(
+                db,
+                org_id=str(org_id),
+                approval_action_id=str(approval_action_id),
+                expected_tool_name=str(name),
+                args_match=lambda tool_args: _approval_tool_args_match(tool_name=str(name), args=args, tool_args=tool_args),
+            )
+            audit_details = {
+                "reason": msg,
+                "tool_name": str(name),
+                "approval_action_id": approval_action_id,
+                **dict(approval.details),
+            }
+            if not approval.ok:
+                await log_audit(
+                    db, org_id, "mcp.call.blocked", "tool",
+                    user_id=getattr(user, "id", None),
+                    resource_id=str(getattr(tool, "id", "") or name),
+                    details=audit_details,
+                )
+                await db.commit()
+                return {"ok": False, "error": msg, "requires_approval": True, "approval_reason": approval.reason}
+            await log_audit(
+                db, org_id, "mcp.call.approval_consumed", "tool",
+                user_id=getattr(user, "id", None),
+                resource_id=str(getattr(tool, "id", "") or name),
+                details=audit_details,
+            )
+            await db.commit()
+            try:
+                out = await eng.execute(name, json.dumps(args), approved=True)
+                return {"ok": True, "output": out}
+            except Exception as e2:
+                logger.exception("MCP approved tool call failed org=%s tool=%s", org_id, name)
+                return {"ok": False, "error": str(e2)}
         return {"ok": False, "error": "Tool execution failed"}
 
 

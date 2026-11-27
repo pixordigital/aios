@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -9,6 +10,7 @@ logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).parent.parent.parent
 TIMEOUT_CLAUDE = 180
 TIMEOUT_CODEX = 180
+_DEV_SUBPROCESS_ENV = "AIOS_DEV_SUBPROCESS_ENABLED"
 
 def _validate_cwd(cwd: str) -> str:
     if not cwd:
@@ -20,9 +22,45 @@ def _validate_cwd(cwd: str) -> str:
         raise ValueError(f"cwd fora do repo: {cwd}")
     return str(p)
 
+
+def _dev_subprocess_enabled() -> bool:
+    raw = os.getenv(_DEV_SUBPROCESS_ENV)
+    if raw is not None:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    try:
+        from aios.config import settings
+
+        return bool(getattr(settings, "dev_subprocess_enabled", False))
+    except Exception:
+        return False
+
+
+def _audit_dev_subprocess(action: str, details: dict) -> None:
+    try:
+        from aios.core.audit_sink import append as _audit_append
+
+        _audit_append("system", action, {"component": "dev_cli", **details})
+    except Exception:
+        logger.debug("dev subprocess audit failed action=%s", action, exc_info=True)
+
+
 async def _run(cmd: list[str], cwd: str = "", timeout: int = 120) -> dict:
     cwd_valid = _validate_cwd(cwd) if cwd else str(REPO_ROOT)
     start = time.time()
+    label = cmd[0] if cmd else "unknown"
+    if not _dev_subprocess_enabled():
+        _audit_dev_subprocess(
+            "dev.subprocess.blocked",
+            {"cmd": label, "cwd": cwd_valid, "reason": f"{_DEV_SUBPROCESS_ENV} disabled"},
+        )
+        return {
+            "ok": False,
+            "error": f"dev subprocess disabled ({_DEV_SUBPROCESS_ENV}=false)",
+            "stdout": "",
+            "stderr": "disabled",
+            "duration": 0.0,
+        }
+    _audit_dev_subprocess("dev.subprocess.start", {"cmd": label, "cwd": cwd_valid, "argv": cmd[:3]})
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -35,12 +73,18 @@ async def _run(cmd: list[str], cwd: str = "", timeout: int = 120) -> dict:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+            _audit_dev_subprocess("dev.subprocess.timeout", {"cmd": label, "cwd": cwd_valid, "timeout": timeout})
             return {"ok": False, "error": "timeout", "stdout": "", "stderr": "timeout", "duration": timeout}
         duration = round(time.time() - start, 2)
         out = stdout.decode(errors="ignore")[:80000]
         err = stderr.decode(errors="ignore")[:8000]
+        _audit_dev_subprocess(
+            "dev.subprocess.completed" if proc.returncode == 0 else "dev.subprocess.failed",
+            {"cmd": label, "cwd": cwd_valid, "rc": proc.returncode, "duration": duration},
+        )
         return {"ok": proc.returncode == 0, "code": proc.returncode, "stdout": out, "stderr": err, "duration": duration}
     except Exception as e:
+        _audit_dev_subprocess("dev.subprocess.failed", {"cmd": label, "cwd": cwd_valid, "error": str(e)[:300]})
         return {"ok": False, "error": str(e), "stdout": "", "stderr": str(e), "duration": round(time.time()-start,2)}
 
 async def run_claude(prompt: str, cwd: str = "", timeout: int = TIMEOUT_CLAUDE, allowed_tools: str = "Read,Grep,Glob,Bash(git *)") -> dict:

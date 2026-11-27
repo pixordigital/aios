@@ -16,6 +16,7 @@ _lock_sess = None
 async def _tick():
     from aios.db.engine import async_session
     from aios.db.models import AutomationTrigger, Workflow, WorkflowRun
+    from aios.db.rls import bind_session_rls, reset_rls_org_id
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
     try:
@@ -24,57 +25,94 @@ async def _tick():
         logger.warning("croniter not installed, cron scheduler disabled")
         return
     async with async_session() as sess:
+        # Background jobs: pass org_id for RLS-enabled mode per trigger.
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         trigs = (await sess.execute(select(AutomationTrigger).where(AutomationTrigger.type=="cron", AutomationTrigger.is_active==True))).scalars().all()
         for trig in trigs:
-            should_run = False
-            if trig.next_run_at is None and trig.cron_expr:
-                try:
-                    nxt = croniter(trig.cron_expr, now).get_next(datetime)
-                    trig.next_run_at = nxt
-                    await sess.commit()
-                except Exception as e:
-                    logger.warning("cron invalid %s: %s", trig.id, e)
-                    continue
-            if trig.next_run_at and trig.next_run_at <= now:
-                should_run = True
-            if should_run:
-                # Claim the trigger FIRST with a conditional UPDATE. Reading
-                # next_run_at and advancing it afterwards let every worker that
-                # polled the same due trigger fire it: with --workers 2 each cron
-                # workflow ran twice and the customer got every automated message
-                # twice. A conditional UPDATE is the lock -- the loser sees
-                # rowcount 0 and skips.
-                try:
-                    from sqlalchemy import update as _update
-                    _claim = await sess.execute(
-                        _update(AutomationTrigger)
-                        .where(
-                            AutomationTrigger.id == trig.id,
-                            AutomationTrigger.next_run_at <= now,
+            rls_token = await bind_session_rls(sess, getattr(trig, "org_id", None))
+            try:
+                should_run = False
+                if trig.next_run_at is None and trig.cron_expr:
+                    try:
+                        nxt = croniter(trig.cron_expr, now).get_next(datetime)
+                        trig.next_run_at = nxt
+                        await sess.commit()
+                    except Exception as e:
+                        logger.warning("cron invalid %s: %s", trig.id, e)
+                        continue
+                if trig.next_run_at and trig.next_run_at <= now:
+                    should_run = True
+                if should_run:
+                    # Claim the trigger FIRST with a conditional UPDATE. Reading
+                    # next_run_at and advancing it afterwards let every worker that
+                    # polled the same due trigger fire it: with --workers 2 each cron
+                    # workflow ran twice and the customer got every automated message
+                    # twice. A conditional UPDATE is the lock -- the loser sees
+                    # rowcount 0 and skips.
+                    try:
+                        from sqlalchemy import update as _update
+                        _claim = await sess.execute(
+                            _update(AutomationTrigger)
+                            .where(
+                                AutomationTrigger.id == trig.id,
+                                AutomationTrigger.next_run_at <= now,
+                            )
+                            .values(next_run_at=croniter(trig.cron_expr, now).get_next(datetime),
+                                    last_run_at=now)
                         )
-                        .values(next_run_at=croniter(trig.cron_expr, now).get_next(datetime),
-                                last_run_at=now)
-                    )
+                        await sess.commit()
+                        if _claim.rowcount == 0:
+                            continue  # another worker already claimed this tick
+                    except Exception:
+                        logger.exception("cron claim failed for trigger %s", trig.id)
+                        continue
+                    wf = await sess.get(Workflow, trig.workflow_id, options=[selectinload(Workflow.nodes)])
+                    if not wf:
+                        continue
+                    run = WorkflowRun(workflow_id=wf.id, org_id=trig.org_id, status="pending", inputs={"input": json.dumps({"trigger": "cron", "trigger_id": trig.id, "cron": trig.cron_expr}), "trigger_id": trig.id})
+                    sess.add(run)
                     await sess.commit()
-                    if _claim.rowcount == 0:
-                        continue  # another worker already claimed this tick
-                except Exception:
-                    logger.exception("cron claim failed for trigger %s", trig.id)
-                    continue
-                wf = await sess.get(Workflow, trig.workflow_id, options=[selectinload(Workflow.nodes)])
-                if not wf:
-                    continue
-                run = WorkflowRun(workflow_id=wf.id, org_id=trig.org_id, status="pending", inputs={"input": json.dumps({"trigger": "cron", "trigger_id": trig.id, "cron": trig.cron_expr}), "trigger_id": trig.id})
-                sess.add(run)
-                await sess.commit()
-                await sess.refresh(run)
-                try:
-                    from aios.tasks.queue import enqueue_job
-                    await enqueue_job("aios.tasks.jobs.workflow_run_job", {"workflow_id": wf.id, "run_id": run.id})
-                except Exception:
-                    logger.exception("cron enqueue failed for trigger %s", trig.id)
-                logger.info("cron triggered workflow %s run %s", wf.id, run.id)
+                    await sess.refresh(run)
+                    try:
+                        from aios.tasks.queue import enqueue_job
+                        await enqueue_job("aios.tasks.jobs.workflow_run_job", {"workflow_id": wf.id, "run_id": run.id})
+                    except Exception:
+                        logger.exception("cron enqueue failed for trigger %s", trig.id)
+                    logger.info("cron triggered workflow %s run %s", wf.id, run.id)
+            finally:
+                if rls_token is not None:
+                    reset_rls_org_id(rls_token)
+
+def _backup_audit(action: str, details: dict) -> None:
+    try:
+        from aios.core.audit_sink import append as _audit_append
+
+        _audit_append("system", action, {"component": "cron_scheduler.backup", **details})
+    except Exception:
+        logger.debug("backup audit sink failed action=%s", action, exc_info=True)
+
+
+def _resolve_backup_script() -> pathlib.Path | None:
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    allowed = {
+        (repo_root / "deploy" / "backup.sh").resolve(),
+        pathlib.Path("/app/deploy/backup.sh").resolve(),
+    }
+    candidates = [
+        repo_root / "deploy" / "backup.sh",
+        pathlib.Path("/app/deploy/backup.sh"),
+        pathlib.Path("deploy/backup.sh"),
+    ]
+    script = next((p for p in candidates if p.exists()), None)
+    if script is None:
+        return None
+    resolved = script.resolve()
+    if resolved.name != "backup.sh" or resolved not in allowed:
+        _backup_audit("cron.backup.rejected", {"path": str(script), "resolved": str(resolved), "reason": "unexpected_path"})
+        logger.error("backup.sh path rejected: %s resolved=%s", script, resolved)
+        return None
+    return resolved
+
 
 async def _backup_tick():
     """Daily 03:00 UTC backup via deploy/backup.sh (minimalista, aws cli opcional)."""
@@ -89,15 +127,11 @@ async def _backup_tick():
     if _last_backup_day == today:
         return
     _last_backup_day = today
-    candidates = [
-        pathlib.Path(__file__).resolve().parents[2] / "deploy" / "backup.sh",
-        pathlib.Path("/app/deploy/backup.sh"),
-        pathlib.Path("deploy/backup.sh"),
-    ]
-    script = next((p for p in candidates if p.exists()), None)
+    script = _resolve_backup_script()
     if not script:
-        logger.warning("backup.sh not found, skipping daily backup")
+        logger.warning("backup.sh not found or rejected, skipping daily backup")
         return
+    _backup_audit("cron.backup.start", {"script": str(script)})
     logger.info("daily backup 03:00 trigger %s", script)
     try:
         proc = await asyncio.to_thread(
@@ -105,8 +139,12 @@ async def _backup_tick():
         )
         logger.info("backup done rc=%s out=%.500s", proc.returncode, proc.stdout or "")
         if proc.returncode != 0:
+            _backup_audit("cron.backup.failed", {"script": str(script), "rc": proc.returncode})
             logger.warning("backup failed rc=%s err=%.500s", proc.returncode, proc.stderr or "")
+        else:
+            _backup_audit("cron.backup.completed", {"script": str(script), "rc": proc.returncode})
     except Exception as e:
+        _backup_audit("cron.backup.failed", {"script": str(script), "error": str(e)[:300]})
         logger.exception("backup tick failed: %s", e)
 
 
@@ -149,27 +187,33 @@ async def _proactive_alerts_tick():
                 )
             ).scalars().all()
 
-            for org_id in orgs:
-                try:
-                    from aios.tools.proactive_alerts import check_sales_drop
+        for org_id in orgs:
+            try:
+                async with async_session() as sess:
+                    rls_token = await bind_session_rls(sess, org_id)
+                    try:
+                        from aios.tools.proactive_alerts import check_sales_drop
 
-                    alert = await check_sales_drop(org_id)
-                    if not alert:
-                        continue
-                    await publish_event(
-                        "sales.drop_detected",
-                        org_id,
-                        alert,
-                        # Day-scoped so the daily check cannot fire the same
-                        # drop twice if the tick is retried.
-                        idempotency_key=f"sales-drop:{org_id}:{today}",
-                    )
-                    logger.info(
-                        "sales.drop_detected published org=%s drop=%.1f%%",
-                        org_id, alert.get("drop_pct", 0),
-                    )
-                except Exception as e:
-                    logger.exception("sales drop check failed for org %s: %s", org_id, e)
+                        alert = await check_sales_drop(org_id)
+                    finally:
+                        if rls_token is not None:
+                            reset_rls_org_id(rls_token)
+                if not alert:
+                    continue
+                await publish_event(
+                    "sales.drop_detected",
+                    org_id,
+                    alert,
+                    # Day-scoped so the daily check cannot fire the same
+                    # drop twice if the tick is retried.
+                    idempotency_key=f"sales-drop:{org_id}:{today}",
+                )
+                logger.info(
+                    "sales.drop_detected published org=%s drop=%.1f%%",
+                    org_id, alert.get("drop_pct", 0),
+                )
+            except Exception as e:
+                logger.exception("sales drop check failed for org %s: %s", org_id, e)
     except Exception as e:
         logger.exception("Proactive alerts tick failed: %s", e)
 
@@ -202,38 +246,52 @@ async def _crm_mql_stale_tick():
 
         async with async_session() as sess:
             orgs = (await sess.execute(select(Organization.id).where(Organization.is_active == True))).scalars().all()
-            for org_id in orgs:
-                cutoff = datetime.now() - timedelta(days=7)
-                stale = (await sess.execute(
-                    select(CrmDeal).where(
-                        CrmDeal.org_id == org_id,
-                        CrmDeal.stage == "mql",
-                        CrmDeal.updated_at < cutoff,
-                    )
-                )).scalars().all()
-
-                for d in stale:
-                    owner = await sess.get(Agent, d.agent_id) if d.agent_id else None
+        for org_id in orgs:
+            try:
+                async with async_session() as sess:
+                    rls_token = await bind_session_rls(sess, org_id)
                     try:
-                        await publish_event(
-                            "crm.deal_stalled",
-                            org_id,
-                            {
-                                "deal_id": d.id,
-                                "lead_name": d.lead_name,
-                                "lead_email": d.lead_email,
-                                "pipeline": d.pipeline,
-                                "value": float(d.value or 0),
-                                "stage": d.stage,
-                                "days_stalled": 7,
-                                "owner_agent_id": d.agent_id or "",
-                                "owner_agent_name": owner.name if owner else "",
-                            },
-                            idempotency_key=f"crm-stalled:{d.id}:{today}",
-                        )
-                    except Exception:
-                        # One bad deal must not abort the org sweep.
-                        logger.exception("crm.deal_stalled publish failed deal=%s", d.id)
+                        cutoff = datetime.now() - timedelta(days=7)
+                        stale = (await sess.execute(
+                            select(CrmDeal).where(
+                                CrmDeal.org_id == org_id,
+                                CrmDeal.stage == "mql",
+                                CrmDeal.updated_at < cutoff,
+                            )
+                        )).scalars().all()
+                        owner_ids = {d.agent_id for d in stale if d.agent_id}
+                        owners = {}
+                        if owner_ids:
+                            owners = {a.id: a for a in (await sess.execute(select(Agent).where(Agent.id.in_(owner_ids)))).scalars().all()}
+                    finally:
+                        if rls_token is not None:
+                            reset_rls_org_id(rls_token)
+            except Exception:
+                logger.exception("crm mql stale org query failed org=%s", org_id)
+                continue
+
+            for d in stale:
+                owner = owners.get(d.agent_id) if d.agent_id else None
+                try:
+                    await publish_event(
+                        "crm.deal_stalled",
+                        org_id,
+                        {
+                            "deal_id": d.id,
+                            "lead_name": d.lead_name,
+                            "lead_email": d.lead_email,
+                            "pipeline": d.pipeline,
+                            "value": float(d.value or 0),
+                            "stage": d.stage,
+                            "days_stalled": 7,
+                            "owner_agent_id": d.agent_id or "",
+                            "owner_agent_name": owner.name if owner else "",
+                        },
+                        idempotency_key=f"crm-stalled:{d.id}:{today}",
+                    )
+                except Exception:
+                    # One bad deal must not abort the org sweep.
+                    logger.exception("crm.deal_stalled publish failed deal=%s", d.id)
     except Exception as e:
         logger.exception("CRM mql stale tick failed: %s", e)
 
@@ -250,24 +308,32 @@ async def _expire_pending_tick():
 
         async with async_session() as sess:
             orgs = (await sess.execute(select(Organization).where(Organization.is_active == True))).scalars().all()
-            for org in orgs:
-                try:
-                    days = int((org.extra_data or {}).get("pending_expiry_days", 7))
-                    if not 1 <= days <= 60:
-                        days = 7
-                except Exception:
+        for org in orgs:
+            try:
+                days = int((org.extra_data or {}).get("pending_expiry_days", 7))
+                if not 1 <= days <= 60:
                     days = 7
-                cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - __import__("datetime").timedelta(days=days)
-                # expira pending antigos
-                from sqlalchemy import update
+            except Exception:
+                days = 7
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - __import__("datetime").timedelta(days=days)
+            try:
+                async with async_session() as sess:
+                    rls_token = await bind_session_rls(sess, org.id)
+                    try:
+                        from sqlalchemy import update
 
-                await sess.execute(
-                    update(PendingAction)
-                    .where(PendingAction.status == "pending", PendingAction.created_at < cutoff)
-                    .values(status="expired")
-                )
-                await sess.commit()
-            logger.info("expire_pending tick done")
+                        await sess.execute(
+                            update(PendingAction)
+                            .where(PendingAction.org_id == org.id, PendingAction.status == "pending", PendingAction.created_at < cutoff)
+                            .values(status="expired")
+                        )
+                        await sess.commit()
+                    finally:
+                        if rls_token is not None:
+                            reset_rls_org_id(rls_token)
+            except Exception:
+                logger.exception("expire_pending tick failed org=%s", org.id)
+        logger.info("expire_pending tick done")
     except Exception:
         logger.exception("expire_pending tick failed")
 

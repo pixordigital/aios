@@ -1,10 +1,9 @@
 """Stripe billing — checkout, webhook, portal.
 
-NOT MOUNTED: AIOS ships as an internal tool first, so `aios/api/router.py` does
-not include this router and `/dashboard/billing` is commented out. There is no
-subscriber and no subscription lifecycle to verify, so exposing these endpoints
-would claim a capability the product does not operate. Re-enable as part of
-multi-tenant onboarding, together with end-to-end billing tests.
+Fail-closed by default: AIOS ships as an internal tool first. Router and
+dashboard billing routes mount only when `settings.billing_enabled` is true.
+There is no subscriber/subscription lifecycle to verify in default mode, so we
+do not expose a half-enabled commercial surface.
 """
 
 import hashlib

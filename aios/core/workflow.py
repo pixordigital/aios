@@ -691,7 +691,12 @@ class WorkflowEngine:
                         stage_adapter.budget.charge_tool()
                     async with sem:
                         output = await asyncio.wait_for(
-                            engine.execute(node.tool_name, args_json), timeout=node.timeout
+                            engine.execute(
+                                node.tool_name,
+                                args_json,
+                                approved=bool(getattr(stage_adapter, "approval_bound", None)),
+                            ),
+                            timeout=node.timeout,
                         )
                     if stage_adapter is not None:
                         stage_adapter.validate_output(output)

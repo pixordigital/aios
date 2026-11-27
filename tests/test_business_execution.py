@@ -42,52 +42,56 @@ class DryRunAdapter:
 
 
 def test_unconfigured_adapter_fails_closed():
-    registry = ExecutionRegistry()
+    registry = ExecutionRegistry(idempotency_store=None, require_durable_idempotency=False)
 
     with pytest.raises(ExecutionDenied, match="not configured"):
         registry.execute(
             adapter="missing",
             action="invoice.create",
-            payload={"customer": "acme"},
+            payload={"customer": "acme", "org_id": "org1"},
             idempotency_key="idem-1",
         )
 
 
 def test_unapproved_adapter_fails_closed():
-    registry = ExecutionRegistry()
+    registry = ExecutionRegistry(idempotency_store=None, require_durable_idempotency=False)
     registry.register(DryRunAdapter(approved=False))
 
     with pytest.raises(ExecutionDenied, match="not approved"):
         registry.execute(
             adapter="dry_run",
             action="invoice.create",
-            payload={"customer": "acme"},
+            payload={"customer": "acme", "org_id": "org1"},
             idempotency_key="idem-2",
         )
 
 
 def test_idempotency_key_required_for_side_effect():
-    registry = ExecutionRegistry()
+    registry = ExecutionRegistry(idempotency_store=None, require_durable_idempotency=False)
     registry.register(DryRunAdapter())
 
     with pytest.raises(ExecutionDenied, match="idempotency_key required"):
         registry.execute(
             adapter="dry_run",
             action="invoice.create",
-            payload={"customer": "acme"},
+            payload={"customer": "acme", "org_id": "org1"},
             idempotency_key="",
         )
 
 
 def test_audit_callback_called():
     events: list[dict[str, Any]] = []
-    registry = ExecutionRegistry(audit_callback=events.append)
+    registry = ExecutionRegistry(
+        audit_callback=events.append,
+        idempotency_store=None,
+        require_durable_idempotency=False,
+    )
     registry.register(DryRunAdapter())
 
     result = registry.execute(
         adapter="dry_run",
         action="invoice.create",
-        payload={"customer": "acme"},
+        payload={"customer": "acme", "org_id": "org1"},
         idempotency_key="idem-audit",
     )
 
@@ -102,13 +106,13 @@ def test_audit_callback_called():
 
 def test_configured_dry_run_adapter_returns_ok():
     adapter = DryRunAdapter()
-    registry = ExecutionRegistry()
+    registry = ExecutionRegistry(idempotency_store=None, require_durable_idempotency=False)
     registry.register(adapter)
 
     result = registry.execute(
         adapter="dry_run",
         action="invoice.create",
-        payload={"customer": "acme"},
+        payload={"customer": "acme", "org_id": "org1"},
         idempotency_key="idem-ok",
     )
 
@@ -120,7 +124,7 @@ def test_configured_dry_run_adapter_returns_ok():
     assert adapter.calls == [
         {
             "action": "invoice.create",
-            "payload": {"customer": "acme"},
+            "payload": {"customer": "acme", "org_id": "org1"},
             "idempotency_key": "idem-ok",
         }
     ]

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, ForeignKey, Index, Integer, String, Table, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Column, ForeignKey, Index, Integer, Numeric, String, Table, Text, UniqueConstraint, text
 from sqlalchemy import JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -476,9 +476,10 @@ class PendingAction(Base, TimestampMixin):
     tool_name: Mapped[str] = mapped_column(String(255))
     tool_args: Mapped[dict] = mapped_column(JSON, default=dict)
     context_summary: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|approved|rejected|expired
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|approved|rejected|expired|consumed
     decided_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class Skill(Base, TimestampMixin, OrgScopedMixin):
@@ -1430,3 +1431,232 @@ class OwnerNotification(Base, TimestampMixin, OrgScopedMixin):
     deadline_at: Mapped[datetime | None] = mapped_column(default=None)
     acked_at: Mapped[datetime | None] = mapped_column(default=None)
     escalated_at: Mapped[datetime | None] = mapped_column(default=None)
+
+
+# =============================================================================
+# Finance / Legal system-of-record (additive, minimal, org-scoped)
+# =============================================================================
+
+
+class FinanceContract(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "finance_contracts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    contract_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    customer_name: Mapped[str] = mapped_column(String(255), default="")
+    customer_ref: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_accounts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    contact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_contacts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    deal_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_deals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)  # draft|active|suspended|terminated|cancelled
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    effective_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (
+        UniqueConstraint("org_id", "external_id", name="uq_finance_contracts_org_external_id"),
+        UniqueConstraint("org_id", "idempotency_key", name="uq_finance_contracts_org_idempotency_key"),
+        Index("ix_finance_contracts_org_status", "org_id", "status"),
+    )
+
+
+class FinanceContractVersion(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "finance_contract_versions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    contract_id: Mapped[str] = mapped_column(
+        ForeignKey("finance_contracts.id", ondelete="CASCADE"), index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)  # draft|pending_approval|approved|effective|superseded|void
+    title: Mapped[str] = mapped_column(String(255), default="")
+    terms: Mapped[str] = mapped_column(Text, default="")
+    amount_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    effective_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source: Mapped[str] = mapped_column(String(50), default="manual")
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (
+        UniqueConstraint("contract_id", "version_number", name="uq_finance_contract_versions_contract_version"),
+        UniqueConstraint("org_id", "idempotency_key", name="uq_finance_contract_versions_org_idempotency_key"),
+        Index("ix_finance_contract_versions_org_contract", "org_id", "contract_id"),
+    )
+
+
+class FinanceInvoice(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "finance_invoices"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    invoice_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    contract_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_contracts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    contract_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_contract_versions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_accounts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    contact_id: Mapped[str | None] = mapped_column(
+        ForeignKey("crm_contacts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)  # draft|issued|partially_paid|paid|void|overdue
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    subtotal_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    tax_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    total_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    amount_due_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    issued_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (
+        UniqueConstraint("org_id", "external_id", name="uq_finance_invoices_org_external_id"),
+        UniqueConstraint("org_id", "idempotency_key", name="uq_finance_invoices_org_idempotency_key"),
+        Index("ix_finance_invoices_org_status_due", "org_id", "status", "due_at"),
+    )
+
+
+class FinanceInvoiceLine(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "finance_invoice_lines"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    invoice_id: Mapped[str] = mapped_column(
+        ForeignKey("finance_invoices.id", ondelete="CASCADE"), index=True
+    )
+    line_no: Mapped[int] = mapped_column(Integer, default=1)
+    description: Mapped[str] = mapped_column(Text, default="")
+    quantity: Mapped[float] = mapped_column(Numeric(18, 6), default=1)
+    unit_amount_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    line_amount_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    tax_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (
+        UniqueConstraint("invoice_id", "line_no", name="uq_finance_invoice_lines_invoice_line_no"),
+        UniqueConstraint("org_id", "idempotency_key", name="uq_finance_invoice_lines_org_idempotency_key"),
+        Index("ix_finance_invoice_lines_org_invoice", "org_id", "invoice_id"),
+    )
+
+
+class FinancePayment(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "finance_payments"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    invoice_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_invoices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(50), default="manual", index=True)
+    provider_payment_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)  # pending|succeeded|failed|cancelled|refunded
+    amount_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    paid_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (
+        UniqueConstraint("org_id", "external_id", name="uq_finance_payments_org_external_id"),
+        UniqueConstraint("org_id", "idempotency_key", name="uq_finance_payments_org_idempotency_key"),
+        UniqueConstraint("org_id", "provider", "provider_payment_id", name="uq_finance_payments_org_provider_payment_id"),
+        Index("ix_finance_payments_org_status", "org_id", "status"),
+    )
+
+
+class FinanceRefund(Base, TimestampMixin, OrgScopedMixin):
+    __tablename__ = "finance_refunds"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    payment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_payments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    invoice_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_invoices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(50), default="manual", index=True)
+    provider_refund_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)  # pending|succeeded|failed|cancelled
+    amount_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    refunded_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (
+        UniqueConstraint("org_id", "external_id", name="uq_finance_refunds_org_external_id"),
+        UniqueConstraint("org_id", "idempotency_key", name="uq_finance_refunds_org_idempotency_key"),
+        UniqueConstraint("org_id", "provider", "provider_refund_id", name="uq_finance_refunds_org_provider_refund_id"),
+        Index("ix_finance_refunds_org_status", "org_id", "status"),
+    )
+
+
+class FinanceLedgerEntry(Base, TimestampMixin, OrgScopedMixin):
+    """Append-only-ish ledger record. Corrections should be compensating entries."""
+    __tablename__ = "finance_ledger_entries"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    entry_type: Mapped[str] = mapped_column(String(40), index=True)  # invoice_issue|payment|refund|adjustment|reversal
+    direction: Mapped[str] = mapped_column(String(10), default="debit")  # debit|credit
+    account_code: Mapped[str] = mapped_column(String(64), default="")
+    amount_minor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    currency: Mapped[str] = mapped_column(String(10), default="BRL")
+    occurred_at: Mapped[datetime] = mapped_column(default=_now, index=True)
+    contract_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_contracts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    invoice_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_invoices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    payment_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_payments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    refund_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_refunds.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reverses_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("finance_ledger_entries.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source_system: Mapped[str] = mapped_column(String(50), default="aios")
+    source_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
+    __table_args__ = (
+        UniqueConstraint("org_id", "external_id", name="uq_finance_ledger_entries_org_external_id"),
+        UniqueConstraint("org_id", "idempotency_key", name="uq_finance_ledger_entries_org_idempotency_key"),
+        Index("ix_finance_ledger_entries_org_occurred", "org_id", "occurred_at"),
+        Index("ix_finance_ledger_entries_org_type", "org_id", "entry_type"),
+    )
+
+
+class BusinessIdempotencyRecord(Base):
+    """Durable side-effect idempotency claim for business execution."""
+
+    __tablename__ = "business_idempotency_records"
+
+    scope: Mapped[str] = mapped_column(String(64), primary_key=True, default="global")
+    idempotency_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), default="processing")  # processing|completed|failed
+    adapter: Mapped[str] = mapped_column(String(64), default="")
+    action: Mapped[str] = mapped_column(String(128), default="")
+    org_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+    updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+    __table_args__ = (
+        UniqueConstraint("scope", "idempotency_key", name="uq_business_idempotency_scope_key"),
+    )

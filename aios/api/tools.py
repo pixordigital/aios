@@ -1,9 +1,12 @@
 import importlib
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
+from aios.core.approval_evidence import verify_and_consume_approval
+from aios.core.audit import log_audit
 from aios.core.tools import ToolEngine
 from aios.db.backend import get_db_backend, DatabaseBackend
 from aios.db.models import Organization, Tool
@@ -141,6 +144,30 @@ async def tool_audit_calls(user=Depends(get_current_user)):
     return ToolEngine.audit_summary()
 
 
+def _approval_tool_args_match(*, tool_name: str, args: dict[str, Any], tool_args: Any) -> bool:
+    if not isinstance(tool_args, dict):
+        return False
+    # Accept exact args or common wrapper shapes; reject mismatched explicit fields.
+    expected_name = str(tool_name or "")
+    if "tool_name" in tool_args and str(tool_args.get("tool_name") or "") != expected_name:
+        return False
+    candidates = [tool_args]
+    for k in ("args", "arguments", "payload", "input"):
+        v = tool_args.get(k)
+        if isinstance(v, dict):
+            candidates.append(v)
+    for cand in candidates:
+        if cand == args:
+            return True
+        # Subset match when args are explicit; extra metadata keys allowed.
+        if args and all(k in cand and cand.get(k) == v for k, v in args.items()):
+            # Avoid matching obvious wrappers with different nested payload.
+            if "args" in cand or "arguments" in cand or "payload" in cand or "input" in cand:
+                continue
+            return True
+    return False
+
+
 async def _tool_actor_context(db: DatabaseBackend, user) -> dict:
     """Best-effort actor identity for tool execution. Fail closed downstream if unresolved."""
     actor_departments: set[str] = set()
@@ -249,23 +276,77 @@ async def test_tool(
     user=Depends(get_current_user),
 ):
     tool = await db.get(Tool, tool_id)
+    await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.test_tool")
     args = body.get("args") or body.get("arguments") or {}
-    if tool and tool.code_reference and tool.code_reference.startswith("code:"):
+    approval_action_id = body.get("approval_action_id")
+    if tool.code_reference and tool.code_reference.startswith("code:"):
         from aios.tools.dynamic import register_dynamic_tool
         register_dynamic_tool(tool.name, tool.description, tool.code_reference[5:], tool.input_schema)
-    reason = await _direct_tool_hitl_reason(db, user, org_id, tool.name if tool else "", args)
+    reason = await _direct_tool_hitl_reason(db, user, org_id, tool.name, args)
+    approval_consumed = False
+
+    async def _consume(reason_text: str):
+        nonlocal approval_consumed
+        if approval_consumed:
+            return True, "ok"
+        if not approval_action_id:
+            return False, "approval_action_id required"
+        approval = await verify_and_consume_approval(
+            db,
+            org_id=str(org_id),
+            approval_action_id=str(approval_action_id),
+            expected_tool_name=str(tool.name),
+            args_match=lambda tool_args: _approval_tool_args_match(tool_name=str(tool.name), args=args, tool_args=tool_args),
+        )
+        audit_details = {
+            "reason": reason_text,
+            "tool_name": tool.name,
+            "approval_action_id": approval_action_id,
+            **dict(approval.details),
+        }
+        if not approval.ok:
+            await log_audit(
+                db, org_id, "tools.test.blocked", "tool",
+                user_id=getattr(user, "id", None),
+                resource_id=str(tool_id),
+                details=audit_details,
+            )
+            await db.commit()
+            return False, approval.reason
+        approval_consumed = True
+        await log_audit(
+            db, org_id, "tools.test.approval_consumed", "tool",
+            user_id=getattr(user, "id", None),
+            resource_id=str(tool_id),
+            details=audit_details,
+        )
+        await db.commit()
+        return True, "ok"
+
     if reason:
-        return {"ok": False, "error": f"HITL: {reason}", "requires_approval": True}
-    await verify_org_access_async(org_id, tool, db=db, actor_id=user.id, source="api.tools.test_tool")
+        ok, approval_reason = await _consume(reason)
+        if not ok:
+            return {"ok": False, "error": f"HITL: {reason}", "requires_approval": True, "approval_reason": approval_reason}
+
     import json
     from aios.core.tools import ToolEngine
     actor = await _tool_actor_context(db, user)
     eng = ToolEngine([tool.name], org_id=org_id, **actor)
     try:
-        out = await eng.execute(tool.name, json.dumps(args))
+        out = await eng.execute(tool.name, json.dumps(args), approved=bool(reason) or approval_consumed)
         return {"ok": True, "output": out}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        msg = str(e)
+        if "HITL/action policy" in msg or "requires approval" in msg:
+            ok, approval_reason = await _consume(msg)
+            if not ok:
+                return {"ok": False, "error": msg, "requires_approval": True, "approval_reason": approval_reason}
+            try:
+                out = await eng.execute(tool.name, json.dumps(args), approved=True)
+                return {"ok": True, "output": out}
+            except Exception as e2:
+                return {"ok": False, "error": str(e2)}
+        return {"ok": False, "error": msg}
 
 
 @router.get("/{tool_id}", response_model=ToolOut)

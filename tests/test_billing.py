@@ -1,9 +1,11 @@
-"""Billing is a commercial surface and AIOS ships as an internal tool first.
+"""Billing is a commercial surface — fail-closed by default.
 
-The router is deliberately not mounted, so these tests assert the surface is
-absent rather than half-working. Re-enable together with multi-tenant onboarding.
+Default: billing_enabled=False, internal_mode=False. API router does not mount
+billing; dashboard billing/proposal/trial return 404. No half-enabled
+commercial flow exposed unless explicitly enabled.
 """
 
+from aios.config import settings
 from httpx import AsyncClient
 
 
@@ -29,8 +31,18 @@ class TestBillingDisabled:
         response = await auth_client.get("/api/billing/usage")
         assert response.status_code == 404
 
-    async def test_billing_page_is_not_mounted(self, auth_client: AsyncClient):
-        # The dashboard redirects unauthenticated HTML requests (303), so what
-        # matters is that the page is not served.
+    async def test_billing_page_not_exposed_by_default(self, auth_client: AsyncClient):
         response = await auth_client.get("/dashboard/billing", follow_redirects=False)
-        assert response.status_code != 200
+        assert response.status_code == 404
+
+    async def test_proposal_not_exposed_by_default(self, auth_client: AsyncClient):
+        response = await auth_client.get("/dashboard/proposal", follow_redirects=False)
+        assert response.status_code == 404
+
+    async def test_billing_trial_not_exposed_by_default(self, auth_client: AsyncClient):
+        response = await auth_client.post("/dashboard/billing/trial", follow_redirects=False)
+        assert response.status_code == 404
+
+
+def test_billing_disabled_by_default():
+    assert settings.billing_enabled is False

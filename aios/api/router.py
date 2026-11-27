@@ -7,9 +7,12 @@ from .channels import router as channels_router
 from .conversations import router as conversations_router
 from .teams import router as teams_router
 from .tools import router as tools_router
+from aios.config import settings
 from .billing import router as billing_router
 from .files import router as files_router
 from .admin_api import router as admin_api_router
+from .business_execution import router as business_execution_router
+from .finance_sor import router as finance_sor_router
 from .ws import router as ws_router
 from .approvals import router as approvals_router
 from .skills import router as skills_router
@@ -85,9 +88,12 @@ api_router.include_router(conversations_router)
 api_router.include_router(channels_router)
 api_router.include_router(tools_router)
 api_router.include_router(analytics_router)
-api_router.include_router(billing_router)
+if settings.billing_enabled:
+    api_router.include_router(billing_router)
 api_router.include_router(files_router)
 api_router.include_router(admin_api_router)
+api_router.include_router(business_execution_router)
+api_router.include_router(finance_sor_router)
 api_router.include_router(ws_router)
 api_router.include_router(approvals_router)
 api_router.include_router(skills_router)
