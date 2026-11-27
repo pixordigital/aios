@@ -103,6 +103,36 @@ def test_inbound_populates_provider_message_id():
     assert "duplicate" in src
 
 
+def test_org_membership_timestamps_backfill_without_bound_sql_expression():
+    import importlib.util
+
+    import sqlalchemy as sa
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    path = VERSIONS / "e2f3a4b5c6d7_org_memberships_timestamps_not_null.py"
+    spec = importlib.util.spec_from_file_location("org_membership_backfill", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = sa.create_engine("sqlite:///:memory:")
+    with engine.connect() as conn:
+        conn.execute(sa.text(
+            "CREATE TABLE organization_memberships ("
+            "id INTEGER PRIMARY KEY, created_at DATETIME, updated_at DATETIME)"
+        ))
+        conn.execute(sa.text("INSERT INTO organization_memberships (id) VALUES (1)"))
+        conn.commit()
+        with Operations.context(MigrationContext.configure(conn)):
+            migration.upgrade()
+        conn.commit()
+        created_at, updated_at = conn.execute(sa.text(
+            "SELECT created_at, updated_at FROM organization_memberships"
+        )).one()
+        assert created_at is not None
+        assert updated_at is not None
+
+
 def test_agent_packs_migration_makes_pending_actions_nullable():
     p = VERSIONS / "b2c3d4e5f6a7_agent_packs.py"
     assert p.exists()

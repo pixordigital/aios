@@ -31,17 +31,14 @@ def upgrade():
         return
 
     bind = op.get_bind()
-    now = sa.func.now()
 
     # Backfill NULLs (ad-hoc rows) before enforcing NOT NULL, matching TimestampMixin intent.
+    # CURRENT_TIMESTAMP must stay inline: bound sa.func.now() reaches asyncpg as a
+    # SQL expression object and raises DataError on Postgres.
     if "created_at" in cols:
-        bind.execute(
-            sa.text("UPDATE organization_memberships SET created_at = :now WHERE created_at IS NULL").bindparams(now=now)
-        )
+        bind.execute(sa.text("UPDATE organization_memberships SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
     if "updated_at" in cols:
-        bind.execute(
-            sa.text("UPDATE organization_memberships SET updated_at = :now WHERE updated_at IS NULL").bindparams(now=now)
-        )
+        bind.execute(sa.text("UPDATE organization_memberships SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
 
     # Re-inspect after backfill so we only alter columns still nullable.
     cols = _org_memberships_columns()
