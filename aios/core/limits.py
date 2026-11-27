@@ -7,6 +7,7 @@ race conditions on concurrent agent runs — Paperclip-style atomic checkout.
 import logging
 import uuid as _uuid
 from datetime import date
+from typing import Any
 
 from sqlalchemy import func, select, text
 
@@ -43,6 +44,23 @@ async def _is_sqlite(db) -> bool:
         return bool(bind and bind.dialect.name == "sqlite")
     except Exception:
         return False
+
+
+def seat_allows_model(org: Any | None, user_id: str | None, model: str) -> bool:
+    """Per-seat allowed models via org.extra_data.seats: {user_id: [model, ...]}.
+
+    Empty/missing seat config -> allowed (org plan governs). Explicit list -> exact model match,
+    deny otherwise. Enforcement wiring into the run path is deferred (Phase 7 remainder).
+    """
+    if not org or not user_id:
+        return True
+    seats = (org.extra_data or {}).get("seats") or {}
+    if not isinstance(seats, dict) or not seats:
+        return True
+    allowed = seats.get(user_id) or []
+    if not allowed:
+        return True
+    return any(str(m) == str(model) for m in allowed)
 
 
 async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
