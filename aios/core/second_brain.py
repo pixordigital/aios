@@ -47,6 +47,27 @@ async def get_second_brain_injections(agent_id, org_id, query, top_k=3):
              "content": "=== Second Brain (AgentDB) ===\n" + "\n".join(lines[:top_k])}]
 
 
+async def ingest_conversation(agent_id, org_id, conversation_id, text, source="transcript"):
+    """Persist raw conversation text as a reflection/knowledge fact (best-effort)."""
+    ref = _trim(text, 400)
+    if not ref:
+        return
+    try:
+        from datetime import datetime
+
+        await agent_db.put_knowledge(
+            agent_id=agent_id,
+            org_id=org_id,
+            knowledge_type="reflection",
+            key=f"reflection:{source}:{conversation_id}:{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            value=ref,
+            source=source,
+            extra_data={"conversation_id": conversation_id, "source": source},
+        )
+    except Exception:
+        logger.debug("second_brain: conversation ingest failed", exc_info=True)
+
+
 async def consolidate_reflection(agent_id, org_id, conversation_id, reflections):
     """Write reflections to AgentDB: knowledge fact + success learning (best-effort)."""
     if not org_id:
