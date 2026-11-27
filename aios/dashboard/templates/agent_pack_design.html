@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem">
+  <div>
+    <h1>Desenhar Time</h1>
+    <p class="text-sm text-secondary mt-1">Design de time a partir de Solution base: gera AgentPack versionado (deterministic MVP).</p>
+  </div>
+  <a class="btn btn-ghost btn-sm" href="/dashboard/agent-packs">← Voltar</a>
+</div>
+
+<div class="card mb-4">
+  <h2 class="mb-2">Form</h2>
+  <form method="POST" action="/dashboard/agent-packs/design" class="grid-2" style="gap:0.75rem;max-width:720px">
+    <div>
+      <label>Base (Solution)</label>
+      <select class="input" name="base_key">
+        {% for s in solutions %}
+        <option value="{{ s.key }}">{{ s.title }} ({{ s.version }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Negocio / vertical</label>
+      <input class="input" name="vertical" placeholder="ex: clinica de estetica" required>
+    </div>
+    <div style="grid-column: 1 / -1">
+      <label>Adicionar ao prompt</label>
+      <textarea class="input" name="addon" rows="4" placeholder="Instrução de escopo do time..." required></textarea>
+    </div>
+    <div style="grid-column: 1 / -1">
+      <button class="btn btn-primary" type="submit">Desenhar time</button>
+    </div>
+  </form>
+</div>
+
+{% if error %}
+<div class="card mb-4" style="border-color:var(--red);color:var(--red)"><strong>Erro:</strong> {{ error }}</div>
+{% endif %}
+
+{% if design %}
+<div class="card mb-4">
+  <h2 class="mb-2">Design gerado</h2>
+  <div class="text-sm" style="display:grid;gap:0.375rem">
+    <div><span class="text-tertiary">base_key:</span> <span class="font-mono">{{ design.base_key }}</span></div>
+    <div><span class="text-tertiary">vertical:</span> <span>{{ design.vertical }}</span></div>
+    <div><span class="text-tertiary">identity_id:</span> <span class="font-mono">{{ design.identity_id }}</span></div>
+    <div><span class="text-tertiary">identity_name:</span> <span>{{ design.identity_name }}</span></div>
+    <div><span class="text-tertiary">version:</span> <span class="font-mono">{{ design.version }}</span></div>
+    <div><span class="text-tertiary">checksum:</span> <span class="font-mono" style="word-break:break-all">{{ design.checksum }}</span></div>
+    <div><span class="text-tertiary">description:</span> <span class="text-secondary">{{ design.description }}</span></div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

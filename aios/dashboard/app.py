@@ -4095,6 +4095,56 @@ async def agent_pack_export(request: Request, pack_id: str, version_id: str, tar
         raise HTTPException(status_code=500, detail="Falha ao exportar bundle") from e
 
 
+@router.get("/agent-packs/design")
+async def agent_pack_design_page(request: Request):
+    from aios.core.solution_pack import build_solution_pack, solution_pack_keys
+
+    solutions = []
+    for key in solution_pack_keys():
+        try:
+            m = build_solution_pack(key)
+            solutions.append({
+                "key": key,
+                "title": m.identity.name,
+                "desc": str(m.identity.description or ""),
+                "agent_type": m.identity.agent_type,
+                "version": m.version,
+            })
+        except Exception as e:
+            logger.warning("solution pack build failed key=%s err=%s", key, e)
+    return await _render("agent_pack_design.html", request, title="Desenhar Time", solutions=solutions, design=None, error="")
+
+
+@router.post("/agent-packs/design")
+async def agent_pack_design_create(
+    request: Request,
+    base_key: str = Form(""),
+    vertical: str = Form(...),
+    addon: str = Form(...),
+):
+    design = None
+    error = ""
+    if base_key:
+        try:
+            from aios.core.solution_pack import design_team_pack
+
+            m = design_team_pack(base_key, vertical, addon)
+            design = {
+                "base_key": base_key,
+                "vertical": vertical,
+                "addon": addon,
+                "identity_id": m.identity.id,
+                "identity_name": m.identity.name,
+                "agent_type": m.identity.agent_type,
+                "description": str(m.identity.description or ""),
+                "version": m.version,
+                "checksum": str(m.provenance.checksum_sha256 or ""),
+            }
+        except Exception as e:
+            error = str(e)
+    return await _render("agent_pack_design.html", request, title="Desenhar Time", solutions=[], design=design, error=error)
+
+
 # ─── Routines (read-only normalized view) ───
 
 @router.get("/routines", response_class=HTMLResponse)
