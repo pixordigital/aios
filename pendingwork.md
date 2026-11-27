@@ -40,6 +40,10 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - `design_team_pack` accepts `runtime_target` (default docker); design endpoint accepts `runtime_target` (default docker) → designed manifest can target openbot/openclaw.
 - Tests: design openbot → `runtime_targets[0].target == "openbot"`; default docker. Suite green (11 passed). Commit `1a33fdb`.
 
+### 2026-11-27 — Phase 6 CONCLUDED
+
+- Phase 6 slice shipped: runtime target pluggable through designer (openbot/openclaw capable). Design→install→activate execution for openbot remains in core install CLI (deferred). Phase 6 closed.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
