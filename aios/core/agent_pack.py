@@ -22,7 +22,18 @@ except Exception:  # pragma: no cover - optional dependency
 PACK_SCHEMA_VERSION = "1.0.0"
 MAX_PACK_BYTES = 128 * 1024
 
-RuntimeTarget = Literal["local_proc", "docker", "k8s", "wasm", "remote_http"]
+RuntimeTarget = Literal[
+    "local_proc",
+    "docker",
+    "k8s",
+    "wasm",
+    "remote_http",
+    "openclaw",
+    "openbot",
+    "claude_code",
+    "codex",
+    "opencode",
+]
 ApprovalMode = Literal["none", "ask_tools", "ask_all", "policy"]
 MemoryScopeKind = Literal["conversation", "agent", "team", "org"]
 RiskClass = Literal["read", "write", "side_effect", "destructive"]

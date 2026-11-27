@@ -283,6 +283,7 @@ class AgentPackDesignBody(BaseModel):
     base_key: str = Field(min_length=1, max_length=64)
     vertical: str = Field(min_length=1, max_length=120)
     addon: str = Field(min_length=1, max_length=4000)
+    runtime_target: str = "docker"
 
 
 @router.post("/design")
@@ -290,7 +291,7 @@ async def design_agent_pack(body: AgentPackDesignBody, user=Depends(get_current_
     """Design a new named team pack from a base Solution (deterministic MVP, no DB writes)."""
     if body.base_key not in solution_pack_keys():
         raise HTTPException(status_code=400, detail=f"Unknown base solution: {body.base_key}")
-    m = design_team_pack(body.base_key, body.vertical, body.addon)
+    m = design_team_pack(body.base_key, body.vertical, body.addon, runtime_target=body.runtime_target)
     return {
         "base_key": body.base_key,
         "vertical": body.vertical,

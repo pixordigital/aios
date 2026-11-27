@@ -72,7 +72,15 @@ def _slug(text: str) -> str:
     return slug[:63] or "team"
 
 
-def design_team_pack(base_key: str, vertical: str, addon: str, *, created_by: str = "designer", created_at: str = "2026-11-27") -> AgentPackManifest:
+def design_team_pack(
+    base_key: str,
+    vertical: str,
+    addon: str,
+    *,
+    created_by: str = "designer",
+    created_at: str = "2026-11-27",
+    runtime_target: str = "docker",
+) -> AgentPackManifest:
     """Design a new named team pack by cloning/adapting a base Solution (MVP, deterministic)."""
     base = build_solution_pack(base_key, created_by=created_by, created_at=created_at)
     version = SOLUTION_PACK_VERSION
@@ -94,7 +102,7 @@ def design_team_pack(base_key: str, vertical: str, addon: str, *, created_by: st
         routines=[],
         approvals=base.approvals,
         memory_scope=base.memory_scope,
-        runtime_targets=[PackRuntimeTarget(target="docker", entrypoint="main:run", image=None, resources={})],
+        runtime_targets=[PackRuntimeTarget(target=runtime_target, entrypoint="main:run", image=None, resources={})],  # type: ignore[arg-type]
         changelog=[PackChangelogEntry(version=version, date=created_at, summary=f"Designed team from {base_key}: {vertical}", author=created_by)],
         provenance=PackProvenance(source=f"designs:{base_key}", created_by=created_by, created_at=f"{created_at}T00:00:00Z", checksum_sha256=None, signature=None, parent_fingerprint=None),
     )

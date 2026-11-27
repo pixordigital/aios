@@ -122,6 +122,14 @@ async def test_design_agent_pack_from_base_solution(test_db_session, auth_client
     assert body["base_key"] == "vender"
     assert body["manifest"]["version"] == "1.0.0"
     assert body["manifest"]["identity"]["id"].startswith("sol-vender-")
+    assert body["manifest"]["runtime_targets"][0]["target"] == "docker"
+
+    r = await auth_client.post(
+        "/api/agent-packs/design",
+        json={"base_key": "vender", "vertical": "clinica de estetica", "addon": "Voce e o time comercial da clinica.", "runtime_target": "openbot"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["manifest"]["runtime_targets"][0]["target"] == "openbot"
 
     r = await auth_client.post("/api/agent-packs/design", json={"base_key": "nope", "vertical": "x", "addon": "y"})
     assert r.status_code == 400
