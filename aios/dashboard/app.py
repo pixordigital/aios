@@ -33,6 +33,7 @@ from sqlalchemy.orm import selectinload
 from aios.db.backend import db_session
 from aios.db.models import Agent, AgentInstance, AgentPack, AgentPackActivation, AgentPackVersion, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
 from aios.core.audit import log_audit
+from aios.core.agent_pack import pack_counts
 from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
 from aios.api.auth import _validate_password
@@ -3929,6 +3930,7 @@ async def agent_packs_list(request: Request):
             "active_version_label": _agent_pack_version_label(active),
             "version_count": len(p_versions),
             "updated_at": p.updated_at,
+            "counts": pack_counts(active.manifest_json if active is not None else None),
         })
     return await _render("agent_packs.html", request, title="Pacotes de Agentes", packs=rows)
 

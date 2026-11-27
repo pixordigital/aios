@@ -2,6 +2,14 @@
 
 Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` last verified 2026-11-24; local AIOS `main` matched `origin/main` after push. Recheck `git status`/`git rev-parse HEAD origin/main` before any further push.
 
+### 2026-11-27 — Phase 1 (agent pack vitrine counts) — IMPLEMENTED
+
+- Context: video follow-up wave — Alan Nicolas `28lKPCja5jk` ("Como Colocar uma Empresa Inteira para Rodar com IA (em 2027)", live 26/11/2026, 2h22) → transcript `/tmp/opencode/transcript_raw.txt`; roadmap "fases" 1-6 (vitrine+toggle, catálogo de times prontos, custo por agente/team, designer, gaps, install OpenClaw/OpenBot) — Phase 1 started.
+- Done: `pack_counts()` em `aios/core/agent_pack.py`; `agent_packs_list` injeta `counts` (routines/approval_mode/approval_required/runtime_targets/memory_scopes/memory_long_term); `agent_packs.html` colunas Rotinas/Approvals/Runtime/Memory; `tests/test_agent_packs_vitrine.py` (2 passed) + `tests/test_agent_packs_api.py` (8 passed); py_compile + Jinja parse OK; `graphify update .` OK.
+- Phase 1 partial: **vitrine feita**; **toggle rotina por org pendente decisão de design** (sources: `AutomationTrigger.is_active` / event subs `enabled`+agent status).
+- Next: toggle rotina (decidir design) OR Phase 2 catálogo de times prontos.
+
+
 ### 2026-11-25 shell-enabled resume — agent verification wave RUNNING
 
 - User granted `normal mode` (shell + push allowed) and requested pending/blocked work finished. 5 read-only agents launched: audit (`ses_ded69156affeWsv2JIcePkPDz6`), i18n smoke (`ses_ded691567ffetyF1epwgYOrcHq`), HITL tests (`ses_ded691561ffevHyz49YgdQgFRa`), new-feature tests (`ses_ded69155fffeqsYROxYLd81tzN`), dirty-code review (`ses_ded6870cbffe8IEVcocz7FMt25`). No agent may edit/commit/push/deploy.

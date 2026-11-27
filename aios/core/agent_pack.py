@@ -289,3 +289,24 @@ def validate_agent_pack(obj: dict[str, Any] | str | Path | AgentPackManifest) ->
         raise AgentPackValidationError(str(exc)) from exc
     except ValueError as exc:
         raise AgentPackValidationError(str(exc)) from exc
+
+
+def pack_counts(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    """Derive human-facing catalog counts from an AgentPack manifest.
+
+    Used by the dashboard vitrine: routines, approval policy, runtime targets and
+    memory scopes of the active version, without loading the full ORM graph.
+    """
+    m = manifest or {}
+    routines = m.get("routines") or []
+    approvals = m.get("approvals") or {}
+    memory = m.get("memory_scope") or {}
+    runtime_targets = m.get("runtime_targets") or []
+    return {
+        "routines": len(routines) if isinstance(routines, list) else 0,
+        "approval_mode": approvals.get("mode") or "ask_tools",
+        "approval_required": len(approvals.get("required_for") or []),
+        "runtime_targets": len(runtime_targets) if isinstance(runtime_targets, list) else 0,
+        "memory_scopes": len(memory.get("scopes") or []),
+        "memory_long_term": bool(memory.get("long_term_enabled")),
+    }

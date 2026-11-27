@@ -15,7 +15,7 @@
 <div class="table-wrap">
   <table>
     <thead><tr>
-      <th>Pacote</th><th>Tipo</th><th>Versão ativa</th><th>Versões</th><th>Atualizado</th><th></th>
+      <th>Pacote</th><th>Tipo</th><th>Versão ativa</th><th>Versões</th><th>Rotinas</th><th>Approvals</th><th>Runtime</th><th>Memory</th><th>Atualizado</th><th></th>
     </tr></thead>
     <tbody>
     {% for p in packs %}
@@ -28,11 +28,15 @@
         <td><span class="badge">{{ p.agent_type or '-' }}</span></td>
         <td class="text-xs font-mono">{{ p.active_version_label or '—' }}</td>
         <td class="text-xs">{{ p.version_count }}</td>
+        <td class="text-xs">{{ p.counts.routines or 0 }}</td>
+        <td class="text-xs">{{ p.counts.approval_mode or '-' }}{% if p.counts.approval_required %} <span class="text-tertiary">({{ p.counts.approval_required }} required)</span>{% endif %}</td>
+        <td class="text-xs">{{ p.counts.runtime_targets or 0 }}</td>
+        <td class="text-xs">{{ p.counts.memory_scopes or 0 }}</td>
         <td class="text-xs font-mono">{{ p.updated_at.strftime('%d/%m %H:%M') if p.updated_at else '-' }}</td>
         <td><a class="btn btn-ghost btn-sm" href="/dashboard/agent-packs/{{ p.id }}">Abrir</a></td>
       </tr>
     {% else %}
-      <tr><td colspan="6" class="text-secondary text-sm">Nenhum pacote encontrado para esta organização.</td></tr>
+      <tr><td colspan="10" class="text-secondary text-sm">Nenhum pacote encontrado para esta organização.</td></tr>
     {% endfor %}
     </tbody>
   </table>
