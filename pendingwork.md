@@ -31,7 +31,8 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Commit `05b83c0 feat(dashboard): add agent pack design page`. Tests agent-packs suite 12 passed; py_compile + Jinja OK; diff-check OK.
 
 - Fase 4 remainder: dashboard designer UI + commit. Next: Phase 5.
-- Fase 5 started: `second_brain.ingest_conversation(agent_id, org_id, conversation_id, text, source)` → put_knowledge(knowledge_type=reflection). Tests `tests/test_second_brain_ingest.py` (2 passed) + business_os 5 passed. Commit `7e0091c`. Fase 5 remainder: seat models/caps + maybe API endpoint to trigger ingest from transcript cache.
+- Fase 5 started: `second_brain.ingest_conversation(agent_id, org_id, conversation_id, text, source)` → put_knowledge(knowledge_type=reflection). Tests `tests/test_second_brain_ingest.py` (2 passed) + business_os 5 passed. Commit `7e0091c`.
+- Fase 5 CONCLUDED (2026-11-27): shipped ingest slice; seat models/caps deferred to next cycle (needs migration + billing wiring). Closeout note only.
 
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
