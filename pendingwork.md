@@ -44,6 +44,10 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 
 - Phase 6 slice shipped: runtime target pluggable through designer (openbot/openclaw capable). Design→install→activate execution for openbot remains in core install CLI (deferred). Phase 6 closed.
 
+### 2026-11-27 — Phase 7 started
+
+- `seat_allows_model(org, user_id, model)` em `aios/core/limits.py` via `org.extra_data.seats` ({user_id: [model]}). Empty seat -> allow (org plan governs); listed -> exact match, deny else. Enforcement wiring into run path deferred. Tests `tests/test_seat_limits.py` (4 passed). Commit `d09e8fa`. Phase 7 remainder: enforcement + membership-level allowed_models + migration.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
