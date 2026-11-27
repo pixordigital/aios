@@ -622,14 +622,61 @@ async def _org_filter(request: Request) -> str:
 
 @router.get("/one_person", response_class=HTMLResponse)
 async def dashboard_one_person(request: Request):
-    """OnePersonOS vision view: scaffold status, pending actions, decisions."""
+    """OnePersonOS vision view: scaffold status, packs, routines, HITL (one-person onboarding slice)."""
     from aios.core.one_person_os import DIRS
     import os
 
     base = str(settings.app_data_dir) if getattr(settings, "app_data_dir", None) else os.getcwd()
     dirs = {d: os.path.isdir(os.path.join(base, d)) for d in DIRS}
     all_done = bool(base) and all(dirs.values())
-    return await _render("one_person_os.html", request, dirs=dirs, all_done=all_done, base=base)
+    org_id = await _org_filter(request)
+    packs_count = 0
+    routines_count = 0
+    pending_approvals_count = 0
+    dlq_failures = []
+    try:
+        from aios.db.models import PendingAction
+        from aios.core.routines import list_routines
+        async with db_session() as db:
+            packs_count = (await db.execute(select(func.count(AgentPack.id)).where(AgentPack.org_id == org_id))).scalar() or 0
+            try:
+                rows = await list_routines(db, org_id, include_disabled=True)
+                routines_count = len(rows)
+            except Exception:
+                routines_count = 0
+            pending_approvals_count = (await db.execute(
+                select(func.count(PendingAction.id)).where(PendingAction.org_id == org_id, PendingAction.status == "pending")
+            )).scalar() or 0
+        # P2: org-scoped failed jobs needing human attention. Read-only, no payload exposure.
+        from aios.core.dead_letter import list_dlq_for_org
+        dlq_failures = await list_dlq_for_org(org_id, limit=5)
+    except Exception:
+        logger.debug("one_person counts failed", exc_info=True)
+    return await _render(
+        "one_person_os.html",
+        request,
+        dirs=dirs,
+        all_done=all_done,
+        base=base,
+        packs_count=packs_count,
+        routines_count=routines_count,
+        pending_approvals_count=pending_approvals_count,
+        dlq_failures=dlq_failures,
+    )
+
+
+@router.post("/one_person/init", response_class=HTMLResponse)
+async def dashboard_one_person_init(request: Request):
+    """Scaffold OnePersonOS dirs (reuse aios.core.one_person_os)."""
+    from aios.core.one_person_os import scaffold_one_person_os
+    import os
+
+    base = str(settings.app_data_dir) if getattr(settings, "app_data_dir", None) else os.getcwd()
+    try:
+        scaffold_one_person_os(base)
+    except Exception as e:
+        logger.warning("one_person scaffold failed: %s", e)
+    return RedirectResponse("/dashboard/one_person", status_code=303)
 
 
 @router.get("", response_class=HTMLResponse)

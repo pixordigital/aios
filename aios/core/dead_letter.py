@@ -72,6 +72,23 @@ async def list_dlq(limit: int = 50) -> list[dict]:
         return [_entry_to_dict(e) for e in rows]
 
 
+async def list_dlq_for_org(org_id: str | None, limit: int = 5) -> list[dict]:
+    """Read-only org-scoped failures still needing human attention (P2 escalation).
+
+    Retried entries are excluded; unlike list_dlq this never crosses orgs.
+    """
+    if not org_id:
+        return []
+    async with db_session() as db:
+        rows = (await db.execute(
+            select(DeadLetter).where(
+                DeadLetter.org_id == org_id,
+                DeadLetter.status != "retried",
+            ).order_by(DeadLetter.created_at.desc()).limit(limit)
+        )).scalars().all()
+        return [_entry_to_dict(e) for e in rows]
+
+
 async def retry_dlq(entry_id: str) -> dict:
     """Re-enqueue a DLQ'd job via ARQ. Payload carries the original job args.
 

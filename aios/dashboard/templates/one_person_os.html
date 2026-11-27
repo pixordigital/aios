@@ -4,32 +4,74 @@
 
 {% block content %}
 <h1 class="display-4 text-center mb-2">OnePersonOS</h1>
-<p class="lead text-center mb-5">Your one-person business operating system — vision view.</p>
+<p class="lead text-center mb-5">Onboarding mínimo para operação solo: config → packs → rotinas → HITL (gates).</p>
+<div class="alert alert-warning" role="alert">
+  <strong>Status: scaffold/operator-assisted.</strong> Domínios externos (pagamentos/CRM/e-mail/WhatsApp/calendário/fulfillment) <strong>não configurados por padrão</strong>. Nenhuma ação externa roda sem aprovação <strong>HITL</strong> (humano no loop). Não é automação de negócio ao vivo. Ver <a href="https://github.com/pixor-ai/aios/blob/main/docs/business-os-scope-limits.md" class="alert-link">docs/business-os-scope-limits.md</a>.
+</div>
 
 <div class="row justify-content-center">
   <div class="col-lg-8">
     <div class="card mb-4">
-      <div class="card-header">Structure ({% if all_done %}✅{% else %}⏳{% endif %})</div>
+      <div class="card-header">1) Workspace (config/local) ({% if all_done %}✅{% else %}⏳{% endif %})</div>
       <div class="card-body">
+        <p class="text-sm text-secondary mb-2">Base: <code>{{ base }}</code></p>
         <table class="table table-sm">
           <tbody>
-            <tr>
-              <th>Context</th>
-              <td class="text-{% if dirs['Context'] %}success{% else %}warning{% endif %}">{% if dirs['Context'] %}Created{% else %}Pending{% endif %}</td>
-            </tr>
-            <tr><th>Decision Log</th><td>{% if dirs['Decision_Log'] %}✅{% else %}⏳{% endif %}</td></tr>
+            <tr><th>Context</th><td class="{% if dirs['Context'] %}text-success{% else %}text-warning{% endif %}">{% if dirs['Context'] %}Criado{% else %}Pendente{% endif %}</td></tr>
+            <tr><th>Decision_Log</th><td>{% if dirs['Decision_Log'] %}✅{% else %}⏳{% endif %}</td></tr>
             <tr><th>Inbox</th><td>{% if dirs['Inbox'] %}✅{% else %}⏳{% endif %}</td></tr>
             <tr><th>Work</th><td>{% if dirs['Work'] %}✅{% else %}⏳{% endif %}</td></tr>
             <tr><th>Log</th><td>{% if dirs['Log'] %}✅{% else %}⏳{% endif %}</td></tr>
           </tbody>
         </table>
+        <form method="post" action="/dashboard/one_person/init" class="mt-2">
+          <button type="submit" class="btn btn-sm btn-primary" {% if all_done %}disabled{% endif %}>Criar pastas agora</button>
+        </form>
+        <p class="text-xs text-secondary mt-2">Reutiliza <code>aios.core.one_person_os.scaffold_one_person_os</code>. Ajustes de credenciais/planos em <a href="/dashboard/settings">Configurações</a>.</p>
       </div>
     </div>
-    <div class="card">
-      <div class="card-header">Recommendation</div>
+
+    <div class="card mb-4">
+      <div class="card-header">2) Agent Packs</div>
       <div class="card-body">
-        <p>Run <code>aios one_person_os --init {{ base }}</code> to scaffold all five dirs in seconds.</p>
-        <p>Mirror the shape of <a href="/dashboard/agents">agents.html</a>; when team_brain is configured, push Log/.* summaries via <code>aios.core.one_person_os.sync_one_person_os_to_team_brain</code>.</p>
+        <p class="mb-2">Pacotes instalados (org): <strong>{{ packs_count }}</strong></p>
+        <p class="text-sm text-secondary">Instalação/ativação seguem contratos do backend; ativação/rollback são <strong>HITL-gated</strong> (PendingAction) — nada muda sem aprovação humana.</p>
+        <a class="btn btn-sm btn-secondary" href="/dashboard/agent-packs">Ver / gerenciar packs</a>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">3) Rotinas</div>
+      <div class="card-body">
+        <p class="mb-2">Rotinas descobertas (visão normalizada): <strong>{{ routines_count }}</strong></p>
+        <p class="text-sm text-secondary">Lista read-only (cron/ARQ/workday/eventos/fixos). Use para conferir agendamentos antes de ativar automações.</p>
+        <a class="btn btn-sm btn-secondary" href="/dashboard/routines">Ver rotinas</a>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">4) HITL / Aprovações</div>
+      <div class="card-body">
+        <p class="mb-2">Aprovações pendentes: <strong>{{ pending_approvals_count }}</strong></p>
+        <p class="text-sm text-secondary">Efeitos externos e ações sensíveis exigem aprovação humana (ver <code>docs/business-os-scope-limits.md</code>). Não enfraquecer gates.</p>
+        <a class="btn btn-sm btn-secondary" href="/dashboard/approvals">Fila de aprovações</a>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">5) Falhas / Escalonamento humano</div>
+      <div class="card-body">
+        <p class="mb-2">Jobs falhos da org (sem reprocessamento): <strong>{{ dlq_failures | length }}</strong></p>
+        {% if dlq_failures %}
+        <table class="table table-sm">
+          <tbody>
+          {% for e in dlq_failures %}
+            <tr><td><code>{{ e.job_name }}</code></td><td>{{ (e.error or '')[:120] }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+        <p class="text-sm text-secondary">Sinais de falha para chamar humano. Nenhuma ação automática aqui; recuperação segue fluxo administrativo existente.</p>
       </div>
     </div>
   </div>

@@ -131,6 +131,25 @@ async def test_dlq_retry_sets_status(async_client):
         assert entry.retried_at is not None
 
 
+async def test_list_dlq_for_org_is_org_scoped_and_excludes_retried(async_client):
+    """P2 escalation view must not leak other orgs or show already-recovered jobs."""
+    from aios.core.dead_letter import list_dlq_for_org, write_dlq
+    from aios.db.backend import db_session
+    from aios.db.models import DeadLetter
+
+    mine = await write_dlq(direction="outbound", channel_type="x", job_name="p2_a", payload={}, error="a", org_id="p2_org_a")
+    other = await write_dlq(direction="outbound", channel_type="x", job_name="p2_b", payload={}, error="b", org_id="p2_org_b")
+    async with db_session() as db:
+        row = await db.get(DeadLetter, mine)
+        row.status = "retried"
+        await db.commit()
+
+    rows = await list_dlq_for_org("p2_org_a", limit=20)
+    assert all(e["org_id"] == "p2_org_a" for e in rows)
+    assert all(e["id"] not in (mine, other) for e in rows)
+    assert await list_dlq_for_org("", limit=20) == []
+
+
 async def test_dlq_clear(async_client):
     from aios.core.dead_letter import write_dlq
     await write_dlq(direction="outbound", channel_type="x", job_name="j", payload={}, error="e1")
