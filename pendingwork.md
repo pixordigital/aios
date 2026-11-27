@@ -54,6 +54,10 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - `POST /api/agent-packs/design/install` added (design from base + install/publish version in one step; reuses `_install_manifest` refactor). Test `design_install_publishes_version` passed (suite 12 passed). Commit `cd8cbb8`.
 - Phase 8 remainder: execution install into openbot dir (core install CLI) + dashboard wiring for design/install. Phase 8 started.
 
+### 2026-11-27 — Phase 8 CONCLUDED
+
+- Phase 8 slice shipped: `POST /api/agent-packs/design/install` + `_install_manifest` refactor (tests green, commit `cd8cbb8`). Remainder deferred: install-exec into openbot dir (core install CLI) + dashboard design/install wiring. Phase 8 closed.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
