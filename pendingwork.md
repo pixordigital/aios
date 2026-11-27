@@ -17,6 +17,12 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Next: wire solutions into dashboard vitrine/UI; then Phase 3 (custo por agente/team).
 - Phase 2 follow-up done: `agent_packs_list` now appends solution packs (source=solution, active v1.0.0, counts) — commits `1db795a` + `a9c2ce7`. Phase 2 CLOSED. Next: Phase 3.
 
+### 2026-11-27 — Phase 3 STARTED
+
+- Backend already existed: `aios/core/limits.py::get_agent_usage_breakdown` + `GET /api/analytics/usage/agents` (pre-existing, verified).
+- This session: added `tests/test_agent_usage_breakdown.py` (1 passed) — per-agent tokens aggregation + name enrichment.
+- Phase 3 next: surface breakdown in dashboard/UI (usage page) for teams. Then Phase 4 (designer).
+
 
 ### 2026-11-25 shell-enabled resume — agent verification wave RUNNING
 
