@@ -27,3 +27,45 @@ def test_seat_allows_model_denies_unlisted_model():
 def test_seat_allows_model_other_seat_unlisted_denies():
     org = _org({"seats": {"u1": ["openai/gpt-4o-mini"]}})
     assert seat_allows_model(org, "u2", "openai/gpt-4o-mini") is True  # empty seat -> allow
+
+
+def test_membership_allowed_models_used_without_org_seats():
+    org = _org({})
+    assert seat_allows_model(org, "u1", "openai/gpt-4o-mini", ["openai/gpt-4o-mini"]) is True
+    assert seat_allows_model(org, "u1", "openai/gpt-4o", ["openai/gpt-4o-mini"]) is False
+
+
+def test_org_seats_override_membership():
+    org = _org({"seats": {"u1": ["openai/gpt-4o"]}})
+    assert seat_allows_model(org, "u1", "openai/gpt-4o", ["openai/gpt-4o-mini"]) is True
+    assert seat_allows_model(org, "u1", "openai/gpt-4o-mini", ["openai/gpt-4o-mini"]) is False
+
+
+def test_missing_model_never_enforces_seat():
+    org = _org({"seats": {"u1": ["openai/gpt-4o-mini"]}})
+    assert seat_allows_model(org, "u1", None) is True
+
+
+def test_check_org_limits_denies_membership_model_mismatch():
+    import asyncio
+
+    from aios.core.limits import check_org_limits
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return ["openai/gpt-4o-mini"]
+
+    class _DB:
+        async def get(self, model, ident):
+            org = _org({})
+            org.is_active = True
+            org.license_status = "active"
+            return org
+
+        async def execute(self, stmt, *a, **k):
+            assert "organization_memberships" in str(stmt)
+            return _Result()
+
+    allowed, reason = asyncio.run(check_org_limits("org-1", _DB(), user_id="u1", model="openai/gpt-4o"))
+    assert allowed is False
+    assert "not allowed for model" in reason

@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import func, select, text
 
 from aios.config import PLANS, DEFAULT_PLAN
-from aios.db.models import Agent, Organization, UsageRecord
+from aios.db.models import Agent, Organization, OrganizationMembership, UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +46,24 @@ async def _is_sqlite(db) -> bool:
         return False
 
 
-def seat_allows_model(org: Any | None, user_id: str | None, model: str) -> bool:
-    """Per-seat allowed models via org.extra_data.seats: {user_id: [model, ...]}.
+def seat_allows_model(
+    org: Any | None,
+    user_id: str | None,
+    model: str | None,
+    membership_allowed_models: list | None = None,
+) -> bool:
+    """Per-seat allowed models. org.extra_data.seats wins; else membership row.
 
-    Empty/missing seat config -> allowed (org plan governs). Explicit list -> exact model match,
-    deny otherwise. Enforcement wiring into the run path is deferred (Phase 7 remainder).
+    Gate needs both user and model; unset -> allowed (org plan governs).
+    Explicit list -> exact match, deny otherwise.
     """
-    if not org or not user_id:
+    if not org or not user_id or not model:
         return True
     seats = (org.extra_data or {}).get("seats") or {}
-    if not isinstance(seats, dict) or not seats:
-        return True
-    allowed = seats.get(user_id) or []
+    if isinstance(seats, dict) and seats:
+        allowed = seats.get(user_id) or []
+    else:
+        allowed = membership_allowed_models or []
     if not allowed:
         return True
     return any(str(m) == str(model) for m in allowed)
@@ -71,8 +77,7 @@ async def check_org_limits(org_id: str, db, user_id: str | None = None, model: s
     caller's next commit (track_usage uses the same session), not for the
     whole run. No run-long atomicity is claimed.
 
-    user_id + model plumb the per-seat allowlist gate (Phase 7 helper ->
-    Phase 9 enforcement point); unset -> org plan governs (legacy behavior).
+    user_id + model plumb the per-seat allowlist gate; unset -> org plan governs.
     """
     org = await db.get(Organization, org_id)
     if not org:
@@ -88,8 +93,22 @@ async def check_org_limits(org_id: str, db, user_id: str | None = None, model: s
     if status not in ("active", "", "trial"):
         return False, f"Organization is {status}"
 
-    if user_id and not seat_allows_model(org, user_id, model or ""):
-        return False, f"Seat {user_id} not allowed for model {model or ''}"
+    if user_id and model:
+        membership_models = None
+        try:
+            membership_models = (
+                await db.execute(
+                    select(OrganizationMembership.allowed_models).where(
+                        OrganizationMembership.org_id == org_id,
+                        OrganizationMembership.user_id == user_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        except Exception:
+            # Legacy DB before the allowed_models column: org seats still govern.
+            logger.warning("seat membership lookup failed; falling back to org seats", exc_info=True)
+        if not seat_allows_model(org, user_id, model, membership_models):
+            return False, f"Seat {user_id} not allowed for model {model}"
 
     from aios.config import settings as _settings
     if _settings.internal_mode:

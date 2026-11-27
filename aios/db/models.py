@@ -105,6 +105,8 @@ class OrganizationMembership(Base, TimestampMixin):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(50), default="admin")
+    # Per-seat model allowlist. Empty/NULL -> org plan governs.
+    allowed_models: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
 
     user = relationship("User", back_populates="memberships")
     organization = relationship("Organization")

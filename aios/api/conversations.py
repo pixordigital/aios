@@ -45,6 +45,19 @@ async def _get_conversation(
     return conv
 
 
+async def _turn_model(db: DatabaseBackend, conv: Conversation) -> str | None:
+    """Model used by this turn's agent (or first team agent), for seat checks."""
+    agent_id = conv.agent_id
+    if not agent_id and conv.team_id:
+        team = await db.get(Team, conv.team_id)
+        agent_id = team.agents[0].id if team and team.agents else None
+    if agent_id:
+        agent = await db.get(Agent, agent_id)
+        if agent:
+            return str((agent.llm_config or {}).get("model") or "") or None
+    return None
+
+
 @router.post("", response_model=ConversationOut)
 async def create_conversation(
     body: ConversationCreate,
@@ -274,7 +287,7 @@ async def send_message(
     reply_msg: Message | None = None
 
     # check org limits before routing
-    allowed, reason = await check_org_limits(org_id, db)
+    allowed, reason = await check_org_limits(org_id, db, user_id=user.id, model=await _turn_model(db, conv))
     if not allowed:
         reply_msg = Message(
             conversation_id=conversation_id,
@@ -338,7 +351,7 @@ async def send_message_stream(
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return StreamingResponse(handover_stream(), media_type="text/event-stream")
 
-    allowed, reason = await check_org_limits(org_id, db)
+    allowed, reason = await check_org_limits(org_id, db, user_id=user.id, model=await _turn_model(db, conv))
     if not allowed:
         async def err_stream():
             yield f"data: {json.dumps({'type': 'token', 'content': f'⚠️ {reason}'})}\n\n"
