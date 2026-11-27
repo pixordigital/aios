@@ -7,7 +7,7 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Context: video follow-up wave — Alan Nicolas `28lKPCja5jk` ("Como Colocar uma Empresa Inteira para Rodar com IA (em 2027)", live 26/11/2026, 2h22) → transcript `/tmp/opencode/transcript_raw.txt`; roadmap "fases" 1-6 (vitrine+toggle, catálogo de times prontos, custo por agente/team, designer, gaps, install OpenClaw/OpenBot) — Phase 1 started.
 - Done: `pack_counts()` em `aios/core/agent_pack.py`; `agent_packs_list` injeta `counts` (routines/approval_mode/approval_required/runtime_targets/memory_scopes/memory_long_term); `agent_packs.html` colunas Rotinas/Approvals/Runtime/Memory; `tests/test_agent_packs_vitrine.py` (2 passed) + `tests/test_agent_packs_api.py` (8 passed); py_compile + Jinja parse OK; `graphify update .` OK.
 - Phase 1 partial: **vitrine feita**; **toggle rotina por org pendente decisão de design** (sources: `AutomationTrigger.is_active` / event subs `enabled`+agent status).
-- Next: toggle rotina (decidir design) OR Phase 2 catálogo de times prontos.
+- Phase 1 CONCLUDED (2026-11-27): shipped vitrine counts slice; toggle design deferred to Phase 1 remainder. Phase 1 closed.
 
 ### 2026-11-27 — Phase 2 (named solution packs) — IMPLEMENTED
 
