@@ -34,6 +34,7 @@ from aios.db.backend import db_session
 from aios.db.models import Agent, AgentInstance, AgentPack, AgentPackActivation, AgentPackVersion, ChannelConnection, Conversation, Invitation, Message, Organization, Team, User, team_agents
 from aios.core.audit import log_audit
 from aios.core.agent_pack import pack_counts
+from aios.core.solution_pack import build_solution_pack, solution_pack_keys
 from aios.templates import TEMPLATES, apply_template
 from aios.api.deps import COOKIE_NAME, create_jwt_token
 from aios.api.auth import _validate_password
@@ -3932,6 +3933,24 @@ async def agent_packs_list(request: Request):
             "updated_at": p.updated_at,
             "counts": pack_counts(active.manifest_json if active is not None else None),
         })
+    for key in solution_pack_keys():
+        try:
+            m = build_solution_pack(key)
+            rows.append({
+                "id": f"sol-{key}",
+                "pack_key": f"sol-{key}",
+                "name": m.identity.name,
+                "description": str(m.identity.description or ""),
+                "agent_type": m.identity.agent_type,
+                "active_version_id": None,
+                "active_version_label": f"v{m.version}",
+                "version_count": 1,
+                "updated_at": None,
+                "source": "solution",
+                "counts": pack_counts(m.model_dump(mode="json")),
+            })
+        except Exception as e:
+            logger.warning("solution pack build failed key=%s err=%s", key, e)
     return await _render("agent_packs.html", request, title="Pacotes de Agentes", packs=rows)
 
 

@@ -23,6 +23,7 @@
         <td>
           <div style="font-weight:500">{{ p.name or p.pack_key }}</div>
           <div class="text-xs text-tertiary font-mono">{{ p.pack_key }}</div>
+          {% if p.source == 'solution' %}<div><span class="badge">solução</span></div>{% endif %}
           {% if p.description %}<div class="text-xs text-secondary mt-1">{{ p.description[:140] }}{% if p.description|length > 140 %}…{% endif %}</div>{% endif %}
         </td>
         <td><span class="badge">{{ p.agent_type or '-' }}</span></td>
