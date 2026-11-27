@@ -63,13 +63,16 @@ def seat_allows_model(org: Any | None, user_id: str | None, model: str) -> bool:
     return any(str(m) == str(model) for m in allowed)
 
 
-async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
+async def check_org_limits(org_id: str, db, user_id: str | None = None, model: str | None = None) -> tuple[bool, str]:
     """Check if org can execute another agent run. Returns (allowed, reason).
 
     Best-effort SELECT FOR UPDATE on today's UsageRecord row reduces
     double-spending on concurrent runs. The lock is held only until the
     caller's next commit (track_usage uses the same session), not for the
     whole run. No run-long atomicity is claimed.
+
+    user_id + model plumb the per-seat allowlist gate (Phase 7 helper ->
+    Phase 9 enforcement point); unset -> org plan governs (legacy behavior).
     """
     org = await db.get(Organization, org_id)
     if not org:
@@ -84,6 +87,9 @@ async def check_org_limits(org_id: str, db) -> tuple[bool, str]:
     status = (getattr(org, "license_status", None) or "active").lower()
     if status not in ("active", "", "trial"):
         return False, f"Organization is {status}"
+
+    if user_id and not seat_allows_model(org, user_id, model or ""):
+        return False, f"Seat {user_id} not allowed for model {model or ''}"
 
     from aios.config import settings as _settings
     if _settings.internal_mode:
