@@ -65,3 +65,38 @@ def build_solution_pack_dict(key: str) -> dict[str, Any]:
         "version": m.version,
         "manifest": m.model_dump(mode="json"),
     }
+
+
+def _slug(text: str) -> str:
+    slug = "".join(c if c.isalnum() else "-" for c in text.lower()).strip("-")
+    return slug[:63] or "team"
+
+
+def design_team_pack(base_key: str, vertical: str, addon: str, *, created_by: str = "designer", created_at: str = "2026-11-27") -> AgentPackManifest:
+    """Design a new named team pack by cloning/adapting a base Solution (MVP, deterministic)."""
+    base = build_solution_pack(base_key, created_by=created_by, created_at=created_at)
+    version = SOLUTION_PACK_VERSION
+    slug = _slug(vertical)
+    prompt_text = str(base.prompt.system_prompt) + f"\n\n# Escopo do time (projeto: {vertical})\n{addon}"
+    manifest = AgentPackManifest(
+        schema_version="1.0.0",
+        version=version,
+        identity=PackIdentity(
+            id=f"sol-{base_key}-{slug}",
+            name=f"{base.identity.name} — {vertical[:60]}",
+            agent_type=base.identity.agent_type,
+            description=f"Designed team from {base_key}: {vertical}",
+            owner=base.identity.owner,
+            tags=[base_key, slug],
+        ),
+        prompt=PackPrompt(system_prompt=prompt_text, variables=list(base.prompt.variables), scaffold_required=True),
+        tools=base.tools,
+        routines=[],
+        approvals=base.approvals,
+        memory_scope=base.memory_scope,
+        runtime_targets=[PackRuntimeTarget(target="docker", entrypoint="main:run", image=None, resources={})],
+        changelog=[PackChangelogEntry(version=version, date=created_at, summary=f"Designed team from {base_key}: {vertical}", author=created_by)],
+        provenance=PackProvenance(source=f"designs:{base_key}", created_by=created_by, created_at=f"{created_at}T00:00:00Z", checksum_sha256=None, signature=None, parent_fingerprint=None),
+    )
+    validated = validate_agent_pack(manifest)
+    return validated.model_copy(update={"provenance": validated.provenance.model_copy(update={"checksum_sha256": _checksum_fingerprint(validated)})})
