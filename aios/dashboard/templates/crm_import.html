@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Importar CRM (CSV/JSON)</h1>
+<p class="text-sm text-secondary mb-4">Envie um arquivo, escolha mapeamento e chave de deduplicação, revise a prévia e <strong>aprovar</strong> antes de gravar. Nada é salvo sem sua confirmação.</p>
+
+<div class="card mb-4">
+  <h2 style="font-size:1rem">1) Enviar arquivo</h2>
+  <form method="POST" action="/dashboard/crm/import/preview" enctype="multipart/form-data" style="display:flex;flex-direction:column;gap:0.75rem;max-width:640px">
+    <div>
+      <label style="font-size:0.75rem;color:var(--text-tertiary)">Arquivo (.csv ou .json)</label>
+      <input type="file" name="file" accept=".csv,.json,application/json,text/csv" class="input" required>
+    </div>
+    <div>
+      <label style="font-size:0.75rem;color:var(--text-tertiary)">Chave de deduplicação</label>
+      <select name="dedupe_key" class="input">
+        <option value="lead_email">E-mail (lead_email)</option>
+        <option value="lead_phone">Telefone (lead_phone)</option>
+        <option value="none">Sem dedupe (sempre criar / anexar)</option>
+      </select>
+      <div class="text-xs text-tertiary" style="margin-top:0.25rem">Usado para atualizar registro existente (se escolhido “upsert”). Se “sem dedupe”, tudo vira novo.</div>
+    </div>
+    <div>
+      <label style="font-size:0.75rem;color:var(--text-tertiary)">Modo de aplicação</label>
+      <select name="apply_mode" class="input">
+        <option value="upsert">Upsert: atualizar se achar por chave, senão criar</option>
+        <option value="create_only">Somente criar (ignora correspondências; pode duplicar se não deduplicar)</option>
+      </select>
+    </div>
+    <div>
+      <label style="font-size:0.75rem;color:var(--text-tertiary)">Pipeline padrão (opcional)</label>
+      <input name="pipeline" class="input" value="default" placeholder="default">
+    </div>
+    <div>
+      <label style="font-size:0.75rem;color:var(--text-tertiary)">Mapeamento (JSON simples): campo do arquivo → campo do CRM</label>
+      <textarea name="mapping_json" class="input" rows="4" placeholder='{"Nome":"lead_name","Email":"lead_email","Telefone":"lead_phone","Valor":"value"}'></textarea>
+      <div class="text-xs text-tertiary" style="margin-top:0.25rem">Campos CRM aceitos: <code class="font-mono">lead_name</code>, <code class="font-mono">lead_email</code>, <code class="font-mono">lead_phone</code>, <code class="font-mono">value</code>, <code class="font-mono">stage</code>, <code class="font-mono">source</code>, <code class="font-mono">score</code>. Se vazio, tenta mapear automaticamente (nome/email/phone/value/stage).</div>
+    </div>
+    <div class="text-sm" style="color:var(--amber);background:var(--amber-subtle);padding:0.5rem;border-radius:6px">
+      <strong>Risco/observação:</strong> esta ação grava no CRM após aprovação. Custos/limites do sistema: <strong>desconhecido</strong> (não há item de limite/custo de importação definido em <code class="font-mono">aios/config.py</code> / <code class="font-mono">aios/core/limits.py</code> para esta operação). Revise a prévia antes de aprovar.
+    </div>
+    <div style="display:flex;gap:0.5rem">
+      <button class="btn btn-primary" type="submit">Pré-visualizar</button>
+      <a class="btn btn-ghost" href="/dashboard/crm">Voltar ao CRM</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

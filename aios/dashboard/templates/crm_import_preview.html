@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Prévia da importação CRM</h1>
+<p class="text-sm text-secondary mb-4">Revise os dados antes de solicitar aprovação. Após aprovar em <a href="/dashboard/approvals">Aprovações</a>, a importação será executada.</p>
+
+<div class="card mb-4">
+  <h2 style="font-size:1rem">Resumo</h2>
+  <div class="text-sm">
+    <div>Total de linhas no arquivo: <strong>{{ total_rows }}</strong></div>
+    <div>Linhas válidas (com ao menos nome ou e-mail ou telefone): <strong>{{ valid_rows }}</strong></div>
+    <div>Chave de dedupe: <strong>{{ dedupe_key }}</strong> • Modo: <strong>{{ apply_mode }}</strong> • Pipeline: <strong>{{ pipeline }}</strong></div>
+    <div style="margin-top:0.5rem">Correspondências encontradas (por chave, nesta org): <strong>{{ matched_count }}</strong> • Novos: <strong>{{ new_count }}</strong></div>
+  </div>
+</div>
+
+<div class="card mb-4" style="border-left:4px solid var(--amber)">
+  <h2 style="font-size:1rem">Risco e custo</h2>
+  <p class="text-sm text-secondary mb-2">Esta importação grava dados no CRM <strong>somente após aprovação explícita</strong>. Não há sobrescrita silenciosa: você vê esta prévia e aprova manualmente.</p>
+  <p class="text-sm text-secondary"><strong>Custo/limites do sistema:</strong> desconhecido (não há limite/custo de importação de CRM definido em <code class="font-mono">aios/config.py</code> / <code class="font-mono">aios/core/limits.py</code> para esta operação). Se houver custo externo futuro, ele será informado antes da execução.</p>
+</div>
+
+<div class="card mb-4">
+  <h2 style="font-size:1rem">Amostra (até 20 linhas)</h2>
+  <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:0.75rem">
+      <thead>
+        <tr style="background:var(--bg-elevated);text-align:left;border-bottom:1px solid var(--border)">
+          {% for h in sample_headers %}<th style="padding:0.5rem">{{ h }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in sample_rows %}
+        <tr style="border-bottom:1px solid var(--border)">
+          {% for h in sample_headers %}<td style="padding:0.5rem">{{ r.get(h, '') }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if total_rows > 20 %}<p class="text-xs text-tertiary" style="margin-top:0.5rem">Mostrando 20 de {{ valid_rows }} linhas válidas.</p>{% endif %}
+</div>
+
+<form method="POST" action="/dashboard/crm/import/apply-request">
+  <input type="hidden" name="dedupe_key" value="{{ dedupe_key }}">
+  <input type="hidden" name="apply_mode" value="{{ apply_mode }}">
+  <input type="hidden" name="pipeline" value="{{ pipeline }}">
+  <textarea name="rows_json" style="display:none">{{ rows_json }}</textarea>
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+    <button class="btn btn-primary" type="submit">Solicitar aprovação para importar ({{ valid_rows }} linhas)</button>
+    <a class="btn btn-ghost" href="/dashboard/crm/import">Voltar</a>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem;align-items:flex-start">
+  <div>
+    <h1>Conectores</h1>
+    <p class="text-sm text-secondary" style="max-width:52rem;line-height:1.6">Central de conexões: veja o que está ligado, o que falta configurar e como validar (quando houver teste disponível). Tudo claro, sem promessas ocultas.</p>
+  </div>
+</div>
+
+<div class="grid-2 mb-4" style="gap:1rem">
+  <div class="card" style="padding:1.25rem">
+    <div class="flex-between" style="margin-bottom:0.75rem;align-items:flex-start;gap:0.5rem;flex-wrap:wrap">
+      <h2 style="font-size:1rem;margin:0;font-weight:600">WhatsApp (Evolution)</h2>
+      {% if evo_configured %}
+        <span class="badge"><span class="badge-dot" style="background:var(--green)"></span> Configurado</span>
+      {% else %}
+        <span class="badge"><span class="badge-dot" style="background:var(--amber)"></span> Não configurado</span>
+      {% endif %}
+    </div>
+    <p class="text-sm text-secondary" style="margin-bottom:0.75rem;line-height:1.6">
+      Conecta o WhatsApp da sua empresa para receber e enviar mensagens (com aprovação humana em fluxos de envio). Requer URL do servidor Evolution e chave de API configuradas no servidor/Coolify. Permissões: acesso à API Evolution e ao webhook do AIOS.
+    </p>
+
+    {% if evo_error %}
+      <div class="text-sm" style="color:var(--amber);background:var(--amber-subtle);padding:0.6rem 0.75rem;border-radius:8px;margin-bottom:0.75rem;line-height:1.5">{{ evo_error }}</div>
+    {% else %}
+      <div class="text-sm text-secondary" style="margin-bottom:0.75rem;line-height:1.6">
+        {% if evo_instances_count is not none %}
+          Instâncias visíveis para sua organização no gateway: <strong style="color:var(--text)">{{ evo_instances_count }}</strong>
+        {% else %}
+          Status: <em>não verificado agora</em> (gateway indisponível ou não configurado).
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.75rem">
+      <a class="btn btn-ghost btn-sm" href="/dashboard/whatsapp">Ver WhatsApp</a>
+      <a class="btn btn-ghost btn-sm" href="/dashboard/evolution">Instâncias (legado)</a>
+    </div>
+    <p class="text-xs text-tertiary" style="margin-top:0.875rem;line-height:1.5">Validação rápida: abra "Ver WhatsApp" e confira conexão/QR. Teste automático da API não é feito aqui para evitar chamadas extras.</p>
+  </div>
+
+  <div class="card" style="padding:1.25rem">
+    <div class="flex-between" style="margin-bottom:0.75rem;align-items:flex-start;gap:0.5rem;flex-wrap:wrap">
+      <h2 style="font-size:1rem;margin:0;font-weight:600">Importar contatos/leads para o CRM</h2>
+      <span class="badge"><span class="badge-dot" style="background:var(--accent)"></span> Disponível</span>
+    </div>
+    <p class="text-sm text-secondary" style="margin-bottom:0.75rem;line-height:1.6">
+      Importe CSV ou JSON. Você define mapeamento, revisa prévia (contagem, exemplos, chave de dedupe) e confirma antes de gravar. Nada é salvo sem aprovação explícita sua.
+    </p>
+    <div class="text-sm text-secondary" style="margin-bottom:0.75rem;line-height:1.6">
+      Formatos: <code class="font-mono">.csv</code>, <code class="font-mono">.json</code> (lista de objetos ou objeto com <code class="font-mono">deals</code>/<code class="font-mono">items</code>/<code class="font-mono">rows</code>).
+    </div>
+    <div style="margin-top:0.75rem">
+      <a class="btn btn-primary btn-sm" href="/dashboard/crm/import">Iniciar importação (CSV/JSON)</a>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="padding:1.25rem">
+  <h2 style="font-size:1rem;margin-bottom:0.5rem;font-weight:600">Outros conectores</h2>
+  <p class="text-sm text-secondary" style="line-height:1.6;margin:0">Novas integrações aparecem aqui quando forem liberadas (curadoria). Se precisar de algo específico, fale com o suporte.</p>
+</div>
+{% endblock %}

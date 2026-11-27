@@ -3,7 +3,10 @@
 {% include '_whatsapp_tabs.html' %}
 <div class="flex-between mb-4">
   <div><h1>WhatsApp</h1><p class="text-sm text-secondary">Conecte seu número — Baileys, Cloud API ou Coexistence (App + Cloud mesmo número)</p></div>
-  <button class="btn btn-primary" onclick="document.getElementById('evo-create').showModal()">+ Nova instância</button>
+  <div class="flex-center gap-2" style="flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="document.getElementById('evo-create').showModal()">+ Nova instância</button>
+    <button class="btn btn-ghost" onclick="document.getElementById('wa-send-draft').showModal()">✉️ Enviar (rascunho → aprovação)</button>
+  </div>
 </div>
 
 <dialog id="evo-create" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:1.25rem;width:min(480px,94vw);color:var(--text)">
@@ -13,6 +16,22 @@
     <select name="provider" class="input"><option value="baileys">Baileys (Web) — c/ anti-ban gateway</option><option value="cloud">Cloud API (Meta oficial)</option><option value="coexistence">Coexistence (App + Cloud mesmo número) — SMB</option></select>
     <span class="text-xs text-tertiary">Canal será criado auto. Gateway roteia Baileys/Cloud/Coexistence; webhook em /api/whatsapp/webhook/evolution/{instance} (smb_message_echoes p/ coexistence)</span>
     <div style="display:flex;gap:0.5rem;justify-content:flex-end"><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancelar</button><button class="btn btn-primary btn-sm">Criar</button></div>
+  </form>
+</dialog>
+
+<dialog id="wa-send-draft" style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:1.25rem;width:min(540px,94vw);color:var(--text)">
+  <form method="POST" action="/dashboard/whatsapp/draft-send" style="display:flex;flex-direction:column;gap:0.75rem">
+    <h2>Rascunho de envio WhatsApp (exige aprovação)</h2>
+    <p class="text-xs text-tertiary">Cria uma aprovação na fila. Depois de aprovar em <a href="/dashboard/approvals">Aprovações</a>, o envio é executado (action: whatsapp_send_draft).</p>
+    <label class="text-xs">Instância</label>
+    <input name="instance" required class="input input-mono" placeholder="nome_da_instancia">
+    <label class="text-xs">Número destino (E.164 ou JID)</label>
+    <input name="to" required class="input" placeholder="+5511999999999">
+    <label class="text-xs">Mensagem (prévia)</label>
+    <textarea name="text" required class="input" rows="4" placeholder="Texto da mensagem..."></textarea>
+    <label class="text-xs">Provedor</label>
+    <select name="provider" class="input"><option value="baileys">baileys</option><option value="cloud">cloud</option></select>
+    <div style="display:flex;gap:0.5rem;justify-content:flex-end"><button type="button" class="btn btn-ghost btn-sm" onclick="this.closest('dialog').close()">Cancelar</button><button class="btn btn-primary btn-sm">Criar aprovação</button></div>
   </form>
 </dialog>
 

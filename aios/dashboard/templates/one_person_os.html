@@ -3,77 +3,99 @@
 {% block title %}OnePersonOS — Single-Person Business OS{% endblock %}
 
 {% block content %}
-<h1 class="display-4 text-center mb-2">OnePersonOS</h1>
-<p class="lead text-center mb-5">Onboarding mínimo para operação solo: config → packs → rotinas → HITL (gates).</p>
-<div class="alert alert-warning" role="alert">
-  <strong>Status: scaffold/operator-assisted.</strong> Domínios externos (pagamentos/CRM/e-mail/WhatsApp/calendário/fulfillment) <strong>não configurados por padrão</strong>. Nenhuma ação externa roda sem aprovação <strong>HITL</strong> (humano no loop). Não é automação de negócio ao vivo. Ver <a href="https://github.com/pixor-ai/aios/blob/main/docs/business-os-scope-limits.md" class="alert-link">docs/business-os-scope-limits.md</a>.
-</div>
+<div style="max-width:48rem;margin:0 auto">
+  <h1 style="text-align:center;margin-bottom:0.5rem;font-size:1.5rem;letter-spacing:-0.02em">OnePersonOS</h1>
+  <p class="text-sm text-secondary" style="text-align:center;margin-bottom:1.5rem;line-height:1.6;max-width:42rem;margin-left:auto;margin-right:auto">Passos mínimos para operar sozinho: preparar workspace, conferir pacotes, revisar rotinas e manter aprovação humana em ações sensíveis.</p>
 
-<div class="row justify-content-center">
-  <div class="col-lg-8">
-    <div class="card mb-4">
-      <div class="card-header">1) Workspace (config/local) ({% if all_done %}✅{% else %}⏳{% endif %})</div>
-      <div class="card-body">
-        <p class="text-sm text-secondary mb-2">Base: <code>{{ base }}</code></p>
-        <table class="table table-sm">
-          <tbody>
-            <tr><th>Context</th><td class="{% if dirs['Context'] %}text-success{% else %}text-warning{% endif %}">{% if dirs['Context'] %}Criado{% else %}Pendente{% endif %}</td></tr>
-            <tr><th>Decision_Log</th><td>{% if dirs['Decision_Log'] %}✅{% else %}⏳{% endif %}</td></tr>
-            <tr><th>Inbox</th><td>{% if dirs['Inbox'] %}✅{% else %}⏳{% endif %}</td></tr>
-            <tr><th>Work</th><td>{% if dirs['Work'] %}✅{% else %}⏳{% endif %}</td></tr>
-            <tr><th>Log</th><td>{% if dirs['Log'] %}✅{% else %}⏳{% endif %}</td></tr>
-          </tbody>
-        </table>
-        <form method="post" action="/dashboard/one_person/init" class="mt-2">
-          <button type="submit" class="btn btn-sm btn-primary" {% if all_done %}disabled{% endif %}>Criar pastas agora</button>
-        </form>
-        <p class="text-xs text-secondary mt-2">Reutiliza <code>aios.core.one_person_os.scaffold_one_person_os</code>. Ajustes de credenciais/planos em <a href="/dashboard/settings">Configurações</a>.</p>
+  <div class="card mb-4" style="border-left:3px solid var(--amber);padding:1rem 1.25rem">
+    <div style="font-size:0.8125rem;color:var(--text-secondary);line-height:1.7">
+      <strong style="color:var(--text)">Status: scaffold / assistido por operador.</strong> Domínios externos (pagamentos, CRM externo, e-mail, WhatsApp, calendário, fulfillment) <strong>não</strong> vêm configurados por padrão. Nenhuma ação externa roda sem <strong>aprovação humana (HITL)</strong>. Não é automação de negócio ao vivo. Veja <a href="https://github.com/pixor-ai/aios/blob/main/docs/business-os-scope-limits.md" style="color:var(--accent)">docs/business-os-scope-limits.md</a>.
+    </div>
+  </div>
+
+  <div class="card mb-4" style="padding:0.75rem 1.25rem;background:var(--bg);border-style:dashed">
+    <div style="font-size:0.7rem;color:var(--text-tertiary);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:0.5rem">Fluxo sugerido</div>
+    <div class="text-sm text-secondary" style="line-height:1.7">1. Workspace → 2. Agent Packs → 3. Rotinas → 4. Aprovações (HITL) → 5. Falhas / escalonamento</div>
+  </div>
+
+  <div class="card mb-4" style="padding:1.25rem">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem;align-items:flex-start;margin-bottom:0.75rem">
+      <div>
+        <div style="font-size:0.7rem;color:var(--text-tertiary);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:0.25rem">Passo 1</div>
+        <h2 style="font-size:1.0625rem;margin:0;font-weight:600">Workspace (config/local)</h2>
+      </div>
+      <span class="badge" style="font-size:0.625rem;border-color:{% if all_done %}var(--green){% else %}var(--amber){% endif %};color:{% if all_done %}var(--green){% else %}var(--amber){% endif %}">{% if all_done %}Concluído{% else %}Pendente{% endif %}</span>
+    </div>
+    <p class="text-sm text-secondary mb-2" style="line-height:1.6">Base: <code class="font-mono">{{ base }}</code></p>
+    <table class="table table-sm" style="margin-bottom:1rem">
+      <tbody>
+        <tr><th style="width:10rem">Context</th><td>{% if dirs['Context'] %}<span style="color:var(--green)">Criado</span>{% else %}<span style="color:var(--amber)">Pendente</span>{% endif %}</td></tr>
+        <tr><th>Decision_Log</th><td>{% if dirs['Decision_Log'] %}Criado{% else %}Pendente{% endif %}</td></tr>
+        <tr><th>Inbox</th><td>{% if dirs['Inbox'] %}Criado{% else %}Pendente{% endif %}</td></tr>
+        <tr><th>Work</th><td>{% if dirs['Work'] %}Criado{% else %}Pendente{% endif %}</td></tr>
+        <tr><th>Log</th><td>{% if dirs['Log'] %}Criado{% else %}Pendente{% endif %}</td></tr>
+      </tbody>
+    </table>
+    <form method="post" action="/dashboard/one_person/init">
+      <button type="submit" class="btn btn-sm btn-primary" {% if all_done %}disabled{% endif %}>Criar pastas agora</button>
+    </form>
+    <p class="text-xs text-tertiary mt-2" style="line-height:1.5">Usa <code class="font-mono">aios.core.one_person_os.scaffold_one_person_os</code>. Credenciais e planos em <a href="/dashboard/settings" style="color:var(--accent)">Configurações</a>.</p>
+  </div>
+
+  <div class="card mb-4" style="padding:1.25rem">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem;align-items:flex-start;margin-bottom:0.75rem">
+      <div>
+        <div style="font-size:0.7rem;color:var(--text-tertiary);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:0.25rem">Passo 2</div>
+        <h2 style="font-size:1.0625rem;margin:0;font-weight:600">Agent Packs</h2>
       </div>
     </div>
+    <p class="mb-2 text-sm" style="line-height:1.6">Pacotes instalados (organização): <strong>{{ packs_count }}</strong></p>
+    <p class="text-sm text-secondary" style="line-height:1.6">Instalação e ativação seguem o backend; ativação/rollback exigem <strong>aprovação humana (HITL)</strong> — nada muda sem sua decisão.</p>
+    <a class="btn btn-sm btn-secondary mt-2" href="/dashboard/agent-packs">Ver / gerenciar packs</a>
+  </div>
 
-    <div class="card mb-4">
-      <div class="card-header">2) Agent Packs</div>
-      <div class="card-body">
-        <p class="mb-2">Pacotes instalados (org): <strong>{{ packs_count }}</strong></p>
-        <p class="text-sm text-secondary">Instalação/ativação seguem contratos do backend; ativação/rollback são <strong>HITL-gated</strong> (PendingAction) — nada muda sem aprovação humana.</p>
-        <a class="btn btn-sm btn-secondary" href="/dashboard/agent-packs">Ver / gerenciar packs</a>
+  <div class="card mb-4" style="padding:1.25rem">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem;align-items:flex-start;margin-bottom:0.75rem">
+      <div>
+        <div style="font-size:0.7rem;color:var(--text-tertiary);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:0.25rem">Passo 3</div>
+        <h2 style="font-size:1.0625rem;margin:0;font-weight:600">Rotinas</h2>
       </div>
     </div>
+    <p class="mb-2 text-sm" style="line-height:1.6">Rotinas descobertas (visão normalizada): <strong>{{ routines_count }}</strong></p>
+    <p class="text-sm text-secondary" style="line-height:1.6">Lista somente leitura (cron/ARQ/workday/eventos/fixos). Confira antes de ligar automações.</p>
+    <a class="btn btn-sm btn-secondary mt-2" href="/dashboard/routines">Ver rotinas</a>
+  </div>
 
-    <div class="card mb-4">
-      <div class="card-header">3) Rotinas</div>
-      <div class="card-body">
-        <p class="mb-2">Rotinas descobertas (visão normalizada): <strong>{{ routines_count }}</strong></p>
-        <p class="text-sm text-secondary">Lista read-only (cron/ARQ/workday/eventos/fixos). Use para conferir agendamentos antes de ativar automações.</p>
-        <a class="btn btn-sm btn-secondary" href="/dashboard/routines">Ver rotinas</a>
+  <div class="card mb-4" style="padding:1.25rem">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem;align-items:flex-start;margin-bottom:0.75rem">
+      <div>
+        <div style="font-size:0.7rem;color:var(--text-tertiary);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:0.25rem">Passo 4</div>
+        <h2 style="font-size:1.0625rem;margin:0;font-weight:600">Aprovações (HITL)</h2>
       </div>
     </div>
+    <p class="mb-2 text-sm" style="line-height:1.6">Aprovações pendentes: <strong>{{ pending_approvals_count }}</strong></p>
+    <p class="text-sm text-secondary" style="line-height:1.6">Efeitos externos e ações sensíveis exigem aprovação humana. Não enfraqueça gates.</p>
+    <a class="btn btn-sm btn-secondary mt-2" href="/dashboard/approvals">Fila de aprovações</a>
+  </div>
 
-    <div class="card mb-4">
-      <div class="card-header">4) HITL / Aprovações</div>
-      <div class="card-body">
-        <p class="mb-2">Aprovações pendentes: <strong>{{ pending_approvals_count }}</strong></p>
-        <p class="text-sm text-secondary">Efeitos externos e ações sensíveis exigem aprovação humana (ver <code>docs/business-os-scope-limits.md</code>). Não enfraquecer gates.</p>
-        <a class="btn btn-sm btn-secondary" href="/dashboard/approvals">Fila de aprovações</a>
+  <div class="card mb-4" style="padding:1.25rem">
+    <div class="flex-between" style="flex-wrap:wrap;gap:0.5rem;align-items:flex-start;margin-bottom:0.75rem">
+      <div>
+        <div style="font-size:0.7rem;color:var(--text-tertiary);letter-spacing:0.04em;text-transform:uppercase;margin-bottom:0.25rem">Passo 5</div>
+        <h2 style="font-size:1.0625rem;margin:0;font-weight:600">Falhas / escalonamento humano</h2>
       </div>
     </div>
-
-    <div class="card mb-4">
-      <div class="card-header">5) Falhas / Escalonamento humano</div>
-      <div class="card-body">
-        <p class="mb-2">Jobs falhos da org (sem reprocessamento): <strong>{{ dlq_failures | length }}</strong></p>
-        {% if dlq_failures %}
-        <table class="table table-sm">
-          <tbody>
-          {% for e in dlq_failures %}
-            <tr><td><code>{{ e.job_name }}</code></td><td>{{ (e.error or '')[:120] }}</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-        {% endif %}
-        <p class="text-sm text-secondary">Sinais de falha para chamar humano. Nenhuma ação automática aqui; recuperação segue fluxo administrativo existente.</p>
-      </div>
-    </div>
+    <p class="mb-2 text-sm" style="line-height:1.6">Jobs falhos da organização (sem reprocessamento automático listado aqui): <strong>{{ dlq_failures | length }}</strong></p>
+    {% if dlq_failures %}
+    <table class="table table-sm mb-2">
+      <tbody>
+      {% for e in dlq_failures %}
+        <tr><td><code class="font-mono text-xs">{{ e.job_name }}</code></td><td class="text-sm text-secondary">{{ (e.error or '')[:120] }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <p class="text-sm text-secondary" style="line-height:1.6;margin:0">Sinais para intervenção humana. Recuperação segue o fluxo administrativo existente.</p>
   </div>
 </div>
 {% endblock %}

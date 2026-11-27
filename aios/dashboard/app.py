@@ -321,6 +321,7 @@ async def _render(name: str, request: Request, **kw) -> str:
         "user_email": user_email,
         "is_superadmin": is_sa,
         "internal_mode": settings.internal_mode,
+        "billing_enabled": settings.billing_enabled,
         "is_impersonating": getattr(state, "is_impersonating", False) if state else False,
         "orgs": orgs,
         "active_org_id": active_org_id,
@@ -768,10 +769,248 @@ async def dashboard_home(request: Request):
 
 # ─── Analytics Dashboard ───
 
+@router.get("/connectors", response_class=HTMLResponse)
+async def connectors_page(request: Request):
+    """Connectors hub (curated): status/health and entry points."""
+    org_id = await _org_filter(request)
+    evo_configured = bool(getattr(settings, "evolution_server_url", "") and getattr(settings, "evolution_api_key", ""))
+    evo_error = None
+    evo_instances_count = None
+    if evo_configured:
+        try:
+            from aios.core.evolution_api import evo_fetch_instances
+
+            instances = await evo_fetch_instances()
+            async with db_session() as db:
+                from aios.db.models import ChannelConnection
+
+                chans = (
+                    await db.execute(
+                        select(ChannelConnection).where(
+                            ChannelConnection.channel_type == "evolution",
+                            ChannelConnection.org_id == org_id,
+                        )
+                    )
+                ).scalars().all()
+                mine = {c.config.get("instance") for c in chans if c.config}
+            if not settings.internal_mode:
+                instances = [i for i in instances if (i.get("name") or i.get("instanceName") or i.get("instance", {}).get("instanceName", "")) in mine]
+            evo_instances_count = len(instances)
+        except Exception as e:
+            logger.warning("connectors: evo status check failed: %s", e)
+            evo_error = "Não foi possível verificar status agora (gateway indisponível)."
+    else:
+        evo_error = "Servidor/chave da Evolution não configurados no ambiente."
+    return await _render(
+        "connectors.html",
+        request,
+        title="Conectores",
+        evo_configured=evo_configured,
+        evo_error=evo_error,
+        evo_instances_count=evo_instances_count,
+    )
+
+
 @router.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
     """Analytics & Telemetry dashboard."""
     return await _render("analytics.html", request, title="Análises")
+
+@router.get("/crm/import", response_class=HTMLResponse)
+async def crm_import_page(request: Request):
+    return await _render("crm_import.html", request, title="Importar CRM")
+
+
+@router.post("/crm/import/preview", response_class=HTMLResponse)
+async def crm_import_preview(request: Request):
+    org_id = await _org_filter(request)
+    form = await request.form()
+    file = ffile(form, "file")
+    dedupe_key = fstr(form, "dedupe_key") or "lead_email"
+    apply_mode = fstr(form, "apply_mode") or "upsert"
+    pipeline = fstr(form, "pipeline") or "default"
+    mapping_json = fstr(form, "mapping_json") or ""
+
+    if not file:
+        return await _render("crm_import.html", request, title="Importar CRM", error="Arquivo é obrigatório.")
+
+    try:
+        raw_bytes = await file.read()
+        filename = file.filename or ""
+        name = filename.lower()
+        if name.endswith(".json"):
+            data = json.loads(raw_bytes.decode("utf-8", errors="ignore"))
+            if isinstance(data, list):
+                rows_raw = [r for r in data if isinstance(r, dict)]
+            elif isinstance(data, dict):
+                for k in ("deals", "items", "rows", "data"):
+                    if isinstance(data.get(k), list):
+                        rows_raw = [r for r in data[k] if isinstance(r, dict)]
+                        break
+                else:
+                    rows_raw = [data]
+            else:
+                rows_raw = []
+        else:
+            import csv
+            import io
+            text = raw_bytes.decode("utf-8-sig", errors="ignore")
+            reader = csv.DictReader(io.StringIO(text))
+            rows_raw = [dict(r) for r in reader]
+    except Exception as e:
+        return await _render("crm_import.html", request, title="Importar CRM", error=f"Falha ao ler arquivo: {e}")
+
+    mapping: dict[str, str] = {}
+    if mapping_json.strip():
+        try:
+            mapping = json.loads(mapping_json)
+            if not isinstance(mapping, dict):
+                mapping = {}
+        except Exception:
+            mapping = {}
+    if not mapping and rows_raw:
+        sample = rows_raw[0]
+        for c in list(sample.keys()):
+            lc = c.lower().strip()
+            if lc in ("nome", "name", "lead_name", "nome do lead"):
+                mapping[c] = "lead_name"
+            elif lc in ("email", "e-mail", "lead_email", "mail"):
+                mapping[c] = "lead_email"
+            elif lc in ("telefone", "phone", "lead_phone", "tel", "celular"):
+                mapping[c] = "lead_phone"
+            elif lc in ("valor", "value", "amount"):
+                mapping[c] = "value"
+            elif lc in ("stage", "etapa"):
+                mapping[c] = "stage"
+            elif lc in ("source", "origem"):
+                mapping[c] = "source"
+            elif lc in ("score",):
+                mapping[c] = "score"
+
+    def map_row(raw: dict) -> dict:
+        out = {"lead_name": "", "lead_email": "", "lead_phone": "", "value": 0.0, "stage": "prospection", "source": "import", "score": 0}
+        for src, dst in (mapping or {}).items():
+            if dst not in out:
+                continue
+            val = raw.get(src)
+            if val is None:
+                continue
+            sval = str(val).strip()
+            if dst == "value":
+                try:
+                    out["value"] = float(str(sval).replace(",", "."))
+                except Exception:
+                    out["value"] = 0.0
+            elif dst == "score":
+                try:
+                    out["score"] = int(float(str(sval).replace(",", ".")))
+                except Exception:
+                    out["score"] = 0
+            else:
+                out[dst] = sval
+        return out
+
+    mapped = [map_row(r) for r in rows_raw]
+    valid = [m for m in mapped if (m.get("lead_name") or m.get("lead_email") or m.get("lead_phone"))]
+    total_rows = len(rows_raw)
+    valid_rows = len(valid)
+
+    matched_count = 0
+    new_count = 0
+    if dedupe_key in ("lead_email", "lead_phone") and valid:
+        keys = [str(v.get(dedupe_key) or "").strip() for v in valid if str(v.get(dedupe_key) or "").strip()]
+        if keys:
+            async with db_session() as db:
+                from aios.db.models import CrmDeal
+                if dedupe_key == "lead_email":
+                    existing = (await db.execute(select(CrmDeal.id).where(CrmDeal.org_id == org_id, CrmDeal.lead_email.in_(keys)))).scalars().all()
+                else:
+                    existing = (await db.execute(select(CrmDeal.id).where(CrmDeal.org_id == org_id, CrmDeal.lead_phone.in_(keys)))).scalars().all()
+                matched_count = len(set(existing))
+        new_count = max(valid_rows - matched_count, 0)
+    else:
+        new_count = valid_rows
+
+    sample_headers = ["lead_name", "lead_email", "lead_phone", "value", "stage", "source", "score"]
+    sample_rows = [{h: m.get(h, "") for h in sample_headers} for m in valid[:20]]
+    rows_json = json.dumps(valid, ensure_ascii=False)
+
+    return await _render(
+        "crm_import_preview.html",
+        request,
+        title="Prévia importação CRM",
+        total_rows=total_rows,
+        valid_rows=valid_rows,
+        dedupe_key=dedupe_key,
+        apply_mode=apply_mode,
+        pipeline=pipeline,
+        matched_count=matched_count,
+        new_count=new_count,
+        sample_headers=sample_headers,
+        sample_rows=sample_rows,
+        rows_json=rows_json,
+    )
+
+
+@router.post("/crm/import/apply-request", response_class=HTMLResponse)
+async def crm_import_apply_request(request: Request):
+    org_id = await _org_filter(request)
+    user = await get_dashboard_user(request)
+    if not user:
+        return RedirectResponse("/dashboard/login", status_code=303)
+    form = await request.form()
+    dedupe_key = fstr(form, "dedupe_key") or "lead_email"
+    apply_mode = fstr(form, "apply_mode") or "upsert"
+    pipeline = fstr(form, "pipeline") or "default"
+    rows_json = fstr(form, "rows_json") or "[]"
+    try:
+        rows = json.loads(rows_json)
+        if not isinstance(rows, list):
+            rows = []
+    except Exception:
+        rows = []
+    valid_rows = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        if not (str(r.get("lead_name") or "").strip() or str(r.get("lead_email") or "").strip() or str(r.get("lead_phone") or "").strip()):
+            continue
+        valid_rows.append({
+            "lead_name": str(r.get("lead_name") or "").strip(),
+            "lead_email": str(r.get("lead_email") or "").strip(),
+            "lead_phone": str(r.get("lead_phone") or "").strip(),
+            "value": float(r.get("value") or 0),
+            "stage": str(r.get("stage") or "prospection").strip() or "prospection",
+            "source": "import",
+            "score": int(r.get("score") or 0),
+        })
+    if not valid_rows:
+        return RedirectResponse("/dashboard/crm/import", status_code=303)
+    from aios.db.models import PendingAction
+    from aios.core.audit import log_audit
+    async with db_session() as db:
+        pa = PendingAction(
+            org_id=org_id,
+            agent_id="",
+            conversation_id="",
+            tool_name="crm_import_apply",
+            tool_args={
+                "dedupe_key": dedupe_key if dedupe_key in ("lead_email", "lead_phone", "none") else "lead_email",
+                "apply_mode": apply_mode if apply_mode in ("upsert", "create_only") else "upsert",
+                "pipeline": pipeline[:50] if pipeline else "default",
+                "rows": valid_rows,
+                "rows_count": len(valid_rows),
+                "_draft_source": "dashboard_crm_import",
+            },
+            context_summary=f"Import CRM: {len(valid_rows)} linhas (dedupe={dedupe_key}, modo={apply_mode}, pipeline={pipeline}). Requer aprovação antes de gravar.",
+            status="pending",
+        )
+        db.add(pa)
+        await db.flush()
+        await log_audit(db, org_id, "crm.import.requested", "pending_action", user_id=user.id, resource_id=pa.id, details={"rows_count": len(valid_rows), "dedupe_key": dedupe_key, "apply_mode": apply_mode})
+        await db.commit()
+    return RedirectResponse("/dashboard/approvals?status=pending", status_code=303)
+
 
 
 @router.get("/autoscale", response_class=HTMLResponse)
@@ -874,8 +1113,9 @@ async def _dashboard_decision(request: Request, action_id: str, *, approve: bool
     raw, so member-role and self-approval denials cannot be bypassed via the
     dashboard HTML path.
     """
-    from aios.api.approvals import _load_approval_or_404
+    from aios.api.approvals import _load_approval_or_404, _dispatch_routine_side_effect_approval
     from aios.core.approval import approval_manager
+    from aios.core.audit import log_audit
 
     user_id = getattr(request.state, "user_id", "") or ""
     org_id = await _org_filter(request)
@@ -884,14 +1124,136 @@ async def _dashboard_decision(request: Request, action_id: str, *, approve: bool
         if not user:
             return RedirectResponse("/dashboard/approvals", status_code=303)
         try:
-            await _load_approval_or_404(db, action_id=action_id, org_id=org_id, user=user, source=source)
+            row = await _load_approval_or_404(db, action_id=action_id, org_id=org_id, user=user, source=source)
         except HTTPException:
-            # Fail closed: authority/self-approval denied — no decision written.
             return RedirectResponse("/dashboard/approvals", status_code=303)
         if approve:
-            await approval_manager.approve(action_id, decided_by=user.id, org_id=org_id)
+            ok = await approval_manager.approve(action_id, decided_by=user.id, org_id=org_id)
+            if ok:
+                try:
+                    await log_audit(db, user.org_id, "approval.approved", "pending_action",
+                                    user_id=user.id, resource_id=action_id,
+                                    details={"tool_name": row.tool_name, "via": "dashboard"})
+                    await db.commit()
+                except Exception:
+                    pass
+                # post-hooks: whatsapp draft send
+                try:
+                    from sqlalchemy import select
+                    from aios.db.models import PendingAction as DBAction
+                    fresh = (
+                        await db.execute(
+                            select(DBAction).where(DBAction.id == action_id).execution_options(populate_existing=True)
+                        )
+                    ).scalar_one_or_none()
+                    if fresh and str(fresh.tool_name or "") == "whatsapp_send_draft":
+                        from aios.core.whatsapp.service import send_via_gateway
+                        ta = fresh.tool_args if isinstance(fresh.tool_args, dict) else {}
+                        inst = str(ta.get("instance") or "")
+                        to = str(ta.get("to") or "")
+                        text = str(ta.get("text") or "")
+                        prov = str(ta.get("provider") or "baileys")
+                        if inst and to:
+                            res = await send_via_gateway(inst, to, text, prov)
+                            await log_audit(db, user.org_id, "whatsapp.draft.sent" if res.get("ok") else "whatsapp.draft.send_failed", "pending_action",
+                                            user_id=user.id, resource_id=action_id,
+                                            details={"ok": bool(res.get("ok")), "to": to, "instance": inst})
+                            await db.commit()
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("dashboard whatsapp draft posthook failed")
+
+                # post-hooks: crm_import_apply
+                try:
+                    from sqlalchemy import select
+                    from aios.db.models import PendingAction as DBAction, CrmDeal
+                    fresh = (
+                        await db.execute(
+                            select(DBAction).where(DBAction.id == action_id).execution_options(populate_existing=True)
+                        )
+                    ).scalar_one_or_none()
+                    if fresh and str(fresh.tool_name or "") == "crm_import_apply":
+                        ta = fresh.tool_args if isinstance(fresh.tool_args, dict) else {}
+                        rows = ta.get("rows") if isinstance(ta.get("rows"), list) else []
+                        dedupe_key = str(ta.get("dedupe_key") or "lead_email")
+                        apply_mode = str(ta.get("apply_mode") or "upsert")
+                        pipeline = str(ta.get("pipeline") or "default")[:50]
+                        created = 0
+                        updated = 0
+                        skipped = 0
+                        for rrow in rows:
+                            if not isinstance(rrow, dict):
+                                skipped += 1
+                                continue
+                            name = str(rrow.get("lead_name") or "").strip()
+                            email = str(rrow.get("lead_email") or "").strip()
+                            phone = str(rrow.get("lead_phone") or "").strip()
+                            if not (name or email or phone):
+                                skipped += 1
+                                continue
+                            deal = None
+                            if apply_mode == "upsert" and dedupe_key != "none":
+                                if dedupe_key == "lead_email" and email:
+                                    deal = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == user.org_id, CrmDeal.lead_email == email))).scalar_one_or_none()
+                                elif dedupe_key == "lead_phone" and phone:
+                                    deal = (await db.execute(select(CrmDeal).where(CrmDeal.org_id == user.org_id, CrmDeal.lead_phone == phone))).scalar_one_or_none()
+                            if deal is None:
+                                deal = CrmDeal(
+                                    org_id=user.org_id,
+                                    lead_name=name,
+                                    lead_email=email,
+                                    lead_phone=phone,
+                                    value=float(rrow.get("value") or 0),
+                                    stage=str(rrow.get("stage") or "prospection") or "prospection",
+                                    source="import",
+                                    score=int(rrow.get("score") or 0),
+                                    pipeline=pipeline,
+                                )
+                                db.add(deal)
+                                created += 1
+                            else:
+                                if apply_mode == "create_only":
+                                    skipped += 1
+                                    continue
+                                deal.lead_name = name or deal.lead_name
+                                if email:
+                                    deal.lead_email = email
+                                if phone:
+                                    deal.lead_phone = phone
+                                try:
+                                    deal.value = float(rrow.get("value") or 0)
+                                except Exception:
+                                    pass
+                                if rrow.get("stage"):
+                                    deal.stage = str(rrow.get("stage") or deal.stage)
+                                try:
+                                    deal.score = int(rrow.get("score") or 0)
+                                except Exception:
+                                    pass
+                                deal.pipeline = pipeline or deal.pipeline
+                                updated += 1
+                        try:
+                            await db.commit()
+                        except Exception:
+                            logger.exception("dashboard crm_import_apply failed")
+                            await db.rollback()
+                        else:
+                            await log_audit(db, user.org_id, "crm.import.applied", "pending_action",
+                                            user_id=user.id, resource_id=action_id,
+                                            details={"created": created, "updated": updated, "skipped": skipped, "via": "dashboard"})
+                            await db.commit()
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("dashboard crm_import_apply posthook failed")
         else:
             await approval_manager.reject(action_id, decided_by=user.id, org_id=org_id)
+            try:
+                await log_audit(db, user.org_id, "approval.rejected", "pending_action",
+                                user_id=user.id, resource_id=action_id,
+                                details={"tool_name": row.tool_name, "via": "dashboard"})
+                await db.commit()
+            except Exception:
+                pass
     return RedirectResponse("/dashboard/approvals", status_code=303)
 
 
@@ -3055,8 +3417,14 @@ async def admin_backup_restore(request: Request, backup_name: str = Form(...), c
 
 # ─── Billing page ───
 
+def _billing_surface_enabled() -> bool:
+    return bool(settings.billing_enabled)
+
+
 @router.get("/billing", response_class=HTMLResponse)
 async def billing_page(request: Request):
+    if not _billing_surface_enabled():
+        raise HTTPException(404, "Not found")
     from aios.config import PLANS
     org_id = await _org_filter(request)
     async with db_session() as db:
@@ -3839,6 +4207,30 @@ async def automations_run(request: Request, wf_id: str):
             await db.commit()
     return RedirectResponse(f"/dashboard/automations/{wf_id}?result=ok", status_code=303)
 
+
+@router.get("/workflow-templates", response_class=HTMLResponse)
+async def workflow_templates_page(request: Request):
+    org_id = await _org_filter(request)
+    from aios.core.workflow_templates import list_evaluated_templates
+    from aios.db.models import Organization
+
+    org_plan = None
+    async with db_session() as db:
+        org = await db.get(Organization, org_id)
+        if org:
+            org_plan = (org.extra_data or {}).get("plan") if isinstance(org.extra_data, dict) else None
+            # fallback to default if missing
+            if not org_plan:
+                org_plan = "free"
+    templates = list_evaluated_templates(org_plan)
+    return await _render(
+        "dashboard/workflow_templates.html",
+        request,
+        title="Modelos de workflow",
+        templates=templates,
+        org_plan=org_plan or "free",
+    )
+
 @router.get("/automations/credentials/{cid}/delete")
 async def automations_cred_delete(request: Request, cid: str):
     org_id = await _org_filter(request)
@@ -4271,10 +4663,17 @@ async def wizard_page(request: Request):
 
 @router.get("/dev", response_class=HTMLResponse)
 async def dev_page(request: Request):
-    return await _render("dev.html", request, title="Dev Claude+Codex")
+    return await _render(
+        "dev.html",
+        request,
+        title="Dev Claude+Codex",
+        dev_subprocess_enabled=bool(settings.dev_subprocess_enabled),
+    )
 
 @router.get("/proposal", response_class=HTMLResponse)
 async def proposal_page(request: Request):
+    if not settings.billing_enabled:
+        raise HTTPException(404, "Not found")
     org_id = await _org_filter(request)
     async with db_session() as db:
         from aios.db.models import Organization
@@ -4295,6 +4694,8 @@ async def proposal_page(request: Request):
 
 @router.post("/billing/trial")
 async def billing_trial(request: Request):
+    if not settings.billing_enabled:
+        raise HTTPException(404, "Not found")
     org_id = await _org_filter(request)
     async with db_session() as db:
         from aios.db.models import Organization
@@ -5742,6 +6143,59 @@ async def whatsapp_gateway_page(request: Request):
     gateway = {"mode": "unificado"}
     return await _render("whatsapp_instances.html", request, title="WhatsApp", instances=instances, chan_map=chan_map, gateway=gateway)
 
+
+@router.post("/whatsapp/draft-send")
+async def whatsapp_draft_send(
+    request: Request,
+    instance: str = Form(...),
+    to: str = Form(...),
+    text: str = Form(...),
+    provider: str = Form("baileys"),
+):
+    """Create a pending approval for a WhatsApp outbound draft (Option A)."""
+    from aios.db.models import PendingAction
+    from aios.api.deps import get_dashboard_user
+    from aios.core.audit import log_audit
+
+    user = await get_dashboard_user(request)
+    if not user:
+        return RedirectResponse("/dashboard/login", status_code=303)
+    org_id = await _org_filter(request)
+    # verify instance belongs to org
+    async with db_session() as db:
+        from aios.db.models import ChannelConnection
+        rows = (await db.execute(
+            select(ChannelConnection).where(
+                ChannelConnection.org_id == org_id,
+                ChannelConnection.channel_type == "evolution",
+            )
+        )).all()
+        owned = any((r.config or {}).get("instance") == instance for r in rows)
+        if not owned:
+            return RedirectResponse("/dashboard/whatsapp?error=instance_not_found", status_code=303)
+        pa = PendingAction(
+            org_id=org_id,
+            agent_id="",
+            conversation_id="",
+            tool_name="whatsapp_send_draft",
+            tool_args={
+                "instance": instance,
+                "to": to,
+                "text": text[:4000],
+                "provider": provider if provider in ("baileys", "cloud") else "baileys",
+                "_draft_source": "dashboard",
+            },
+            context_summary=f"WhatsApp outbound draft para {to} (instância {instance}). Mensagem: {text[:120]}",
+            status="pending",
+        )
+        db.add(pa)
+        await db.flush()
+        await log_audit(db, org_id, "whatsapp.draft.created", "pending_action",
+                        user_id=user.id, resource_id=pa.id,
+                        details={"instance": instance, "to": to})
+        await db.commit()
+    return RedirectResponse("/dashboard/approvals?status=pending", status_code=303)
+
 # ─── Evolution Instances (legado: redirect p/ WhatsApp unificado) ───
 
 @router.get("/whatsapp/risco", response_class=HTMLResponse)
@@ -5860,7 +6314,7 @@ async def evolution_create(request: Request, instanceName: str = Form(...), agen
             ch.config = encrypt_channel_config(ch.config)
             db.add(ch)
             await db.commit()
-    return RedirectResponse("/dashboard/evolution", status_code=303)
+    return RedirectResponse("/dashboard/whatsapp", status_code=303)
 
 @router.get("/evolution/{name}/connect")
 async def evolution_connect_page(request: Request, name: str):

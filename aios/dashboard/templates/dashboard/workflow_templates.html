@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex-between mb-4" style="flex-wrap:wrap;gap:0.75rem;align-items:flex-start">
+  <div>
+    <h1>Modelos de workflow</h1>
+    <p class="text-sm text-secondary mt-1" style="max-width:52rem;line-height:1.6">Modelos prontos para montar automações com segurança: escolha um, confira pré-requisitos e rode com aprovação humana antes de enviar mensagens ou ações externas.</p>
+  </div>
+  <a class="btn btn-ghost btn-sm" href="/dashboard/automations">Ver automações</a>
+</div>
+
+<div class="card mb-4" style="border-left:3px solid var(--accent);padding:1rem 1.25rem">
+  <div style="font-size:0.8125rem;color:var(--text-secondary);line-height:1.6">
+    <b>Verdade primeiro:</b> status vem do que o sistema detecta (plano, Evolution, aprovações). Se algo é desconhecido, mostramos <i>desconhecido/estimativa</i>. Envios externos devem passar por aprovação humana.
+  </div>
+</div>
+
+{% if not templates %}
+<div class="card" style="padding:1.5rem 1.25rem">
+  <p class="text-sm text-secondary" style="margin:0">Nenhum modelo disponível no momento.</p>
+</div>
+{% else %}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1rem">
+{% for t in templates %}
+  <div class="card" style="display:flex;flex-direction:column;gap:0.85rem;padding:1.25rem">
+    <div class="flex-between" style="align-items:flex-start;gap:0.5rem">
+      <div style="font-weight:600;font-size:0.9375rem;line-height:1.35">{{ t.name }}</div>
+      {% if t.runnable and t.status == 'runnable' %}
+        <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.625rem;flex-shrink:0">Pronto</span>
+      {% elif t.runnable and t.status == 'runnable_with_caveats' %}
+        <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.625rem;flex-shrink:0">Pronto com atenção</span>
+      {% else %}
+        <span class="badge" style="border-color:var(--red);color:var(--red);font-size:0.625rem;flex-shrink:0">Bloqueado</span>
+      {% endif %}
+    </div>
+    <div style="font-size:0.8125rem;color:var(--text);line-height:1.6"><b>Resultado esperado:</b> {{ t.outcome }}</div>
+    <div>
+      <div style="font-size:0.7rem;color:var(--text-tertiary);margin-bottom:0.35rem;letter-spacing:0.02em;text-transform:uppercase">Passos</div>
+      <ol style="margin:0;padding-left:1.25rem;font-size:0.8125rem;color:var(--text-secondary);line-height:1.65">
+        {% for s in t.steps %}<li>{{ s }}</li>{% endfor %}
+      </ol>
+    </div>
+    <div>
+      <div style="font-size:0.7rem;color:var(--text-tertiary);margin-bottom:0.35rem;letter-spacing:0.02em;text-transform:uppercase">Você precisa</div>
+      <ul style="margin:0;padding-left:1.25rem;font-size:0.8125rem;color:var(--text-secondary);line-height:1.65">
+        {% for n in t.needs %}<li>{{ n }}</li>{% endfor %}
+      </ul>
+    </div>
+    <div>
+      <div style="font-size:0.7rem;color:var(--text-tertiary);margin-bottom:0.35rem;letter-spacing:0.02em;text-transform:uppercase">Checagens (ambiente/plano)</div>
+      <div style="display:flex;flex-direction:column;gap:0.5rem">
+        {% for r in t.requirements %}
+          <div style="border:1px solid var(--border);border-radius:8px;padding:0.55rem 0.65rem;background:var(--bg)">
+            <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;flex-wrap:wrap">
+              <span style="font-size:0.75rem;font-weight:600;color:var(--text)">{{ r.label }}</span>
+              {% if r.ok == true %}
+                <span class="badge" style="border-color:var(--green);color:var(--green);font-size:0.6rem">OK</span>
+              {% elif r.ok == false %}
+                <span class="badge" style="border-color:var(--red);color:var(--red);font-size:0.6rem">Falta</span>
+              {% else %}
+                <span class="badge" style="border-color:var(--amber);color:var(--amber);font-size:0.6rem">Desconhecido</span>
+              {% endif %}
+            </div>
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.35rem;line-height:1.5">{{ r.detail }}</div>
+            {% if r.hint %}<div style="font-size:0.7rem;color:var(--text-tertiary);margin-top:0.35rem;line-height:1.5">Dica: {{ r.hint }}</div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% if t.blocking and t.blocking|length > 0 %}
+      <div style="font-size:0.75rem;color:var(--red);border-top:1px solid var(--border);padding-top:0.65rem;line-height:1.6">
+        <b>Bloqueios:</b>
+        <ul style="margin:0.35rem 0 0;padding-left:1.25rem">
+          {% for b in t.blocking %}<li>{{ b.label }} — {{ b.detail }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+    <div style="border-top:1px solid var(--border);padding-top:0.65rem">
+      <div style="font-size:0.7rem;color:var(--text-tertiary);margin-bottom:0.35rem;letter-spacing:0.02em;text-transform:uppercase">Segurança (padrão)</div>
+      <ul style="margin:0;padding-left:1.25rem;font-size:0.75rem;color:var(--text-secondary);line-height:1.6">
+        {% for n in t.safety_notes %}<li>{{ n }}</li>{% endfor %}
+      </ul>
+    </div>
+    <div style="margin-top:auto;padding-top:0.25rem;display:flex;gap:0.5rem;flex-wrap:wrap">
+      <a class="btn btn-primary btn-sm" href="/dashboard/automations">Abrir Automações</a>
+      <a class="btn btn-ghost btn-sm" href="/dashboard/approvals">Ver Aprovações</a>
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% endif %}
+
+<div class="card mt-4" style="border-left:3px solid var(--amber);padding:1rem 1.25rem">
+  <div style="font-size:0.8125rem;color:var(--text-secondary);line-height:1.6">
+    <b>Como usar (modo seguro):</b> crie ou ajuste a automação em <i>Automações</i>, mantenha aprovação humana antes de envios, e valide com um teste pequeno. Custos/limites de modelo não são prometidos aqui (dependem da sua configuração).
+  </div>
+</div>
+{% endblock %}

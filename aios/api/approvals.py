@@ -221,6 +221,15 @@ async def approve_action(
     if not ok:
         raise HTTPException(404, "Action not found or already decided")
 
+    # audit: generic approval decision
+    try:
+        await log_audit(db, user.org_id, "approval.approved", "pending_action",
+                        user_id=user.id, resource_id=action_id,
+                        details={"tool_name": row.tool_name})
+        await db.commit()
+    except Exception:
+        logger.debug("audit log failed", exc_info=True)
+
     # Agent pack activation: deterministic apply after approval.
     try:
         from aios.api.agent_packs import apply_agent_pack_activation, ACTIVATE_TOOL, ROLLBACK_TOOL
@@ -248,6 +257,121 @@ async def approve_action(
                 db, row=fresh, action_id=action_id, decided_by=user.id
             )
             return {"status": "approved", "action_id": action_id, "dispatch": dispatch}
+        # WhatsApp send draft (Option A)
+        if fresh and tool == "whatsapp_send_draft":
+            from aios.core.whatsapp.service import send_via_gateway
+            ta = fresh.tool_args if isinstance(fresh.tool_args, dict) else {}
+            inst = str(ta.get("instance") or "")
+            to = str(ta.get("to") or "")
+            text = str(ta.get("text") or "")
+            prov = str(ta.get("provider") or "baileys")
+            if not inst or not to:
+                await log_audit(db, user.org_id, "whatsapp.draft.send_failed", "pending_action",
+                                user_id=user.id, resource_id=action_id,
+                                details={"reason": "missing_instance_or_to"})
+                return {"status": "approved", "action_id": action_id, "send": {"ok": False, "error": "missing instance/to"}}
+            res = await send_via_gateway(inst, to, text, prov)
+            await log_audit(db, user.org_id, "whatsapp.draft.sent" if res.get("ok") else "whatsapp.draft.send_failed", "pending_action",
+                            user_id=user.id, resource_id=action_id,
+                            details={"ok": bool(res.get("ok")), "to": to, "instance": inst, "error": res.get("error")})
+            try:
+                await db.commit()
+            except Exception:
+                pass
+            return {"status": "approved", "action_id": action_id, "send": res}
+
+        # CRM import apply (dashboard wizard)
+        if fresh and tool == "crm_import_apply":
+            ta = fresh.tool_args if isinstance(fresh.tool_args, dict) else {}
+            rows = ta.get("rows") if isinstance(ta.get("rows"), list) else []
+            dedupe_key = str(ta.get("dedupe_key") or "lead_email")
+            apply_mode = str(ta.get("apply_mode") or "upsert")
+            pipeline = str(ta.get("pipeline") or "default")[:50]
+            if not rows:
+                await log_audit(db, user.org_id, "crm.import.applied", "pending_action",
+                                user_id=user.id, resource_id=action_id,
+                                details={"created": 0, "updated": 0, "skipped": 0, "reason": "no_rows"})
+                return {"status": "approved", "action_id": action_id, "import": {"created": 0, "updated": 0, "skipped": len(rows)}}
+
+            created = 0
+            updated = 0
+            skipped = 0
+            from aios.db.models import CrmDeal
+            from sqlalchemy import select as _sel
+            for rrow in rows:
+                if not isinstance(rrow, dict):
+                    skipped += 1
+                    continue
+                name = str(rrow.get("lead_name") or "").strip()
+                email = str(rrow.get("lead_email") or "").strip()
+                phone = str(rrow.get("lead_phone") or "").strip()
+                if not (name or email or phone):
+                    skipped += 1
+                    continue
+                deal = None
+                if apply_mode == "upsert" and dedupe_key != "none":
+                    if dedupe_key == "lead_email" and email:
+                        deal = (await db.execute(_sel(CrmDeal).where(CrmDeal.org_id == user.org_id, CrmDeal.lead_email == email))).scalar_one_or_none()
+                    elif dedupe_key == "lead_phone" and phone:
+                        deal = (await db.execute(_sel(CrmDeal).where(CrmDeal.org_id == user.org_id, CrmDeal.lead_phone == phone))).scalar_one_or_none()
+                if deal is None:
+                    deal = CrmDeal(
+                        org_id=user.org_id,
+                        lead_name=name,
+                        lead_email=email,
+                        lead_phone=phone,
+                        value=float(rrow.get("value") or 0),
+                        stage=str(rrow.get("stage") or "prospection") or "prospection",
+                        source=str(rrow.get("source") or "import"),
+                        score=int(rrow.get("score") or 0),
+                        pipeline=pipeline,
+                    )
+                    db.add(deal)
+                    created += 1
+                else:
+                    # apply_mode create_only: if we found an existing deal, skip (do not update)
+                    if apply_mode == "create_only":
+                        skipped += 1
+                        continue
+                    # upsert update path
+                    deal.lead_name = name or deal.lead_name
+                    if email:
+                        deal.lead_email = email
+                    if phone:
+                        deal.lead_phone = phone
+                    if rrow.get("value") is not None:
+                        try:
+                            deal.value = float(rrow.get("value") or 0)
+                        except Exception:
+                            pass
+                    if rrow.get("stage"):
+                        deal.stage = str(rrow.get("stage") or deal.stage)
+                    if rrow.get("score") is not None:
+                        try:
+                            deal.score = int(rrow.get("score") or 0)
+                        except Exception:
+                            pass
+                    deal.pipeline = pipeline or deal.pipeline
+                    updated += 1
+            try:
+                await db.commit()
+            except Exception:
+                logger.exception("crm_import_apply commit failed")
+                await db.rollback()
+                await log_audit(db, user.org_id, "crm.import.failed", "pending_action",
+                                user_id=user.id, resource_id=action_id,
+                                details={"error": "commit_failed"})
+                return {"status": "approved", "action_id": action_id, "import": {"error": "commit_failed"}}
+
+            await log_audit(db, user.org_id, "crm.import.applied", "pending_action",
+                            user_id=user.id, resource_id=action_id,
+                            details={"created": created, "updated": updated, "skipped": skipped, "dedupe_key": dedupe_key, "apply_mode": apply_mode})
+            try:
+                await db.commit()
+            except Exception:
+                pass
+            return {"status": "approved", "action_id": action_id, "import": {"created": created, "updated": updated, "skipped": skipped}}
+
     except HTTPException:
         raise
     except Exception:
