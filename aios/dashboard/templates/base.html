@@ -65,7 +65,7 @@
         .sidebar-label { font-size: 0.65rem; color: var(--text-tertiary); margin-top: 0.125rem; letter-spacing: 0.04em; text-transform: uppercase; font-family: 'JetBrains Mono', monospace; white-space: nowrap; overflow: hidden; }
         .sidebar.collapsed .sidebar-logo,
         .sidebar.collapsed .sidebar-label { display: none; }
-        .sidebar-nav { flex: 1; padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 1px; }
+        .sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 1px; }
         .sidebar-nav a {
             display: flex; align-items: center; gap: 0.625rem;
             padding: 0.5rem 0.625rem; border-radius: var(--radius-sm);
@@ -769,7 +769,22 @@ window.aiosI18n.register({
         const toggle = document.getElementById('sidebar-toggle');
         const main = document.querySelector('.main');
         if (!sidebar || !toggle || !main) return;
-        
+
+        // Scrolled nav clips collapsed tooltips; pin them to the viewport.
+        sidebar.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+            const label = a.querySelector('.nav-text');
+            if (!label) return;
+            a.addEventListener('mouseenter', function() {
+                if (!sidebar.classList.contains('collapsed')) return;
+                const box = a.getBoundingClientRect();
+                label.style.position = 'fixed';
+                label.style.left = (box.right + 12) + 'px';
+                label.style.top = box.top + 'px';
+                label.style.margin = '0';
+            });
+            a.addEventListener('mouseleave', function() { label.removeAttribute('style'); });
+        });
+
         const STORAGE_KEY = 'aios_sidebar_collapsed';
         const COLLAPSED_W = '56px';
         const EXPANDED_W = '220px';
