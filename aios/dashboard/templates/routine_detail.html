@@ -4,6 +4,12 @@
   <a href="/dashboard/routines" class="btn btn-ghost btn-sm">← Voltar</a>
   <h1 style="flex:1">{{ r.name }}</h1>
   <span class="badge" style="border-color:{{ 'var(--green)' if r.enabled else 'var(--border)' }};color:{{ 'var(--green)' if r.enabled else 'var(--text-tertiary)' }}">{{ 'enabled' if r.enabled else 'disabled' }}</span>
+  {% if r.source_type == 'automation_cron' %}
+  <form method="POST" action="/dashboard/routines/{{ r.routine_id }}/toggle">
+    <input type="hidden" name="enabled" value="{{ '0' if r.enabled else '1' }}">
+    <button class="btn btn-sm" type="submit">{{ 'Desativar' if r.enabled else 'Ativar' }}</button>
+  </form>
+  {% endif %}
 </div>
 
 <div class="grid-2 mb-4">

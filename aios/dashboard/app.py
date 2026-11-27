@@ -4198,6 +4198,25 @@ async def routine_detail(request: Request, routine_id: str):
     return await _render("routine_detail.html", request, title=r.name, r=r)
 
 
+@router.post("/routines/{routine_id:path}/toggle")
+async def routine_toggle(request: Request, routine_id: str, enabled: str = Form("")):
+    """Toggle an org-owned AutomationTrigger. Other routine sources stay read-only."""
+    org_id = await _org_filter(request)
+    prefix = "automation_cron:"
+    if not routine_id.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Rotina não pode ser alternada")
+    from aios.db.models import AutomationTrigger
+
+    trigger_id = routine_id[len(prefix):]
+    async with db_session() as db:
+        trig = await db.get(AutomationTrigger, trigger_id)
+        if not trig or trig.org_id != org_id:
+            raise HTTPException(status_code=404, detail="Rotina não encontrada")
+        trig.is_active = str(enabled).lower() in ("1", "true", "on", "yes")
+        await db.commit()
+    return RedirectResponse(f"/dashboard/routines/{routine_id}", status_code=303)
+
+
 @router.get("/wizard", response_class=HTMLResponse)
 async def wizard_page(request: Request):
     return await _render("wizard.html", request, title="Assistente 60s")
