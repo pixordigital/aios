@@ -112,6 +112,22 @@ async def test_activate_creates_pending_action_and_does_not_activate(test_db_ses
 
 
 @pytest.mark.asyncio
+async def test_design_agent_pack_from_base_solution(test_db_session, auth_client):
+    r = await auth_client.post(
+        "/api/agent-packs/design",
+        json={"base_key": "vender", "vertical": "clinica de estetica", "addon": "Voce e o time comercial da clinica."},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["base_key"] == "vender"
+    assert body["manifest"]["version"] == "1.0.0"
+    assert body["manifest"]["identity"]["id"].startswith("sol-vender-")
+
+    r = await auth_client.post("/api/agent-packs/design", json={"base_key": "nope", "vertical": "x", "addon": "y"})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
 async def test_approve_applies_activation_idempotent(test_db_session, auth_client, test_org, test_user):
     # create second admin user as approver (self-approval forbidden)
     approver = User(email="approver@example.com", hashed_password=_hash_password("testpass123"), org_id=test_org.id, role="admin")

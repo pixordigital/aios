@@ -20,7 +20,7 @@ from aios.core.agent_pack import (
     validate_agent_pack,
 )
 from aios.core.audit import log_audit
-from aios.core.solution_pack import build_solution_pack_dict, solution_pack_keys
+from aios.core.solution_pack import build_solution_pack_dict, design_team_pack, solution_pack_keys
 from aios.db.backend import DatabaseBackend, get_db_backend
 from aios.db.models import AgentPack, AgentPackActivation, AgentPackVersion, PendingAction
 from aios.governance.security import record_cross_tenant_block_if_mismatch
@@ -275,6 +275,28 @@ async def list_solution_packs(user=Depends(get_current_user)) -> list[dict[str, 
         except Exception as e:
             logger.warning("solution pack build failed key=%s err=%s", key, e)
     return out
+
+
+class AgentPackDesignBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_key: str = Field(min_length=1, max_length=64)
+    vertical: str = Field(min_length=1, max_length=120)
+    addon: str = Field(min_length=1, max_length=4000)
+
+
+@router.post("/design")
+async def design_agent_pack(body: AgentPackDesignBody, user=Depends(get_current_user)) -> dict[str, Any]:
+    """Design a new named team pack from a base Solution (deterministic MVP, no DB writes)."""
+    if body.base_key not in solution_pack_keys():
+        raise HTTPException(status_code=400, detail=f"Unknown base solution: {body.base_key}")
+    m = design_team_pack(body.base_key, body.vertical, body.addon)
+    return {
+        "base_key": body.base_key,
+        "vertical": body.vertical,
+        "addon": body.addon,
+        "manifest": m.model_dump(mode="json"),
+    }
 
 
 @router.get("/{pack_id}")
