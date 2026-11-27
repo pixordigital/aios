@@ -73,6 +73,14 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Itens pendentes formalmente fechados como deferidos: toggle rotina design (F1), seat caps enforcement/migration (F5/F7/F9), install-exec OpenClaw/OpenBot + dashboard design/install wiring (F6/F8).
 - Pendências de código restantes: enforcement caller wiring (agent run paths), membership allowed_models + migration, install-exec into openbot dir.
 
+### 2026-11-27 — PENDÊNCIAS DE CÓDIGO RESOLVIDAS
+
+- Seat enforcement: `seat_allows_model` agora usa membership `allowed_models` quando `org.extra_data.seats` ausente; gate exige user_id + modelo (unset = legacy). `check_org_limits` consulta `OrganizationMembership` por org/user. Callers `POST /api/conversations/{id}/messages` e `/messages/stream` passam user + modelo do agente/team. Coluna + migration `f3a4b5c6d7e8` (head único). Commit `84d8003`.
+- Toggle rotina por org: `POST /dashboard/routines/{routine_id:path}/toggle` altera só `AutomationTrigger.is_active` (prefix `automation_cron:`), org-scoped; demais fontes read-only. Form no detalhe da rotina. Commit `84c40a1`.
+- Install-exec local: `POST /api/agent-packs/design/install` aceita `execute_install`, `consent_phrase`, `target_root`, `records_dir`, `allow_unsigned`, `accept_capability_loss` → export bundle + `plan_install` + `apply_install` consent-gated, sem exec/network. Commit `694639d`.
+- Dashboard designer: form com runtime_target + "Desenhar e instalar" reusa endpoint da API; rotas GET/POST agora `response_class=HTMLResponse`. Commit `694639d`.
+- Verificação: `71 passed` (conversations, routines, limits, agent-packs, migrations); py_compile + Jinja parse + diff-check OK. `graphify update .` executado. Nenhuma pendência de código aberta destas frentes.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
