@@ -34,6 +34,12 @@ Snapshot: 2026-11-25. Deployed AIOS `86714b6` (Coolify #819), ARVO `09249ba` las
 - Fase 5 started: `second_brain.ingest_conversation(agent_id, org_id, conversation_id, text, source)` → put_knowledge(knowledge_type=reflection). Tests `tests/test_second_brain_ingest.py` (2 passed) + business_os 5 passed. Commit `7e0091c`.
 - Fase 5 CONCLUDED (2026-11-27): shipped ingest slice; seat models/caps deferred to next cycle (needs migration + billing wiring). Closeout note only.
 
+### 2026-11-27 — Phase 6 started
+
+- `RuntimeTarget` widened to include install/export targets (`openclaw`, `openbot`, `claude_code`, `codex`, `opencode`).
+- `design_team_pack` accepts `runtime_target` (default docker); design endpoint accepts `runtime_target` (default docker) → designed manifest can target openbot/openclaw.
+- Tests: design openbot → `runtime_targets[0].target == "openbot"`; default docker. Suite green (11 passed). Commit `1a33fdb`.
+
 ### 2026-11-27 — Phase 4 started, Phase 3 concluded
 
 - Phase 3 concluded: backend + endpoint + test + billing UI (`agent_breakdown`) all verified green this session.
