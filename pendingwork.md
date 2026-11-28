@@ -938,6 +938,25 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - Verified: `tests/test_tools.py` `39 passed` in full-file run; focused missing-org test passes isolated. Focused finance + WhatsApp + side-effect suite `18 passed`.
 - Full prepush rerun in background shell `sh_21f5317210018XnKwR1dKDLgeB` (worker `prepush4`, 30m timeout). Prod baseline before ship: `/health/live` 200, `/health/ready` 200 with all checks ok. Commit stage to be frozen only after prepush4 green because other sessions are still editing dashboard templates.
 
+### 2026-11-27 — wave shipped to origin/main, deploy in progress
+
+- `prepush4`: `169 passed, 1 skipped, 50 warnings in 977.91s`. Green.
+- Another session had already committed and pushed the main wave (`52ebd43` → `8ff3f99`). This session committed only the handoff doc as `191d164` (`docs: record prepush verification and ship handoff`) and pushed `origin/main` `8ff3f99..191d164`. Local HEAD == `origin/main` == `191d16423cf10f946d13c87774637b9bbf2680f5`.
+- No `graphify-out/` staged. `git diff --cached --check` clean.
+- Manual Coolify deploy triggered: app `pixor-aios`, uuid `38908ddf-a875-4105-a93f-a4570513911f`, deployment uuid `r2bcmdzir2trtfhbw1uijewh`, commit `191d164...`. Status at trigger time: `in_progress` (clone step).
+- Still open: verify deploy reaches `finished`, then smoke `/health/live`, `/health/ready`, homepage, `/dashboard/login`. Prod Postgres migration verification is via `/health/ready` `migrations:ok` plus deploy logs; no direct prod DB mutation by this session.
+
+### 2026-11-28 — prod startup failure found and fixed (psycopg missing)
+
+- Deploy `r2bcmdzir2trtfhbw1uijewh` reached `finished`, but app returned `502` and Coolify showed `running:starting` / `last_restart_type=crash`. Migrations were fine (`/tmp/alembic.log`: Postgres context, no failure).
+- Diagnosed through a temporary Coolify scheduled task in the `worker` container (created `gr3nqe7pbjivpmh2lbewhvn0`, deleted after use). Import traceback:
+  - `DBIdempotencyStore init error: No module named 'psycopg'`
+  - `ExecutionDenied: durable idempotency store required for business side effects; set AIOS_BUSINESS_IDEMPOTENCY_REQUIRED=false only for local dev/test` at `aios/main.py:297`.
+- Root cause: `aios/core/business_idempotency.py` converts asyncpg DSN to `postgresql+psycopg://`, but `psycopg` was never declared in `pyproject.toml`; production image had only `asyncpg`. Fail-closed startup correctly refused to run.
+- Fix: added `psycopg[binary]>=3.1.0` to `pyproject.toml` dependencies. No policy/env weakening.
+- Verified locally after install: `psycopg 3.3.9`; `from aios.main import app` → `IMPORT_OK 23` with `db-backed durable store` log; `git diff --check` clean.
+- Next: commit `pyproject.toml` + handoff, push, redeploy `191d164+fix`, then smoke. Do not set `AIOS_BUSINESS_IDEMPOTENCY_REQUIRED=false` in prod: that would bypass the durable-store guarantee.
+
 ### 2026-11-27 — business readiness consolidation (docs-only)
 
 - Created `docs/BUSINESS_READINESS_STATUS.md` (factual, no overclaim): verdict not fully/safely/autonomously business-ready; uncommitted wave summary (billing fail-closed, action policy/HITL evidence, durable idempotency/fail-closed/TTL, finance SOR schema/service/read API/posting skeleton, provider sandbox stubs, RLS/audit/DR/LGPD/KMS scaffolds, side-effect guards); reported evidence (finance 19, exec 36+1, idempotency controlled 15, adapters/stubs 46/15/29, side-effect 22, mcp 4, approval replay 8, rls+audit 16, restore drill 3, migration chain upgrade/downgrade ok); known gaps (3 WhatsApp approval hardening failures under fix; SQLite env flakiness); blockers/missing (real rails/creds, money movement/reconciliation, real contract/e-sign/payroll/tax/fiscal, Postgres RLS enable+verify, WORM audit sink, DR/oncall/KMS/LGPD DPO signoff, DSAR execution evidence, full green suite); human-gated decisions; safe rollout order.
