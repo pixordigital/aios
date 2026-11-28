@@ -955,7 +955,9 @@ No prod deploy, no signed delivery verification, no cutover claim.
 - Root cause: `aios/core/business_idempotency.py` converts asyncpg DSN to `postgresql+psycopg://`, but `psycopg` was never declared in `pyproject.toml`; production image had only `asyncpg`. Fail-closed startup correctly refused to run.
 - Fix: added `psycopg[binary]>=3.1.0` to `pyproject.toml` dependencies. No policy/env weakening.
 - Verified locally after install: `psycopg 3.3.9`; `from aios.main import app` → `IMPORT_OK 23` with `db-backed durable store` log; `git diff --check` clean.
-- Next: commit `pyproject.toml` + handoff, push, redeploy `191d164+fix`, then smoke. Do not set `AIOS_BUSINESS_IDEMPOTENCY_REQUIRED=false` in prod: that would bypass the durable-store guarantee.
+- Commit `4afeaf2` (`fix(deps): declare psycopg for durable idempotency store`) pushed `191d164..4afeaf2`. Redeploy `jsttsejwljvhyurbtyqrhemp` commit `4afeaf25fa7682107952723c86dd5ce5d3f5085d` reached `finished` at `2026-11-28T00:10:48Z`. Build log confirms `psycopg-binary` + `psycopg` installed.
+- Post-deploy smoke: `/health/ready` attempt 6 → `200 {"status":"ready","checks":{"role":"all","db":"ok","migrations":"ok","redis":"ok","rag":"ok"}}`; `/health/live` `200`; homepage `200`; `/dashboard/login` `200`. Coolify app status still `running:starting` but `restart_count=0`, no `last_restart_type`; endpoint truth used (health-check flag disabled in app config). Prod Postgres not directly mutated by this session; `migrations:ok` and entrypoint log are the verification.
+- Do NOT set `AIOS_BUSINESS_IDEMPOTENCY_REQUIRED=false` in prod: that would bypass the durable-store guarantee. Human gates unchanged.
 
 ### 2026-11-27 — business readiness consolidation (docs-only)
 
